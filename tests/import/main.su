@@ -1,0 +1,2 @@
+import core.types;
+fn main() -> i32 { 0 }

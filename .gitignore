@@ -1,0 +1,74 @@
+# 分析文档目录不提交
+analysis/
+
+# --- 构建产物 ---
+# 可执行文件（编译器 shuc 等）
+shuc
+su
+*.exe
+*.out
+
+# C 目标文件与静态库
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# 链接与中间文件
+*.ll
+*.bc
+*.s
+*.asm
+
+# --- 构建系统 ---
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+build/
+out/
+# 仅忽略构建目录内生成的 Makefile，根目录 Makefile 可提交
+build/Makefile
+out/Makefile
+
+# --- 依赖与包 ---
+# 第三方 / 子模块（若后续引入）
+vendor/
+third_party/
+deps/
+.pkg/
+
+# --- 开发环境 ---
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# --- 测试与临时 ---
+# 测试输出、临时目录
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
+
+# --- 可选：调试与覆盖率 ---
+# *.dSYM/
+# coverage/
+# *.gcno
+# *.gcda
