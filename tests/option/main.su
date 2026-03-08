@@ -1,0 +1,10 @@
+// 测试 core.option 的 Option_i32：none_i32、some_i32、unwrap_or_i32
+import core.option;
+
+function main(): i32 {
+  let none_opt: Option_i32 = none_i32();
+  let some_opt: Option_i32 = some_i32(42);
+  let a: i32 = unwrap_or_i32(none_opt, 10);
+  let b: i32 = unwrap_or_i32(some_opt, 10);
+  return a + b;
+}
