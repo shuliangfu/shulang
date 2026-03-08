@@ -1,0 +1,8 @@
+// core.mem — 内存操作、copy/move、对齐（自举前最小实现）
+// 自举前：提供对齐查询等最小 API；copy/move 原语后续扩展。
+
+// 占位函数，表示本模块已可 import。
+function placeholder(): i32 { return 0; }
+
+// 返回 i32 类型的对齐要求（字节），当前为 4。
+function align_of_i32(): i32 { return 4; }
