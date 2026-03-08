@@ -91,6 +91,10 @@ test:
 	@if [ -f ../tests/run-path.sh ]; then (cd .. && chmod +x tests/run-path.sh && ./tests/run-path.sh); fi
 	@if [ -f ../tests/run-map.sh ]; then (cd .. && chmod +x tests/run-map.sh && ./tests/run-map.sh); fi
 	@if [ -f ../tests/run-error.sh ]; then (cd .. && chmod +x tests/run-error.sh && ./tests/run-error.sh); fi
+	@if [ -f ../tests/run-net.sh ]; then (cd .. && chmod +x tests/run-net.sh && ./tests/run-net.sh); fi
+	@if [ -f ../tests/run-io-driver.sh ]; then (cd .. && chmod +x tests/run-io-driver.sh && ./tests/run-io-driver.sh); fi
+	@if [ -f ../tests/run-ub.sh ]; then (cd .. && chmod +x tests/run-ub.sh && ./tests/run-ub.sh); fi
+	@if [ -f ../tests/run-abi-layout.sh ]; then (cd .. && chmod +x tests/run-abi-layout.sh && ./tests/run-abi-layout.sh); fi
 # 阶段 8 体积基线：编译固定用例并输出可执行文件大小
 size-baseline:
 	@if [ -f ../tests/run-size-baseline.sh ]; then (cd .. && chmod +x tests/run-size-baseline.sh && ./tests/run-size-baseline.sh); fi
