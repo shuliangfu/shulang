@@ -11,6 +11,7 @@
 #include "parser/parser.h"
 #include "typeck/typeck.h"
 #include "codegen/codegen.h"
+#include "ast.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -294,6 +295,51 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
     return 0;
 }
 
+/** 阶段 8.1 DCE 上下文：供 dce_is_func_used / dce_is_mono_used / dce_is_type_used 回调使用。 */
+struct dce_ctx {
+    ASTFunc **used;
+    int n;
+    int (*mono)[64];
+    int mono_rows;
+    const char **used_type_names;
+    int n_used_types;
+    ASTModule *entry;
+    ASTModule **deps;
+    int nd;
+};
+static int dce_is_func_used(void *ctx, const ASTModule *mod, const ASTFunc *func) {
+    const struct dce_ctx *c = (const struct dce_ctx *)ctx;
+    if (!c || !c->used) return 1;
+    /* 库模块（非入口）：始终保留符号，避免入口 extern 引用的 import 函数被误删导致链接失败 */
+    if (mod != c->entry) return 1;
+    for (int i = 0; i < c->n; i++)
+        if (c->used[i] == func) return 1;
+    return 0;
+}
+static int dce_is_mono_used(void *ctx, const ASTModule *mod, int k) {
+    const struct dce_ctx *c = (const struct dce_ctx *)ctx;
+    if (!c || !c->mono || k < 0 || k >= 64) return 1;
+    /* 库模块：始终保留单态化实例，避免入口引用的泛型 import 被误删 */
+    if (mod != c->entry) return 1;
+    int idx = (mod == c->entry) ? 0 : -1;
+    if (idx < 0 && c->deps)
+        for (int i = 0; i < c->nd; i++)
+            if (c->deps[i] == mod) { idx = 1 + i; break; }
+    if (idx < 0 || idx >= c->mono_rows) return 1;
+    return c->mono[idx][k];
+}
+
+/** 阶段 8.1 DCE 扩展：类型名在 used_type_names 中则保留，否则删除；库模块类型始终保留。 */
+static int dce_is_type_used(void *ctx, const ASTModule *mod, const char *type_name) {
+    const struct dce_ctx *c = (const struct dce_ctx *)ctx;
+    if (!c || !type_name) return 1;
+    if (mod != c->entry) return 1;
+    if (!c->used_type_names) return 1;
+    for (int i = 0; i < c->n_used_types; i++)
+        if (c->used_type_names[i] && strcmp(c->used_type_names[i], type_name) == 0) return 1;
+    return 0;
+}
+
 /**
  * 编译器主入口：解析命令行，执行 lexer→parser→typeck，可选 codegen→cc 产出可执行文件。
  * 功能说明：支持 -L、-target、-o；无 -o 时打印 Token 与 parse/typeck OK（供测试）；有 -o 时生成 C（含 import 占位）、调用 cc 链接。
@@ -402,14 +448,14 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
-        int ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0);
+        int ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0, NULL, NULL, NULL, NULL);
         while (ndep--) ast_module_free(dep_mods[ndep]);
         ast_module_free(mod);
         free(src);
         return ec != 0 ? 1 : 0;
     }
 
-    /* 若指定 -o：需有 main，生成 C（含 import 的 .c）→ 调用 cc 链接；依赖使用已加载的 dep_mods（7.3 跨模块调用） */
+    /* 若指定 -o：需有 main，生成 C（含 import 的 .c）→ 调用 cc 链接；依赖使用已加载的 dep_mods（7.3 跨模块调用）；阶段 8.1 DCE 仅生成被引用函数与单态化 */
     if (out_path) {
         if (!mod->main_func || !mod->main_func->body) {
             fprintf(stderr, "shuc: no main function (cannot emit executable)\n");
@@ -418,6 +464,23 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
+        /* 阶段 8.1 DCE：从 main 起算可达性，仅生成已引用函数与 mono 实例；未做 DCE 时传 NULL 避免误删库符号 */
+        #define MAX_USED_FUNCS 256
+        #define MAX_DCE_MODULES 33
+        ASTFunc *used_funcs[MAX_USED_FUNCS];
+        int n_used = 0;
+        int used_mono[MAX_DCE_MODULES][64];
+        const char *used_type_names[64];
+        int n_used_types = 0;
+        int dce_done = 0;
+        if (ndep >= 0 && ndep < MAX_DCE_MODULES - 1) {
+            codegen_compute_used(mod, dep_mods, ndep, used_funcs, &n_used, MAX_USED_FUNCS, used_mono);
+            codegen_compute_used_types(mod, dep_mods, ndep, used_funcs, n_used, used_type_names, &n_used_types, 64);
+            dce_done = 1;
+        }
+        struct dce_ctx dce = { used_funcs, n_used, used_mono, 1 + ndep, dce_done ? used_type_names : NULL, n_used_types, mod, dep_mods, ndep };
+        void *dce_ctx_arg = dce_done ? (void *)&dce : NULL;
+
         const char *c_paths[MAX_C_FILES];
         int n_c = 0;
         char tmp_c[256];
@@ -443,7 +506,7 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
-        if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep) != 0) {
+        if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
             fclose(cf);
             unlink(tmp);
             while (ndep--) ast_module_free(dep_mods[ndep]);
@@ -476,7 +539,7 @@ int main(int argc, char **argv) {
                 return 1;
             }
             FILE *dcf = fdopen(fdd, "w");
-            if (!dcf || codegen_library_module_to_c(dep_mods[i], mod->import_paths[i], dcf) != 0) {
+            if (!dcf || codegen_library_module_to_c(dep_mods[i], mod->import_paths[i], dcf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
                 if (dcf) fclose(dcf);
                 else close(fdd);
                 unlink(tmpd);
