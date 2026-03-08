@@ -28,7 +28,11 @@ typedef enum TokenKind {
     TOKEN_DEFER,    /**< 关键字 defer（作用域退出时执行） */
     TOKEN_MATCH,    /**< 关键字 match（多分支匹配） */
     TOKEN_STRUCT,   /**< 关键字 struct（结构体定义） */
+    TOKEN_ENUM,     /**< 关键字 enum（枚举定义，§7） */
     TOKEN_GOTO,     /**< 关键字 goto（跳转） */
+    TOKEN_TRAIT,    /**< 关键字 trait（接口定义，阶段 7.2） */
+    TOKEN_IMPL,     /**< 关键字 impl（trait 实现，阶段 7.2） */
+    TOKEN_SELF,     /**< 关键字 self（方法接收者，阶段 7.2） */
     TOKEN_UNDERSCORE, /**< _（match 通配模式） */
     TOKEN_IMPORT,   /**< 关键字 import（阶段 5） */
     TOKEN_IDENT,    /**< 标识符（如 main） */
@@ -40,9 +44,16 @@ typedef enum TokenKind {
     TOKEN_I64,      /**< 类型名 i64 */
     TOKEN_USIZE,    /**< 类型名 usize（与指针同宽的无符号整数） */
     TOKEN_ISIZE,    /**< 类型名 isize（与指针同宽的有符号整数） */
+    TOKEN_I32X4,    /**< 类型名 i32x4（4 车道 i32 向量，文档 §10） */
+    TOKEN_I32X8,    /**< 类型名 i32x8（8 车道 i32 向量） */
+    TOKEN_U32X4,    /**< 类型名 u32x4（4 车道 u32 向量） */
+    TOKEN_U32X8,    /**< 类型名 u32x8（8 车道 u32 向量） */
     TOKEN_TRUE,     /**< 布尔字面量 true */
     TOKEN_FALSE,    /**< 布尔字面量 false */
+    TOKEN_F32,      /**< 类型名 f32（32 位浮点，文档阶段 8+） */
+    TOKEN_F64,      /**< 类型名 f64（64 位浮点） */
     TOKEN_INT,      /**< 整数字面量 */
+    TOKEN_FLOAT,    /**< 浮点字面量（如 0.0、1.5） */
     TOKEN_LPAREN,   /**< ( */
     TOKEN_RPAREN,   /**< ) */
     TOKEN_LBRACE,   /**< { */
@@ -75,7 +86,8 @@ typedef enum TokenKind {
     TOKEN_GE,       /**< >= 大于等于 */
     TOKEN_AMPAMP,   /**< && 逻辑与 */
     TOKEN_PIPEPIPE, /**< || 逻辑或 */
-    TOKEN_BANG      /**< ! 逻辑非（一元） */
+    TOKEN_BANG,     /**< ! 逻辑非（一元） */
+    TOKEN_QUESTION  /**< ? 三元运算符 cond ? then : else */
 } TokenKind;
 
 /** 单个 Token：类型 + 源码位置 + 可选值（字面量/标识符） */
@@ -85,6 +97,7 @@ typedef struct Token {
     int col;    /**< 列号，从 1 开始 */
     union {
         int int_val;        /**< TOKEN_INT 时使用 */
+        double float_val;   /**< TOKEN_FLOAT 时使用 */
         const char *ident;  /**< TOKEN_IDENT / TOKEN_I32 等部分类型 Token 时指向源码中的标识符（不拷贝，生命周期由调用方保证） */
     } value;
     /** TOKEN_IDENT / 类型名 Token 时标识符字节长度，其它为 0 */
