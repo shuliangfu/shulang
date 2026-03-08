@@ -1,0 +1,40 @@
+// std.net — 网络模块占位（高吞吐网络 第八节）
+// Ipv4Addr、TcpStream、TcpListener、connect、listen、accept 占位；自举前解析与类型检查通过，实现可空或 panic。
+// 与 std.io.driver 统一：网络连接实现 Reader/Writer，读写走 driver；accept 带 Completion 占位。
+// 网络协议检查项（高吞吐网络 第十节）：通过 std.net 创建的套接字默认非阻塞，由 std.io.driver 统一调度。
+
+// ——— Ipv4Addr：IPv4 地址占位（自举后为 4 字节或 u32） ———
+struct Ipv4Addr {
+  a: u8
+  b: u8
+  c: u8
+  d: u8
+}
+
+// ——— TcpStream：TCP 连接占位（fd 或句柄，自举后扩展） ———
+struct TcpStream {
+  fd: i32
+}
+
+// ——— TcpListener：TCP 监听占位（fd 或句柄） ———
+struct TcpListener {
+  fd: i32
+}
+
+// ——— connect：连接至 addr:port；port 为 u32（0–65535）；占位返回无效 TcpStream（fd -1） ———
+function connect(addr: Ipv4Addr, port: u32): TcpStream {
+  return TcpStream { fd: -1 };
+}
+
+// ——— listen：在 addr:port 监听；占位返回无效 TcpListener ———
+function listen(addr: Ipv4Addr, port: u32): TcpListener {
+  return TcpListener { fd: -1 };
+}
+
+// ——— accept：从 listener 接受连接；Completion 占位（自举后与 driver 对接）；占位返回无效 TcpStream ———
+function accept(listener: TcpListener): TcpStream {
+  return TcpStream { fd: -1 };
+}
+
+// 占位，表示本模块可 import
+function placeholder(): i32 { return 0; }
