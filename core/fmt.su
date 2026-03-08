@@ -1,8 +1,0 @@
-// core.fmt — 格式化核心（与 std.fmt 对接，自举前最小实现）
-// 自举前：提供最小可调用 API；格式化到缓冲区等后续在具备 string/buffer 后扩展。
-
-// 占位函数，表示本模块已可 import。
-function placeholder(): i32 { return 0; }
-
-// 将 i32 作为“格式结果”返回（自举前占位：无缓冲区时仅透传，后续扩展为 format!("{}", x) 等）。
-function fmt_i32(x: i32): i32 { return x; }
