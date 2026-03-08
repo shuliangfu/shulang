@@ -54,7 +54,7 @@
   - 第一版可运行程序（如 Hello World）可以**不 import**，由 codegen 直接生成调用 libc printf 的 C 或 LLVM IR，这样**不依赖任何 .su 标准库**；
   - 之后再实现 **import 解析** 与 **core/std 的编译与链接**，此时才需要先实现「自举前必须」的 core/std 子集。
 
-- **标准库自身**：core 不依赖 std；std 依赖 core。因此开发顺序为 **先 core 子集，再 std 子集**。
+- **标准库自身**：core 不依赖 std；std 依赖 core。因此开发顺序为 **先 core 子集，再 std 子集**。当前 **core/** 与 **std/** 采用「目录即模块」布局：每模块对应一目录，入口为 `mod.su`（如 `core/result/mod.su`、`std/io/mod.su`），便于按目录拆分与扩展代码。
 
 ### 1.3 与里程碑的对应
 
@@ -154,8 +154,8 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 5.1 | **Import 解析**：driver 或单独模块解析 `import core.xxx`，根据「标准库根路径」找到 `core/xxx.su`，对该文件递归做 lex→parse→typeck，纳入同一编译单元或符号表 | Driver, 标准库路径配置 | 能编译含 `import core.types` 的 .su（若 types 已实现） | ✅ 已完成 |
-| 5.2 | **core 最小子集**（core/ 目录下 .su 文件）：core.types、core.mem、core.option、core.result、core.slice、core.fmt、core.builtin、core.debug；可先做「仅类型与函数声明 + 少量实现」，保证编译器能解析、类型检查通过 | 无（标准库与编译器可并行开发，但需 import 先通） | 至少 core.types + core.mem 可被 import 且通过 typeck | ✅ 已完成 |
+| 5.1 | **Import 解析**：driver 解析 `import core.xxx` / `import std.xxx`，根据标准库根路径找模块：先试单文件 `core/xxx.su`，若无则试目录模块 `core/xxx/mod.su`（std 同理）；对该文件做 lex→parse→typeck，纳入同一编译单元 | Driver, 标准库路径配置 | 能编译含 `import core.types` 的 .su（若 types 已实现） | ✅ 已完成 |
+| 5.2 | **core 最小子集**（**目录即模块**：每模块一目录，入口为 `mod.su`，如 `core/result/mod.su`）：core.types、core.mem、core.option、core.result、core.slice、core.fmt、core.builtin、core.debug；可先做「仅类型与函数声明 + 少量实现」，保证编译器能解析、类型检查通过 | 无（标准库与编译器可并行开发，但需 import 先通） | 至少 core.types + core.mem 可被 import 且通过 typeck | ✅ 已完成 |
 | 5.3 | **测试**：examples 或 tests 中「import core.xxx 并调用」的用例能编译通过 | Import + core 子集 | 用例通过 | ✅ 已完成 |
 
 **下一步前置**：用户 .su 可 import core 的若干模块；编译器能解析并类型检查多文件/多模块。
@@ -168,7 +168,7 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 6.1 | **std 最小子集**（std/ 目录下 .su）：std.runtime、std.io、std.fs、std.path、std.process、std.heap、std.string、std.vec、std.map、std.error；实现可先「单平台」（当前 OS），内部条件编译留好接口 | core 可用, import | 能编译「import std.io; 打开文件读一行」之类用例 | ✅ 已完成 |
+| 6.1 | **std 最小子集**（**目录即模块**：每模块一目录，入口为 `mod.su`，如 `std/io/mod.su`，同目录可放 `driver.su` 等拆分文件）：std.runtime、std.io、std.fs、std.path、std.process、std.heap、std.string、std.vec、std.map、std.error；实现可先「单平台」（当前 OS），内部条件编译留好接口 | core 可用, import | 能编译「import std.io; 打开文件读一行」之类用例 | ✅ 已完成 |
 | 6.2 | **多目标**：driver 支持 `-target`（如 x86_64-pc-linux-gnu）；codegen 与链接根据 target 选工具链与库；标准库内按 target 条件编译 | Codegen, Driver | 同一 .su 可编译出 linux/macos 可执行文件（或至少两个目标之一） | ✅ 已完成 |
 | 6.3 | **测试**：多目标各编一例并运行（或交叉编译后交目标机运行） | 6.1, 6.2 | 多目标用例通过 | ✅ 已完成 |
 
