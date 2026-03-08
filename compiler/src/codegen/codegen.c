@@ -930,6 +930,9 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 
 /** 前向声明：codegen_block_body 与 codegen_run_defers 互相依赖；cast_return_to_int 为 1 时对 return 表达式包 (int) 以适配 C 的 int main() */
 static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, int cast_return_to_int);
+/** 阶段 8.1 块内 DCE 前向声明：收集块内被引用变量名、判断是否在 used 集合中。 */
+static void collect_var_names_from_block(const struct ASTBlock *b, const char **out, int *n, int max);
+static int is_var_used(const char *name, const char **used, int n_used);
 
 /**
  * 按逆序生成执行本块所有 defer 块的 C 代码（块退出时执行）。
@@ -948,13 +951,20 @@ static int codegen_run_defers(FILE *out, const struct ASTBlock *b, int indent) {
  * 若 final_expr 为 break/continue/return/panic 则生成对应语句，否则 (void)(final_expr);。
  * 用于 main 块或 while 体；indent 为每行前空格数（如 2 或 4）。
  */
+#define MAX_BLOCK_USED_VARS 128
+
 static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, int cast_return_to_int) {
     if (!b || !out) return -1;
     const char *pad = (indent == 2) ? "  " : (indent == 4) ? "    " : "      ";
+    /* 阶段 8.1 块内 DCE：仅输出被引用的 const/let */
+    const char *used_buf[MAX_BLOCK_USED_VARS];
+    int n_used = 0;
+    collect_var_names_from_block(b, used_buf, &n_used, MAX_BLOCK_USED_VARS);
     for (int i = 0; i < b->num_consts; i++) {
+        const char *name = b->const_decls[i].name ? b->const_decls[i].name : "";
+        if (!is_var_used(name, used_buf, n_used)) continue;
         const struct ASTType *ty = b->const_decls[i].type;
         const struct ASTType *ety = codegen_emit_type(ty);
-        const char *name = b->const_decls[i].name ? b->const_decls[i].name : "";
         if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
             fprintf(out, "%sconst %s %s = ", pad, c_type_str(ety), name);
         else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
@@ -971,9 +981,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
         fprintf(out, ";\n");
     }
     for (int i = 0; i < b->num_lets; i++) {
+        const char *name = b->let_decls[i].name ? b->let_decls[i].name : "";
+        if (!is_var_used(name, used_buf, n_used)) continue;
         const struct ASTType *ty = b->let_decls[i].type;
         const struct ASTType *ety = codegen_emit_type(ty);
-        const char *name = b->let_decls[i].name ? b->let_decls[i].name : "";
         if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
             fprintf(out, "%s%s %s = ", pad, c_type_str(ety), name);
         else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
@@ -1098,10 +1109,15 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
     int cast_return_to_int = (f && f->name && strcmp(f->name, "main") == 0
         && f->return_type && f->return_type->kind == AST_TYPE_I64);
     const char *pad = "  ";
+    /* 阶段 8.1 块内 DCE：仅输出被引用的 const/let */
+    const char *used_buf[MAX_BLOCK_USED_VARS];
+    int n_used = 0;
+    collect_var_names_from_block(b, used_buf, &n_used, MAX_BLOCK_USED_VARS);
     for (int i = 0; i < b->num_consts; i++) {
+        const char *name = b->const_decls[i].name ? b->const_decls[i].name : "";
+        if (!is_var_used(name, used_buf, n_used)) continue;
         const struct ASTType *ty = b->const_decls[i].type;
         const struct ASTType *ety = codegen_emit_type(ty);
-        const char *name = b->const_decls[i].name ? b->const_decls[i].name : "";
         if (ety && ety->kind == AST_TYPE_NAMED && ety->name) {
             if (is_enum_type(m, ety->name))
                 fprintf(out, "%sconst enum %s %s = ", pad, ety->name, name);
@@ -1121,9 +1137,10 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
         fprintf(out, ";\n");
     }
     for (int i = 0; i < b->num_lets; i++) {
+        const char *name = b->let_decls[i].name ? b->let_decls[i].name : "";
+        if (!is_var_used(name, used_buf, n_used)) continue;
         const struct ASTType *ty = b->let_decls[i].type;
         const struct ASTType *ety = codegen_emit_type(ty);
-        const char *name = b->let_decls[i].name ? b->let_decls[i].name : "";
         if (ety && ety->kind == AST_TYPE_NAMED && ety->name) {
             if (is_enum_type(m, ety->name))
                 fprintf(out, "%senum %s %s = ", pad, ety->name, name);
@@ -1357,11 +1374,500 @@ static int codegen_one_mono_instance(const struct ASTFunc *f, struct ASTType **t
     return 0;
 }
 
+/** 阶段 8.1 DCE：在模块 m 的 mono_instances 中查找 (template, type_args) 对应的实例下标，未找到返回 -1。 */
+static int find_mono_index(const struct ASTModule *m, const struct ASTFunc *template,
+    struct ASTType **type_args, int n) {
+    if (!m || !m->mono_instances || !template || !type_args) return -1;
+    for (int k = 0; k < m->num_mono_instances; k++) {
+        const struct ASTMonoInstance *inst = &m->mono_instances[k];
+        if (inst->template != template || inst->num_type_args != n) continue;
+        int eq = 1;
+        for (int j = 0; j < n && eq; j++)
+            if (!type_equal(inst->type_args[j], type_args[j])) eq = 0;
+        if (eq) return k;
+    }
+    return -1;
+}
+
+/** 返回 func 所在模块在 (entry, dep_mods[0..ndep-1]) 中的下标：0=entry，1+i=dep_mods[i]，未找到返回 -1。 */
+static int module_index(const struct ASTModule *entry, struct ASTModule **dep_mods, int ndep, const struct ASTModule *mod) {
+    if (mod == entry) return 0;
+    for (int i = 0; i < ndep; i++)
+        if (dep_mods[i] == mod) return 1 + i;
+    return -1;
+}
+
+/** 判断 func 是否属于模块 m（顶层函数或 impl 方法）。 */
+static int func_belongs_to_module(const struct ASTModule *m, const struct ASTFunc *func) {
+    if (!m || !func) return 0;
+    for (int i = 0; i < m->num_funcs && m->funcs; i++)
+        if (m->funcs[i] == func) return 1;
+    for (int k = 0; k < m->num_impl_blocks && m->impl_blocks; k++)
+        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++)
+            if (m->impl_blocks[k]->funcs[j] == func) return 1;
+    return 0;
+}
+
+/** 阶段 8.1 DCE：从表达式递归收集被调函数与单态化，加入 worklist 并标记 used_mono。 */
+static void dce_collect_from_expr(const struct ASTExpr *e, struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
+    struct ASTFunc **worklist, int *n_wl, int max_wl, int *in_wl,
+    int used_mono[][64], int used_mono_rows) {
+    if (!e) return;
+    /* return expr 在 parser 中为 AST_EXPR_RETURN(operand)，须先递归 operand 才能看到其中的 CALL 并收集 callee */
+    if (e->kind == AST_EXPR_RETURN && e->value.unary.operand) {
+        dce_collect_from_expr(e->value.unary.operand, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+        return;
+    }
+    if (e->kind == AST_EXPR_CALL && e->value.call.resolved_callee_func) {
+        const struct ASTFunc *callee = e->value.call.resolved_callee_func;
+        if (e->value.call.num_type_args > 0 && e->value.call.type_args) {
+            const struct ASTModule *owner = NULL;
+            if (func_belongs_to_module(entry, callee)) owner = entry;
+            else
+                for (int i = 0; i < ndep && !owner; i++)
+                    if (func_belongs_to_module(dep_mods[i], callee)) owner = dep_mods[i];
+            if (owner) {
+                int mi = module_index(entry, dep_mods, ndep, owner);
+                int k = find_mono_index(owner, callee, (struct ASTType **)e->value.call.type_args, e->value.call.num_type_args);
+                if (mi >= 0 && mi < used_mono_rows && k >= 0 && k < 64)
+                    used_mono[mi][k] = 1;
+            }
+        }
+        for (int i = 0; i < *n_wl; i++)
+            if (worklist[i] == (struct ASTFunc *)callee) goto skip_add;
+        if (*n_wl < max_wl) {
+            worklist[*n_wl++] = (struct ASTFunc *)callee;
+            if (in_wl) in_wl[(size_t)(const char *)callee % (size_t)max_wl] = 1;
+        }
+    skip_add: ;
+    }
+    if (e->kind == AST_EXPR_METHOD_CALL && e->value.method_call.resolved_impl_func) {
+        const struct ASTFunc *callee = e->value.method_call.resolved_impl_func;
+        for (int i = 0; i < *n_wl; i++)
+            if (worklist[i] == (struct ASTFunc *)callee) goto skip_impl;
+        if (*n_wl < max_wl) worklist[*n_wl++] = (struct ASTFunc *)callee;
+    skip_impl: ;
+    }
+    switch (e->kind) {
+        case AST_EXPR_CALL:
+            for (int i = 0; i < e->value.call.num_args; i++)
+                dce_collect_from_expr(e->value.call.args[i], entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            dce_collect_from_expr(e->value.method_call.base, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            for (int i = 0; i < e->value.method_call.num_args; i++)
+                dce_collect_from_expr(e->value.method_call.args[i], entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV: case AST_EXPR_MOD:
+        case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
+        case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
+        case AST_EXPR_LOGAND: case AST_EXPR_LOGOR:
+        case AST_EXPR_ASSIGN:
+            dce_collect_from_expr(e->value.binop.left, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            dce_collect_from_expr(e->value.binop.right, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
+        case AST_EXPR_PANIC:
+            dce_collect_from_expr(e->value.unary.operand, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_IF:
+        case AST_EXPR_TERNARY:
+            dce_collect_from_expr(e->value.if_expr.cond, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            dce_collect_from_expr(e->value.if_expr.then_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            if (e->value.if_expr.else_expr) dce_collect_from_expr(e->value.if_expr.else_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_MATCH:
+            dce_collect_from_expr(e->value.match_expr.matched_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            for (int i = 0; i < e->value.match_expr.num_arms; i++)
+                dce_collect_from_expr(e->value.match_expr.arms[i].result, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_FIELD_ACCESS:
+            dce_collect_from_expr(e->value.field_access.base, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_STRUCT_LIT:
+            for (int i = 0; i < e->value.struct_lit.num_fields; i++)
+                dce_collect_from_expr(e->value.struct_lit.inits[i], entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_ARRAY_LIT:
+            for (int i = 0; i < e->value.array_lit.num_elems; i++)
+                dce_collect_from_expr(e->value.array_lit.elems[i], entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        case AST_EXPR_INDEX:
+            dce_collect_from_expr(e->value.index.base, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            dce_collect_from_expr(e->value.index.index_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+            break;
+        default: break;
+    }
+}
+
+/** 阶段 8.1 DCE 兜底：判断表达式 e 中是否出现对 func 的调用（CALL/METHOD_CALL），含 AST_EXPR_RETURN 内层。用于 ndep==0 时 used 未收到同模块 callee 仍保留被 main 引用的函数。 */
+static int expr_references_func(const struct ASTExpr *e, const struct ASTFunc *func) {
+    if (!e || !func) return 0;
+    if (e->kind == AST_EXPR_CALL && e->value.call.resolved_callee_func == func) return 1;
+    if (e->kind == AST_EXPR_METHOD_CALL && e->value.method_call.resolved_impl_func == func) return 1;
+    if (e->kind == AST_EXPR_RETURN && e->value.unary.operand && expr_references_func(e->value.unary.operand, func)) return 1;
+    switch (e->kind) {
+        case AST_EXPR_CALL:
+            for (int i = 0; i < e->value.call.num_args; i++)
+                if (expr_references_func(e->value.call.args[i], func)) return 1;
+            break;
+        case AST_EXPR_METHOD_CALL:
+            if (expr_references_func(e->value.method_call.base, func)) return 1;
+            for (int i = 0; i < e->value.method_call.num_args; i++)
+                if (expr_references_func(e->value.method_call.args[i], func)) return 1;
+            break;
+        case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV: case AST_EXPR_MOD:
+        case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
+        case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
+        case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+            if (expr_references_func(e->value.binop.left, func) || expr_references_func(e->value.binop.right, func)) return 1;
+            break;
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC:
+            if (expr_references_func(e->value.unary.operand, func)) return 1;
+            break;
+        case AST_EXPR_IF: case AST_EXPR_TERNARY:
+            if (expr_references_func(e->value.if_expr.cond, func) || expr_references_func(e->value.if_expr.then_expr, func)) return 1;
+            if (e->value.if_expr.else_expr && expr_references_func(e->value.if_expr.else_expr, func)) return 1;
+            break;
+        case AST_EXPR_MATCH:
+            if (expr_references_func(e->value.match_expr.matched_expr, func)) return 1;
+            for (int i = 0; i < e->value.match_expr.num_arms; i++)
+                if (expr_references_func(e->value.match_expr.arms[i].result, func)) return 1;
+            break;
+        case AST_EXPR_FIELD_ACCESS:
+            if (expr_references_func(e->value.field_access.base, func)) return 1;
+            break;
+        case AST_EXPR_STRUCT_LIT:
+            for (int i = 0; i < e->value.struct_lit.num_fields; i++)
+                if (expr_references_func(e->value.struct_lit.inits[i], func)) return 1;
+            break;
+        case AST_EXPR_ARRAY_LIT:
+            for (int i = 0; i < e->value.array_lit.num_elems; i++)
+                if (expr_references_func(e->value.array_lit.elems[i], func)) return 1;
+            break;
+        case AST_EXPR_INDEX:
+            if (expr_references_func(e->value.index.base, func) || expr_references_func(e->value.index.index_expr, func)) return 1;
+            break;
+        default: break;
+    }
+    return 0;
+}
+
+/** 阶段 8.1 块内 DCE：将 name 加入 used 集合（去重），out 为指针数组，n 为当前个数，max 为上限。 */
+static void add_used_var_name(const char *name, const char **out, int *n, int max) {
+    if (!name || !out || !n || *n >= max) return;
+    for (int i = 0; i < *n; i++) if (out[i] && strcmp(out[i], name) == 0) return;
+    out[(*n)++] = name;
+}
+
+/** 从表达式中收集所有作为 VAR 出现的变量名到 out（用于块内 const/let DCE）。 */
+static void collect_var_names_from_expr(const struct ASTExpr *e, const char **out, int *n, int max) {
+    if (!e || *n >= max) return;
+    if (e->kind == AST_EXPR_VAR && e->value.var.name)
+        add_used_var_name(e->value.var.name, out, n, max);
+    switch (e->kind) {
+        case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV: case AST_EXPR_MOD:
+        case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
+        case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
+        case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+            collect_var_names_from_expr(e->value.binop.left, out, n, max);
+            collect_var_names_from_expr(e->value.binop.right, out, n, max);
+            break;
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_RETURN:
+            if (e->value.unary.operand) collect_var_names_from_expr(e->value.unary.operand, out, n, max);
+            break;
+        case AST_EXPR_IF: case AST_EXPR_TERNARY:
+            collect_var_names_from_expr(e->value.if_expr.cond, out, n, max);
+            if (e->value.if_expr.then_expr) collect_var_names_from_expr(e->value.if_expr.then_expr, out, n, max);
+            if (e->value.if_expr.else_expr) collect_var_names_from_expr(e->value.if_expr.else_expr, out, n, max);
+            break;
+        case AST_EXPR_MATCH:
+            collect_var_names_from_expr(e->value.match_expr.matched_expr, out, n, max);
+            for (int i = 0; i < e->value.match_expr.num_arms; i++)
+                collect_var_names_from_expr(e->value.match_expr.arms[i].result, out, n, max);
+            break;
+        case AST_EXPR_FIELD_ACCESS:
+            collect_var_names_from_expr(e->value.field_access.base, out, n, max);
+            break;
+        case AST_EXPR_STRUCT_LIT:
+            for (int i = 0; i < e->value.struct_lit.num_fields; i++)
+                collect_var_names_from_expr(e->value.struct_lit.inits[i], out, n, max);
+            break;
+        case AST_EXPR_ARRAY_LIT:
+            for (int i = 0; i < e->value.array_lit.num_elems; i++)
+                collect_var_names_from_expr(e->value.array_lit.elems[i], out, n, max);
+            break;
+        case AST_EXPR_INDEX:
+            collect_var_names_from_expr(e->value.index.base, out, n, max);
+            collect_var_names_from_expr(e->value.index.index_expr, out, n, max);
+            break;
+        case AST_EXPR_CALL:
+            for (int i = 0; i < e->value.call.num_args; i++)
+                collect_var_names_from_expr(e->value.call.args[i], out, n, max);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            collect_var_names_from_expr(e->value.method_call.base, out, n, max);
+            for (int i = 0; i < e->value.method_call.num_args; i++)
+                collect_var_names_from_expr(e->value.method_call.args[i], out, n, max);
+            break;
+        default: break;
+    }
+}
+
+/** 从块中收集所有被引用的变量名（final_expr、const/let 的 init、循环、defer、labeled）；用于仅输出被使用的 const/let。 */
+static void collect_var_names_from_block(const struct ASTBlock *b, const char **out, int *n, int max) {
+    if (!b || *n >= max) return;
+    for (int i = 0; i < b->num_consts; i++) {
+        if (b->const_decls[i].init) collect_var_names_from_expr(b->const_decls[i].init, out, n, max);
+    }
+    for (int i = 0; i < b->num_lets; i++) {
+        if (b->let_decls[i].init) collect_var_names_from_expr(b->let_decls[i].init, out, n, max);
+    }
+    for (int i = 0; i < b->num_loops; i++)
+        collect_var_names_from_block(b->loops[i].body, out, n, max);
+    for (int i = 0; i < b->num_for_loops; i++) {
+        if (b->for_loops[i].init) collect_var_names_from_expr(b->for_loops[i].init, out, n, max);
+        if (b->for_loops[i].cond) collect_var_names_from_expr(b->for_loops[i].cond, out, n, max);
+        if (b->for_loops[i].step) collect_var_names_from_expr(b->for_loops[i].step, out, n, max);
+        collect_var_names_from_block(b->for_loops[i].body, out, n, max);
+    }
+    for (int i = 0; i < b->num_defers; i++)
+        collect_var_names_from_block(b->defer_blocks[i], out, n, max);
+    for (int i = 0; i < b->num_labeled_stmts; i++)
+        if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr)
+            collect_var_names_from_expr(b->labeled_stmts[i].u.return_expr, out, n, max);
+    if (b->final_expr) collect_var_names_from_expr(b->final_expr, out, n, max);
+}
+
+/** 判断 name 是否在 used 集合中（用于块内 const/let DCE）。 */
+static int is_var_used(const char *name, const char **used, int n_used) {
+    if (!name || !used) return 1;
+    for (int i = 0; i < n_used; i++) if (used[i] && strcmp(used[i], name) == 0) return 1;
+    return 0;
+}
+
+/** 判断块 b 中是否出现对 func 的调用（遍历 const/let/循环/labeled/final_expr）。 */
+static int block_references_func(const struct ASTBlock *b, const struct ASTFunc *func) {
+    if (!b || !func) return 0;
+    for (int i = 0; i < b->num_consts; i++)
+        if (b->const_decls[i].init && expr_references_func(b->const_decls[i].init, func)) return 1;
+    for (int i = 0; i < b->num_lets; i++)
+        if (b->let_decls[i].init && expr_references_func(b->let_decls[i].init, func)) return 1;
+    for (int i = 0; i < b->num_loops; i++)
+        if (block_references_func(b->loops[i].body, func)) return 1;
+    for (int i = 0; i < b->num_for_loops; i++) {
+        if (b->for_loops[i].init && expr_references_func(b->for_loops[i].init, func)) return 1;
+        if (b->for_loops[i].cond && expr_references_func(b->for_loops[i].cond, func)) return 1;
+        if (b->for_loops[i].step && expr_references_func(b->for_loops[i].step, func)) return 1;
+        if (block_references_func(b->for_loops[i].body, func)) return 1;
+    }
+    for (int i = 0; i < b->num_labeled_stmts; i++)
+        if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr
+            && expr_references_func(b->labeled_stmts[i].u.return_expr, func)) return 1;
+    if (b->final_expr && expr_references_func(b->final_expr, func)) return 1;
+    return 0;
+}
+
+static void dce_collect_from_block(const struct ASTBlock *b, struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
+    struct ASTFunc **worklist, int *n_wl, int max_wl, int *in_wl, int used_mono[][64], int used_mono_rows) {
+    if (!b) return;
+    for (int i = 0; i < b->num_consts; i++)
+        if (b->const_decls[i].init) dce_collect_from_expr(b->const_decls[i].init, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+    for (int i = 0; i < b->num_lets; i++)
+        if (b->let_decls[i].init) dce_collect_from_expr(b->let_decls[i].init, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+    for (int i = 0; i < b->num_loops; i++)
+        dce_collect_from_block(b->loops[i].body, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+    for (int i = 0; i < b->num_for_loops; i++) {
+        if (b->for_loops[i].init) dce_collect_from_expr(b->for_loops[i].init, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+        if (b->for_loops[i].cond) dce_collect_from_expr(b->for_loops[i].cond, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+        if (b->for_loops[i].step) dce_collect_from_expr(b->for_loops[i].step, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+        dce_collect_from_block(b->for_loops[i].body, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+    }
+    for (int i = 0; i < b->num_labeled_stmts; i++)
+        if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr)
+            dce_collect_from_expr(b->labeled_stmts[i].u.return_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+    if (b->final_expr) dce_collect_from_expr(b->final_expr, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
+}
+
+void codegen_compute_used(struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
+    struct ASTFunc **used_funcs_out, int *n_used_out, int max_used,
+    int used_mono[][64]) {
+    if (!entry || !entry->main_func || !used_funcs_out || !n_used_out || max_used <= 0) return;
+    if (used_mono) {
+        for (int r = 0; r <= ndep; r++)
+            for (int k = 0; k < 64; k++) used_mono[r][k] = 0;
+    }
+    int n = 0;
+    used_funcs_out[n++] = entry->main_func;
+    struct ASTFunc *worklist[256];
+    int n_wl = 0;
+    worklist[n_wl++] = (struct ASTFunc *)entry->main_func;
+    int used_mono_rows = used_mono ? (1 + ndep) : 0;
+    /* 种子：先遍历 main 体填满 worklist，再把 worklist 中所有函数加入 used，确保入口引用的 import 符号不被误删 */
+    if (entry->main_func->body)
+        dce_collect_from_block(entry->main_func->body, entry, dep_mods, ndep, worklist, &n_wl, 256, NULL, used_mono, used_mono_rows);
+    for (int i = 0; i < n_wl && n < max_used; i++) {
+        struct ASTFunc *f = worklist[i];
+        if (!f) continue;
+        int already = 0;
+        for (int j = 0; j < n; j++) if (used_funcs_out[j] == f) { already = 1; break; }
+        if (!already) used_funcs_out[n++] = f;
+    }
+    while (n_wl > 0) {
+        struct ASTFunc *f = worklist[--n_wl];
+        if (!f || !f->body) continue;
+        {
+            int already = 0;
+            for (int i = 0; i < n; i++) if (used_funcs_out[i] == f) { already = 1; break; }
+            if (!already && n < max_used) used_funcs_out[n++] = f;
+        }
+        dce_collect_from_block(f->body, entry, dep_mods, ndep, worklist, &n_wl, 256, NULL, used_mono, used_mono_rows);
+    }
+    *n_used_out = n;
+}
+
+/** 若 name 非空且未在 out[0..*n) 中则追加并返回 1，否则返回 0；*n 不超过 max。 */
+static int add_used_type_name(const char *name, const char **out, int *n, int max) {
+    if (!name || !*name || *n >= max) return 0;
+    for (int i = 0; i < *n; i++) if (out[i] && strcmp(out[i], name) == 0) return 0;
+    out[(*n)++] = name;
+    return 1;
+}
+
+/** 从类型中收集 NAMED 类型名并递归 elem_type。 */
+static void collect_type_from_type(const struct ASTType *ty, const char **out, int *n, int max) {
+    if (!ty || *n >= max) return;
+    if (ty->kind == AST_TYPE_NAMED && ty->name) add_used_type_name(ty->name, out, n, max);
+    if (ty->elem_type) collect_type_from_type(ty->elem_type, out, n, max);
+}
+
+/** 从表达式中收集类型名（resolved_type、struct_lit.struct_name）并递归子表达式。 */
+static void collect_type_from_expr(const struct ASTExpr *e, const char **out, int *n, int max) {
+    if (!e || *n >= max) return;
+    if (e->resolved_type) collect_type_from_type(e->resolved_type, out, n, max);
+    if (e->kind == AST_EXPR_STRUCT_LIT && e->value.struct_lit.struct_name)
+        add_used_type_name(e->value.struct_lit.struct_name, out, n, max);
+    switch (e->kind) {
+        case AST_EXPR_CALL:
+            for (int i = 0; i < e->value.call.num_args; i++) collect_type_from_expr(e->value.call.args[i], out, n, max);
+            break;
+        case AST_EXPR_METHOD_CALL:
+            collect_type_from_expr(e->value.method_call.base, out, n, max);
+            for (int i = 0; i < e->value.method_call.num_args; i++) collect_type_from_expr(e->value.method_call.args[i], out, n, max);
+            break;
+        case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV: case AST_EXPR_MOD:
+        case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
+        case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
+        case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+            collect_type_from_expr(e->value.binop.left, out, n, max);
+            collect_type_from_expr(e->value.binop.right, out, n, max);
+            break;
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC:
+        case AST_EXPR_RETURN:
+            collect_type_from_expr(e->value.unary.operand, out, n, max);
+            break;
+        case AST_EXPR_IF: case AST_EXPR_TERNARY:
+            collect_type_from_expr(e->value.if_expr.cond, out, n, max);
+            collect_type_from_expr(e->value.if_expr.then_expr, out, n, max);
+            if (e->value.if_expr.else_expr) collect_type_from_expr(e->value.if_expr.else_expr, out, n, max);
+            break;
+        case AST_EXPR_MATCH:
+            collect_type_from_expr(e->value.match_expr.matched_expr, out, n, max);
+            for (int i = 0; i < e->value.match_expr.num_arms; i++) collect_type_from_expr(e->value.match_expr.arms[i].result, out, n, max);
+            break;
+        case AST_EXPR_FIELD_ACCESS:
+            collect_type_from_expr(e->value.field_access.base, out, n, max);
+            break;
+        case AST_EXPR_STRUCT_LIT:
+            for (int i = 0; i < e->value.struct_lit.num_fields; i++) collect_type_from_expr(e->value.struct_lit.inits[i], out, n, max);
+            break;
+        case AST_EXPR_ARRAY_LIT:
+            for (int i = 0; i < e->value.array_lit.num_elems; i++) collect_type_from_expr(e->value.array_lit.elems[i], out, n, max);
+            break;
+        case AST_EXPR_INDEX:
+            collect_type_from_expr(e->value.index.base, out, n, max);
+            collect_type_from_expr(e->value.index.index_expr, out, n, max);
+            break;
+        default: break;
+    }
+}
+
+/** 从块中收集类型名。 */
+static void collect_type_from_block(const struct ASTBlock *b, const char **out, int *n, int max) {
+    if (!b || *n >= max) return;
+    for (int i = 0; i < b->num_consts; i++) {
+        if (b->const_decls[i].type) collect_type_from_type(b->const_decls[i].type, out, n, max);
+        if (b->const_decls[i].init) collect_type_from_expr(b->const_decls[i].init, out, n, max);
+    }
+    for (int i = 0; i < b->num_lets; i++) {
+        if (b->let_decls[i].type) collect_type_from_type(b->let_decls[i].type, out, n, max);
+        if (b->let_decls[i].init) collect_type_from_expr(b->let_decls[i].init, out, n, max);
+    }
+    for (int i = 0; i < b->num_loops; i++) collect_type_from_block(b->loops[i].body, out, n, max);
+    for (int i = 0; i < b->num_for_loops; i++) {
+        if (b->for_loops[i].init) collect_type_from_expr(b->for_loops[i].init, out, n, max);
+        if (b->for_loops[i].cond) collect_type_from_expr(b->for_loops[i].cond, out, n, max);
+        if (b->for_loops[i].step) collect_type_from_expr(b->for_loops[i].step, out, n, max);
+        collect_type_from_block(b->for_loops[i].body, out, n, max);
+    }
+    for (int i = 0; i < b->num_labeled_stmts; i++)
+        if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr)
+            collect_type_from_expr(b->labeled_stmts[i].u.return_expr, out, n, max);
+    if (b->final_expr) collect_type_from_expr(b->final_expr, out, n, max);
+}
+
+/** 对已收集的类型名做结构体字段传递闭包：若某名为本模块或依赖中的 struct，则将其字段类型名加入集合（多轮至不动点）。 */
+static void close_struct_types(struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
+    const char **out, int *n, int max) {
+    struct ASTModule *mods[33];
+    int nmods = 0;
+    if (entry) mods[nmods++] = entry;
+    for (int i = 0; i < ndep && dep_mods && nmods < 33; i++) if (dep_mods[i]) mods[nmods++] = dep_mods[i];
+    for (int round = 0; round < 8; round++) {
+        int added = 0;
+        for (int i = 0; i < *n; i++) {
+            const char *name = out[i];
+            if (!name) continue;
+            for (int m = 0; m < nmods; m++) {
+                struct ASTStructDef **sd = mods[m]->struct_defs;
+                int num = mods[m]->num_structs;
+                if (!sd) continue;
+                for (int j = 0; j < num; j++) {
+                    if (!sd[j] || !sd[j]->name || strcmp(sd[j]->name, name) != 0) continue;
+                    for (int k = 0; k < sd[j]->num_fields; k++) {
+                        const struct ASTType *fty = sd[j]->fields[k].type;
+                        if (fty) collect_type_from_type(fty, out, n, max);
+                    }
+                    added = 1;
+                    break;
+                }
+                if (added) break;
+            }
+        }
+        if (!added) break;
+    }
+}
+
+void codegen_compute_used_types(struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
+    struct ASTFunc **used_funcs, int n_used, const char **used_type_names_out, int *n_out, int max_types) {
+    if (!used_type_names_out || !n_out || max_types <= 0) return;
+    *n_out = 0;
+    for (int i = 0; i < n_used && used_funcs && used_funcs[i]; i++) {
+        const struct ASTFunc *f = used_funcs[i];
+        if (f->return_type) collect_type_from_type(f->return_type, used_type_names_out, n_out, max_types);
+        for (int j = 0; j < f->num_params; j++)
+            if (f->params[j].type) collect_type_from_type(f->params[j].type, used_type_names_out, n_out, max_types);
+        if (f->body) collect_type_from_block(f->body, used_type_names_out, n_out, max_types);
+    }
+    close_struct_types(entry, dep_mods, ndep, used_type_names_out, n_out, max_types);
+}
+
 /**
  * 将入口模块生成 C；功能、参数、返回值见 codegen.h 声明处注释。
  * 多函数：先生成所有函数的 vector/slice 前置定义，再按「非 main 先、main 最后」生成各函数定义。
  */
-int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep) {
+int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep,
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx) {
     if (!m || !out) return -1;
     if (!m->main_func || !m->main_func->body) return -1;
     if (strcmp(m->main_func->name, "main") != 0) return -1;
@@ -1470,10 +1976,11 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
         for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++)
             if (m->impl_blocks[k]->funcs[j]->body)
                 ensure_block_vector_typedefs(m->impl_blocks[k]->funcs[j]->body, out);
-    /* 顶层枚举定义 → C enum（§7.4 无负载枚举；变体名以 EnumName_ 前缀避免全局冲突） */
+    /* 顶层枚举定义 → C enum；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用枚举 */
     for (int i = 0; i < m->num_enums && m->enum_defs; i++) {
         const struct ASTEnumDef *ed = m->enum_defs[i];
         if (!ed || !ed->name) continue;
+        if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, ed->name)) continue;
         fprintf(out, "enum %s { ", ed->name);
         for (int j = 0; j < ed->num_variants; j++) {
             if (j > 0) fprintf(out, ", ");
@@ -1481,10 +1988,11 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
         }
         fprintf(out, " };\n");
     }
-    /* 顶层结构体定义 → C struct（变量类型与类型系统设计 §6.1） */
+    /* 顶层结构体定义 → C struct；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用结构体 */
     for (int i = 0; i < m->num_structs && m->struct_defs; i++) {
         const struct ASTStructDef *sd = m->struct_defs[i];
         if (!sd || !sd->name) continue;
+        if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, sd->name)) continue;
         fprintf(out, "struct %s { ", sd->name);
         for (int j = 0; j < sd->num_fields; j++) {
             const struct ASTType *fty = sd->fields[j].type;
@@ -1504,21 +2012,30 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
     fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
     fprintf(out, "  abort();\n");
     fprintf(out, "}\n");
-    /* 先输出非 main 函数，再输出 impl 方法、泛型单态化实例，最后 main */
+    /* 先输出非 main 函数，再输出 impl 方法、泛型单态化实例，最后 main；阶段 8.1 DCE 时仅输出已引用；若未在 used 中但被 main 体直接引用则兜底保留 */
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
         if (!m->funcs[i] || strcmp(m->funcs[i]->name, "main") == 0 || m->funcs[i]->num_generic_params > 0) continue;
+        if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, m->funcs[i])) {
+            if (!m->main_func || !m->main_func->body || !block_references_func(m->main_func->body, m->funcs[i])) continue;
+        }
         if (codegen_one_func(m->funcs[i], m, out) != 0) return -1;
     }
     for (int k = 0; k < m->num_impl_blocks && m->impl_blocks; k++)
-        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++)
+        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++) {
+            if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, m->impl_blocks[k]->funcs[j])) {
+                if (!m->main_func || !m->main_func->body || !block_references_func(m->main_func->body, m->impl_blocks[k]->funcs[j])) continue;
+            }
             if (codegen_one_impl_func(m->impl_blocks[k]->funcs[j], m, out) != 0) return -1;
+        }
     for (int k = 0; k < m->num_mono_instances && m->mono_instances; k++) {
         const struct ASTMonoInstance *inst = &m->mono_instances[k];
         if (!inst->template || !inst->type_args) continue;
+        if (dce_ctx && is_mono_used && !is_mono_used(dce_ctx, m, k)) continue;
         if (codegen_one_mono_instance(inst->template, inst->type_args, inst->num_type_args, m, out) != 0) return -1;
     }
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
         if (!m->funcs[i] || strcmp(m->funcs[i]->name, "main") != 0 || m->funcs[i]->num_generic_params > 0) continue;
+        if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, m->funcs[i])) continue;
         if (codegen_one_func(m->funcs[i], m, out) != 0) return -1;
         break;
     }
@@ -1526,9 +2043,10 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
 }
 
 /**
- * 将库模块生成 C（类型与函数带 import 前缀，避免与入口模块符号冲突）；功能见 codegen.h。
+ * 将库模块生成 C（类型与函数带 import 前缀，避免与入口模块符号冲突）；功能见 codegen.h。阶段 8.1 DCE 时仅输出已引用。
  */
-int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FILE *out) {
+int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FILE *out,
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx) {
     if (!m || !out) return -1;
     static char lib_prefix_buf[256];
     size_t off = 0;
@@ -1591,6 +2109,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FI
     for (int i = 0; i < m->num_enums && m->enum_defs; i++) {
         const struct ASTEnumDef *ed = m->enum_defs[i];
         if (!ed || !ed->name) continue;
+        if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, ed->name)) continue;
         char ename[256];
         library_prefixed_name(ed->name, ename, sizeof(ename));
         fprintf(out, "enum %s { ", ename);
@@ -1603,6 +2122,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FI
     for (int i = 0; i < m->num_structs && m->struct_defs; i++) {
         const struct ASTStructDef *sd = m->struct_defs[i];
         if (!sd || !sd->name) continue;
+        if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, sd->name)) continue;
         char sname[256];
         library_prefixed_name(sd->name, sname, sizeof(sname));
         fprintf(out, "struct %s { ", sname);
@@ -1624,14 +2144,18 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FI
 
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
         if (!m->funcs[i] || strcmp(m->funcs[i]->name, "main") == 0 || m->funcs[i]->num_generic_params > 0) continue;
+        if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, m->funcs[i])) continue;
         if (codegen_one_func(m->funcs[i], m, out) != 0) { codegen_library_prefix = NULL; codegen_library_module = NULL; codegen_library_import_path = NULL; return -1; }
     }
     for (int k = 0; k < m->num_impl_blocks && m->impl_blocks; k++)
-        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++)
+        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++) {
+            if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, m->impl_blocks[k]->funcs[j])) continue;
             if (codegen_one_impl_func(m->impl_blocks[k]->funcs[j], m, out) != 0) { codegen_library_prefix = NULL; codegen_library_module = NULL; codegen_library_import_path = NULL; return -1; }
+        }
     for (int k = 0; k < m->num_mono_instances && m->mono_instances; k++) {
         const struct ASTMonoInstance *inst = &m->mono_instances[k];
         if (!inst->template || !inst->type_args) continue;
+        if (dce_ctx && is_mono_used && !is_mono_used(dce_ctx, m, k)) continue;
         if (codegen_one_mono_instance(inst->template, inst->type_args, inst->num_type_args, m, out) != 0) {
             codegen_library_prefix = NULL;
             codegen_library_module = NULL;
