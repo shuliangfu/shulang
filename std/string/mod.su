@@ -1,0 +1,8 @@
+// std.string — 字符串类型与基本操作（自举前最小实现）
+// 自举前：提供最小可调用 API；字符串类型与 len/ptr 等后续扩展。
+
+// 占位函数，表示本模块已可 import。
+function placeholder(): i32 { return 0; }
+
+// 表示“空字符串”长度（占位），后续扩展为真实字符串类型与 len。
+function string_empty(): i32 { return 0; }
