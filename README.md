@@ -1,6 +1,17 @@
 # Shulang 开发时序文档
 
-> 本文档说明**先开发什么、再开发什么**，按**依赖关系**排序，避免出现「下一步依赖尚未就绪」的情况。与 `architecture.md`、`README.md` 中的里程碑（M0–M5）对应，此处细化到可执行的开发顺序。
+> 本文档说明**先开发什么、再开发什么**，按**依赖关系**排序，避免出现「下一步依赖尚未就绪」的情况。与 `architecture.md`、项目里程碑（M0–M5）对应，此处细化到可执行的开发顺序。
+
+---
+
+## 当前进度小结（便于快速对照）
+
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| 0–6 | ✅ 已完成 | 流水线、import、core/std 最小子集、多目标已打通 |
+| 7 | ✅ 已完成 | 泛型、trait/impl、多文件、core/std 扩展（最小实现） |
+| 8 | 部分完成 | 8.1 DCE ✅；8.2 后端 -O2/-Os、strip、NDEBUG、shuc OPT=1 ✅；8.3 体积/性能基线脚本 ✅ |
+| 9 | 未开始 | 自举（用 .su 重写编译器） |
 
 ---
 
@@ -143,11 +154,9 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 5.1 | **Import 解析**：driver 或单独模块解析 `import core.xxx`，根据「标准库根路径」找到 `core/xxx.su`，对该文件递归做 lex→parse→typeck，纳入同一编译单元或符号表 | Driver, 标准库路径配置 | 能编译含 `import core.types` 的 .su（若 types 已实现） | ✅ |
-| 5.2 | **core 最小子集**（core/ 目录下 .su 文件）：  
-  - core.types（基础类型）、core.mem（size_of/align_of 等）、core.option、core.result、core.slice、core.fmt（最小）、core.builtin、core.debug（assert 等）  
-  可先做「仅类型与函数声明 + 少量实现」，保证编译器能解析、类型检查通过 | 无（标准库与编译器可并行开发，但需 import 先通） | 至少 core.types + core.mem 可被 import 且通过 typeck | ✅ |
-| 5.3 | **测试**：examples 或 tests 中「import core.xxx 并调用」的用例能编译通过 | Import + core 子集 | 用例通过 | ✅ |
+| 5.1 | **Import 解析**：driver 或单独模块解析 `import core.xxx`，根据「标准库根路径」找到 `core/xxx.su`，对该文件递归做 lex→parse→typeck，纳入同一编译单元或符号表 | Driver, 标准库路径配置 | 能编译含 `import core.types` 的 .su（若 types 已实现） | ✅ 已完成 |
+| 5.2 | **core 最小子集**（core/ 目录下 .su 文件）：core.types、core.mem、core.option、core.result、core.slice、core.fmt、core.builtin、core.debug；可先做「仅类型与函数声明 + 少量实现」，保证编译器能解析、类型检查通过 | 无（标准库与编译器可并行开发，但需 import 先通） | 至少 core.types + core.mem 可被 import 且通过 typeck | ✅ 已完成 |
+| 5.3 | **测试**：examples 或 tests 中「import core.xxx 并调用」的用例能编译通过 | Import + core 子集 | 用例通过 | ✅ 已完成 |
 
 **下一步前置**：用户 .su 可 import core 的若干模块；编译器能解析并类型检查多文件/多模块。
 
@@ -159,11 +168,9 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 6.1 | **std 最小子集**（std/ 目录下 .su）：  
-  - std.runtime、std.io（Read/Write/最小）、std.fs（open/read/write/close）、std.path、std.process（exit、args）、std.heap、std.string、std.vec、std.map、std.error  
-  实现可先「单平台」（当前 OS），内部条件编译留好接口 | core 可用, import | 能编译「import std.io; 打开文件读一行」之类用例 | ✅ |
-| 6.2 | **多目标**：driver 支持 `-target`（如 x86_64-pc-linux-gnu）；codegen 与链接根据 target 选工具链与库；标准库内按 target 条件编译 | Codegen, Driver | 同一 .su 可编译出 linux/macos 可执行文件（或至少两个目标之一） | ✅ |
-| 6.3 | **测试**：多目标各编一例并运行（或交叉编译后交目标机运行） | 6.1, 6.2 | 多目标用例通过 | ✅ |
+| 6.1 | **std 最小子集**（std/ 目录下 .su）：std.runtime、std.io、std.fs、std.path、std.process、std.heap、std.string、std.vec、std.map、std.error；实现可先「单平台」（当前 OS），内部条件编译留好接口 | core 可用, import | 能编译「import std.io; 打开文件读一行」之类用例 | ✅ 已完成 |
+| 6.2 | **多目标**：driver 支持 `-target`（如 x86_64-pc-linux-gnu）；codegen 与链接根据 target 选工具链与库；标准库内按 target 条件编译 | Codegen, Driver | 同一 .su 可编译出 linux/macos 可执行文件（或至少两个目标之一） | ✅ 已完成 |
+| 6.3 | **测试**：多目标各编一例并运行（或交叉编译后交目标机运行） | 6.1, 6.2 | 多目标用例通过 | ✅ 已完成 |
 
 **下一步前置**：用户程序可 import std 并做简单 I/O、文件、进程；可针对不同目标编译。
 
@@ -175,10 +182,10 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 7.1 | **泛型**：typeck 支持泛型函数/结构体与单态化；IR/codegen 能正确生成单态化后的代码 | Typeck, IR, Codegen | 泛型 .su 程序能编译并运行 | |
-| 7.2 | **Trait/接口**：类型系统支持 trait 与 impl；满足「自举前必须」的语法需求 | Typeck | 带 trait 的 .su 能通过 typeck 并编译 | |
-| 7.3 | **模块系统**：多文件、export/import、可见性规则；与现有 import core/std 一致 | Driver, Parser, Typeck | 多文件项目能正确编译与链接 | |
-| 7.4 | **标准库扩展**：core 其余模块；std 的 string、fmt、vec、map、thread、mutex、time、heap、error、test 等 | 7.1–7.3 | 文档「自举前必须的库」全部可 import 并有最小实现 | |
+| 7.1 | **泛型**：typeck 支持泛型函数/结构体与单态化；IR/codegen 能正确生成单态化后的代码 | Typeck, IR, Codegen | 泛型 .su 程序能编译并运行 | ✅ |
+| 7.2 | **Trait/接口**：类型系统支持 trait 与 impl；满足「自举前必须」的语法需求 | Typeck | 带 trait 的 .su 能通过 typeck 并编译 | ✅ |
+| 7.3 | **模块系统**：多文件、export/import、可见性规则；与现有 import core/std 一致 | Driver, Parser, Typeck | 多文件项目能正确编译与链接 | ✅ |
+| 7.4 | **标准库扩展**：core 其余模块；std 的 string、fmt、vec、map、thread、mutex、time、heap、error、test 等 | 7.1–7.3 | 文档「自举前必须的库」全部可 import 并有最小实现 | ✅ |
 
 **下一步前置**：语言子集达到「可写编译器」所需；标准库达到自举前必须集合。
 
@@ -186,13 +193,13 @@
 
 ### 阶段 8：优化与体积/性能（M4）
 
-**目标**：内联、DCE、LTO、strip；可执行文件小、性能达标。**依赖** 阶段 7；中端/后端需有优化 pass 或交给 LLVM 优化。
+**目标**：内联、DCE、LTO、strip；可执行文件小、性能达标。**依赖** 阶段 7；中端/后端需有优化 pass 或交给系统 cc 优化。
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 8.1 | **死代码消除（DCE）**：未使用函数、未实例化泛型不进入目标码 | IR 或 Codegen | 未引用 std 模块不进入二进制 | |
-| 8.2 | **内联、常量传播**：在 IR 层或交给 LLVM；发布构建 LTO、strip | Codegen, 构建脚本 | 小程序二进制明显缩小；性能可测 | |
-| 8.3 | **体积与性能回归**：benchmarks/ 或固定用例，记录体积与耗时，防止退化 | 8.1, 8.2 | 有数字可对比 | |
+| 8.1 | **死代码消除（DCE）**：未使用函数、未实例化泛型不进入目标码；未引用模块中的代码不进入二进制 | IR 或 Codegen | 从 main 做可达性分析，codegen 按 used 集合仅输出被引用函数与单态化实例 | ✅ |
+| 8.2 | **后端优化与 strip**：invoke_cc 默认 -O2，支持 -O 0/2/s、SHULANG_OPT；非 -O0 时 strip 产出并传 -DNDEBUG；Makefile 支持 OPT=1 编译 shuc | Codegen, Driver, Makefile | 用户产物可 -O2/-Os；体积可测 | ✅ |
+| 8.3 | **体积与性能基线**：run-size-baseline.sh（-O0/-O2/-Os 对比）、run-perf-baseline.sh；make size-baseline / perf-baseline | 8.2 | 有体积与耗时数字可对比 | ✅ |
 
 **下一步前置**：发布构建稳定；体积与性能满足「轻量级、比肩 C」目标。
 
