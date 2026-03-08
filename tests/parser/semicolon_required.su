@@ -1,0 +1,5 @@
+// 分号统一规则：语句结束必须加分号；仅 } 后可不加。此处 return 后必须写分号。
+function main(): i32 {
+  let x: i32 = 1;
+  return 0;
+}
