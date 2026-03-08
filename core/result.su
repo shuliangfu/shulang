@@ -1,0 +1,36 @@
+// core.result — Result<T,E> 与错误传播（自举前最小实现）
+// 当前：提供 Result_i32 具体类型及 ok/err/unwrap_or，供无泛型类型语法时使用。
+
+// Result_i32：is_ok 为真时 value 为成功值，否则为错误码
+struct Result_i32 {
+  is_ok: bool;
+  value: i32;
+}
+
+// 构造成功值
+function ok_i32(x: i32): Result_i32 {
+  return Result_i32 { is_ok: true, value: x };
+}
+
+// 构造错误值
+function err_i32(e: i32): Result_i32 {
+  return Result_i32 { is_ok: false, value: e };
+}
+
+// 成功则返回值，否则返回默认值
+function unwrap_or_i32(r: Result_i32, default_val: i32): i32 {
+  return r.is_ok ? r.value : default_val;
+}
+
+// 是否为成功
+function is_ok_i32(r: Result_i32): bool {
+  return r.is_ok;
+}
+
+// 是否为错误
+function is_err_i32(r: Result_i32): bool {
+  return !r.is_ok;
+}
+
+// 泛型占位，表示本模块可 import；完整 Result<T,E> 待类型实参语法后实现
+function result_placeholder<T>(x: T): T { return x; }
