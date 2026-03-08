@@ -60,6 +60,8 @@ Thumbs.db
 *.log
 
 # --- 测试与临时 ---
+# 测试 ABI 脚本编译出的可执行文件
+tests/abi/layout_abi
 # 测试输出、临时目录
 tmp/
 temp/
