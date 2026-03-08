@@ -1,1 +1,20 @@
-// std.io — 阶段 6 占位；Read/Write 等最小 I/O 接口后续在此扩展
+// std.io — Read/Write 最小接口、标准输入输出（自举前最小实现）
+// print_i32/print_u32 由 codegen 生成 printf 调用。
+
+// 向标准输出打印有符号整数 x 并换行，返回 0
+function print_i32(x: i32): i32 {
+  return 0;
+}
+
+// 向标准输出打印无符号整数 x 并换行，返回 0
+function print_u32(x: u32): i32 {
+  return 0;
+}
+
+// 向标准输出打印 64 位有符号整数 x 并换行，返回 0
+function print_i64(x: i64): i32 {
+  return 0;
+}
+
+// 占位，表示本模块可 import；Read/Write 等后续实现
+function placeholder(): i32 { return 0; }
