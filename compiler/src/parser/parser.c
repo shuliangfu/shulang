@@ -1476,10 +1476,16 @@ static ASTStructDef *parse_one_struct(Parser *p, int allow_padding) {
         free(name);
         return NULL;
     }
+    /* 可选 packed：struct Name packed { ... }（内存契约，无填充布局） */
+    int is_packed = 0;
+    if (peek(p)->kind == TOKEN_PACKED) {
+        is_packed = 1;
+        advance(p);
+    }
     if (peek(p)->kind != TOKEN_LBRACE) {
         free(name);
         if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
-        fail(p, "expected '{' after struct name");
+        fail(p, "expected '{' or 'packed' after struct name");
         return NULL;
     }
     advance(p);
@@ -1576,6 +1582,7 @@ static ASTStructDef *parse_one_struct(Parser *p, int allow_padding) {
     s->fields = fields;
     s->num_fields = num_fields;
     s->allow_padding = allow_padding;
+    s->packed = is_packed;
     return s;
 }
 
@@ -1854,6 +1861,7 @@ static ASTFunc *parse_impl_method(Parser *p, const char *trait_name, const char 
     f->num_params = num_params;
     f->return_type = ret;
     f->body = body;
+    f->is_extern = 0;
     f->impl_for_trait = trait_name;
     f->impl_for_type = type_name;
     return f;
@@ -2509,11 +2517,11 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
 }
 
 /**
- * 解析单条函数定义：function name ( [ param : type , ... ] ) -> type { block }。
- * 当前 Token 须为 TOKEN_FUNCTION；调用后消耗整条 function 包括 }。
+ * 解析单条函数定义：function name ( [ param : type , ... ] ) : type { block } 或 extern function name (...) : type ;
+ * 当 is_extern 非 0 时，当前 Token 须为 TOKEN_FUNCTION（extern 已在上层消费），结尾为 ; 且 body 为 NULL。
  * 返回值：成功返回新分配的 ASTFunc*（调用方由 ast_module_free 统一释放）；失败返回 NULL 且已 fail。
  */
-static ASTFunc *parse_one_function(Parser *p) {
+static ASTFunc *parse_one_function(Parser *p, int is_extern) {
     if (peek(p)->kind != TOKEN_FUNCTION) return NULL;
     advance(p);
     if (peek(p)->kind != TOKEN_IDENT) {
@@ -2640,30 +2648,47 @@ static ASTFunc *parse_one_function(Parser *p) {
         free(params);
         return NULL;
     }
-    if (peek(p)->kind != TOKEN_LBRACE) {
-        free(name);
-        if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
-        ast_type_free(return_type);
-        for (int i = 0; i < num_params; i++) {
-            if (params[i].name) free((void *)params[i].name);
-            if (params[i].type) ast_type_free(params[i].type);
+    ASTBlock *body = NULL;
+    if (is_extern) {
+        if (peek(p)->kind != TOKEN_SEMICOLON) {
+            free(name);
+            if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
+            ast_type_free(return_type);
+            for (int i = 0; i < num_params; i++) {
+                if (params[i].name) free((void *)params[i].name);
+                if (params[i].type) ast_type_free(params[i].type);
+            }
+            free(params);
+            fail(p, "expected ';' after extern function signature");
+            return NULL;
         }
-        free(params);
-        fail(p, "expected '{' before function body");
-        return NULL;
-    }
-    advance(p);
-    ASTBlock *body = parse_block(p, 1);
-    if (!body) {
-        free(name);
-        if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
-        ast_type_free(return_type);
-        for (int i = 0; i < num_params; i++) {
-            if (params[i].name) free((void *)params[i].name);
-            if (params[i].type) ast_type_free(params[i].type);
+        advance(p);
+    } else {
+        if (peek(p)->kind != TOKEN_LBRACE) {
+            free(name);
+            if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
+            ast_type_free(return_type);
+            for (int i = 0; i < num_params; i++) {
+                if (params[i].name) free((void *)params[i].name);
+                if (params[i].type) ast_type_free(params[i].type);
+            }
+            free(params);
+            fail(p, "expected '{' before function body");
+            return NULL;
         }
-        free(params);
-        return NULL;
+        advance(p);
+        body = parse_block(p, 1);
+        if (!body) {
+            free(name);
+            if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
+            ast_type_free(return_type);
+            for (int i = 0; i < num_params; i++) {
+                if (params[i].name) free((void *)params[i].name);
+                if (params[i].type) ast_type_free(params[i].type);
+            }
+            free(params);
+            return NULL;
+        }
     }
     ASTFunc *func = (ASTFunc *)malloc(sizeof(ASTFunc));
     if (!func) {
@@ -2687,6 +2712,7 @@ static ASTFunc *parse_one_function(Parser *p) {
     if (num_params == 0) free(params);
     func->return_type = return_type;
     func->body = body;
+    func->is_extern = is_extern ? 1 : 0;
     func->impl_for_trait = NULL;
     func->impl_for_type = NULL;
     return func;
@@ -2884,12 +2910,21 @@ int parse(Lexer *lex, ASTModule **out) {
         impl_list[nimpls++] = impl;
     }
 
-    /* [ function name ( params ) -> type { block } ]*；至少一个 function main 作为入口 */
+    /* [ extern? function name ( params ) : type { block } | ; ]*；至少一个 function main 作为入口 */
     ASTFunc *func_list[AST_MODULE_MAX_FUNCS];
     int nfuncs = 0;
-    while (peek(&prs)->kind == TOKEN_FUNCTION) {
-        ASTFunc *func = parse_one_function(&prs);
+    while (peek(&prs)->kind == TOKEN_EXTERN || peek(&prs)->kind == TOKEN_FUNCTION) {
+        int is_extern = (peek(&prs)->kind == TOKEN_EXTERN) ? 1 : 0;
+        if (is_extern) {
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_FUNCTION) {
+                fail(&prs, "expected 'function' after 'extern'");
+                goto cleanup_funcs_fail;
+            }
+        }
+        ASTFunc *func = parse_one_function(&prs, is_extern);
         if (!func) {
+cleanup_funcs_fail:
             while (nfuncs--) {
                 ASTFunc *f = func_list[nfuncs];
                 if (f->name) free((void *)f->name);
