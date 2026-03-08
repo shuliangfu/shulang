@@ -696,10 +696,10 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 fprintf(stderr, "typeck error: unknown function '%s'\n", callee_name ? callee_name : "");
                 return -1;
             }
-            if (from_dep >= 0) {
+            /* 本模块与 import 调用均登记 resolved_callee_func，供阶段 8.1 DCE 可达性分析使用 */
+            ((struct ASTExpr *)e)->value.call.resolved_callee_func = (struct ASTFunc *)func;
+            if (from_dep >= 0)
                 ((struct ASTExpr *)e)->value.call.resolved_import_path = m->import_paths[from_dep];
-                ((struct ASTExpr *)e)->value.call.resolved_callee_func = (struct ASTFunc *)func;
-            }
             /* 泛型调用 f<Type>(args)：要求函数为泛型、类型实参个数一致，登记单态化实例并做代入后类型检查 */
             if (e->value.call.num_type_args > 0) {
                 if (func->num_generic_params == 0) {
