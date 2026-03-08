@@ -1,0 +1,2 @@
+function id<T>(x: T): T { return x; }
+function main(): i32 { return id<i32>(42); }
