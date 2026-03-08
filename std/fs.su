@@ -1,1 +1,8 @@
-// std.fs — 阶段 6 占位；open/read/write/close 等后续在此扩展
+// std.fs — open/read/write/close、文件路径（自举前最小实现）
+// 自举前：提供最小可调用 API；文件系统接口后续扩展。
+
+// 占位函数，表示本模块已可 import。
+function placeholder(): i32 { return 0; }
+
+// 表示“未打开的文件句柄”占位（-1），后续扩展为 open/read/write/close。
+function fs_invalid_handle(): i32 { return -1; }
