@@ -1,0 +1,7 @@
+// 测试 std.io.print_u32：向标准输出打印无符号整数
+import std.io;
+
+function main(): i32 {
+  let n: i32 = print_u32(100);
+  return n;
+}
