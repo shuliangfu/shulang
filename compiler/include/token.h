@@ -28,6 +28,7 @@ typedef enum TokenKind {
     TOKEN_DEFER,    /**< 关键字 defer（作用域退出时执行） */
     TOKEN_MATCH,    /**< 关键字 match（多分支匹配） */
     TOKEN_STRUCT,   /**< 关键字 struct（结构体定义） */
+    TOKEN_PACKED,   /**< 关键字 packed（结构体无填充布局，与 C __attribute__((packed)) 一致） */
     TOKEN_ENUM,     /**< 关键字 enum（枚举定义，§7） */
     TOKEN_GOTO,     /**< 关键字 goto（跳转） */
     TOKEN_TRAIT,    /**< 关键字 trait（接口定义，阶段 7.2） */
@@ -35,6 +36,7 @@ typedef enum TokenKind {
     TOKEN_SELF,     /**< 关键字 self（方法接收者，阶段 7.2） */
     TOKEN_UNDERSCORE, /**< _（match 通配模式） */
     TOKEN_IMPORT,   /**< 关键字 import（阶段 5） */
+    TOKEN_EXTERN,   /**< 关键字 extern（FFI：声明 C 函数，无体） */
     TOKEN_IDENT,    /**< 标识符（如 main） */
     TOKEN_I32,      /**< 类型名 i32（内建整数） */
     TOKEN_BOOL,     /**< 类型名 bool（布尔） */
