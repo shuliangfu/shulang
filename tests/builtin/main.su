@@ -1,0 +1,7 @@
+// 测试 core.builtin：占位可 import 并调用
+import core.builtin;
+
+function main(): i32 {
+  let n: i32 = placeholder();
+  return n;
+}
