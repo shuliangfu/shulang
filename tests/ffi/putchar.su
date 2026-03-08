@@ -1,0 +1,6 @@
+// 测试 FFI：extern 声明 C 的 putchar，从 .su 调用
+extern function putchar(c: i32): i32;
+
+function main(): i32 {
+  return putchar(65);  // 'A'，返回 putchar 的返回值
+}
