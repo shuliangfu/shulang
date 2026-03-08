@@ -1,0 +1,9 @@
+// 测试 core.slice.len_i32：切片 .len 与 len_i32(s) 返回 usize
+import core.slice;
+
+function main(): i32 {
+  let a: [4]i32 = [10, 20, 30, 40];
+  let s: []i32 = a;
+  let n: usize = len_i32(s);
+  return 0;
+}
