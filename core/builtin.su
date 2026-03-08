@@ -1,0 +1,5 @@
+// core.builtin — 内建函数 / intrinsics（自举前最小实现）
+// 自举前占位：提供最小可编译导出；内建映射由编译器识别后在此声明。
+
+// 占位函数，表示本模块已可 import；内建由编译器特殊处理，此处仅占位。
+function placeholder(): i32 { return 0; }
