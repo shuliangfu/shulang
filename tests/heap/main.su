@@ -1,0 +1,7 @@
+// 测试 std.heap：alloc_size_zero
+import std.heap;
+
+function main(): i32 {
+  let n: i32 = alloc_size_zero();
+  return n;
+}
