@@ -49,20 +49,54 @@ static void import_path_to_file_path(const char *lib_root, const char *import_pa
 }
 
 /**
- * 解析并类型检查模块的所有 import 依赖。
- * 功能说明：按 mod->import_paths 依次解析对应 .su 文件并执行 typeck，确保依赖模块存在且合法；不保留依赖 AST，仅做存在性与类型检查。
- * 参数：mod 已解析的入口模块，其 import_paths 与 num_imports 已填充；lib_root 标准库根目录，用于 import_path_to_file_path。
- * 返回值：0 表示全部 import 解析与 typeck 通过；-1 表示某 import 打开失败、解析失败或 typeck 失败，且已向 stderr 输出信息。
- * 错误与边界：mod 为 NULL 或 num_imports 为 0 时直接返回 0；任一依赖失败即返回 -1，不继续后续 import。
- * 副作用与约定：每个依赖会临时分配 Lexer 与 AST 并在本函数内 ast_module_free，不修改 mod；会向 stderr 打印错误信息。
+ * 从入口文件路径得到其所在目录，用于多文件时从同目录解析 import（阶段 7.3）。
+ * 参数：input_path 入口 .su 路径；entry_dir 输出缓冲区；size 缓冲区大小。
+ * 无目录时写入 "."。
  */
-static int resolve_imports(ASTModule *mod, const char *lib_root) {
+static void get_entry_dir(const char *input_path, char *entry_dir, size_t size) {
+    if (!input_path || !entry_dir || size == 0) {
+        if (size) entry_dir[0] = '\0';
+        return;
+    }
+    const char *last = strrchr(input_path, '/');
+    if (!last) {
+        (void)snprintf(entry_dir, size, ".");
+        return;
+    }
+    size_t len = (size_t)(last - input_path);
+    if (len >= size) len = size - 1;
+    memcpy(entry_dir, input_path, len);
+    entry_dir[len] = '\0';
+}
+
+/**
+ * 解析 import 路径到实际 .su 文件路径：先试 lib_root，若不存在且为单段路径则试 entry_dir（多文件 7.3）。
+ * 参数：lib_root 库根；entry_dir 入口所在目录（可为 NULL 或 ""）；import_path 如 "foo" 或 "core.types"；path 输出；path_size 缓冲区大小。
+ */
+static void resolve_import_file_path(const char *lib_root, const char *entry_dir, const char *import_path, char *path, size_t path_size) {
+    import_path_to_file_path(lib_root, import_path, path, path_size);
+    if (entry_dir && entry_dir[0] && strchr(import_path, '.') == NULL) {
+        if (access(path, R_OK) != 0) {
+            (void)snprintf(path, path_size, "%s/%.255s.su", entry_dir, import_path);
+        }
+    }
+}
+
+/**
+ * 解析并类型检查所有 import 依赖，将依赖模块填入 dep_mods，供 typeck 跨模块解析与 -o 时 codegen 使用（阶段 7.3 跨模块调用）。
+ * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；dep_mods 输出依赖 AST 数组；ndep_out 输出依赖个数；max_deps 最多保留个数。
+ * 返回值：0 成功；-1 打开/解析/typeck 失败，且已释放已加载的 dep_mods。
+ */
+static int resolve_and_load_imports(ASTModule *mod, const char *lib_root, const char *entry_dir,
+    ASTModule **dep_mods, int *ndep_out, int max_deps) {
     char path[512];
-    for (int i = 0; i < mod->num_imports; i++) {
-        import_path_to_file_path(lib_root, mod->import_paths[i], path, sizeof(path));
+    int ndep = 0;
+    for (int i = 0; i < mod->num_imports && ndep < max_deps; i++) {
+        resolve_import_file_path(lib_root, entry_dir, mod->import_paths[i], path, sizeof(path));
         char *src = read_file(path);
         if (!src) {
             fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", mod->import_paths[i], path);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             return -1;
         }
         Lexer *lex = lexer_new(src);
@@ -72,15 +106,18 @@ static int resolve_imports(ASTModule *mod, const char *lib_root) {
         free(src);
         if (pr != 0 || !dep) {
             fprintf(stderr, "shuc: failed to parse import '%s'\n", mod->import_paths[i]);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             return -1;
         }
-        if (typeck_module(dep) != 0) {
+        if (typeck_module(dep, NULL, 0) != 0) {
             fprintf(stderr, "shuc: typeck failed for import '%s'\n", mod->import_paths[i]);
             ast_module_free(dep);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             return -1;
         }
-        ast_module_free(dep);
+        dep_mods[ndep++] = dep;
     }
+    *ndep_out = ndep;
     return 0;
 }
 
@@ -110,7 +147,11 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_DEFER:   return "DEFER";
         case TOKEN_MATCH:   return "MATCH";
         case TOKEN_STRUCT:  return "STRUCT";
+        case TOKEN_ENUM:    return "ENUM";
         case TOKEN_GOTO:    return "GOTO";
+        case TOKEN_TRAIT:   return "TRAIT";
+        case TOKEN_IMPL:    return "IMPL";
+        case TOKEN_SELF:    return "SELF";
         case TOKEN_UNDERSCORE: return "UNDERSCORE";
         case TOKEN_IDENT:   return "IDENT";
         case TOKEN_I32:     return "I32";
@@ -121,9 +162,16 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_I64:     return "I64";
         case TOKEN_USIZE:   return "USIZE";
         case TOKEN_ISIZE:   return "ISIZE";
+        case TOKEN_I32X4:   return "I32X4";
+        case TOKEN_I32X8:   return "I32X8";
+        case TOKEN_U32X4:   return "U32X4";
+        case TOKEN_U32X8:   return "U32X8";
         case TOKEN_TRUE:    return "TRUE";
         case TOKEN_FALSE:   return "FALSE";
+        case TOKEN_F32:     return "F32";
+        case TOKEN_F64:     return "F64";
         case TOKEN_INT:     return "INT";
+        case TOKEN_FLOAT:   return "FLOAT";
         case TOKEN_LPAREN:  return "LPAREN";
         case TOKEN_RPAREN:  return "RPAREN";
         case TOKEN_LBRACE:  return "LBRACE";
@@ -157,6 +205,7 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_AMPAMP: return "AMPAMP";
         case TOKEN_PIPEPIPE: return "PIPEPIPE";
         case TOKEN_BANG:   return "BANG";
+        case TOKEN_QUESTION: return "QUESTION";
         case TOKEN_ASSIGN: return "ASSIGN";
         default:            return "?";
     }
@@ -184,30 +233,37 @@ static char *read_file(const char *path) {
 
 /**
  * 调用系统 cc 将多个 C 文件编译链接为可执行文件。
- * 功能说明：阶段 7.3 多文件；fork 子进程 execvp("cc", ...)，将 c_paths 中所有 .c 与 -o out_path、可选 -target 一并传入 cc。
- * 参数：c_paths 生成的 .c 文件路径数组，元素不可为 NULL；n 文件个数，至少 1，且 n 与 c_paths 实际数量一致；out_path 输出可执行文件路径；target 可选目标三元组（如 x86_64-apple-darwin），NULL 或空表示本机。
- * 返回值：0 表示 cc 执行成功且退出码为 0；-1 表示参数非法、fork/exec 失败或 cc 非零退出，且已向 stderr 输出信息。
- * 错误与边界：c_paths 为 NULL 或 n<1 时直接返回 -1；子进程内 execvp 失败会 _exit(127)。
- * 副作用与约定：阻塞等待子进程结束；不修改 c_paths、out_path、target；依赖 PATH 中的 cc（通常为 clang/gcc）。
+ * 功能说明：阶段 7.3 多文件；阶段 8 优化：向 cc 传入 -O<level>（默认 -O2）。fork 子进程 execvp("cc", ...)，将 c_paths 中所有 .c 与 -o out_path、可选 -target、-O 一并传入 cc。
+ * 参数：c_paths 生成的 .c 文件路径数组；n 文件个数；out_path 输出可执行文件路径；target 可选目标三元组，NULL 或空表示本机；opt_level 优化级别 "0"/"2"/"s"，NULL 表示用默认 "2"。
+ * 返回值：0 表示 cc 执行成功且退出码为 0；-1 表示参数非法、fork/exec 失败或 cc 非零退出。
  */
-static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target) {
+static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target, const char *opt_level) {
     if (!c_paths || n < 1) return -1;
+    if (!opt_level || !*opt_level) opt_level = "2";
     pid_t pid = fork();
     if (pid < 0) {
         perror("shuc: fork");
         return -1;
     }
     if (pid == 0) {
-        char *argv[MAX_C_FILES + 8];
+        char *argv[MAX_C_FILES + 10];
         int i = 0;
         argv[i++] = (char *)"cc";
         if (target && target[0]) {
             argv[i++] = (char *)"-target";
             argv[i++] = (char *)target;
         }
+        {
+            static char oopt_buf[8];
+            (void)snprintf(oopt_buf, sizeof(oopt_buf), "-O%s", opt_level);
+            argv[i++] = oopt_buf;
+        }
+        /* 阶段 8：非调试时传 -DNDEBUG，便于依赖 assert 的代码在发布构建中关闭断言 */
+        if (strcmp(opt_level, "0") != 0)
+            argv[i++] = (char *)"-DNDEBUG";
         argv[i++] = (char *)"-o";
         argv[i++] = (char *)out_path;
-        for (int j = 0; j < n && i < MAX_C_FILES + 6; j++)
+        for (int j = 0; j < n && i < MAX_C_FILES + 8; j++)
             argv[i++] = (char *)c_paths[j];
         argv[i++] = NULL;
         execvp("cc", argv);
@@ -222,6 +278,18 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         fprintf(stderr, "shuc: cc failed (exit %d)\n", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
         return -1;
+    }
+    /* 阶段 8：非调试（-O0）时对产出执行 strip，减小体积（避免传 -s 给 cc 触发 ld 的 obsolete 警告） */
+    if (strcmp(opt_level, "0") != 0) {
+        pid_t spid = fork();
+        if (spid == 0) {
+            execlp("strip", "strip", out_path, (char *)NULL);
+            _exit(127);
+        }
+        if (spid > 0) {
+            int sstatus;
+            (void)waitpid(spid, &sstatus, 0);
+        }
     }
     return 0;
 }
@@ -239,28 +307,40 @@ int main(int argc, char **argv) {
     const char *out_path = NULL;
     const char *lib_root = NULL;
     const char *target = NULL;
+    const char *opt_level = NULL;  /* -O 优化级别：0/2/s，默认 2（阶段 8） */
     int emit_c_only = 0;  /* -E：仅生成 C 到 stdout，不调用 cc */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-E") == 0) {
             emit_c_only = 1;
+        } else if (strcmp(argv[i], "-O") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                return 1;
+            }
+            opt_level = argv[i + 1];
+            if (strcmp(opt_level, "0") != 0 && strcmp(opt_level, "2") != 0 && strcmp(opt_level, "s") != 0) {
+                fprintf(stderr, "shuc: -O expects 0, 2, or s (got '%s')\n", opt_level);
+                return 1;
+            }
+            i++;
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             out_path = argv[i + 1];
             i++;
         } else if (strcmp(argv[i], "-L") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             lib_root = argv[i + 1];
             i++;
         } else if (strcmp(argv[i], "-target") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             target = argv[i + 1];
@@ -271,9 +351,11 @@ int main(int argc, char **argv) {
     }
     if (!lib_root) lib_root = getenv("SHULANG_LIB");
     if (!lib_root) lib_root = ".";
+    if (!opt_level) opt_level = getenv("SHULANG_OPT");
+    if (!opt_level || !*opt_level) opt_level = "2";
 
     if (!input_path) {
-        fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+        fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
         return 0;
     }
 
@@ -293,12 +375,19 @@ int main(int argc, char **argv) {
         free(src);
         return 1;
     }
-    if (mod->num_imports > 0 && resolve_imports(mod, lib_root) != 0) {
+    char entry_dir_buf[512];
+    get_entry_dir(input_path, entry_dir_buf, sizeof(entry_dir_buf));
+    const char *entry_dir = entry_dir_buf;
+
+    ASTModule *dep_mods[32];
+    int ndep = 0;
+    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, dep_mods, &ndep, 32) != 0) {
         ast_module_free(mod);
         free(src);
         return 1;
     }
-    if (typeck_module(mod) != 0) {
+    if (typeck_module(mod, ndep > 0 ? dep_mods : NULL, ndep) != 0) {
+        while (ndep--) ast_module_free(dep_mods[ndep]);
         ast_module_free(mod);
         free(src);
         return 1;
@@ -308,20 +397,23 @@ int main(int argc, char **argv) {
     if (emit_c_only) {
         if (!mod->main_func || !mod->main_func->body) {
             fprintf(stderr, "shuc: no main function (cannot emit C)\n");
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
         }
-        int ec = codegen_module_to_c(mod, stdout);
+        int ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0);
+        while (ndep--) ast_module_free(dep_mods[ndep]);
         ast_module_free(mod);
         free(src);
         return ec != 0 ? 1 : 0;
     }
 
-    /* 若指定 -o：需有 main，生成 C（含 import 闭包占位 .c）→ 调用 cc 链接 → 产出可执行文件；阶段 7.3 多文件 */
+    /* 若指定 -o：需有 main，生成 C（含 import 的 .c）→ 调用 cc 链接；依赖使用已加载的 dep_mods（7.3 跨模块调用） */
     if (out_path) {
         if (!mod->main_func || !mod->main_func->body) {
             fprintf(stderr, "shuc: no main function (cannot emit executable)\n");
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
@@ -330,13 +422,14 @@ int main(int argc, char **argv) {
         int n_c = 0;
         char tmp_c[256];
         char dep_c_paths[32][256];
-        int ndep = 0;
+        int ndep_c = 0;
 
         /* 入口模块 → 临时 .c */
         char tmp[] = "/tmp/shuc_XXXXXX";
         int fd = mkstemp(tmp);
         if (fd < 0) {
             perror("shuc: mkstemp");
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
@@ -345,13 +438,15 @@ int main(int argc, char **argv) {
         if (!cf) {
             close(fd);
             unlink(tmp);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
         }
-        if (codegen_module_to_c(mod, cf) != 0) {
+        if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep) != 0) {
             fclose(cf);
             unlink(tmp);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
@@ -361,85 +456,69 @@ int main(int argc, char **argv) {
         if (rename(tmp, tmp_c) != 0) {
             perror("shuc: rename");
             unlink(tmp);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
             ast_module_free(mod);
             free(src);
             return 1;
         }
         c_paths[n_c++] = tmp_c;
 
-        /* 每个 import 生成占位 .c，参与链接 */
-        for (int i = 0; i < mod->num_imports && ndep < 32; i++) {
-            char path[512];
-            import_path_to_file_path(lib_root, mod->import_paths[i], path, sizeof(path));
-            char *dep_src = read_file(path);
-            if (!dep_src) {
-                fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", mod->import_paths[i], path);
-                while (ndep--) unlink(dep_c_paths[ndep]);
-                unlink(tmp_c);
-                ast_module_free(mod);
-                free(src);
-                return 1;
-            }
-            Lexer *dlex = lexer_new(dep_src);
-            ASTModule *dep = NULL;
-            int dpr = parse(dlex, &dep);
-            lexer_free(dlex);
-            free(dep_src);
-            if (dpr != 0 || !dep) {
-                fprintf(stderr, "shuc: failed to parse import '%s'\n", mod->import_paths[i]);
-                while (ndep--) unlink(dep_c_paths[ndep]);
-                unlink(tmp_c);
-                ast_module_free(mod);
-                free(src);
-                return 1;
-            }
+        /* 每个已加载的依赖生成 .c，参与链接（不再重复解析） */
+        for (int i = 0; i < ndep && ndep_c < 32; i++) {
             char tmpd[] = "/tmp/shuc_XXXXXX";
             int fdd = mkstemp(tmpd);
             if (fdd < 0) {
-                ast_module_free(dep);
-                while (ndep--) unlink(dep_c_paths[ndep]);
+                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
+                while (ndep--) ast_module_free(dep_mods[ndep]);
                 ast_module_free(mod);
                 free(src);
                 return 1;
             }
             FILE *dcf = fdopen(fdd, "w");
-            if (!dcf || codegen_library_module_to_c(dep, mod->import_paths[i], dcf) != 0) {
+            if (!dcf || codegen_library_module_to_c(dep_mods[i], mod->import_paths[i], dcf) != 0) {
                 if (dcf) fclose(dcf);
                 else close(fdd);
                 unlink(tmpd);
-                ast_module_free(dep);
-                while (ndep--) unlink(dep_c_paths[ndep]);
+                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
+                while (ndep--) ast_module_free(dep_mods[ndep]);
                 ast_module_free(mod);
                 free(src);
                 return 1;
             }
             fclose(dcf);
-            snprintf(dep_c_paths[ndep], sizeof(dep_c_paths[0]), "%s.c", tmpd);
-            if (rename(tmpd, dep_c_paths[ndep]) != 0) {
+            snprintf(dep_c_paths[ndep_c], sizeof(dep_c_paths[0]), "%s.c", tmpd);
+            if (rename(tmpd, dep_c_paths[ndep_c]) != 0) {
                 unlink(tmpd);
-                ast_module_free(dep);
-                while (ndep--) unlink(dep_c_paths[ndep]);
+                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
+                while (ndep--) ast_module_free(dep_mods[ndep]);
                 ast_module_free(mod);
                 free(src);
                 return 1;
             }
-            c_paths[n_c++] = dep_c_paths[ndep];
-            ndep++;
-            ast_module_free(dep);
+            c_paths[n_c++] = dep_c_paths[ndep_c];
+            ndep_c++;
         }
 
-        int cc_ok = invoke_cc(c_paths, n_c, out_path, target);
-        while (ndep--) unlink(dep_c_paths[ndep]);
+        int cc_ok = invoke_cc(c_paths, n_c, out_path, target, opt_level);
+        while (ndep_c--) unlink(dep_c_paths[ndep_c]);
         unlink(tmp_c);
+        while (ndep--) ast_module_free(dep_mods[ndep]);
         ast_module_free(mod);
         free(src);
         return cc_ok == 0 ? 0 : 1;
     }
 
     /* 无 -o：保留原有行为：打印 Token，再解析并打印 parse/typeck OK（供测试） */
+    /* 先保存 main 名称与字面量，避免后续第二次 lexer 可能覆盖堆后 mod 指针失效 */
+    const char *main_name = (mod->main_func && mod->main_func->name) ? mod->main_func->name : "?";
+    int main_final_lit = -1;
+    if (mod->main_func && mod->main_func->body && mod->main_func->body->final_expr
+        && mod->main_func->body->final_expr->kind == AST_EXPR_LIT)
+        main_final_lit = mod->main_func->body->final_expr->value.int_val;
+
     Lexer *lex2 = lexer_new(src);
     Token tok;
     for (;;) {
@@ -451,6 +530,8 @@ int main(int argc, char **argv) {
         printf("%s", token_kind_str(tok.kind));
         if (tok.kind == TOKEN_INT)
             printf(" %d", tok.value.int_val);
+        else if (tok.kind == TOKEN_FLOAT)
+            printf(" %g", tok.value.float_val);
         else if ((tok.kind == TOKEN_IDENT || tok.kind == TOKEN_I32 || tok.kind == TOKEN_BOOL
                   || tok.kind == TOKEN_U8 || tok.kind == TOKEN_U32 || tok.kind == TOKEN_U64
                   || tok.kind == TOKEN_I64 || tok.kind == TOKEN_USIZE || tok.kind == TOKEN_ISIZE)
@@ -461,18 +542,14 @@ int main(int argc, char **argv) {
     lexer_free(lex2);
 
     if (mod->main_func && mod->main_func->body) {
-        const struct ASTBlock *blk = mod->main_func->body;
-        const struct ASTExpr *e = blk->final_expr;
-        if (e && e->kind == AST_EXPR_LIT)
-            printf("parse OK: %s() -> i32 { %d }\n",
-                   mod->main_func->name,
-                   e->value.int_val);
+        if (main_final_lit >= 0)
+            printf("parse OK: %s(): i32 { %d }\n", main_name, main_final_lit);
         else
-            printf("parse OK: %s() -> i32 { expr }\n",
-                   mod->main_func->name);
+            printf("parse OK: %s(): i32 { expr }\n", main_name);
     } else
         printf("parse OK (library module)\n");
     printf("typeck OK\n");
+    while (ndep--) ast_module_free(dep_mods[ndep]);
     ast_module_free(mod);
     free(src);
     return 0;
