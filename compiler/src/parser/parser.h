@@ -16,7 +16,7 @@ struct Lexer;  /* 前向声明，避免 parser 使用者强制依赖 lexer.h */
 
 /**
  * 从 Lexer 解析整段源码为 AST 模块。
- * 功能说明：支持顶层 [ import path ; ]* 与可选的 fn main() -> i32 { 整数字面量 }；库模块可为仅 import 或空。
+ * 功能说明：支持顶层 [ import path ; ]* 与可选的 function main() -> i32 { 整数字面量 }；库模块可为仅 import 或空。
  * 参数：lex 已创建并指向待解析源码的 Lexer，在 parse 调用期间不得被其它线程使用；out 成功时写入 ASTModule*，不可为 NULL。
  * 返回值：0 成功，*out 已设置且调用方须 ast_module_free(*out)；-1 语法错误或内存不足，*out 未修改或为 NULL，已向 stderr 输出信息。
  * 错误与边界：lex 为 NULL 或 out 为 NULL 时行为未定义；import 超过 MAX_IMPORTS 时报错。
