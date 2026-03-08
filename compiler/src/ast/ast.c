@@ -17,6 +17,7 @@ void ast_expr_free(ASTExpr *e) {
     if (!e) return;
     switch (e->kind) {
         case AST_EXPR_LIT:
+        case AST_EXPR_FLOAT_LIT:
         case AST_EXPR_BOOL_LIT:
             break;
         case AST_EXPR_VAR:
@@ -34,9 +35,14 @@ void ast_expr_free(ASTExpr *e) {
             ast_expr_free(e->value.unary.operand);
             break;
         case AST_EXPR_IF:
+        case AST_EXPR_TERNARY:
             ast_expr_free(e->value.if_expr.cond);
             ast_expr_free(e->value.if_expr.then_expr);
             ast_expr_free(e->value.if_expr.else_expr);
+            break;
+        case AST_EXPR_ASSIGN:
+            ast_expr_free(e->value.binop.left);
+            ast_expr_free(e->value.binop.right);
             break;
         case AST_EXPR_BREAK:
         case AST_EXPR_CONTINUE:
@@ -47,8 +53,13 @@ void ast_expr_free(ASTExpr *e) {
             break;
         case AST_EXPR_MATCH: {
             ast_expr_free(e->value.match_expr.matched_expr);
-            for (int i = 0; i < e->value.match_expr.num_arms; i++)
+            for (int i = 0; i < e->value.match_expr.num_arms; i++) {
+                if (e->value.match_expr.arms[i].is_enum_variant) {
+                    if (e->value.match_expr.arms[i].enum_name) free((void *)e->value.match_expr.arms[i].enum_name);
+                    if (e->value.match_expr.arms[i].variant_name) free((void *)e->value.match_expr.arms[i].variant_name);
+                }
                 ast_expr_free(e->value.match_expr.arms[i].result);
+            }
             free(e->value.match_expr.arms);
             break;
         }
@@ -81,6 +92,32 @@ void ast_expr_free(ASTExpr *e) {
             ast_expr_free(e->value.index.base);
             ast_expr_free(e->value.index.index_expr);
             break;
+        case AST_EXPR_CALL:
+            ast_expr_free(e->value.call.callee);
+            if (e->value.call.args) {
+                for (int i = 0; i < e->value.call.num_args; i++)
+                    ast_expr_free(e->value.call.args[i]);
+                free(e->value.call.args);
+            }
+            if (e->value.call.type_args) {
+                for (int i = 0; i < e->value.call.num_type_args; i++)
+                    ast_type_free(e->value.call.type_args[i]);
+                free(e->value.call.type_args);
+            }
+            break;
+        case AST_EXPR_METHOD_CALL:
+            ast_expr_free(e->value.method_call.base);
+            if (e->value.method_call.method_name) free((void *)e->value.method_call.method_name);
+            if (e->value.method_call.args) {
+                for (int i = 0; i < e->value.method_call.num_args; i++)
+                    ast_expr_free(e->value.method_call.args[i]);
+                free(e->value.method_call.args);
+            }
+            break;
+        case AST_EXPR_ENUM_VARIANT:
+            if (e->value.enum_variant.enum_name) free((void *)e->value.enum_variant.enum_name);
+            if (e->value.enum_variant.variant_name) free((void *)e->value.enum_variant.variant_name);
+            break;
     }
     free(e);
 }
@@ -91,7 +128,7 @@ void ast_expr_free(ASTExpr *e) {
  */
 void ast_type_free(ASTType *t) {
     if (!t) return;
-    if ((t->kind == AST_TYPE_PTR || t->kind == AST_TYPE_ARRAY || t->kind == AST_TYPE_SLICE) && t->elem_type)
+    if ((t->kind == AST_TYPE_PTR || t->kind == AST_TYPE_ARRAY || t->kind == AST_TYPE_SLICE || t->kind == AST_TYPE_VECTOR) && t->elem_type)
         ast_type_free(t->elem_type);
     if (t->kind == AST_TYPE_NAMED && t->name)
         free((void *)t->name);
@@ -170,6 +207,11 @@ void ast_block_free(ASTBlock *b) {
 void ast_struct_def_free(ASTStructDef *s) {
     if (!s) return;
     if (s->name) free((void *)s->name);
+    if (s->generic_param_names) {
+        for (int i = 0; i < s->num_generic_params; i++)
+            if (s->generic_param_names[i]) free((void *)s->generic_param_names[i]);
+        free(s->generic_param_names);
+    }
     if (s->fields) {
         for (int i = 0; i < s->num_fields; i++) {
             if (s->fields[i].name) free((void *)s->fields[i].name);
@@ -178,6 +220,69 @@ void ast_struct_def_free(ASTStructDef *s) {
         free(s->fields);
     }
     free(s);
+}
+
+/**
+ * 释放单条枚举定义；功能、参数见 ast.h 中 ast_enum_def_free 声明处注释。
+ */
+void ast_enum_def_free(ASTEnumDef *e) {
+    if (!e) return;
+    if (e->name) free((void *)e->name);
+    if (e->variant_names) {
+        for (int i = 0; i < e->num_variants; i++)
+            if (e->variant_names[i]) free((void *)e->variant_names[i]);
+        free(e->variant_names);
+    }
+    free(e);
+}
+
+/**
+ * 释放单条 trait 定义（方法签名名与返回类型及自身）；由 ast_module_free 内部调用。
+ */
+void ast_trait_def_free(ASTTraitDef *t) {
+    if (!t) return;
+    if (t->name) free((void *)t->name);
+    if (t->methods) {
+        for (int i = 0; i < t->num_methods; i++) {
+            if (t->methods[i].name) free((void *)t->methods[i].name);
+            if (t->methods[i].return_type) ast_type_free(t->methods[i].return_type);
+        }
+        free(t->methods);
+    }
+    free(t);
+}
+
+/**
+ * 释放单条 impl 块（trait/type 名及方法函数数组及自身）；impl 块拥有的 func 由本函数释放。
+ */
+void ast_impl_block_free(ASTImplBlock *impl) {
+    if (!impl) return;
+    if (impl->trait_name) free((void *)impl->trait_name);
+    if (impl->type_name) free((void *)impl->type_name);
+    if (impl->funcs) {
+        for (int i = 0; i < impl->num_funcs; i++) {
+            ASTFunc *f = impl->funcs[i];
+            if (!f) continue;
+            if (f->name) free((void *)f->name);
+            if (f->generic_param_names) {
+                for (int j = 0; j < f->num_generic_params; j++)
+                    if (f->generic_param_names[j]) free((void *)f->generic_param_names[j]);
+                free(f->generic_param_names);
+            }
+            if (f->params) {
+                for (int j = 0; j < f->num_params; j++) {
+                    if (f->params[j].name) free((void *)f->params[j].name);
+                    if (f->params[j].type) ast_type_free(f->params[j].type);
+                }
+                free(f->params);
+            }
+            if (f->return_type) ast_type_free(f->return_type);
+            if (f->body) ast_block_free(f->body);
+            free(f);
+        }
+        free(impl->funcs);
+    }
+    free(impl);
 }
 
 /**
@@ -199,11 +304,57 @@ void ast_module_free(ASTModule *m) {
         m->struct_defs = NULL;
         m->num_structs = 0;
     }
-    if (m->main_func) {
-        if (m->main_func->name) free((void *)m->main_func->name);
-        if (m->main_func->return_type) ast_type_free(m->main_func->return_type);
-        if (m->main_func->body) ast_block_free(m->main_func->body);
-        free(m->main_func);
+    if (m->enum_defs) {
+        for (int i = 0; i < m->num_enums; i++)
+            ast_enum_def_free(m->enum_defs[i]);
+        free(m->enum_defs);
+        m->enum_defs = NULL;
+        m->num_enums = 0;
+    }
+    if (m->trait_defs) {
+        for (int i = 0; i < m->num_traits; i++)
+            ast_trait_def_free(m->trait_defs[i]);
+        free(m->trait_defs);
+        m->trait_defs = NULL;
+        m->num_traits = 0;
+    }
+    if (m->impl_blocks) {
+        for (int i = 0; i < m->num_impl_blocks; i++)
+            ast_impl_block_free(m->impl_blocks[i]);
+        free(m->impl_blocks);
+        m->impl_blocks = NULL;
+        m->num_impl_blocks = 0;
+    }
+    /* mono_instances[i].type_args 与 AST 中 CALL 表达式的 type_args 共享，由 ast_expr_free 路径释放，此处仅释放实例数组 */
+    if (m->mono_instances) {
+        free(m->mono_instances);
+        m->mono_instances = NULL;
+        m->num_mono_instances = 0;
+    }
+    if (m->funcs) {
+        for (int i = 0; i < m->num_funcs; i++) {
+            ASTFunc *f = m->funcs[i];
+            if (!f) continue;
+            if (f->name) free((void *)f->name);
+            if (f->generic_param_names) {
+                for (int j = 0; j < f->num_generic_params; j++)
+                    if (f->generic_param_names[j]) free((void *)f->generic_param_names[j]);
+                free(f->generic_param_names);
+            }
+            if (f->params) {
+                for (int j = 0; j < f->num_params; j++) {
+                    if (f->params[j].name) free((void *)f->params[j].name);
+                    if (f->params[j].type) ast_type_free(f->params[j].type);
+                }
+                free(f->params);
+            }
+            if (f->return_type) ast_type_free(f->return_type);
+            if (f->body) ast_block_free(f->body);
+            free(f);
+        }
+        free(m->funcs);
+        m->funcs = NULL;
+        m->num_funcs = 0;
         m->main_func = NULL;
     }
     free(m);
