@@ -1,1 +1,8 @@
-// std.map — 阶段 6 占位；映射类型后续在此扩展
+// std.map — 映射/字典（自举前最小实现）
+// 自举前：提供最小可调用 API；映射/字典后续扩展。
+
+// 占位函数，表示本模块已可 import。
+function placeholder(): i32 { return 0; }
+
+// 表示“空 map 大小”占位（0），后续扩展为 Map<K,V> 与 len。
+function map_empty_size(): i32 { return 0; }
