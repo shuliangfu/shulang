@@ -1,0 +1,47 @@
+// std.io.driver — 舒 I/O 驱动占位（高并发IO 第八节 + 三项约定）
+// 占位类型与签名：Buffer、IO_Result、Completion、AsyncContext；register、submit_read、submit_write。
+// 自举前仅解析与类型检查通过，实现可空或 panic；Err(i32) 约定：错误码 i32，正/负由文档约定；AsyncContext 原子位预留。
+// Buffer 与 std.mem.Buffer ABI 一致（ptr+len+handle 24 字节），便于与 std.mem 互通。
+
+// ——— Buffer：与 std.mem.Buffer 同布局（ABI 24 字节），本模块自含以简化 codegen ———
+struct Buffer {
+  ptr: *u8
+  len: usize
+  handle: usize
+}
+
+// ——— Completion：完成句柄占位，自举后与 submit 回调/结果对接 ———
+struct Completion {
+  tag: i32
+}
+
+// ——— AsyncContext：原子位占位（flags 自举后用于原子状态位） ———
+struct AsyncContext {
+  flags: u32
+}
+
+// ——— IO_Result：Ok/Err/Timeout/Cancelled；Err(i32) 约定（错误码 i32，自举后扩展负载） ———
+enum IO_Result {
+  Ok,
+  Err,
+  Timeout,
+  Cancelled
+}
+
+// ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；占位返回 0 ———
+function register(buf: Buffer): i32 {
+  return 0;
+}
+
+// ——— 提交读；buf 目标缓冲区，timeout_ms 毫秒（0=无超时）；占位返回 0（Ok）；预留 []Buffer 多段扩展（高吞吐网络 第十节） ———
+function submit_read(buf: Buffer, timeout_ms: u32): i32 {
+  return 0;
+}
+
+// ——— 提交写；占位返回 0（Ok）；预留 []Buffer 多段扩展（高吞吐网络 第十节） ———
+function submit_write(buf: Buffer, timeout_ms: u32): i32 {
+  return 0;
+}
+
+// 占位，表示本模块可 import
+function placeholder(): i32 { return 0; }
