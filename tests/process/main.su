@@ -1,0 +1,6 @@
+// 测试 std.process.exit(code)：终止进程并返回退出码（exit 不返回，return 仅满足语法）
+import std.process;
+
+function main(): i32 {
+  return exit(99);
+}
