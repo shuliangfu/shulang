@@ -196,8 +196,40 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    if (len == 4 && memcmp(start, "enum", 4) == 0) {
+        out->kind = TOKEN_ENUM;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
     if (len == 4 && memcmp(start, "goto", 4) == 0) {
         out->kind = TOKEN_GOTO;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 5 && memcmp(start, "trait", 5) == 0) {
+        out->kind = TOKEN_TRAIT;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 4 && memcmp(start, "impl", 4) == 0) {
+        out->kind = TOKEN_IMPL;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 4 && memcmp(start, "self", 4) == 0) {
+        out->kind = TOKEN_SELF;
         out->line = line0;
         out->col = col0;
         out->value.ident = NULL;
@@ -207,6 +239,38 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
     /* _ 单独作为 match 通配模式 */
     if (len == 1 && start[0] == '_') {
         out->kind = TOKEN_UNDERSCORE;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 5 && memcmp(start, "i32x4", 5) == 0) {
+        out->kind = TOKEN_I32X4;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 5 && memcmp(start, "i32x8", 5) == 0) {
+        out->kind = TOKEN_I32X8;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 5 && memcmp(start, "u32x4", 5) == 0) {
+        out->kind = TOKEN_U32X4;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 5 && memcmp(start, "u32x8", 5) == 0) {
+        out->kind = TOKEN_U32X8;
         out->line = line0;
         out->col = col0;
         out->value.ident = NULL;
@@ -301,6 +365,22 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    if (len == 3 && memcmp(start, "f32", 3) == 0) {
+        out->kind = TOKEN_F32;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 3 && memcmp(start, "f64", 3) == 0) {
+        out->kind = TOKEN_F64;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
 
     out->kind = TOKEN_IDENT;
     out->line = line0;
@@ -310,18 +390,94 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
 }
 
 /**
- * 识别十进制整数字面量；推进连续数字并计算值，写入 out->value.int_val。
- * 参数：l 当前 Lexer；out 输出 Token。返回值：无。副作用：推进 l，写 out；line/col 为数字起始位置。
+ * 对已得到的浮点值 fval 解析可选指数部分 e/E (+|-)? digits，并乘到 *fval 上。
+ * 若存在指数则推进 l 并修改 *fval，否则不推进。返回值：1 表示解析了指数，0 表示无指数。
  */
-static void lex_int(Lexer *l, Token *out) {
-    int line0 = l->line, col0 = l->col;
-    int val = 0;
+static int lex_optional_exponent(Lexer *l, double *fval) {
+    if (l->src >= l->end || (*l->src != 'e' && *l->src != 'E')) return 0;
+    lexer_advance(l);
+    int exp_sign = 1;
+    if (l->src < l->end && *l->src == '-') {
+        exp_sign = -1;
+        lexer_advance(l);
+    } else if (l->src < l->end && *l->src == '+') {
+        lexer_advance(l);
+    }
+    int exp = 0;
     while (l->src < l->end && isdigit((unsigned char)*l->src))
-        val = val * 10 + (lexer_advance(l) - '0');
+        exp = exp * 10 + (lexer_advance(l) - '0');
+    exp *= exp_sign;
+    double scale = 1.0;
+    if (exp > 0) {
+        for (int i = 0; i < exp; i++) scale *= 10.0;
+    } else if (exp < 0) {
+        for (int i = 0; i < -exp; i++) scale /= 10.0;
+    }
+    *fval *= scale;
+    return 1;
+}
+
+/**
+ * 识别整数字面量或浮点字面量：支持 42、3.14、.5、1e2、1.5e-1 等形式；含小数点或指数则输出 TOKEN_FLOAT。
+ * 参数：l 当前 Lexer；out 输出 Token。副作用：推进 l，写 out。
+ */
+static void lex_number(Lexer *l, Token *out) {
+    int line0 = l->line, col0 = l->col;
+    int ival = 0;
+    while (l->src < l->end && isdigit((unsigned char)*l->src))
+        ival = ival * 10 + (lexer_advance(l) - '0');
+    /* 仅当 '.' 后接数字时才解析为浮点，避免 21.double() 被吞成 FLOAT(21.) */
+    if (l->src < l->end && *l->src == '.' && l->src + 1 < l->end && isdigit((unsigned char)l->src[1])) {
+        lexer_advance(l);
+        double fval = (double)ival;
+        double frac = 0.1;
+        while (l->src < l->end && isdigit((unsigned char)*l->src)) {
+            fval += frac * (lexer_advance(l) - '0');
+            frac *= 0.1;
+        }
+        lex_optional_exponent(l, &fval);
+        out->kind = TOKEN_FLOAT;
+        out->line = line0;
+        out->col = col0;
+        out->value.float_val = fval;
+        out->ident_len = 0;
+        return;
+    }
+    if (l->src < l->end && (*l->src == 'e' || *l->src == 'E')) {
+        double fval = (double)ival;
+        lex_optional_exponent(l, &fval);
+        out->kind = TOKEN_FLOAT;
+        out->line = line0;
+        out->col = col0;
+        out->value.float_val = fval;
+        out->ident_len = 0;
+        return;
+    }
     out->kind = TOKEN_INT;
     out->line = line0;
     out->col = col0;
-    out->value.int_val = val;
+    out->value.int_val = ival;
+    out->ident_len = 0;
+}
+
+/**
+ * 识别仅小数形式浮点字面量（如 .5、.5e2）：当前字符为 '.'，下一字符为数字。
+ * 参数：l 当前 Lexer；out 输出 Token。副作用：推进 l，写 out。
+ */
+static void lex_float_leading_dot(Lexer *l, Token *out) {
+    int line0 = l->line, col0 = l->col;
+    lexer_advance(l);  /* 消耗 '.' */
+    double fval = 0.0;
+    double frac = 0.1;
+    while (l->src < l->end && isdigit((unsigned char)*l->src)) {
+        fval += frac * (lexer_advance(l) - '0');
+        frac *= 0.1;
+    }
+    lex_optional_exponent(l, &fval);
+    out->kind = TOKEN_FLOAT;
+    out->line = line0;
+    out->col = col0;
+    out->value.float_val = fval;
     out->ident_len = 0;
 }
 
@@ -354,7 +510,12 @@ void lexer_next(Lexer *l, Token *out) {
         return;
     }
     if (isdigit((unsigned char)c)) {
-        lex_int(l, out);
+        lex_number(l, out);
+        return;
+    }
+    /* 仅小数形式（如 .5、.5e2）：'.' 后接数字则解析为浮点字面量 */
+    if (c == '.' && l->src + 1 < l->end && isdigit((unsigned char)l->src[1])) {
+        lex_float_leading_dot(l, out);
         return;
     }
 
@@ -409,6 +570,7 @@ void lexer_next(Lexer *l, Token *out) {
             if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_NE; }
             else { out->kind = TOKEN_BANG; }
             break;
+        case '?': out->kind = TOKEN_QUESTION; break;  /* 三元运算符 cond ? then : else */
         case '=':
             if (lexer_peek(l) == '>') { lexer_advance(l); out->kind = TOKEN_FATARROW; }
             else if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_EQ; }
