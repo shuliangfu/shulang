@@ -40,6 +40,23 @@ static const struct ASTStructDef *find_struct_def(struct ASTStructDef **defs, in
 }
 
 /**
+ * 先在本模块 defs 中查找结构体，未找到时在 typeck_dep_mods 中查找（跨模块类型解析，如 import std.mem 后使用 Buffer）。
+ * 参数：defs/num 当前模块结构体；name 类型名。返回值：找到返回该 ASTStructDef*，否则 NULL。
+ */
+static const struct ASTStructDef *find_struct_def_with_deps(struct ASTStructDef **defs, int num, const char *name) {
+    const struct ASTStructDef *sd = find_struct_def(defs, num, name);
+    if (sd) return sd;
+    if (!typeck_dep_mods || !name) return NULL;
+    for (int j = 0; j < typeck_num_deps; j++) {
+        struct ASTModule *dm = typeck_dep_mods[j];
+        if (!dm || !dm->struct_defs) continue;
+        sd = find_struct_def(dm->struct_defs, dm->num_structs, name);
+        if (sd) return sd;
+    }
+    return NULL;
+}
+
+/**
  * 按名称查找枚举定义；用于枚举值 Name::Variant 校验（§7.4）。
  * 参数：defs 枚举定义数组；num 长度；name 类型名。返回值：找到返回该 ASTEnumDef*，否则 NULL。
  */
@@ -134,6 +151,37 @@ static const char *type_to_name_string(const struct ASTType *ty) {
 }
 
 /**
+ * 将类型格式化为可读字符串，用于面包屑错误（Expected/Found）；写入 buf，最多 size 字节。
+ * 支持标量、NAMED、*T、[]T、[N]T。
+ */
+static void type_to_string_buf(const struct ASTType *ty, char *buf, size_t size) {
+    if (!ty || !buf || size == 0) { if (buf && size) buf[0] = '\0'; return; }
+    const char *base = type_to_name_string(ty);
+    if (ty->kind == AST_TYPE_PTR && ty->elem_type) {
+        char inner[64];
+        type_to_string_buf(ty->elem_type, inner, sizeof(inner));
+        (void)snprintf(buf, size, "*%s", inner[0] ? inner : "?");
+        return;
+    }
+    if (ty->kind == AST_TYPE_SLICE && ty->elem_type) {
+        char inner[64];
+        type_to_string_buf(ty->elem_type, inner, sizeof(inner));
+        (void)snprintf(buf, size, "[]%s", inner[0] ? inner : "?");
+        return;
+    }
+    if (ty->kind == AST_TYPE_ARRAY && ty->elem_type && ty->array_size > 0) {
+        char inner[64];
+        type_to_string_buf(ty->elem_type, inner, sizeof(inner));
+        (void)snprintf(buf, size, "[%d]%s", ty->array_size, inner[0] ? inner : "?");
+        return;
+    }
+    if (base && base[0])
+        (void)snprintf(buf, size, "%s", base);
+    else
+        (void)snprintf(buf, size, "?");
+}
+
+/**
  * 在枚举定义中按变体名查找 0-based 序号；用于 match 枚举分支（§7.4）。
  * 参数：ed 枚举定义；variant_name 变体名。返回值：序号（>=0）或 -1 表示未找到。
  */
@@ -164,7 +212,7 @@ static int type_align_of(const struct ASTType *ty, struct ASTStructDef **struct_
         case AST_TYPE_VECTOR:
             return ty->elem_type ? type_align_of(ty->elem_type, struct_defs, num_structs, enum_defs, num_enums) : 1;
         case AST_TYPE_NAMED: {
-            const struct ASTStructDef *sd = find_struct_def(struct_defs, num_structs, ty->name);
+            const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, ty->name);
             if (sd && sd->struct_align > 0) return sd->struct_align;
             if (find_enum_def(enum_defs, num_enums, ty->name)) return 4;  /* 枚举按 int 对齐 */
             return 1;
@@ -197,7 +245,7 @@ static int type_size_of(const struct ASTType *ty, struct ASTStructDef **struct_d
             return (ty->array_size > 0 && esz > 0) ? (ty->array_size * esz) : 0;
         }
         case AST_TYPE_NAMED: {
-            const struct ASTStructDef *sd = find_struct_def(struct_defs, num_structs, ty->name);
+            const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, ty->name);
             if (sd && sd->struct_size > 0) return sd->struct_size;
             if (find_enum_def(enum_defs, num_enums, ty->name)) return 4;  /* 枚举按 int */
             return 0;
@@ -218,6 +266,24 @@ static int compute_struct_layouts(struct ASTStructDef **struct_defs, int num_str
         if (!sd || !sd->fields || sd->num_fields <= 0) continue;
         int current_offset = 0;
         int max_align = 1;
+        if (sd->packed) {
+            /* packed：无填充，字段紧密排列，结构体对齐为 1（内存契约） */
+            for (int i = 0; i < sd->num_fields && i < AST_STRUCT_MAX_FIELDS; i++) {
+                const struct ASTType *fty = sd->fields[i].type;
+                if (!fty) { sd->field_offsets[i] = current_offset; continue; }
+                sd->field_offsets[i] = current_offset;
+                int fsize = type_size_of(fty, struct_defs, num_structs, enum_defs, num_enums);
+                if (fsize <= 0) {
+                    fprintf(stderr, "typeck error: struct '%s' field '%s' has unknown or invalid type size\n",
+                        sd->name ? sd->name : "?", sd->fields[i].name ? sd->fields[i].name : "?");
+                    return -1;
+                }
+                current_offset += fsize;
+            }
+            sd->struct_size = current_offset;
+            sd->struct_align = 1;
+            continue;
+        }
         for (int i = 0; i < sd->num_fields && i < AST_STRUCT_MAX_FIELDS; i++) {
             const struct ASTType *fty = sd->fields[i].type;
             if (!fty) { sd->field_offsets[i] = current_offset; continue; }
@@ -517,7 +583,12 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             const struct ASTType *ty_then = e->value.if_expr.then_expr->resolved_type;
             const struct ASTType *ty_else = e->value.if_expr.else_expr->resolved_type;
             if (!ty_then || !ty_else || !type_equal(ty_then, ty_else)) {
-                fprintf(stderr, "typeck error: ternary branches must have the same type\n");
+                {
+                    char ebuf[80], fbuf[80];
+                    type_to_string_buf(e->value.if_expr.then_expr->resolved_type, ebuf, sizeof(ebuf));
+                    type_to_string_buf(e->value.if_expr.else_expr->resolved_type, fbuf, sizeof(fbuf));
+                    fprintf(stderr, "typeck error: ternary branches must have the same type: expected %s, found %s\n", ebuf, fbuf);
+                }
                 return -1;
             }
             ((struct ASTExpr *)e)->resolved_type = ty_then;
@@ -533,7 +604,10 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 ((struct ASTExpr *)e->value.binop.right)->resolved_type = lt;  /* 子块中右端可能未解析到类型，用左端补 */
             rt = e->value.binop.right->resolved_type;
             if (!lt || !rt || !type_equal(lt, rt)) {
-                fprintf(stderr, "typeck error: assignment type mismatch\n");
+                char ebuf[80], fbuf[80];
+                type_to_string_buf(lt, ebuf, sizeof(ebuf));
+                type_to_string_buf(rt, fbuf, sizeof(fbuf));
+                fprintf(stderr, "typeck error: assignment type mismatch: expected %s, found %s\n", ebuf, fbuf);
                 return -1;
             }
             ((struct ASTExpr *)e)->resolved_type = lt;
@@ -610,7 +684,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 fprintf(stderr, "typeck error: field access requires struct type\n");
                 return -1;
             }
-            const struct ASTStructDef *sd = find_struct_def(struct_defs, num_structs, base_name);
+            const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, base_name);
             if (!sd) {
                 fprintf(stderr, "typeck error: unknown struct type '%s'\n", base_name);
                 return -1;
@@ -622,7 +696,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             return -1;
         }
         case AST_EXPR_STRUCT_LIT: {
-            const struct ASTStructDef *sd = find_struct_def(struct_defs, num_structs, e->value.struct_lit.struct_name);
+            const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, e->value.struct_lit.struct_name);
             if (!sd) {
                 fprintf(stderr, "typeck error: unknown struct type '%s'\n", e->value.struct_lit.struct_name ? e->value.struct_lit.struct_name : "");
                 return -1;
@@ -756,7 +830,13 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     const struct ASTType *param_type = func->params[i].type;
                     if (!arg_type || !param_type || !type_equal_subst(param_type, arg_type,
                             func->generic_param_names, e->value.call.type_args, e->value.call.num_type_args)) {
-                        fprintf(stderr, "typeck error: argument %d of '%s' type mismatch\n", i + 1, callee_name ? callee_name : "");
+                        const struct ASTType *exp_ty = get_substituted_return_type(param_type,
+                            func->generic_param_names, e->value.call.type_args, e->value.call.num_type_args);
+                        char ebuf[80], fbuf[80];
+                        type_to_string_buf(exp_ty ? exp_ty : param_type, ebuf, sizeof(ebuf));
+                        type_to_string_buf(arg_type, fbuf, sizeof(fbuf));
+                        fprintf(stderr, "typeck error: argument %d of '%s' type mismatch: expected %s, found %s\n",
+                            i + 1, callee_name ? callee_name : "", ebuf, fbuf);
                         return -1;
                     }
                 }
@@ -790,7 +870,11 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     && e->value.call.args[i]->kind == AST_EXPR_LIT)
                     ok = 1;
                 if (!ok) {
-                    fprintf(stderr, "typeck error: argument %d of '%s' type mismatch\n", i + 1, callee_name ? callee_name : "");
+                    char ebuf[80], fbuf[80];
+                    type_to_string_buf(param_type, ebuf, sizeof(ebuf));
+                    type_to_string_buf(arg_type, fbuf, sizeof(fbuf));
+                    fprintf(stderr, "typeck error: argument %d of '%s' type mismatch: expected %s, found %s\n",
+                        i + 1, callee_name ? callee_name : "", ebuf, fbuf);
                     return -1;
                 }
             }
@@ -1043,6 +1127,10 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         return -1;
     }
 
+    if (m->main_func->is_extern) {
+        fprintf(stderr, "typeck error: main cannot be extern\n");
+        return -1;
+    }
     if (!m->main_func->body) {
         fprintf(stderr, "typeck error: main must have a body (block)\n");
         return -1;
