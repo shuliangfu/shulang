@@ -1,0 +1,7 @@
+// 测试 core.fmt：fmt_i32 最小 API
+import core.fmt;
+
+function main(): i32 {
+  let n: i32 = fmt_i32(42);
+  return n;
+}
