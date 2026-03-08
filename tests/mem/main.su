@@ -1,0 +1,7 @@
+// 测试 core.mem：align_of_i32
+import core.mem;
+
+function main(): i32 {
+  let a: i32 = align_of_i32();
+  return if (a != 4) { 1 } else { 0 };
+}
