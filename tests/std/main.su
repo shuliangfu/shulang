@@ -1,2 +1,2 @@
 import std.io;
-function main() -> i32 { 0 }
+function main(): i32 { return 0; }
