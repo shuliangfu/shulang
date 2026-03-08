@@ -1,4 +1,4 @@
-function main() -> i32 {
+function main(): i32 {
   const N: i32 = 7;
-  N
+  return N;
 }
