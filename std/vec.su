@@ -1,8 +1,0 @@
-// std.vec — 动态数组 Vec（依赖泛型，自举前最小实现）
-// 自举前：提供占位 API；Vec<T> 类型与 push/len 等后续在此实现。
-
-// 占位泛型函数，表示本模块已可 import。
-function vec_placeholder<T>(x: T): T { return x; }
-
-// 表示“空 Vec 长度”占位（0），后续扩展为 Vec<T> 的 len。
-function vec_len_empty(): i32 { return 0; }
