@@ -1,0 +1,7 @@
+// 测试 std.io.print_i64：向标准输出打印 64 位整数
+import std.io;
+
+function main(): i32 {
+  let n: i32 = print_i64(123);
+  return n;
+}
