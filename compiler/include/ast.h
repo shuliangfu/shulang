@@ -30,7 +30,10 @@ typedef enum ASTTypeKind {
     AST_TYPE_NAMED,  /**< 用户自定义类型名（如结构体/枚举），name 保存标识符文本 */
     AST_TYPE_PTR,    /**< 裸指针 *T，elem_type 指向元素类型（见 §5.1） */
     AST_TYPE_ARRAY,  /**< 固定长数组 [N]T，elem_type 为元素类型，array_size 为 N（文档 §6.2） */
-    AST_TYPE_SLICE   /**< 切片 []T，elem_type 为元素类型；语义为 { ptr, len }（文档 §6.3） */
+    AST_TYPE_SLICE,  /**< 切片 []T，elem_type 为元素类型；语义为 { ptr, len }（文档 §6.3） */
+    AST_TYPE_VECTOR, /**< 向量类型如 i32x4；elem_type 为元素类型，array_size 为 lane 数（文档 §10，先用 struct 模拟） */
+    AST_TYPE_F32,    /**< 32 位浮点（文档阶段 8+ 可选） */
+    AST_TYPE_F64     /**< 64 位浮点 */
 } ASTTypeKind;
 
 /** 类型节点：内建/具名/指针/数组/切片等；指针/数组/切片时 elem_type 非 NULL，由 ast_type_free 递归释放 */
@@ -43,8 +46,9 @@ typedef struct ASTType {
 
 /** 表达式节点类型：字面量、变量引用、二元运算、一元运算 */
 typedef enum ASTExprKind {
-    AST_EXPR_LIT,      /**< 整数字面量 */
-    AST_EXPR_BOOL_LIT, /**< 布尔字面量 true/false（value.int_val 0/1） */
+    AST_EXPR_LIT,       /**< 整数字面量 */
+    AST_EXPR_FLOAT_LIT, /**< 浮点字面量（value.float_val） */
+    AST_EXPR_BOOL_LIT,  /**< 布尔字面量 true/false（value.int_val 0/1） */
     AST_EXPR_VAR,    /**< 变量/常量引用（value.var.name 为 strdup 的名称） */
     AST_EXPR_ADD,    /**< + */
     AST_EXPR_SUB,    /**< - */
@@ -68,6 +72,8 @@ typedef enum ASTExprKind {
     AST_EXPR_BITNOT, /**< 一元 ~ */
     AST_EXPR_LOGNOT, /**< 一元 ! */
     AST_EXPR_IF,     /**< if cond { then_expr } else { else_expr }（条件表达式） */
+    AST_EXPR_TERNARY,/**< cond ? then_expr : else_expr（三元运算符） */
+    AST_EXPR_ASSIGN,  /**< 赋值表达式 left = right（如 for 的 step）；复用 value.binop：left 为左值，right 为右值 */
     AST_EXPR_BREAK,   /**< break（仅允许在循环体内） */
     AST_EXPR_CONTINUE,/**< continue（仅允许在循环体内） */
     AST_EXPR_RETURN,  /**< return expr（显式返回，仅允许在函数体内） */
@@ -76,21 +82,30 @@ typedef enum ASTExprKind {
     AST_EXPR_FIELD_ACCESS, /**< 字段访问 base.field（base 为表达式，field 为字段名） */
     AST_EXPR_STRUCT_LIT,   /**< 结构体字面量 TypeName { field: expr, ... } */
     AST_EXPR_ARRAY_LIT,    /**< 数组字面量 [e1, e2, ...]（文档 §6.2） */
-    AST_EXPR_INDEX         /**< 下标访问 base[index] */
+    AST_EXPR_INDEX,        /**< 下标访问 base[index] */
+    AST_EXPR_CALL,         /**< 函数调用 callee(args)；callee 为 VAR 标识符，args 为实参表达式数组 */
+    AST_EXPR_METHOD_CALL,  /**< 方法调用 base.method(args)；由 typeck 解析为具体 impl 函数（阶段 7.2） */
+    AST_EXPR_ENUM_VARIANT  /**< 已废弃：枚举值现用 Name.Variant（FIELD_ACCESS+is_enum_variant），保留以兼容旧 AST/typeck/codegen 分支 */
 } ASTExprKind;
 
-/** match 单分支：字面量或 _ => 表达式（arms 由 ast_module_free 路径释放） */
+/** match 单分支：整数字面量、_、或枚举变体 Name.Variant => 表达式（arms 由 ast_module_free 路径释放） */
 typedef struct ASTMatchArm {
-    int is_wildcard;  /**< 1 表示 _ 分支，0 表示整数字面量 */
-    int lit_val;      /**< 字面量值（is_wildcard 时忽略） */
+    int is_wildcard;     /**< 1 表示 _ 分支 */
+    int lit_val;        /**< 整数字面量值（is_wildcard 或 is_enum_variant 时忽略） */
+    int is_enum_variant; /**< 1 表示 Name.Variant 模式；此时 enum_name/variant_name 有效，variant_index 由 typeck 填充 */
+    char *enum_name;     /**< 枚举类型名（strdup），仅 is_enum_variant 时非 NULL */
+    char *variant_name; /**< 变体名（strdup），仅 is_enum_variant 时非 NULL */
+    int variant_index;  /**< 变体在枚举中的序号（0-based），由 typeck 填写，codegen 用于比较 */
     struct ASTExpr *result; /**< 该分支结果表达式 */
 } ASTMatchArm;
 
 /** 表达式节点（可递归；二元用 binop，一元用 unary，变量用 var，条件用 if_expr） */
 typedef struct ASTExpr {
     ASTExprKind kind;
+    const struct ASTType *resolved_type; /**< 由 typeck 填写：表达式类型，用于向量运算等 codegen；不归 ast_expr_free 释放 */
     union {
-        int int_val;  /**< AST_EXPR_LIT 时的值 */
+        int int_val;    /**< AST_EXPR_LIT 时的值 */
+        double float_val; /**< AST_EXPR_FLOAT_LIT 时的值 */
         struct {
             const char *name;  /**< AST_EXPR_VAR 时的名称（strdup，由 ast_expr_free 释放） */
         } var;
@@ -114,6 +129,7 @@ typedef struct ASTExpr {
         struct {
             struct ASTExpr *base;    /**< AST_EXPR_FIELD_ACCESS 的基表达式（如变量或另一字段访问） */
             char *field_name;        /**< 字段名（strdup，由 ast_expr_free 释放） */
+            int is_enum_variant;     /**< 由 typeck 设置：1 表示 Type.Variant 枚举变体访问（base 为类型名），codegen 生成 EnumName_VariantName */
         } field_access;
         struct {
             char *struct_name;        /**< 结构体类型名（strdup，由 ast_expr_free 释放） */
@@ -130,6 +146,26 @@ typedef struct ASTExpr {
             struct ASTExpr *index_expr; /**< 下标表达式（须为整数类型） */
             int base_is_slice;        /**< 1 表示基类型为切片 []T，codegen 生成 base.data[i]；0 表示数组，生成 base[i] */
         } index;
+        struct {
+            char *enum_name;   /**< AST_EXPR_ENUM_VARIANT 的枚举类型名（strdup，由 ast_expr_free 释放） */
+            char *variant_name;/**< 变体名（strdup，由 ast_expr_free 释放） */
+        } enum_variant;
+        struct {
+            struct ASTExpr *callee;  /**< 被调用表达式（当前仅 VAR 标识符）；由 ast_expr_free 释放 */
+            struct ASTExpr **args;   /**< 实参表达式数组；由 ast_expr_free 释放 */
+            int num_args;
+            struct ASTType **type_args; /**< 泛型调用时的类型实参（如 f<i32> 的 i32）；由 ast_expr_free 释放 */
+            int num_type_args;       /**< 类型实参个数，0 表示非泛型调用 */
+            const char *resolved_import_path; /**< 由 typeck 填写：若从 import 解析则为其路径如 "foo"，否则 NULL；不释放 */
+            struct ASTFunc *resolved_callee_func; /**< 由 typeck 填写：解析到的函数（本模块或 import）；不释放 */
+        } call;
+        struct {
+            struct ASTExpr *base;    /**< 方法接收者表达式；由 ast_expr_free 释放 */
+            char *method_name;      /**< 方法名（strdup）；由 ast_expr_free 释放 */
+            struct ASTExpr **args;  /**< 实参表达式数组（不含 self）；由 ast_expr_free 释放 */
+            int num_args;
+            struct ASTFunc *resolved_impl_func; /**< 由 typeck 填写：实际调用的 impl 函数；不释放，归属 impl 块 */
+        } method_call;
     } value;
 } ASTExpr;
 
@@ -158,16 +194,32 @@ typedef struct ASTStructField {
 /** 单结构体最大字段数（与 parser 一致），用于布局偏移数组 */
 #define AST_STRUCT_MAX_FIELDS 32
 
-/** 结构体定义：名称与字段列表（顶层定义，由 ast_module_free 释放）。布局由 typeck 按 §11.1 计算后填充。 */
+/** 单函数/结构体最大泛型参数数（阶段 7.1 泛型） */
+#define AST_MAX_GENERIC_PARAMS 8
+
+/** 结构体定义：名称与字段列表（顶层定义，由 ast_module_free 释放）。布局由 typeck 按 §11.1 计算后填充。阶段 7.1 支持泛型 struct Name<T> { ... }。 */
 typedef struct ASTStructDef {
     char *name;                  /**< 结构体类型名（strdup） */
+    char **generic_param_names;  /**< 泛型类型参数名数组（strdup），可为 NULL 表示非泛型；由 ast_module_free 释放 */
+    int num_generic_params;      /**< 泛型参数个数，0 表示非泛型 */
     ASTStructField *fields;      /**< 字段数组 */
     int num_fields;
+    int allow_padding;           /**< 1 表示允许隐式 padding（§11.1 allow(padding)），0 则存在 padding 时报错 */
     /** 以下由 typeck 结构体布局 pass 填充（变量类型与类型系统设计 §11.1） */
     int field_offsets[AST_STRUCT_MAX_FIELDS]; /**< 各字段偏移（字节），未计算时为 0 */
     int struct_size;   /**< 结构体总大小（字节），含末尾对齐；未计算时为 0 */
     int struct_align;  /**< 结构体对齐要求（字节）；未计算时为 0 */
 } ASTStructDef;
+
+/** 单枚举最大变体数（与 parser 一致） */
+#define AST_ENUM_MAX_VARIANTS 32
+
+/** 枚举定义：名称与变体名列表（无负载枚举，文档 §7.4）；由 ast_module_free 释放。 */
+typedef struct ASTEnumDef {
+    char *name;                  /**< 枚举类型名（strdup） */
+    char **variant_names;        /**< 变体名数组（strdup），长度 num_variants */
+    int num_variants;
+} ASTEnumDef;
 
 /** 常量声明：名称、类型（可选，如 "i32"）、初始化表达式（须为常量表达式） */
 typedef struct ASTConstDecl {
@@ -214,21 +266,86 @@ typedef struct ASTBlock {
     struct ASTExpr *final_expr;
 } ASTBlock;
 
-/** 函数节点：name、返回类型、体为块（含 const/let + 最终表达式） */
+/** 函数形参：名称与类型（与 analysis/自举前路线分析.md 多函数 一致） */
+#define AST_FUNC_MAX_PARAMS 16
+typedef struct ASTParam {
+    const char *name;       /**< 参数名（strdup），由 ast_module_free 释放 */
+    struct ASTType *type;   /**< 参数类型，不可为 NULL */
+} ASTParam;
+
+/** 函数节点：name、参数列表、返回类型、体为块（含 const/let + 最终表达式）。阶段 7.1 支持泛型 function name<T>(...) { ... }。 */
 typedef struct ASTFunc {
     const char *name;
+    char **generic_param_names; /**< 泛型类型参数名数组（strdup），可为 NULL 表示非泛型；由 ast_module_free 释放 */
+    int num_generic_params;     /**< 泛型参数个数，0 表示非泛型 */
+    ASTParam *params;       /**< 形参数组，可为 NULL 表示无参；由 ast_module_free 释放（含各 param 的 name/type） */
+    int num_params;
     struct ASTType *return_type;
     ASTBlock *body;    /**< 函数体（块）；不可为 NULL（main 至少含 final_expr） */
+    /** 以下仅当本函数为 impl 块内方法时非 NULL；codegen 用于生成 mangle 名（阶段 7.2） */
+    const char *impl_for_trait; /**< 所属 trait 名，NULL 表示顶层函数 */
+    const char *impl_for_type;  /**< 实现类型名（如 i32、Foo），NULL 表示顶层函数 */
 } ASTFunc;
 
-/** 模块/程序：阶段 1–2 仅含一个 main；阶段 5 支持顶层 import；阶段 4–5 支持顶层 struct 定义 */
+/** trait 内单条方法签名：方法名 + 返回类型（形参仅要求 impl 时首参为 self: Type，阶段 7.2 最小） */
+#define AST_TRAIT_MAX_METHODS 16
+typedef struct ASTTraitMethod {
+    char *name;                 /**< 方法名（strdup），由 ast_trait_def_free 释放 */
+    struct ASTType *return_type;/**< 返回类型，不可为 NULL */
+} ASTTraitMethod;
+
+/** trait 定义：名称 + 方法签名列表；由 ast_module_free 释放。 */
+typedef struct ASTTraitDef {
+    char *name;                  /**< trait 名（strdup） */
+    ASTTraitMethod *methods;     /**< 方法签名数组 */
+    int num_methods;
+} ASTTraitDef;
+
+/** 单模块最大 trait 数 */
+#define AST_MODULE_MAX_TRAITS 16
+/** 单模块最大 impl 块数 */
+#define AST_MODULE_MAX_IMPLS 32
+
+/** impl 块：impl Trait for Type { function method(...) { ... } ... }；由 ast_module_free 释放。 */
+typedef struct ASTImplBlock {
+    char *trait_name;   /**< trait 名（strdup） */
+    char *type_name;    /**< 实现类型名（strdup），如 i32、Foo */
+    struct ASTFunc **funcs; /**< 方法函数数组（本块拥有，释放时逐项 ast_func_free 并 free 本数组） */
+    int num_funcs;
+} ASTImplBlock;
+
+/** 顶层最大函数数（多函数支持，自举前路线分析 §5.1） */
+#define AST_MODULE_MAX_FUNCS 32
+
+/** 单态化实例：泛型函数 + 类型实参，由 typeck 登记、codegen 按实例生成 C（阶段 7.1）。type_args 与数组由 ast_module_free 释放。 */
+typedef struct ASTMonoInstance {
+    struct ASTFunc *template;     /**< 泛型函数模板（来自 mod->funcs） */
+    struct ASTType **type_args;  /**< 类型实参数组，长度 num_type_args */
+    int num_type_args;
+} ASTMonoInstance;
+
+/** 模块内单态化实例最大数量（codegen 为每个实例生成一个 C 函数） */
+#define AST_MODULE_MAX_MONO_INSTANCES 64
+
+/** 模块/程序：阶段 5 支持顶层 import；阶段 4–5 支持顶层 struct；§7 支持顶层 enum；多函数 + 函数调用；7.1 泛型；7.2 trait/impl。 */
 typedef struct ASTModule {
     /** import 路径列表，如 "core.types"；由 parser 分配，ast_module_free 释放 */
     char **import_paths;
     int num_imports;       /**< import_paths 有效长度 */
     ASTStructDef **struct_defs; /**< 顶层结构体定义指针数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组 */
     int num_structs;
-    ASTFunc *main_func;    /**< 顶层 main 函数，库模块可为 NULL */
+    ASTEnumDef **enum_defs;     /**< 顶层枚举定义指针数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组 */
+    int num_enums;
+    ASTTraitDef **trait_defs;   /**< 顶层 trait 定义数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组（阶段 7.2） */
+    int num_traits;
+    ASTImplBlock **impl_blocks; /**< impl 块数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组（阶段 7.2） */
+    int num_impl_blocks;
+    ASTFunc **funcs;       /**< 顶层函数数组（含 main）；由 ast_module_free 逐项释放后 free 本数组 */
+    int num_funcs;
+    ASTFunc *main_func;    /**< 入口函数（名称为 main 的那一个），库模块可为 NULL */
+    /** 泛型单态化实例列表（阶段 7.1）：由 typeck 填充，codegen 按此生成 C 函数；由 ast_module_free 释放 type_args 数组（不释放 template/type 节点）。 */
+    ASTMonoInstance *mono_instances;
+    int num_mono_instances;
 } ASTModule;
 
 /**
@@ -236,6 +353,24 @@ typedef struct ASTModule {
  * 参数：s 待释放的结构体定义；可为 NULL。
  */
 void ast_struct_def_free(ASTStructDef *s);
+
+/**
+ * 释放单条枚举定义（名称、变体名数组及自身）；由 ast_module_free 内部调用。
+ * 参数：e 待释放的枚举定义；可为 NULL。
+ */
+void ast_enum_def_free(ASTEnumDef *e);
+
+/**
+ * 释放单条 trait 定义（方法签名名与类型及自身）；由 ast_module_free 内部调用。
+ * 参数：t 待释放的 trait 定义；可为 NULL。
+ */
+void ast_trait_def_free(ASTTraitDef *t);
+
+/**
+ * 释放单条 impl 块（trait/type 名及方法函数数组及自身）；由 ast_module_free 内部调用。
+ * 参数：impl 待释放的 impl 块；可为 NULL。
+ */
+void ast_impl_block_free(ASTImplBlock *impl);
 
 /**
  * 释放 AST 模块及其子节点。
