@@ -1,0 +1,10 @@
+// 测试 core.result 的 Result_i32：ok_i32、err_i32、unwrap_or_i32
+import core.result;
+
+function main(): i32 {
+  let ok_r: Result_i32 = ok_i32(42);
+  let err_r: Result_i32 = err_i32(7);
+  let a: i32 = unwrap_or_i32(ok_r, 0);
+  let b: i32 = unwrap_or_i32(err_r, 0);
+  return a + b;
+}
