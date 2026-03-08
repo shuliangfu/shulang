@@ -148,6 +148,7 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_DEFER:   return "DEFER";
         case TOKEN_MATCH:   return "MATCH";
         case TOKEN_STRUCT:  return "STRUCT";
+        case TOKEN_PACKED:  return "PACKED";
         case TOKEN_ENUM:    return "ENUM";
         case TOKEN_GOTO:    return "GOTO";
         case TOKEN_TRAIT:   return "TRAIT";
@@ -184,6 +185,7 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_COMMA:   return "COMMA";
         case TOKEN_COLON:   return "COLON";
         case TOKEN_IMPORT:  return "IMPORT";
+        case TOKEN_EXTERN:  return "EXTERN";
         case TOKEN_DOT:     return "DOT";
         case TOKEN_SEMICOLON: return "SEMICOLON";
         case TOKEN_PLUS:   return "PLUS";
