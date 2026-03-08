@@ -1,0 +1,14 @@
+// 测试自举前标准库扩展（5.5）：多个 core/std 模块可 import 并有最小可用实现。
+// 通过调用各模块中具名函数验证解析、typeck 与链接；placeholder 多模块重名，仅调用一次。
+import core.types;
+import core.option;
+import core.result;
+import std.vec;
+
+function main(): i32 {
+  let a: i32 = placeholder();
+  let b: i32 = option_placeholder<i32>(42);
+  let c: i32 = result_placeholder<i32>(1);
+  let d: i32 = vec_placeholder<i32>(2);
+  return 0;
+}
