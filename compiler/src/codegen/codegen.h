@@ -16,7 +16,7 @@ struct ASTModule;
 
 /**
  * 将入口模块（含 main）生成 C 源码写入 out。
- * 功能说明：仅支持名为 main 的函数；生成 #include <stdio.h>、int main(void)、printf("Hello World\\n")，且 return 语句使用 main 体表达式的值（当前仅 AST_EXPR_LIT 的 int_val），使 .su 中写 fn main() -> i32 { 42 } 时程序退出码为 42。
+ * 功能说明：仅支持名为 main 的函数；生成 #include <stdio.h>、int main(void)、printf("Hello World\\n")，且 return 语句使用 main 体表达式的值（当前仅 AST_EXPR_LIT 的 int_val），使 .su 中写 function main() -> i32 { 42 } 时程序退出码为 42。
  * 参数：m 已通过 typeck 的 AST 模块，须含 main_func（name 为 "main"）及 body（当前须为整数字面量）；out 输出流，不可为 NULL。
  * 返回值：0 成功；-1 表示 m 为 NULL、out 为 NULL、无 main、main 名非 "main" 或 body 为 NULL。
  * 错误与边界：body 非 AST_EXPR_LIT 时仍按 0 生成（可后续扩展）；仅写 out，不关闭流。副作用：写 out，不修改 m。
