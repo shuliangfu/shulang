@@ -205,6 +205,7 @@ typedef struct ASTStructDef {
     ASTStructField *fields;      /**< 字段数组 */
     int num_fields;
     int allow_padding;           /**< 1 表示允许隐式 padding（§11.1 allow(padding)），0 则存在 padding 时报错 */
+    int packed;                  /**< 1 表示 packed 布局（无填充、对齐 1，与 C __attribute__((packed)) 一致）；0 为默认 */
     /** 以下由 typeck 结构体布局 pass 填充（变量类型与类型系统设计 §11.1） */
     int field_offsets[AST_STRUCT_MAX_FIELDS]; /**< 各字段偏移（字节），未计算时为 0 */
     int struct_size;   /**< 结构体总大小（字节），含末尾对齐；未计算时为 0 */
@@ -281,7 +282,8 @@ typedef struct ASTFunc {
     ASTParam *params;       /**< 形参数组，可为 NULL 表示无参；由 ast_module_free 释放（含各 param 的 name/type） */
     int num_params;
     struct ASTType *return_type;
-    ASTBlock *body;    /**< 函数体（块）；不可为 NULL（main 至少含 final_expr） */
+    ASTBlock *body;    /**< 函数体（块）；extern 时为 NULL；普通函数不可为 NULL（main 至少含 final_expr） */
+    int is_extern;     /**< 1 表示 extern "C" 声明，无体，由链接器解析 C 符号；0 表示普通 .su 函数 */
     /** 以下仅当本函数为 impl 块内方法时非 NULL；codegen 用于生成 mangle 名（阶段 7.2） */
     const char *impl_for_trait; /**< 所属 trait 名，NULL 表示顶层函数 */
     const char *impl_for_type;  /**< 实现类型名（如 i32、Foo），NULL 表示顶层函数 */
