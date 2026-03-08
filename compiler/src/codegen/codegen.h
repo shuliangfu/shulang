@@ -16,18 +16,17 @@ struct ASTModule;
 
 /**
  * 将入口模块（含 main）生成 C 源码写入 out。
- * 功能说明：仅支持名为 main 的函数；生成 #include <stdio.h>、int main(void)、printf("Hello World\\n")，且 return 语句使用 main 体表达式的值（当前仅 AST_EXPR_LIT 的 int_val），使 .su 中写 function main() -> i32 { 42 } 时程序退出码为 42。
- * 参数：m 已通过 typeck 的 AST 模块，须含 main_func（name 为 "main"）及 body（当前须为整数字面量）；out 输出流，不可为 NULL。
- * 返回值：0 成功；-1 表示 m 为 NULL、out 为 NULL、无 main、main 名非 "main" 或 body 为 NULL。
- * 错误与边界：body 非 AST_EXPR_LIT 时仍按 0 生成（可后续扩展）；仅写 out，不关闭流。副作用：写 out，不修改 m。
+ * 功能说明：仅支持名为 main 的函数；生成 #include、main、extern 等；当 dep_mods 非 NULL 且 ndep>0 时，对来自依赖的 struct 类型使用 "struct prefix_Name" 以便与库 .c 符号一致。
+ * 参数：m 已通过 typeck 的 AST 模块；out 输出流；dep_mods 依赖模块数组（可为 NULL）；dep_import_paths 各依赖的 import 路径（与 dep_mods 对应）；ndep 依赖个数，0 表示无依赖。
+ * 返回值：0 成功；-1 表示 m 为 NULL、out 为 NULL、无 main 等。
  */
-int codegen_module_to_c(struct ASTModule *m, FILE *out);
+int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep);
 
 /**
- * 将库模块（无 main 或仅 import）生成占位 C 写入 out，供多文件链接时参与编译。
- * 功能说明：阶段 7.3 多文件；向 out 输出一行 C 注释（内容含 import_path），避免空翻译单元。
- * 参数：m 库模块 AST，可为 NULL（未使用）；import_path 模块路径如 core.types，用于注释内容，可为 NULL；out 输出流，不可为 NULL。
- * 返回值：0 成功；-1 表示 out 为 NULL。副作用：仅写 out。
+ * 将库模块（无 main 或仅 import）生成 C 写入 out，供多文件链接时参与编译。
+ * 功能说明：阶段 7.3 多文件；类型与函数名均加 import_path 前缀（如 foo_、core_types_），避免与入口模块符号冲突。
+ * 参数：m 库模块 AST；import_path 模块路径如 foo 或 core.types，用于生成前缀；out 输出流，不可为 NULL。
+ * 返回值：0 成功；-1 表示 m/out 为 NULL。副作用：写 out。
  */
 int codegen_library_module_to_c(struct ASTModule *m, const char *import_path, FILE *out);
 
