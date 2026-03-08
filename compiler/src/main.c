@@ -95,21 +95,69 @@ static int resolve_imports(ASTModule *mod, const char *lib_root) {
 static const char *token_kind_str(TokenKind k) {
     switch (k) {
         case TOKEN_EOF:     return "EOF";
-        case TOKEN_FN:      return "FN";
+        case TOKEN_FUNCTION: return "FUNCTION";
+        case TOKEN_LET:     return "LET";
+        case TOKEN_CONST:   return "CONST";
+        case TOKEN_IF:      return "IF";
+        case TOKEN_ELSE:    return "ELSE";
+        case TOKEN_WHILE:   return "WHILE";
+        case TOKEN_LOOP:    return "LOOP";
+        case TOKEN_FOR:     return "FOR";
+        case TOKEN_BREAK:   return "BREAK";
+        case TOKEN_CONTINUE: return "CONTINUE";
+        case TOKEN_RETURN:   return "RETURN";
+        case TOKEN_PANIC:   return "PANIC";
+        case TOKEN_DEFER:   return "DEFER";
+        case TOKEN_MATCH:   return "MATCH";
+        case TOKEN_STRUCT:  return "STRUCT";
+        case TOKEN_GOTO:    return "GOTO";
+        case TOKEN_UNDERSCORE: return "UNDERSCORE";
         case TOKEN_IDENT:   return "IDENT";
         case TOKEN_I32:     return "I32";
+        case TOKEN_BOOL:    return "BOOL";
+        case TOKEN_U8:      return "U8";
+        case TOKEN_U32:     return "U32";
+        case TOKEN_U64:     return "U64";
+        case TOKEN_I64:     return "I64";
+        case TOKEN_USIZE:   return "USIZE";
+        case TOKEN_ISIZE:   return "ISIZE";
+        case TOKEN_TRUE:    return "TRUE";
+        case TOKEN_FALSE:   return "FALSE";
         case TOKEN_INT:     return "INT";
         case TOKEN_LPAREN:  return "LPAREN";
         case TOKEN_RPAREN:  return "RPAREN";
         case TOKEN_LBRACE:  return "LBRACE";
         case TOKEN_RBRACE:  return "RBRACE";
+        case TOKEN_LBRACKET: return "LBRACKET";
+        case TOKEN_RBRACKET: return "RBRACKET";
         case TOKEN_ARROW:   return "ARROW";
+        case TOKEN_FATARROW: return "FATARROW";
         case TOKEN_COMMA:   return "COMMA";
+        case TOKEN_COLON:   return "COLON";
         case TOKEN_IMPORT:  return "IMPORT";
         case TOKEN_DOT:     return "DOT";
         case TOKEN_SEMICOLON: return "SEMICOLON";
         case TOKEN_PLUS:   return "PLUS";
         case TOKEN_MINUS:  return "MINUS";
+        case TOKEN_STAR:   return "STAR";
+        case TOKEN_SLASH:  return "SLASH";
+        case TOKEN_PERCENT: return "PERCENT";
+        case TOKEN_AMP:    return "AMP";
+        case TOKEN_PIPE:   return "PIPE";
+        case TOKEN_CARET:  return "CARET";
+        case TOKEN_LSHIFT: return "LSHIFT";
+        case TOKEN_RSHIFT: return "RSHIFT";
+        case TOKEN_TILDE:  return "TILDE";
+        case TOKEN_EQ:     return "EQ";
+        case TOKEN_NE:     return "NE";
+        case TOKEN_LT:     return "LT";
+        case TOKEN_GT:     return "GT";
+        case TOKEN_LE:     return "LE";
+        case TOKEN_GE:     return "GE";
+        case TOKEN_AMPAMP: return "AMPAMP";
+        case TOKEN_PIPEPIPE: return "PIPEPIPE";
+        case TOKEN_BANG:   return "BANG";
+        case TOKEN_ASSIGN: return "ASSIGN";
         default:            return "?";
     }
 }
@@ -403,23 +451,25 @@ int main(int argc, char **argv) {
         printf("%s", token_kind_str(tok.kind));
         if (tok.kind == TOKEN_INT)
             printf(" %d", tok.value.int_val);
-        else if ((tok.kind == TOKEN_IDENT || tok.kind == TOKEN_I32) && tok.value.ident && tok.ident_len > 0)
+        else if ((tok.kind == TOKEN_IDENT || tok.kind == TOKEN_I32 || tok.kind == TOKEN_BOOL
+                  || tok.kind == TOKEN_U8 || tok.kind == TOKEN_U32 || tok.kind == TOKEN_U64
+                  || tok.kind == TOKEN_I64 || tok.kind == TOKEN_USIZE || tok.kind == TOKEN_ISIZE)
+                 && tok.value.ident && tok.ident_len > 0)
             printf(" %.*s", tok.ident_len, tok.value.ident);
         printf(" @%d:%d\n", tok.line, tok.col);
     }
     lexer_free(lex2);
 
     if (mod->main_func && mod->main_func->body) {
-        const struct ASTExpr *e = mod->main_func->body;
-        if (e->kind == AST_EXPR_LIT)
-            printf("parse OK: %s() -> %s { %d }\n",
+        const struct ASTBlock *blk = mod->main_func->body;
+        const struct ASTExpr *e = blk->final_expr;
+        if (e && e->kind == AST_EXPR_LIT)
+            printf("parse OK: %s() -> i32 { %d }\n",
                    mod->main_func->name,
-                   mod->main_func->return_type ? mod->main_func->return_type : "?",
                    e->value.int_val);
         else
-            printf("parse OK: %s() -> %s { expr }\n",
-                   mod->main_func->name,
-                   mod->main_func->return_type ? mod->main_func->return_type : "?");
+            printf("parse OK: %s() -> i32 { expr }\n",
+                   mod->main_func->name);
     } else
         printf("parse OK (library module)\n");
     printf("typeck OK\n");
