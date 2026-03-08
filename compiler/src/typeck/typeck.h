@@ -14,12 +14,11 @@ struct ASTModule;
 
 /**
  * 对模块做类型检查。
- * 功能说明：若有 main 则校验返回类型为 i32、体为整数字面量；无 main 的库模块视为通过。
- * 参数：m 已解析的 AST 模块；NULL 时返回 -1 并报错。
+ * 功能说明：若有 main 则校验返回类型为 i32、体为整数字面量；无 main 的库模块视为通过。若提供 dep_mods，则 CALL 可在依赖模块中解析（跨模块调用）。
+ * 参数：m 已解析的 AST 模块；dep_mods 依赖模块数组（与 m->import_paths 顺序一致），可为 NULL；num_deps 依赖个数，0 表示仅本模块。
  * 返回值：0 通过；-1 类型错误且已向 stderr 输出 "typeck error: ..."。
- * 错误与边界：m 为 NULL、main 返回类型非 i32、无 body 或 body 非整数字面量时返回 -1。
- * 副作用与约定：只读 m；不分配内存；不修改 m。
+ * 副作用与约定：只读 m 与 dep_mods；会写 m 中 CALL 节点的 resolved_import_path、resolved_callee_func。
  */
-int typeck_module(struct ASTModule *m);
+int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps);
 
 #endif /* SHUC_TYPECK_H */
