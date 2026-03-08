@@ -1,0 +1,7 @@
+// 测试 std.io.print_i32：向标准输出打印整数
+import std.io;
+
+function main(): i32 {
+  let n: i32 = print_i32(42);
+  return n;
+}
