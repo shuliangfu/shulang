@@ -1,0 +1,52 @@
+# Cursor 索引/上下文忽略（.cursor 不忽略，以便读取规则）
+
+# --- 构建产物 ---
+shuc
+compiler/shuc
+*.exe
+*.out
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.ll
+*.bc
+*.s
+*.asm
+
+# --- 构建目录 ---
+build/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# --- 依赖与第三方 ---
+vendor/
+third_party/
+deps/
+node_modules/
+.pkg/
+
+# --- 其他 IDE（不包含 .cursor）---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-*
+
+# --- 系统与临时 ---
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
