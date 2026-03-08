@@ -1,0 +1,7 @@
+// 测试 std.map：map_empty_size
+import std.map;
+
+function main(): i32 {
+  let n: i32 = map_empty_size();
+  return n;
+}
