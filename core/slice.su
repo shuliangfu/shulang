@@ -1,8 +1,0 @@
-// core.slice — 切片类型与边界安全访问（自举前最小实现）
-// 自举前：[]T 支持 .len 字段（类型 usize）；本模块提供 len_i32 等最小 API。
-
-// 返回 []i32 切片的长度（元素个数），类型为 usize。
-function len_i32(s: []i32): usize { return s.len; }
-
-// 占位函数，表示本模块可 import；get 等安全访问后续扩展。
-function placeholder(): i32 { return 0; }
