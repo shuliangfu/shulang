@@ -1,0 +1,7 @@
+// 测试 core.debug.assert：条件为真时返回 0
+import core.debug;
+
+function main(): i32 {
+  let ok: i32 = assert(true);
+  return ok;
+}
