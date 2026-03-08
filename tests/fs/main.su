@@ -1,0 +1,7 @@
+// 测试 std.fs：fs_invalid_handle
+import std.fs;
+
+function main(): i32 {
+  let h: i32 = fs_invalid_handle();
+  return if (h != -1) { 1 } else { 0 };
+}
