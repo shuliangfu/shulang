@@ -1,1 +1,1 @@
-function main() -> i32 { (12 & 7) | (4 ^ 2) }
+function main(): i32 { return (12 & 7) | (4 ^ 2); }
