@@ -116,6 +116,14 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    if (len == 6 && memcmp(start, "extern", 6) == 0) {
+        out->kind = TOKEN_EXTERN;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
     if (len == 5 && memcmp(start, "while", 5) == 0) {
         out->kind = TOKEN_WHILE;
         out->line = line0;
@@ -182,6 +190,14 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
     }
     if (len == 5 && memcmp(start, "match", 5) == 0) {
         out->kind = TOKEN_MATCH;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 6 && memcmp(start, "packed", 6) == 0) {
+        out->kind = TOKEN_PACKED;
         out->line = line0;
         out->col = col0;
         out->value.ident = NULL;
