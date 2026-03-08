@@ -71,11 +71,21 @@ static void get_entry_dir(const char *input_path, char *entry_dir, size_t size) 
 }
 
 /**
- * 解析 import 路径到实际 .su 文件路径：先试 lib_root，若不存在且为单段路径则试 entry_dir（多文件 7.3）。
+ * 解析 import 路径到实际 .su 文件路径：先试 lib_root 下单文件（如 core/result.su），若无则试目录模块 path/mod.su（便于后续按目录拆分代码）；若仍无且为单段路径则试 entry_dir（多文件 7.3）。
  * 参数：lib_root 库根；entry_dir 入口所在目录（可为 NULL 或 ""）；import_path 如 "foo" 或 "core.types"；path 输出；path_size 缓冲区大小。
  */
 static void resolve_import_file_path(const char *lib_root, const char *entry_dir, const char *import_path, char *path, size_t path_size) {
     import_path_to_file_path(lib_root, import_path, path, path_size);
+    if (access(path, R_OK) != 0 && strchr(import_path, '.') != NULL && path_size >= 16) {
+        const char *r = lib_root && lib_root[0] ? lib_root : ".";
+        size_t off = (size_t)snprintf(path, path_size, "%s/", r);
+        for (const char *s = import_path; *s && off + 1 < path_size; s++)
+            path[off++] = (char)(*s == '.' ? '/' : *s);
+        if (off + 9 <= path_size)
+            (void)snprintf(path + off, path_size - off, "/mod.su");
+        if (access(path, R_OK) != 0)
+            import_path_to_file_path(lib_root, import_path, path, path_size);
+    }
     if (entry_dir && entry_dir[0] && strchr(import_path, '.') == NULL) {
         if (access(path, R_OK) != 0) {
             (void)snprintf(path, path_size, "%s/%.255s.su", entry_dir, import_path);
