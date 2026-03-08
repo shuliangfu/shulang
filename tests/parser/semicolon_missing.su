@@ -1,0 +1,5 @@
+// 负例：return 后缺分号，应报 expected ';' after return expr
+function main(): i32 {
+  let x: i32 = 1;
+  return 0
+}
