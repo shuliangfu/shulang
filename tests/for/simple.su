@@ -1,0 +1,5 @@
+function main() -> i32 {
+  let n: i32 = 0;
+  for ( ; n < 1 ; ) { break }
+  42
+}
