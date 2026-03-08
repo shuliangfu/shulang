@@ -1,0 +1,52 @@
+// std.io — Read/Write 最小接口、标准输入输出（自举前最小实现）
+// I/O 抽象：Reader/Writer trait、ReadOnlySlice/WriteOnlySlice、超时参数预留；std.io 为 std.io.driver 的薄封装（全异步实现，同步 = submit + 等一次完成）。
+// print_i32/print_u32 由 codegen 生成 printf 调用。
+
+// ——— ReadOnlySlice / WriteOnlySlice（零拷贝只读/只写视图，预留与 driver 对接） ———
+struct ReadOnlySlice {
+  data: []u8
+}
+
+struct WriteOnlySlice {
+  data: []u8
+}
+
+// ——— Reader / Writer trait（自举前必须清单第二步、高并发IO 1.1） ———
+// 最小签名：仅 (self) + 返回类型；具体 impl 由 File/网络等类型实现；read/write 缓冲与长度由 impl 方法参数扩展。
+trait Reader {
+  function read(self): i32;
+}
+
+trait Writer {
+  function write(self): i32;
+}
+
+// ——— 超时参数预留：统一 u32 毫秒（ms），0 表示无超时（TIMEOUT_MS_NONE）；与 driver timeout_ms 一致 ———
+// 占位：预留带超时的读接口，自举后由 driver 实现；buf 为写入目标，timeout_ms 为 0 表示阻塞直到有数据
+function read_with_timeout(buf: []u8, timeout_ms: u32): i32 {
+  return 0;
+}
+
+// 占位：预留带超时的写接口，自举后由 driver 实现
+function write_with_timeout(buf: []u8, timeout_ms: u32): i32 {
+  return 0;
+}
+
+// ——— 标准输出（现有） ———
+// 向标准输出打印有符号整数 x 并换行，返回 0
+function print_i32(x: i32): i32 {
+  return 0;
+}
+
+// 向标准输出打印无符号整数 x 并换行，返回 0
+function print_u32(x: u32): i32 {
+  return 0;
+}
+
+// 向标准输出打印 64 位有符号整数 x 并换行，返回 0
+function print_i64(x: i64): i32 {
+  return 0;
+}
+
+// 占位，表示本模块可 import
+function placeholder(): i32 { return 0; }
