@@ -16,4 +16,12 @@ else
   exit 1
 fi
 
+# 负例：if 后缺少 '(' 应报 parse error
+if ./compiler/shuc tests/parser/if_missing_paren.su -o /tmp/shuc_parser_fail2 2>&1 | grep -q "expected '(' after 'if'"; then
+  : # 预期报错
+else
+  echo "parser: expected parse error for if missing paren"
+  exit 1
+fi
+
 echo "parser test OK"
