@@ -1,8 +1,29 @@
-// std.string — 字符串类型与基本操作（自举前最小实现）
-// 自举前：提供最小可调用 API；字符串类型与 len/ptr 等后续扩展。
+// std.string — 字符串类型与基本操作（自举前最小可用实现）
+// 自举前：固定缓冲 32 字节 + len，提供 empty/len/from_char；完整拼接与堆扩展待后续。
 
-// 占位函数，表示本模块已可 import。
+struct String {
+  data: [32]u8;
+  len: i32;
+}
+
 function placeholder(): i32 { return 0; }
 
-// 表示“空字符串”长度（占位），后续扩展为真实字符串类型与 len。
 function string_empty(): i32 { return 0; }
+
+function string_new(): String {
+  return String {
+    data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    len: 0
+  };
+}
+
+function string_len(s: String): i32 { return s.len; }
+
+function string_from_char(c: u8): String {
+  return String {
+    data: [c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    len: 1
+  };
+}
+
+function string_get(s: String, i: i32): u8 { return s.data[i]; }
