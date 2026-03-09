@@ -1,0 +1,14 @@
+// std.io.core — 舒 IO 实现桩（Shu IO 核心层，自举前-极致IO与网络性能准备）
+// 供 std.io.driver 与 std.mem 调用；当前为桩（返回 0），自举后可在此模块内改为真实舒 IO 实现或通过 extern 调用内核/驱动。
+
+function shu_io_register(ptr: *u8, len: usize, handle: usize): i32 {
+  return 0;
+}
+
+function shu_io_submit_read(ptr: *u8, len: usize, handle: usize, timeout_ms: u32): i32 {
+  return 0;
+}
+
+function shu_io_submit_write(ptr: *u8, len: usize, handle: usize, timeout_ms: u32): i32 {
+  return 0;
+}
