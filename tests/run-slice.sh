@@ -8,8 +8,8 @@ make -C compiler -q 2>/dev/null || make -C compiler
 exitcode=0; /tmp/shuc_slice >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 20 ] && { echo "expected 20 (slice s[1]), got $exitcode"; exit 1; }
 
-./compiler/shuc -L . tests/slice/len.su -o /tmp/shuc_slice_len 2>&1
-exitcode=0; /tmp/shuc_slice_len >/dev/null 2>&1 || exitcode=$?
+./compiler/shuc -L . tests/slice/length.su -o /tmp/shuc_slice_length 2>&1
+exitcode=0; /tmp/shuc_slice_length >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 0 ] && { echo "expected exit 0 (len_i32), got $exitcode"; exit 1; }
 
 # 边界：对非数组/切片取下标，应报 subscript base must be array or slice
