@@ -1,7 +1,7 @@
 /**
  * lexer.c — 词法分析器实现
  *
- * 文件职责：将 .su 源码按字符流切分为 Token 流，识别关键字（function、import、i32）、标识符、整数字面量、符号（括号、->、.、;）及空白与行注释。
+ * 文件职责：将 .su 源码按字符流切分为 Token 流，识别关键字、标识符、字面量、符号及三种注释：双斜线行注释、块注释、井号行注释。
  * 所属模块：编译器前端 lexer，compiler/src/lexer/；实现 lexer.h 声明的接口。
  * 与其它文件的关系：依赖 include/token.h；被 parser、main 通过 lexer.h 调用；不依赖 parser 或 ast。
  * 重要约定：与 compiler/docs/语法子集-阶段1与2.md 及阶段 5 import 词法一致；Token 的 line/col 为该 Token 在源码中的起始位置；ident 不拷贝，指向 source 内地址。
@@ -414,6 +414,14 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    if (len == 4 && memcmp(start, "void", 4) == 0) {
+        out->kind = TOKEN_VOID;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
 
     out->kind = TOKEN_IDENT;
     out->line = line0;
@@ -518,7 +526,7 @@ static void lex_float_leading_dot(Lexer *l, Token *out) {
  * 取下一个 Token；见 lexer.h 中 lexer_next 注释。
  */
 void lexer_next(Lexer *l, Token *out) {
-    /* 跳过空白 */
+    /* 跳过空白与三种注释：双斜线行注释、块注释、井号行注释 */
     while (l->src < l->end) {
         int c = lexer_peek(l);
         if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
@@ -526,6 +534,20 @@ void lexer_next(Lexer *l, Token *out) {
             continue;
         }
         if (c == '/' && l->src + 1 < l->end && l->src[1] == '/') {
+            while (l->src < l->end && lexer_peek(l) != '\n') lexer_advance(l);
+            continue;
+        }
+        if (c == '/' && l->src + 1 < l->end && l->src[1] == '*') {
+            lexer_advance(l);
+            lexer_advance(l);
+            while (l->src < l->end) {
+                if (lexer_peek(l) == '*' && l->src + 1 < l->end && l->src[1] == '/') break;
+                lexer_advance(l);
+            }
+            if (l->src + 1 < l->end) { lexer_advance(l); lexer_advance(l); }
+            continue;
+        }
+        if (c == '#') {
             while (l->src < l->end && lexer_peek(l) != '\n') lexer_advance(l);
             continue;
         }
