@@ -1,3 +1,3 @@
 function main(): i32 {
-  return if (1 < 2) { 10 } else { 20 };
+  return if (1 < 2) { 10 } else { 20 }
 }
