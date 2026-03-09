@@ -48,7 +48,7 @@ jobs:
         with:
           msystem: MSYS
           update: true
-          install: make gcc
+          install: make gcc diffutils
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         shell: msys2 {0}
