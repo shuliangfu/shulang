@@ -12,6 +12,143 @@
 #include <stdio.h>
 #include <string.h>
 #include <limits.h>
+#include <stdint.h>
+#ifdef SHUC_USE_SU_CODEGEN
+/** .su 侧整数字面量格式化入口：向 out（FILE* 不透明）逐字节输出 val 的十进制表示；由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_format_int_lit(uint8_t *out, int32_t val);
+/** .su 侧布尔字面量输出：向 out 输出 '0' 或 '1'（val 非 0 为 1）；由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_format_bool_lit(uint8_t *out, int32_t val);
+/** .su 侧 C 字符串输出：向 out 逐字节输出 ptr[0..len-1]；由 codegen.su 实现，用于 VAR 变量名等。 */
+extern int32_t codegen_codegen_su_emit_c_string(uint8_t *out, uint8_t *ptr, int32_t len);
+/** .su 侧浮点字面量输出：ptr 指向 double，is_f32 非 0 为 f32；由 codegen.su 转调 C 的 codegen_su_emit_float。 */
+extern int32_t codegen_codegen_su_emit_float_lit(uint8_t *out, uint8_t *ptr, int32_t is_f32);
+/** .su 侧二元运算输出：左/右子表达式与运算符串；need_l/need_r 非 0 时在对应子表达式外加括号。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_binop(uint8_t *out, uint8_t *left, uint8_t *right, uint8_t *op_ptr, int32_t op_len, int32_t need_l, int32_t need_r);
+/** .su 侧一元运算输出：左括号+前缀串、子表达式、右括号。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_unary(uint8_t *out, uint8_t *operand, uint8_t *prefix_ptr, int32_t prefix_len);
+/** .su 侧赋值表达式输出：( left = right )。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_assign(uint8_t *out, uint8_t *left, uint8_t *right);
+/** .su 侧 DIV 表达式：is_int 非 0 时走整数除零检查，否则为浮点 /。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_div_expr(uint8_t *out, uint8_t *left, uint8_t *right, int32_t is_int);
+/** .su 侧 MOD 表达式：is_int 非 0 时走整数取模零检查，否则为浮点 %。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_mod_expr(uint8_t *out, uint8_t *left, uint8_t *right, int32_t is_int);
+/** .su 侧三元表达式内层：cond、op_q（" ? "）、then_e、op_c（" : "）、else_e；C 外包括号。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_ternary_inner(uint8_t *out, uint8_t *cond, uint8_t *then_e, uint8_t *else_e, uint8_t *op_q, int32_t len_q, uint8_t *op_c, int32_t len_c);
+/** .su 侧字段访问 (base).field：输出括号、base、).、field 名。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_field_access(uint8_t *out, uint8_t *base, uint8_t *field_ptr, int32_t field_len);
+/** .su 侧函数调用 fallback：callee(args...)；C 提供 call_callee/call_num_args/call_arg。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_call(uint8_t *out, uint8_t *call_expr);
+/** .su 侧 panic 输出：has_operand 非 0 时 shulang_panic_(1, operand)，否则 shulang_panic_(0, 0)。由 codegen.su 转调 C 的 codegen_su_emit_panic_*。 */
+extern int32_t codegen_codegen_su_emit_panic(uint8_t *out, int32_t has_operand, uint8_t *operand);
+/** .su 侧下标 fallback：(base)[index] 或 (base).data[index]。is_slice 非 0 为 .data 形式。由 codegen.su 实现。 */
+extern int32_t codegen_codegen_su_emit_index_fallback(uint8_t *out, uint8_t *base, uint8_t *index, int32_t is_slice);
+#endif
+/** .su 侧通过 extern 调用的写单字节接口；out 为 FILE* 的不透明指针，b 为要输出的字节（0..255）。返回 0 成功，非 0 失败。始终编译进 codegen.o 以便 bootstrap-codegen 链接时解析。 */
+int32_t codegen_su_emit_byte(uint8_t *out, int32_t b) {
+    int c = (unsigned char)(b & 0xff);
+    return (fputc(c, (FILE *)out) == c) ? 0 : -1;
+}
+/** .su 侧通过 extern 调用的读单字节接口：返回 ptr[i] 的 0..255 值，供 .su 逐字节输出 C 字符串用。 */
+int32_t codegen_su_char_at(uint8_t *ptr, int32_t i) {
+    return (int32_t)(unsigned char)ptr[i];
+}
+/** .su 侧通过 extern 调用的浮点字面量输出：ptr 指向 double，is_f32 非 0 时输出 f32 后缀；0.0 输出 "0.0"/"0.0f"，否则 %g/%gf。返回 0 成功。 */
+int32_t codegen_su_emit_float(uint8_t *out, uint8_t *ptr, int32_t is_f32) {
+    double v;
+    memcpy(&v, ptr, sizeof(double));
+    if (v == 0.0)
+        fprintf((FILE *)out, is_f32 ? "0.0f" : "0.0");
+    else if (is_f32)
+        fprintf((FILE *)out, "%gf", v);
+    else
+        fprintf((FILE *)out, "%g", v);
+    return 0;
+}
+
+static int codegen_expr(const struct ASTExpr *e, FILE *out);
+
+/** .su 侧通过 extern 调用的“输出整棵表达式”接口：递归调用 codegen_expr，供 .su 在二元运算等中输出子表达式。返回 0 成功，-1 失败。 */
+int32_t codegen_su_emit_expr(uint8_t *out, uint8_t *expr) {
+    return (int32_t)codegen_expr((const struct ASTExpr *)expr, (FILE *)out);
+}
+/** .su 侧判断子表达式是否需加括号（比较/逻辑运算符作为加减操作数时）：kind 在 [AST_EXPR_EQ, AST_EXPR_LOGOR] 返回 1。 */
+int32_t codegen_su_expr_needs_compare_parens(uint8_t *expr) {
+    const struct ASTExpr *e = (const struct ASTExpr *)expr;
+    return (e && e->kind >= AST_EXPR_EQ && e->kind <= AST_EXPR_LOGOR) ? 1 : 0;
+}
+/** .su 侧判断子表达式是否需加括号（加减作为乘除操作数时）：kind 为 ADD 或 SUB 返回 1。 */
+int32_t codegen_su_expr_needs_addsub_parens(uint8_t *expr) {
+    const struct ASTExpr *e = (const struct ASTExpr *)expr;
+    return (e && (e->kind == AST_EXPR_ADD || e->kind == AST_EXPR_SUB)) ? 1 : 0;
+}
+/** .su 侧 CALL 访问器：返回 callee 子表达式指针。 */
+uint8_t *codegen_su_call_callee(uint8_t *expr) {
+    const struct ASTExpr *e = (const struct ASTExpr *)expr;
+    return (e && e->kind == AST_EXPR_CALL && e->value.call.callee) ? (uint8_t *)e->value.call.callee : NULL;
+}
+/** .su 侧 CALL 访问器：返回实参个数。 */
+int32_t codegen_su_call_num_args(uint8_t *expr) {
+    const struct ASTExpr *e = (const struct ASTExpr *)expr;
+    return (e && e->kind == AST_EXPR_CALL) ? (int32_t)e->value.call.num_args : 0;
+}
+/** .su 侧 CALL 访问器：返回第 i 个实参表达式指针，i 从 0 起。 */
+uint8_t *codegen_su_call_arg(uint8_t *expr, int32_t i) {
+    const struct ASTExpr *e = (const struct ASTExpr *)expr;
+    if (!e || e->kind != AST_EXPR_CALL || !e->value.call.args || i < 0 || i >= e->value.call.num_args) return NULL;
+    return (uint8_t *)e->value.call.args[i];
+}
+/** .su 侧 panic 无参：输出 shulang_panic_(0, 0)。 */
+int32_t codegen_su_emit_panic_no_arg(uint8_t *out) {
+    return fprintf((FILE *)out, "shulang_panic_(0, 0)") < 0 ? -1 : 0;
+}
+/** .su 侧 panic 有参：输出 shulang_panic_(1, expr)。 */
+int32_t codegen_su_emit_panic_with_arg(uint8_t *out, uint8_t *operand) {
+    if (fprintf((FILE *)out, "shulang_panic_(1, ") < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)operand, (FILE *)out) != 0) return -1;
+    return fprintf((FILE *)out, ")") < 0 ? -1 : 0;
+}
+
+/** .su 侧整数除法输出（含除零检查）：( r==0 ? (shulang_panic_(1,0), l) : (l/r) )，l/r 按需加括号。 */
+int32_t codegen_su_emit_int_div(uint8_t *out, uint8_t *left, uint8_t *right) {
+    const struct ASTExpr *l = (const struct ASTExpr *)left, *r = (const struct ASTExpr *)right;
+    FILE *f = (FILE *)out;
+    int need_l = (l && (l->kind == AST_EXPR_ADD || l->kind == AST_EXPR_SUB));
+    int need_r = (r && (r->kind == AST_EXPR_ADD || r->kind == AST_EXPR_SUB));
+    fprintf(f, "(");
+    if (need_r) fprintf(f, "(");
+    if (codegen_expr(r, f) != 0) return -1;
+    if (need_r) fprintf(f, ")");
+    fprintf(f, " == 0 ? (shulang_panic_(1, 0), ");
+    if (need_l) fprintf(f, "(");
+    if (codegen_expr(l, f) != 0) return -1;
+    if (need_l) fprintf(f, ")");
+    fprintf(f, ") : (");
+    if (need_l) fprintf(f, "(");
+    if (codegen_expr(l, f) != 0) return -1;
+    if (need_l) fprintf(f, ")");
+    fprintf(f, " / ");
+    if (need_r) fprintf(f, "(");
+    if (codegen_expr(r, f) != 0) return -1;
+    if (need_r) fprintf(f, ")");
+    fprintf(f, "))");
+    return 0;
+}
+
+/** .su 侧整数取模输出（含取模零检查）：( r==0 ? (shulang_panic_(1,0), l) : (l %% r) )。 */
+int32_t codegen_su_emit_int_mod(uint8_t *out, uint8_t *left, uint8_t *right) {
+    const struct ASTExpr *l = (const struct ASTExpr *)left, *r = (const struct ASTExpr *)right;
+    FILE *f = (FILE *)out;
+    fprintf(f, "(");
+    if (codegen_expr(r, f) != 0) return -1;
+    fprintf(f, " == 0 ? (shulang_panic_(1, 0), ");
+    if (codegen_expr(l, f) != 0) return -1;
+    fprintf(f, ") : (");
+    if (codegen_expr(l, f) != 0) return -1;
+    fprintf(f, " %% ");
+    if (codegen_expr(r, f) != 0) return -1;
+    fprintf(f, "))");
+    return 0;
+}
 
 /** 用于生成唯一 match 临时变量名，避免嵌套 match 时冲突 */
 static int codegen_match_id;
@@ -29,6 +166,25 @@ static const char *codegen_library_import_path;
 static struct ASTModule **codegen_dep_mods;
 static const char **codegen_dep_paths;
 static int codegen_ndep;
+
+/** 单文件模式时已输出类型名集合（与 codegen_module_to_c/codegen_library_module_to_c 参数一致），供 ensure_slice_struct 去重 slice 结构体。 */
+static char (*codegen_emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX];
+static int *codegen_n_emitted_inout;
+static int codegen_max_emitted;
+
+/** 单文件多模块去重：判断 c_name 是否已在已输出类型名列表中。 */
+static int emitted_type_contains(const char *c_name, char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int n) {
+    if (!emitted_type_names || !c_name) return 0;
+    for (int i = 0; i < n; i++)
+        if (strcmp(emitted_type_names[i], c_name) == 0) return 1;
+    return 0;
+}
+/** 单文件多模块去重：将 c_name 加入已输出列表。 */
+static void emitted_type_add(const char *c_name, char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted) {
+    if (!emitted_type_names || !n_emitted_inout || *n_emitted_inout >= max_emitted || !c_name) return;
+    snprintf(emitted_type_names[*n_emitted_inout], CODEGEN_EMITTED_TYPE_NAME_MAX, "%s", c_name);
+    (*n_emitted_inout)++;
+}
 
 /** 当 codegen_library_prefix 已设置时，将 name 写成 prefix+name 到 buf；否则只写 name。用于库模块符号不冲突。 */
 static void library_prefixed_name(const char *name, char *buf, size_t size) {
@@ -459,6 +615,31 @@ static void c_type_to_buf(const struct ASTType *ty, char *buf, size_t size) {
                 snprintf(buf, size, "struct %s%s", codegen_library_prefix, n);
                 return;
             }
+            /* 库模块：若类型来自其 import 依赖（如 lexer 中的 Token 来自 token），用依赖的 C 前缀，避免 lexer_Token 导致未定义类型 */
+            if (codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+                for (int i = 0; i < codegen_ndep; i++) {
+                    const struct ASTModule *d = codegen_dep_mods[i];
+                    if (!d || !d->enum_defs) continue;
+                    for (int j = 0; j < d->num_enums; j++)
+                        if (d->enum_defs[j]->name && strcmp(d->enum_defs[j]->name, n) == 0) {
+                            static char dep_pre[256];
+                            import_path_to_c_prefix(codegen_dep_paths[i], dep_pre, sizeof(dep_pre));
+                            snprintf(buf, size, "enum %s%s", dep_pre, n);
+                            return;
+                        }
+                }
+                for (int i = 0; i < codegen_ndep; i++) {
+                    const struct ASTModule *d = codegen_dep_mods[i];
+                    if (!d || !d->struct_defs) continue;
+                    for (int j = 0; j < d->num_structs; j++)
+                        if (d->struct_defs[j]->name && strcmp(d->struct_defs[j]->name, n) == 0) {
+                            static char dep_pre[256];
+                            import_path_to_c_prefix(codegen_dep_paths[i], dep_pre, sizeof(dep_pre));
+                            snprintf(buf, size, "struct %s%s", dep_pre, n);
+                            return;
+                        }
+                }
+            }
             /* 入口模块：若类型来自依赖模块的 struct，用 "struct prefix_Name" 与库 .c 一致 */
             if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
                 for (int i = 0; i < codegen_ndep; i++) {
@@ -580,21 +761,25 @@ static void ensure_block_vector_typedefs(const struct ASTBlock *b, FILE *out) {
 
 /**
  * 若 ty 为切片类型，则向 out 输出一次 struct shulang_slice_<elem> { elem* data; size_t length; }（文档 §6.3）。
- * 同一 elem 类型只输出一次。elem 为 struct 时 key 含 "struct "，切片名须用单标识符，故 strip 掉 "struct " 再拼名。
+ * 同一 elem 类型只输出一次。单文件多模块时先查 codegen_emitted_type_names，避免跨库重复定义。
  */
 static void ensure_slice_struct(const struct ASTType *ty, FILE *out) {
     if (!ty || ty->kind != AST_TYPE_SLICE || !ty->elem_type || !out) return;
     const char *key = c_type_str(ty->elem_type);
+    const char *name_part = (strncmp(key, "struct ", 7) == 0) ? key + 7 : key;
+    char full_slice_name[128];
+    (void)snprintf(full_slice_name, sizeof(full_slice_name), "shulang_slice_%s", name_part);
+    if (codegen_emitted_type_names && codegen_n_emitted_inout &&
+        emitted_type_contains(full_slice_name, codegen_emitted_type_names, *codegen_n_emitted_inout))
+        return;
     for (int i = 0; i < codegen_slice_emitted_n; i++)
         if (codegen_slice_emitted[i] && strcmp(codegen_slice_emitted[i], key) == 0) return;
     if (codegen_slice_emitted_n >= MAX_SLICE_STRUCTS) return;
     codegen_slice_emitted[codegen_slice_emitted_n++] = key;
-    const char *name_part = (strncmp(key, "struct ", 7) == 0) ? key + 7 : key;
+    if (codegen_emitted_type_names && codegen_n_emitted_inout && codegen_max_emitted > 0)
+        emitted_type_add(full_slice_name, codegen_emitted_type_names, codegen_n_emitted_inout, codegen_max_emitted);
     fprintf(out, "struct shulang_slice_%s { %s *data; size_t length; };\n", name_part, key);
 }
-
-/** 前向声明，供 codegen_init 使用 */
-static int codegen_expr(const struct ASTExpr *e, FILE *out);
 
 /** 若 e 为向量二元运算（resolved_type 为 VECTOR），则生成逐分量 op 的复合字面量并返回 0；否则返回 -1（调用方走标量分支）。 */
 static int codegen_vector_binop(const struct ASTExpr *e, const char *op, FILE *out) {
@@ -673,20 +858,27 @@ static int codegen_init(const struct ASTType *ty, const struct ASTExpr *init, FI
         fprintf(out, " }");
         return 0;
     }
-    if (ty && ty->kind == AST_TYPE_SLICE && init && init->kind == AST_EXPR_VAR && block) {
+    /* 切片从数组变量初始化：先查当前 block 的 const/let；若未找到则用 init->resolved_type（typeck 已填，如外层块的 [64]u8） */
+    if (ty && ty->kind == AST_TYPE_SLICE && init && init->kind == AST_EXPR_VAR) {
         const char *name = init->value.var.name;
-        for (int i = 0; i < block->num_consts; i++)
-            if (block->const_decls[i].name && name && strcmp(block->const_decls[i].name, name) == 0 &&
-                block->const_decls[i].type && block->const_decls[i].type->kind == AST_TYPE_ARRAY) {
-                fprintf(out, "{ .data = %s, .length = %d }", name ? name : "", block->const_decls[i].type->array_size);
-                return 0;
-            }
-        for (int i = 0; i < block->num_lets; i++)
-            if (block->let_decls[i].name && name && strcmp(block->let_decls[i].name, name) == 0 &&
-                block->let_decls[i].type && block->let_decls[i].type->kind == AST_TYPE_ARRAY) {
-                fprintf(out, "{ .data = %s, .length = %d }", name ? name : "", block->let_decls[i].type->array_size);
-                return 0;
-            }
+        if (block) {
+            for (int i = 0; i < block->num_consts; i++)
+                if (block->const_decls[i].name && name && strcmp(block->const_decls[i].name, name) == 0 &&
+                    block->const_decls[i].type && block->const_decls[i].type->kind == AST_TYPE_ARRAY) {
+                    fprintf(out, "{ .data = %s, .length = %d }", name ? name : "", block->const_decls[i].type->array_size);
+                    return 0;
+                }
+            for (int i = 0; i < block->num_lets; i++)
+                if (block->let_decls[i].name && name && strcmp(block->let_decls[i].name, name) == 0 &&
+                    block->let_decls[i].type && block->let_decls[i].type->kind == AST_TYPE_ARRAY) {
+                    fprintf(out, "{ .data = %s, .length = %d }", name ? name : "", block->let_decls[i].type->array_size);
+                    return 0;
+                }
+        }
+        if (init->resolved_type && init->resolved_type->kind == AST_TYPE_ARRAY && init->resolved_type->array_size > 0) {
+            fprintf(out, "{ .data = %s, .length = %d }", name ? name : "", init->resolved_type->array_size);
+            return 0;
+        }
     }
     return codegen_expr(init, out);
 }
@@ -710,14 +902,30 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
     if (!e || !out) return -1;
     /* CTFE 最小集：typeck 已折叠的常量表达式直接输出整型值，避免运行时计算 */
     if (e->const_folded_valid) {
+#ifdef SHUC_USE_SU_CODEGEN
+        if (codegen_codegen_su_format_int_lit((uint8_t *)out, (int32_t)e->const_folded_val) != 0) return -1;
+        return 0;
+#else
         fprintf(out, "%d", e->const_folded_val);
         return 0;
+#endif
     }
     switch (e->kind) {
         case AST_EXPR_LIT:
+#ifdef SHUC_USE_SU_CODEGEN
+            /* 整数字面量输出由 .su 侧 codegen_su_format_int_lit 实现（自举 codegen 首块迁入）。 */
+            if (codegen_codegen_su_format_int_lit((uint8_t *)out, (int32_t)e->value.int_val) != 0) return -1;
+            return 0;
+#else
             fprintf(out, "%d", e->value.int_val);
             return 0;
+#endif
         case AST_EXPR_FLOAT_LIT: {
+#ifdef SHUC_USE_SU_CODEGEN
+            int is_f32 = (e->resolved_type && e->resolved_type->kind == AST_TYPE_F32) ? 1 : 0;
+            if (codegen_codegen_su_emit_float_lit((uint8_t *)out, (uint8_t *)&e->value.float_val, is_f32) != 0) return -1;
+            return 0;
+#else
             double v = e->value.float_val;
             if (v == 0.0)
                 fprintf(out, e->resolved_type && e->resolved_type->kind == AST_TYPE_F32 ? "0.0f" : "0.0");
@@ -726,17 +934,34 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             else
                 fprintf(out, "%g", v);
             return 0;
+#endif
         }
         case AST_EXPR_BOOL_LIT:
+#ifdef SHUC_USE_SU_CODEGEN
+            /* 布尔字面量输出由 .su 侧 codegen_su_format_bool_lit 实现。 */
+            if (codegen_codegen_su_format_bool_lit((uint8_t *)out, e->value.int_val ? 1 : 0) != 0) return -1;
+            return 0;
+#else
             fprintf(out, "%d", e->value.int_val ? 1 : 0);
             return 0;
-        case AST_EXPR_VAR:
-            fprintf(out, "%s", e->value.var.name ? e->value.var.name : "");
+#endif
+        case AST_EXPR_VAR: {
+            const char *name = e->value.var.name ? e->value.var.name : "";
+#ifdef SHUC_USE_SU_CODEGEN
+            /* 变量名输出由 .su 侧 codegen_su_emit_c_string 逐字节实现。 */
+            if (codegen_codegen_su_emit_c_string((uint8_t *)out, (uint8_t *)name, (int32_t)strlen(name)) != 0) return -1;
             return 0;
+#else
+            fprintf(out, "%s", name);
+            return 0;
+#endif
+        }
         case AST_EXPR_ENUM_VARIANT: {
-            /* C 中枚举值为 EnumName_VariantName；跨模块或库模块时加 prefix */
+            /* C 中枚举值为 EnumName_VariantName；跨模块或库模块时加 prefix；结果写入 buf 后由 .su emit_c_string 或 fprintf 输出。 */
             const char *en = e->value.enum_variant.enum_name ? e->value.enum_variant.enum_name : "";
             const char *vn = e->value.enum_variant.variant_name ? e->value.enum_variant.variant_name : "";
+            char enum_buf[256];
+            int n = 0;
             if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths && en[0]) {
                 for (int di = 0; di < codegen_ndep; di++) {
                     const struct ASTModule *d = codegen_dep_mods[di];
@@ -745,59 +970,71 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                         if (d->enum_defs[ej]->name && strcmp(d->enum_defs[ej]->name, en) == 0) {
                             char pre[256];
                             import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
-                            fprintf(out, "%s%s_%s", pre, en, vn);
-                            return 0;
+                            n = snprintf(enum_buf, sizeof(enum_buf), "%s%s_%s", pre, en, vn);
+                            goto enum_emit;
+                        }
+                }
+            }
+            if (codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths && en[0]) {
+                for (int di = 0; di < codegen_ndep; di++) {
+                    const struct ASTModule *d = codegen_dep_mods[di];
+                    if (!d || !d->enum_defs) continue;
+                    for (int ej = 0; ej < d->num_enums; ej++)
+                        if (d->enum_defs[ej]->name && strcmp(d->enum_defs[ej]->name, en) == 0) {
+                            char pre[256];
+                            import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                            n = snprintf(enum_buf, sizeof(enum_buf), "%s%s_%s", pre, en, vn);
+                            goto enum_emit;
                         }
                 }
             }
             if (codegen_library_prefix && *codegen_library_prefix && en[0])
-                fprintf(out, "%s%s_%s", codegen_library_prefix, en, vn);
+                n = snprintf(enum_buf, sizeof(enum_buf), "%s%s_%s", codegen_library_prefix, en, vn);
             else
-                fprintf(out, "%s_%s", en, vn);
+                n = snprintf(enum_buf, sizeof(enum_buf), "%s_%s", en, vn);
+        enum_emit:
+            if (n <= 0 || (size_t)n >= sizeof(enum_buf)) n = 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            if (codegen_codegen_su_emit_c_string((uint8_t *)out, (uint8_t *)enum_buf, (int32_t)n) != 0) return -1;
             return 0;
+#else
+            fprintf(out, "%s", enum_buf);
+            return 0;
+#endif
         }
-        case AST_EXPR_ADD:
+        case AST_EXPR_ADD: {
             if (codegen_vector_binop(e, "+", out) == 0) return 0;
-            { const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-            int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR);
-            int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR);
-            if (need_l) fprintf(out, "(");
-            if (codegen_expr(l, out) != 0) return -1;
-            if (need_l) fprintf(out, ")");
-            fprintf(out, " + ");
-            if (need_r) fprintf(out, "(");
-            if (codegen_expr(r, out) != 0) return -1;
-            if (need_r) fprintf(out, ")");
-            return 0; }
-        case AST_EXPR_SUB:
+            const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " + "; int nl = codegen_su_expr_needs_compare_parens((uint8_t *)l); int nr = codegen_su_expr_needs_compare_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
+#else
+            { int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR); int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " + "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
+#endif
+        }
+        case AST_EXPR_SUB: {
             if (codegen_vector_binop(e, "-", out) == 0) return 0;
-            { const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-            int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR);
-            int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR);
-            if (need_l) fprintf(out, "(");
-            if (codegen_expr(l, out) != 0) return -1;
-            if (need_l) fprintf(out, ")");
-            fprintf(out, " - ");
-            if (need_r) fprintf(out, "(");
-            if (codegen_expr(r, out) != 0) return -1;
-            if (need_r) fprintf(out, ")");
-            return 0; }
-        case AST_EXPR_MUL:
+            const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " - "; int nl = codegen_su_expr_needs_compare_parens((uint8_t *)l); int nr = codegen_su_expr_needs_compare_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
+#else
+            { int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR); int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " - "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
+#endif
+        }
+        case AST_EXPR_MUL: {
             if (codegen_vector_binop(e, "*", out) == 0) return 0;
-            { const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-            int need_l = (l->kind == AST_EXPR_ADD || l->kind == AST_EXPR_SUB);
-            int need_r = (r->kind == AST_EXPR_ADD || r->kind == AST_EXPR_SUB);
-            if (need_l) fprintf(out, "(");
-            if (codegen_expr(l, out) != 0) return -1;
-            if (need_l) fprintf(out, ")");
-            fprintf(out, " * ");
-            if (need_r) fprintf(out, "(");
-            if (codegen_expr(r, out) != 0) return -1;
-            if (need_r) fprintf(out, ")");
-            return 0; }
+            const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " * "; int nl = codegen_su_expr_needs_addsub_parens((uint8_t *)l); int nr = codegen_su_expr_needs_addsub_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
+#else
+            { int need_l = (l->kind == AST_EXPR_ADD || l->kind == AST_EXPR_SUB); int need_r = (r->kind == AST_EXPR_ADD || r->kind == AST_EXPR_SUB); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " * "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
+#endif
+        }
         case AST_EXPR_DIV: {
             if (codegen_vector_binop(e, "/", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
+#ifdef SHUC_USE_SU_CODEGEN
+            { int is_int = (e->resolved_type && is_integer_type(e->resolved_type)) ? 1 : 0; if (codegen_codegen_su_emit_div_expr((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, is_int) != 0) return -1; return 0; }
+#else
             /* 整数除零：运行时检查，除数为 0 时 panic（UB 收窄为定义行为，见 UB与未定义行为.md） */
             if (e->resolved_type && is_integer_type(e->resolved_type)) {
                 int need_l = (l->kind == AST_EXPR_ADD || l->kind == AST_EXPR_SUB);
@@ -830,10 +1067,15 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             if (need_r) fprintf(out, "(");
             if (codegen_expr(r, out) != 0) return -1;
             if (need_r) fprintf(out, ")");
-            return 0; }
+            return 0;
+#endif
+        }
         case AST_EXPR_MOD: {
             if (codegen_vector_binop(e, "%%", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
+#ifdef SHUC_USE_SU_CODEGEN
+            { int is_int = (e->resolved_type && is_integer_type(e->resolved_type)) ? 1 : 0; if (codegen_codegen_su_emit_mod_expr((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, is_int) != 0) return -1; return 0; }
+#else
             /* 整数取模零：运行时检查（UB 收窄为定义行为） */
             if (e->resolved_type && is_integer_type(e->resolved_type)) {
                 fprintf(out, "(");
@@ -851,38 +1093,63 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             fprintf(out, " %% ");
             if (codegen_expr(r, out) != 0) return -1;
             return 0;
+#endif
         }
         case AST_EXPR_SHL:
             if (codegen_vector_binop(e, "<<", out) == 0) return 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " << "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " << ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_SHR:
             if (codegen_vector_binop(e, ">>", out) == 0) return 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " >> "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " >> ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_BITAND:
             if (codegen_vector_binop(e, "&", out) == 0) return 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " & "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " & ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_BITOR:
             if (codegen_vector_binop(e, "|", out) == 0) return 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " | "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " | ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_BITXOR:
             if (codegen_vector_binop(e, "^", out) == 0) return 0;
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " ^ "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " ^ ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_ASSIGN:
+#ifdef SHUC_USE_SU_CODEGEN
+            if (codegen_codegen_su_emit_assign((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right) != 0) return -1;
+            return 0;
+#else
             /* 赋值表达式：生成 (left = right)，与 C 语义一致且可作为表达式使用（如 for 的 step） */
             fprintf(out, "(");
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -890,61 +1157,106 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             fprintf(out, ")");
             return 0;
+#endif
         case AST_EXPR_EQ:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " == "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " == ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_NE:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " != "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " != ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_LT:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " < "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " < ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_LE:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " <= "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " <= ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_GT:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " > "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " > ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_GE:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " >= "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " >= ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_LOGAND:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " && "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " && ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_LOGOR:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char op[] = " || "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
+#else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
             fprintf(out, " || ");
             if (codegen_expr(e->value.binop.right, out) != 0) return -1;
             return 0;
+#endif
         case AST_EXPR_NEG:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char pre[] = "(-"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
+#else
             fprintf(out, "(-");
             if (codegen_expr(e->value.unary.operand, out) != 0) return -1;
             fprintf(out, ")");
             return 0;
+#endif
         case AST_EXPR_BITNOT:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char pre[] = "(~"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
+#else
             fprintf(out, "(~");
             if (codegen_expr(e->value.unary.operand, out) != 0) return -1;
             fprintf(out, ")");
             return 0;
+#endif
         case AST_EXPR_LOGNOT:
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char pre[] = "(!"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
+#else
             fprintf(out, "(!");
             if (codegen_expr(e->value.unary.operand, out) != 0) return -1;
             fprintf(out, ")");
             return 0;
+#endif
         case AST_EXPR_IF: {
             const struct ASTExpr *then_e = e->value.if_expr.then_expr;
             const struct ASTExpr *else_e = e->value.if_expr.else_expr;
@@ -1059,6 +1371,9 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         }
         case AST_EXPR_TERNARY: {
             /* cond ? then : else → C 三元运算符 */
+#ifdef SHUC_USE_SU_CODEGEN
+            { static const char q[] = " ? ", c[] = " : "; fprintf(out, "("); if (codegen_codegen_su_emit_ternary_inner((uint8_t *)out, (uint8_t *)e->value.if_expr.cond, (uint8_t *)e->value.if_expr.then_expr, (uint8_t *)e->value.if_expr.else_expr, (uint8_t *)q, 3, (uint8_t *)c, 3) != 0) return -1; fprintf(out, ")"); return 0; }
+#else
             fprintf(out, "(");
             if (codegen_expr(e->value.if_expr.cond, out) != 0) return -1;
             fprintf(out, " ? ");
@@ -1067,8 +1382,13 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             if (codegen_expr(e->value.if_expr.else_expr, out) != 0) return -1;
             fprintf(out, ")");
             return 0;
+#endif
         }
         case AST_EXPR_PANIC:
+#ifdef SHUC_USE_SU_CODEGEN
+            if (codegen_codegen_su_emit_panic((uint8_t *)out, e->value.unary.operand ? 1 : 0, (uint8_t *)e->value.unary.operand) != 0) return -1;
+            return 0;
+#else
             /* 冷路径：通过辅助函数标记 noreturn+cold，避免污染 ICache（控制流清单 §8.3、§8.4） */
             if (e->value.unary.operand) {
                 fprintf(out, "shulang_panic_(1, ");
@@ -1078,12 +1398,29 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                 fprintf(out, "shulang_panic_(0, 0)");
             }
             return 0;
+#endif
         case AST_EXPR_FIELD_ACCESS:
             /* Type.Variant 枚举变体（typeck 已设 is_enum_variant）与 base.field 结构体字段（§7.4）；跨模块时用 prefix_Enum_Variant */
             if (e->value.field_access.is_enum_variant && e->value.field_access.base->kind == AST_EXPR_VAR) {
                 const char *en = e->value.field_access.base->value.var.name;
                 const char *vn = e->value.field_access.field_name;
                 if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths && en) {
+                    int found = 0;
+                    for (int di = 0; di < codegen_ndep && !found; di++) {
+                        const struct ASTModule *d = codegen_dep_mods[di];
+                        if (!d || !d->enum_defs) continue;
+                        for (int ej = 0; ej < d->num_enums; ej++)
+                            if (d->enum_defs[ej]->name && strcmp(d->enum_defs[ej]->name, en) == 0) {
+                                char pre[256];
+                                import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                                fprintf(out, "%s%s_%s", pre, en, vn ? vn : "");
+                                found = 1;
+                                break;
+                            }
+                    }
+                    if (found) return 0;
+                }
+                if (codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths && en) {
                     int found = 0;
                     for (int di = 0; di < codegen_ndep && !found; di++) {
                         const struct ASTModule *d = codegen_dep_mods[di];
@@ -1117,14 +1454,38 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                     }
             }
             /* 字段访问 base.field，基表达式加括号以保证 a+b.x 为 (a+b).x */
+#ifdef SHUC_USE_SU_CODEGEN
+            { const char *fn = e->value.field_access.field_name ? e->value.field_access.field_name : ""; if (codegen_codegen_su_emit_field_access((uint8_t *)out, (uint8_t *)e->value.field_access.base, (uint8_t *)fn, (int32_t)strlen(fn)) != 0) return -1; return 0; }
+#else
             fprintf(out, "(");
             if (codegen_expr(e->value.field_access.base, out) != 0) return -1;
             fprintf(out, ").%s", e->value.field_access.field_name ? e->value.field_access.field_name : "");
             return 0;
+#endif
         case AST_EXPR_STRUCT_LIT: {
-            /* 结构体字面量 TypeName { f: expr, ... } → (struct Name){ .f = expr, ... }（C99 指定初始化）；库模块或依赖模块用前缀名 */
+            /* 结构体字面量 TypeName { f: expr, ... } → (struct Name){ .f = expr, ... }（C99 指定初始化）；库模块中若结构体来自依赖用依赖前缀 */
             const char *sname = e->value.struct_lit.struct_name ? e->value.struct_lit.struct_name : "";
-            if (codegen_library_prefix && *codegen_library_prefix && e->value.struct_lit.struct_name) {
+            if (codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths && e->value.struct_lit.struct_name) {
+                int found = 0;
+                for (int di = 0; di < codegen_ndep && !found; di++) {
+                    const struct ASTModule *d = codegen_dep_mods[di];
+                    if (!d || !d->struct_defs) continue;
+                    for (int sj = 0; sj < d->num_structs; sj++)
+                        if (d->struct_defs[sj]->name && strcmp(d->struct_defs[sj]->name, e->value.struct_lit.struct_name) == 0) {
+                            char pre[256];
+                            import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                            fprintf(out, "(struct %s%s){ ", pre, e->value.struct_lit.struct_name);
+                            found = 1;
+                            break;
+                        }
+                }
+                if (found) { /* 下面 for 循环写字段，最后 return 0 */ }
+                else {
+                    char sname_buf[256];
+                    library_prefixed_name(e->value.struct_lit.struct_name, sname_buf, sizeof(sname_buf));
+                    fprintf(out, "(struct %s){ ", sname_buf);
+                }
+            } else if (codegen_library_prefix && *codegen_library_prefix && e->value.struct_lit.struct_name) {
                 char sname_buf[256];
                 library_prefixed_name(e->value.struct_lit.struct_name, sname_buf, sizeof(sname_buf));
                 fprintf(out, "(struct %s){ ", sname_buf);
@@ -1256,7 +1617,11 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                 }
                 return 0;
             }
-            /* 无类型信息或非数组/切片时按原样生成 */
+            /* 无类型信息或非数组/切片时按原样生成：(base)[index] 或 (base).data[index] */
+#ifdef SHUC_USE_SU_CODEGEN
+            if (codegen_codegen_su_emit_index_fallback((uint8_t *)out, (uint8_t *)base, (uint8_t *)idx, e->value.index.base_is_slice ? 1 : 0) != 0) return -1;
+            return 0;
+#else
             fprintf(out, "(");
             if (codegen_expr(base, out) != 0) return -1;
             if (e->value.index.base_is_slice)
@@ -1266,6 +1631,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             if (codegen_expr(idx, out) != 0) return -1;
             fprintf(out, "]");
             return 0;
+#endif
         }
         case AST_EXPR_CALL: {
             /* 跨模块调用：从 import 解析到的函数用前缀名；泛型时用 prefix + mono_instance_mangled_name（阶段 7.3） */
@@ -1365,6 +1731,10 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                     }
                 }
             }
+#ifdef SHUC_USE_SU_CODEGEN
+            if (codegen_codegen_su_emit_call((uint8_t *)out, (uint8_t *)e) != 0) return -1;
+            return 0;
+#else
             if (codegen_expr(e->value.call.callee, out) != 0) return -1;
             fprintf(out, "(");
             for (int i = 0; i < e->value.call.num_args; i++) {
@@ -1373,6 +1743,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             }
             fprintf(out, ")");
             return 0;
+#endif
         }
         case AST_EXPR_METHOD_CALL: {
             struct ASTFunc *impl_func = e->value.method_call.resolved_impl_func;
@@ -2655,7 +3026,8 @@ void codegen_compute_used_types(struct ASTModule *entry, struct ASTModule **dep_
  * 多函数：先生成所有函数的 vector/slice 前置定义，再按「非 main 先、main 最后」生成各函数定义。
  */
 int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep,
-    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx) {
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted) {
     if (!m || !out) return -1;
     if (!m->main_func || !m->main_func->body) return -1;
     if (strcmp(m->main_func->name, "main") != 0) return -1;
@@ -2665,14 +3037,18 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
     codegen_dep_mods = dep_mods;
     codegen_dep_paths = dep_import_paths;
     codegen_ndep = dep_mods && dep_import_paths ? ndep : 0;
+    codegen_emitted_type_names = emitted_type_names;
+    codegen_n_emitted_inout = n_emitted_inout;
+    codegen_max_emitted = max_emitted;
     codegen_slice_emitted_n = 0;
     codegen_vector_emitted_n = 0;
     fprintf(out, "#include <stdio.h>\n");
     fprintf(out, "#include <stdlib.h>\n");
     fprintf(out, "#include <stdint.h>\n");
     fprintf(out, "#include <stddef.h>\n");
-    /* 依赖模块中的 enum 须在 struct 之前输出，避免 struct 字段 "enum prefix_Name" 引用不完整类型 */
-    if (codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+    /* 单文件模式（emitted_type_names 非 NULL）时依赖类型已在前面写出，此处不再重复输出，避免 C 重定义 */
+    if (!emitted_type_names && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+        /* 依赖模块中的 enum 须在 struct 之前输出，避免 struct 字段 "enum prefix_Name" 引用不完整类型 */
         for (int i = 0; i < codegen_ndep; i++) {
             const struct ASTModule *d = codegen_dep_mods[i];
             if (!d || !d->enum_defs) continue;
@@ -2689,9 +3065,7 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
                 fprintf(out, " };\n");
             }
         }
-    }
-    /* 依赖模块中的 struct 须在 extern 声明之前输出，避免 extern 引用不完整类型（如 std.mem.Buffer） */
-    if (codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+        /* 依赖模块中的 struct 须在 extern 声明之前输出，避免 extern 引用不完整类型（如 std.mem.Buffer） */
         for (int i = 0; i < codegen_ndep; i++) {
             const struct ASTModule *d = codegen_dep_mods[i];
             if (!d || !d->struct_defs) continue;
@@ -2820,23 +3194,26 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             if (pt) ensure_slice_struct(pt, out);
         }
     }
-    /* 顶层枚举定义 → C enum；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用枚举 */
+    /* 顶层枚举定义 → C enum；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用枚举；单文件去重时已出现则跳过 */
     for (int i = 0; i < m->num_enums && m->enum_defs; i++) {
         const struct ASTEnumDef *ed = m->enum_defs[i];
         if (!ed || !ed->name) continue;
         if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, ed->name)) continue;
+        if (emitted_type_names && n_emitted_inout && emitted_type_contains(ed->name, emitted_type_names, *n_emitted_inout)) continue;
         fprintf(out, "enum %s { ", ed->name);
         for (int j = 0; j < ed->num_variants; j++) {
             if (j > 0) fprintf(out, ", ");
             fprintf(out, "%s_%s", ed->name, ed->variant_names[j] ? ed->variant_names[j] : "");
         }
         fprintf(out, " };\n");
+        if (emitted_type_names && n_emitted_inout) emitted_type_add(ed->name, emitted_type_names, n_emitted_inout, max_emitted);
     }
-    /* 顶层结构体定义 → C struct；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用结构体 */
+    /* 顶层结构体定义 → C struct；阶段 8.1 DCE 扩展：若 is_type_used 非 NULL 则仅输出被引用结构体；单文件去重时已出现则跳过 */
     for (int i = 0; i < m->num_structs && m->struct_defs; i++) {
         const struct ASTStructDef *sd = m->struct_defs[i];
         if (!sd || !sd->name) continue;
         if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, sd->name)) continue;
+        if (emitted_type_names && n_emitted_inout && emitted_type_contains(sd->name, emitted_type_names, *n_emitted_inout)) continue;
         fprintf(out, "struct %s { ", sd->name);
         for (int j = 0; j < sd->num_fields; j++) {
             const struct ASTType *fty = sd->fields[j].type;
@@ -2852,13 +3229,16 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             fprintf(out, "} __attribute__((packed));\n");
         else
             fprintf(out, "};\n");
+        if (emitted_type_names && n_emitted_inout) emitted_type_add(sd->name, emitted_type_names, n_emitted_inout, max_emitted);
     }
-    /* 冷路径辅助：panic 分支标记 noreturn+cold，利于 ICache 与分支预测（控制流清单 §8.3） */
-    fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-    fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
-    fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
-    fprintf(out, "  abort();\n");
-    fprintf(out, "}\n");
+    /* 冷路径辅助：panic 分支标记 noreturn+cold；单文件时已在第一个库块中输出，此处仅多文件时输出 */
+    if (!emitted_type_names) {
+        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
+        fprintf(out, "  abort();\n");
+        fprintf(out, "}\n");
+    }
     /* 入口模块内函数前向声明：满足 C 要求（任意顺序调用须先声明后定义）；对所有有体的非 main、非 extern、非泛型函数均声明，避免 DCE 未收集到的同模块 callee 导致 C undeclared */
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
         const struct ASTFunc *f = m->funcs[i];
@@ -2933,7 +3313,8 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
 int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
     struct ASTModule **lib_dep_mods, const char **lib_dep_paths, int n_lib_dep,
     FILE *out,
-    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx) {
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted) {
     if (!m || !out) return -1;
     static char lib_prefix_buf[256];
     size_t off = 0;
@@ -2949,13 +3330,19 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
     codegen_dep_mods = lib_dep_mods;
     codegen_dep_paths = lib_dep_paths;
     codegen_ndep = (lib_dep_mods && lib_dep_paths) ? n_lib_dep : 0;
+    codegen_emitted_type_names = emitted_type_names;
+    codegen_n_emitted_inout = n_emitted_inout;
+    codegen_max_emitted = max_emitted;
     codegen_slice_emitted_n = 0;
 
-    fprintf(out, "/* generated from %s */\n", import_path ? import_path : "");
-    fprintf(out, "#include <stdint.h>\n");
-    fprintf(out, "#include <stddef.h>\n");
-    fprintf(out, "#include <stdlib.h>\n");
-    fprintf(out, "#include <stdio.h>\n");
+    /* 单文件模式时 include 与 panic 已由 driver 在写库前统一输出，此处不再输出；仅多文件（无 emitted_type_names）时每个库自己输出 include */
+    if (!emitted_type_names) {
+        fprintf(out, "/* generated from %s */\n", import_path ? import_path : "");
+        fprintf(out, "#include <stdint.h>\n");
+        fprintf(out, "#include <stddef.h>\n");
+        fprintf(out, "#include <stdlib.h>\n");
+        fprintf(out, "#include <stdio.h>\n");
+    }
 
     /* 本库对 lib_dep 的调用：收集后生成 extern，避免 C 编译 undeclared */
     if (codegen_ndep > 0 && lib_dep_mods && lib_dep_paths) {
@@ -3023,12 +3410,14 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, ed->name)) continue;
         char ename[256];
         library_prefixed_name(ed->name, ename, sizeof(ename));
+        if (emitted_type_names && n_emitted_inout && emitted_type_contains(ename, emitted_type_names, *n_emitted_inout)) continue;
         fprintf(out, "enum %s { ", ename);
         for (int j = 0; j < ed->num_variants; j++) {
             if (j > 0) fprintf(out, ", ");
             fprintf(out, "%s_%s", ename, ed->variant_names[j] ? ed->variant_names[j] : "");
         }
         fprintf(out, " };\n");
+        if (emitted_type_names && n_emitted_inout) emitted_type_add(ename, emitted_type_names, n_emitted_inout, max_emitted);
     }
     /* 结构体字段若为 []T，须先输出 slice 结构体定义，避免 C 侧不完整类型 */
     for (int i = 0; i < m->num_structs && m->struct_defs; i++) {
@@ -3043,6 +3432,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         if (dce_ctx && is_type_used && !is_type_used(dce_ctx, m, sd->name)) continue;
         char sname[256];
         library_prefixed_name(sd->name, sname, sizeof(sname));
+        if (emitted_type_names && n_emitted_inout && emitted_type_contains(sname, emitted_type_names, *n_emitted_inout)) continue;
         fprintf(out, "struct %s { ", sname);
         for (int j = 0; j < sd->num_fields; j++) {
             const struct ASTType *fty = sd->fields[j].type;
@@ -3056,12 +3446,16 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
             fprintf(out, "} __attribute__((packed));\n");
         else
             fprintf(out, "};\n");
+        if (emitted_type_names && n_emitted_inout) emitted_type_add(sname, emitted_type_names, n_emitted_inout, max_emitted);
     }
-    fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-    fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
-    fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
-    fprintf(out, "  abort();\n");
-    fprintf(out, "}\n");
+    /* 单文件时 panic 已在第一个库的 include 块中输出；仅多文件（无 emitted_type_names）时每库各自输出 panic */
+    if (!emitted_type_names) {
+        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
+        fprintf(out, "  abort();\n");
+        fprintf(out, "}\n");
+    }
 
     /* extern 函数：仅生成 C 的 extern 声明，符号名为 .su 中的函数名（与 C 一致），无定义 */
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
