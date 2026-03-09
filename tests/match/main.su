@@ -1,5 +1,5 @@
 // match 最小形式：整数字面量与 _ 分支（对变量 match 以通过 typeck）
 function main(): i32 {
   let x: i32 = 1;
-  return match x { 1 => 2; 2 => 3; _ => 0; };
+  return match x { 1 => 2; 2 => 3; _ => 0; }
 }
