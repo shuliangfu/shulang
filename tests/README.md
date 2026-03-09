@@ -13,6 +13,8 @@
 
 **不纳入回归的脚本**：`run-size-baseline.sh`、`run-perf-baseline.sh` 为可选体积/性能基线，需时单独执行。
 
+**CI 多端测试**：push/PR 时 GitHub Actions 在 **Linux（ubuntu-latest）**、**macOS（macos-latest）**、**Windows（windows-latest，通过 WSL 执行 make + run-all.sh）** 上自动构建 compiler 并执行 `./tests/run-all.sh`，见 `.github/workflows/ci.yml`。
+
 ## 二、测试脚本与覆盖范围
 
 | 脚本 | 覆盖内容 | 用例类型 |
@@ -53,7 +55,7 @@
 | `run-panic.sh` | panic() / panic(expr)，编译通过且运行非 0 退出 | 正例 |
 | `run-defer.sh` | defer 块与块尾返回值 | 正例 |
 | `run-goto.sh` | label 与 goto、return | 正例 |
-| `run-vector.sh` | 向量 i32x4/u32x4、0 与字面量初始化、逐分量加 | 正例 |
+| `run-vector.sh` | 向量 i32x4/u32x4/i32x16、0 与字面量初始化、逐分量加 | 正例 |
 | `run-fmt.sh` | core.fmt 格式化 | 正例 |
 | `run-debug.sh` | 调试/打印相关 | 正例 |
 | `run-core-types.sh` | core 基础类型 | 正例 |
@@ -97,3 +99,37 @@ make test
 ```
 
 两者都会跑完自举相关回归套件中全部 `run-*.sh`，并输出各脚本的 OK 或失败信息。
+
+## 五、测试覆盖分析
+
+### 5.1 已覆盖范围
+
+| 维度 | 覆盖情况 |
+|------|----------|
+| **编译器链路** | lexer → parser → preprocess → typeck → codegen → cc 全链路有正例；parser/typeck/lexer 有负例或边界用例（见 README-boundary.md）。 |
+| **语言特性** | 泛型、trait、多文件、import、let/const、if/ternary/while/for、match、enum、struct、slice、数组、指针、向量、defer、goto、panic、return 表达式、二元/一元运算、浮点、布尔 均有对应 run-*.sh。 |
+| **core 模块** | types（core-types）、slice、option、result、builtin、debug、fmt 有独立或 stdlib-import 覆盖；core.mem 通过 std.mem 或 stdlib-import 间接使用。 |
+| **std 模块** | io、io.driver、io.core（经 driver/mem 传递依赖）、mem、net、fs、path、map、string、vec、heap、process、error、runtime 均有 run-*.sh；net 含 connect/listen/accept 与 accept_many/connect_many 调用。 |
+| **边界/负例** | preprocess、parser、lexer、typeck、struct、float、while、for、let-const、import、match、array、slice、generic、trait、ub、panic 已补边界或负例（见 README-boundary.md）。 |
+| **自举相关** | std.io.driver、std.io.core、std.mem、std.net、UB 收窄、ABI 布局 均纳入 run-all.sh。 |
+
+### 5.2 缺口与说明
+
+| 项 | 说明 |
+|------|------|
+| **FFI（extern function）** | 存在 `tests/ffi/putchar.su`，但**无** `run-ffi.sh`，未纳入 run-all.sh；若需回归 extern 调用可新增 run-ffi.sh 并加入 run-all。 |
+| **return 类型与声明一致** | `return_type_mismatch.su` 已保留，当前 typeck 未检查 return 表达式类型与函数声明是否一致，对应断言在 run-return-expr.sh 中已注释，待 typeck 补全后启用。 |
+| **memory-contract / packed** | `memory-contract/packed_struct.su` 仅被 abi/layout_abi.c 文档引用；run-abi-layout.sh 只跑 C 程序，不编译 .su；若需 packed 结构体行为回归可单独加脚本。 |
+| **体积/性能基线** | run-size-baseline.sh、run-perf-baseline.sh 有意不纳入 run-all，需时单独执行。 |
+
+### 5.3 结论
+
+- **自举回归所需**：run-all.sh 已覆盖编译器、语言特性、core/std 主要模块、边界与负例、io.driver/io.core/net/UB/ABI，**可视为自举相关回归已全面覆盖**。
+- **可选增强**：将 FFI 独立测试纳入 run-all、启用 return 类型检查后打开 return_type_mismatch 断言、为 packed 或 memory-contract 增加单独用例。
+
+## 六、CI 多端测试
+
+- **位置**：`.github/workflows/ci.yml`
+- **触发**：推送到或 PR 到 `main` / `master` 分支时自动运行。
+- **矩阵**：`ubuntu-latest`（Linux）、`macos-latest`（macOS）、`windows-latest`（Windows）；Linux/macOS 直接执行 `make` 与 `./tests/run-all.sh`，Windows 在 **WSL** 内执行相同命令（因 Windows 无默认 make/bash）。
+- **要求**：Linux/macOS 需系统 `cc`、`make`、`bash`（托管 runner 已满足）；Windows 依赖 runner 自带 WSL。若需更多架构（如 arm64），可在同一 workflow 中增加 matrix 或新 job。
