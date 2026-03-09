@@ -258,6 +258,7 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_FALSE:   return "FALSE";
         case TOKEN_F32:     return "F32";
         case TOKEN_F64:     return "F64";
+        case TOKEN_VOID:    return "VOID";
         case TOKEN_INT:     return "INT";
         case TOKEN_FLOAT:   return "FLOAT";
         case TOKEN_LPAREN:  return "LPAREN";
