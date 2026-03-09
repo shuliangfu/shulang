@@ -75,6 +75,20 @@ static const struct ASTEnumDef *find_enum_def(struct ASTEnumDef **defs, int num,
     return NULL;
 }
 
+/** 先在本模块 defs 中查找枚举，未找到时在 typeck_dep_mods 中查找（跨模块 Type.Variant，如 import token 后 TokenKind.TOKEN_EOF）。 */
+static const struct ASTEnumDef *find_enum_def_with_deps(struct ASTEnumDef **defs, int num, const char *name) {
+    const struct ASTEnumDef *ed = find_enum_def(defs, num, name);
+    if (ed) return ed;
+    if (!typeck_dep_mods || !name) return NULL;
+    for (int j = 0; j < typeck_num_deps; j++) {
+        struct ASTModule *dm = typeck_dep_mods[j];
+        if (!dm || !dm->enum_defs) continue;
+        ed = find_enum_def(dm->enum_defs, dm->num_enums, name);
+        if (ed) return ed;
+    }
+    return NULL;
+}
+
 /** 按名称查找 trait 定义；用于 impl 校验（阶段 7.2）。 */
 static const struct ASTTraitDef *find_trait_def(struct ASTTraitDef **defs, int num, const char *name) {
     if (!defs || !name) return NULL;
@@ -721,7 +735,9 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             return 0;
         case AST_EXPR_RETURN:
-            return typeck_expr_sym(e->value.unary.operand, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m);
+            if (e->value.unary.operand)
+                return typeck_expr_sym(e->value.unary.operand, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m);
+            return 0;  /* return; 的 void 检查在 typeck_block 中根据 func_return_type 完成 */
         case AST_EXPR_LIT:
             ((struct ASTExpr *)e)->resolved_type = &static_type_i32;
             return 0;
@@ -868,10 +884,10 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             return 0;
         }
         case AST_EXPR_FIELD_ACCESS: {
-            /* Type.Variant 形式：base 为标识符且为枚举类型名时，按枚举变体处理（§7.4） */
+            /* Type.Variant 形式：base 为标识符且为枚举类型名时，按枚举变体处理（§7.4）；含跨模块 import 的枚举 */
             if (e->value.field_access.base->kind == AST_EXPR_VAR && e->value.field_access.base->value.var.name) {
                 const char *type_name = e->value.field_access.base->value.var.name;
-                const struct ASTEnumDef *ed = find_enum_def(enum_defs, num_enums, type_name);
+                const struct ASTEnumDef *ed = find_enum_def_with_deps(enum_defs, num_enums, type_name);
                 if (ed) {
                     const char *vname = e->value.field_access.field_name;
                     if (enum_variant_index(ed, vname) >= 0) {
@@ -1223,9 +1239,10 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     const int *parent_type_kinds, const char **parent_type_names, const struct ASTType **parent_type_ptrs, int parent_n,
     const int *parent_const_values, int parent_n_consts,
     int inside_loop,
-    struct ASTStructDef **struct_defs, int num_structs, struct ASTEnumDef **enum_defs, int num_enums, const struct ASTModule *m) {
+    struct ASTStructDef **struct_defs, int num_structs, struct ASTEnumDef **enum_defs, int num_enums, const struct ASTModule *m,
+    const struct ASTType *func_return_type) {
     if (!b) return -1;
-    if (!b->final_expr && b->num_labeled_stmts == 0) return -1;
+    if (!b->final_expr && b->num_labeled_stmts == 0 && b->num_expr_stmts == 0) return -1;
     const char *names[MAX_SYMTAB];
     int type_kinds[MAX_SYMTAB];
     const char *type_names[MAX_SYMTAB];
@@ -1354,7 +1371,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             fprintf(stderr, "typeck error: while condition must be bool (no implicit int-to-bool)\n");
             return -1;
         }
-        if (typeck_block(b->loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (typeck_block(b->loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m, func_return_type) != 0) return -1;
     }
     for (int i = 0; i < b->num_for_loops; i++) {
         if (b->for_loops[i].init && typeck_expr_sym(b->for_loops[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -1402,20 +1419,43 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                     }
                 }
             }
-            if (typeck_block(b->for_loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            if (typeck_block(b->for_loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m, func_return_type) != 0) return -1;
             bce_n = saved_bce;
         }
     }
     for (int i = 0; i < b->num_defers; i++) {
-        if (typeck_block(b->defer_blocks[i], names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (typeck_block(b->defer_blocks[i], names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m, func_return_type) != 0) return -1;
     }
     for (int i = 0; i < b->num_labeled_stmts; i++) {
-        if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr) {
-            if (typeck_expr_sym(b->labeled_stmts[i].u.return_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
-            fold_expr((struct ASTExpr *)b->labeled_stmts[i].u.return_expr, names, const_values, n_consts, const_start, parent_n_consts);
+        if (b->labeled_stmts[i].kind == AST_STMT_RETURN) {
+            if (!b->labeled_stmts[i].u.return_expr) {
+                if (!func_return_type || func_return_type->kind != AST_TYPE_VOID) {
+                    fprintf(stderr, "typeck error: return; only allowed in void function\n");
+                    return -1;
+                }
+            } else {
+                if (func_return_type && func_return_type->kind == AST_TYPE_VOID) {
+                    fprintf(stderr, "typeck error: void function cannot return a value\n");
+                    return -1;
+                }
+                if (typeck_expr_sym(b->labeled_stmts[i].u.return_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+                fold_expr((struct ASTExpr *)b->labeled_stmts[i].u.return_expr, names, const_values, n_consts, const_start, parent_n_consts);
+            }
         }
     }
+    for (int i = 0; i < b->num_expr_stmts; i++) {
+        if (typeck_expr_sym(b->expr_stmts[i], names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+    }
     if (!b->final_expr) return 0;
+    if (b->final_expr->kind == AST_EXPR_RETURN && !b->final_expr->value.unary.operand) {
+        if (!func_return_type || func_return_type->kind != AST_TYPE_VOID) {
+            fprintf(stderr, "typeck error: return; only allowed in void function\n");
+            return -1;
+        }
+    } else if (b->final_expr->kind == AST_EXPR_RETURN && b->final_expr->value.unary.operand && func_return_type && func_return_type->kind == AST_TYPE_VOID) {
+        fprintf(stderr, "typeck error: void function cannot return a value\n");
+        return -1;
+    }
     if (typeck_expr_sym(b->final_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
     fold_expr((struct ASTExpr *)b->final_expr, names, const_values, n_consts, const_start, parent_n_consts);
     return 0;
@@ -1504,9 +1544,9 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
                     type_names[i] = (f->params[i].type && f->params[i].type->kind == AST_TYPE_NAMED) ? f->params[i].type->name : NULL;
                     type_ptrs[i] = f->params[i].type;
                 }
-                if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+                if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
                     return -1;
-                if (f->return_type && block_has_implicit_return(f->body)) {
+                if (f->return_type && f->return_type->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
                     fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
                     return -1;
                 }
@@ -1530,9 +1570,9 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             type_names[j] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
             type_ptrs[j] = f->params[j].type;
         }
-        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
             return -1;
-        if (f->return_type && block_has_implicit_return(f->body)) {
+        if (f->return_type && f->return_type->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
             fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
             return -1;
         }
@@ -1554,9 +1594,10 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             type_kinds[j] = type_ptrs[j] ? type_ptrs[j]->kind : AST_TYPE_I32;
             type_names[j] = (type_ptrs[j] && type_ptrs[j]->kind == AST_TYPE_NAMED) ? type_ptrs[j]->name : NULL;
         }
-        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+        const struct ASTType *mono_ret = get_substituted_return_type(f->return_type, f->generic_param_names, type_args, num_type_args);
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, mono_ret) != 0)
             return -1;
-        if (f->return_type && block_has_implicit_return(f->body)) {
+        if (mono_ret && mono_ret->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
             fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
             return -1;
         }
