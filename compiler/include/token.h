@@ -48,8 +48,10 @@ typedef enum TokenKind {
     TOKEN_ISIZE,    /**< 类型名 isize（与指针同宽的有符号整数） */
     TOKEN_I32X4,    /**< 类型名 i32x4（4 车道 i32 向量，文档 §10） */
     TOKEN_I32X8,    /**< 类型名 i32x8（8 车道 i32 向量） */
+    TOKEN_I32X16,   /**< 类型名 i32x16（16 车道 i32 向量，512-bit，对应 AVX-512） */
     TOKEN_U32X4,    /**< 类型名 u32x4（4 车道 u32 向量） */
     TOKEN_U32X8,    /**< 类型名 u32x8（8 车道 u32 向量） */
+    TOKEN_U32X16,   /**< 类型名 u32x16（16 车道 u32 向量，512-bit） */
     TOKEN_TRUE,     /**< 布尔字面量 true */
     TOKEN_FALSE,    /**< 布尔字面量 false */
     TOKEN_F32,      /**< 类型名 f32（32 位浮点，文档阶段 8+） */
