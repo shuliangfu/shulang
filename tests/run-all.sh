@@ -54,6 +54,7 @@ run run-match.sh
 run run-panic.sh
 run run-defer.sh
 run run-goto.sh
+run run-preprocess.sh
 run run-vector.sh
 # core/std 与标准库
 run run-fmt.sh
