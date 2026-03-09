@@ -2,7 +2,7 @@
 import std.io.driver;
 
 function main(): i32 {
-  let b: Buffer = Buffer { ptr: 0, len: 0, handle: 0 };
+  let b: Buffer = Buffer { ptr: 0, len: 0, handle: 0 }
   let r: i32 = register(b);
   let r2: i32 = submit_read(b, 0);
   let r3: i32 = submit_write(b, 0);
