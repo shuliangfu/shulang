@@ -16,12 +16,20 @@
 /** 符号表：names[0..n) 为当前作用域内 const/let 名称（const 在前）；type_kinds[i] 为对应类型；type_names[i] 为 NAMED 类型名（结构体名等）。 */
 #define MAX_SYMTAB 64
 
+/** BCE 扩展：循环内值域上下文，用于 for (let i=0; i<n; i++) 或 i < s.length 时证明 arr[i]/s[i] 在界内。 */
+#define MAX_BCE_RANGES 4
+static const char *bce_var_names[MAX_BCE_RANGES];
+static int bce_bound_const[MAX_BCE_RANGES];   /* 1 表示上界为常数 bce_bound_val，0 表示上界为 bce_bound_base 的 .length */
+static int bce_bound_val[MAX_BCE_RANGES];
+static const struct ASTExpr *bce_bound_base[MAX_BCE_RANGES];
+static int bce_n;
+
 /** 字面量默认类型，用于设置 resolved_type 以便函数调用实参匹配 */
 static struct ASTType static_type_i32 = { AST_TYPE_I32, NULL, NULL, 0 };
 static struct ASTType static_type_i64 = { AST_TYPE_I64, NULL, NULL, 0 };
 static struct ASTType static_type_f64 = { AST_TYPE_F64, NULL, NULL, 0 };
 static struct ASTType static_type_bool = { AST_TYPE_BOOL, NULL, NULL, 0 };
-/** 切片 .len 字段类型（与 C 侧 size_t 对应） */
+/** 切片 .length 字段类型（与 C 侧 size_t 对应） */
 static struct ASTType static_type_usize = { AST_TYPE_USIZE, NULL, NULL, 0 };
 
 /** 当前 typeck 的依赖模块列表（与 m->import_paths 顺序一致），供 CALL 跨模块解析；由 typeck_module 设置。 */
@@ -387,12 +395,204 @@ static int is_const_expr(const struct ASTExpr *e, const char **names, int n) {
             return is_const_expr(e->value.binop.left, names, n) && is_const_expr(e->value.binop.right, names, n);
         case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
             return is_const_expr(e->value.unary.operand, names, n);
+        case AST_EXPR_ARRAY_LIT: {
+            /* CTFE 扩展：数组字面量为常量表达式（各元素须为常量），求值时返回元素个数（数组长度） */
+            for (int i = 0; i < e->value.array_lit.num_elems; i++)
+                if (!is_const_expr(e->value.array_lit.elems[i], names, n)) return 0;
+            return 1;
+        }
         case AST_EXPR_IF:
         case AST_EXPR_TERNARY:
         case AST_EXPR_ASSIGN:
             return 0;  /* if/三元/赋值 表达式非常量 */
         default:
             return 0;
+    }
+}
+
+/**
+ * CTFE 最小集：对常量表达式求值，返回整型结果（用于 const 初值及折叠）。
+ * 要求 e 已通过 is_const_expr；names/const_values 为当前作用域 const 名与已求值；n 为 const 个数。
+ */
+static int eval_const_int(const struct ASTExpr *e, const char **names, const int *const_values, int n) {
+    if (!e) return 0;
+    switch (e->kind) {
+        case AST_EXPR_LIT:
+            return e->value.int_val;
+        case AST_EXPR_BOOL_LIT:
+            return e->value.int_val ? 1 : 0;
+        case AST_EXPR_FLOAT_LIT:
+            return (int)e->value.float_val;
+        case AST_EXPR_VAR: {
+            const char *name = e->value.var.name;
+            for (int i = 0; i < n && names && const_values; i++)
+                if (names[i] && name && strcmp(names[i], name) == 0) return const_values[i];
+            return 0;
+        }
+        case AST_EXPR_ADD: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l + r;
+        }
+        case AST_EXPR_SUB: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l - r;
+        }
+        case AST_EXPR_MUL: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l * r;
+        }
+        case AST_EXPR_DIV: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return (r != 0) ? (l / r) : 0;
+        }
+        case AST_EXPR_MOD: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return (r != 0) ? (l % r) : 0;
+        }
+        case AST_EXPR_SHL: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return (int)((unsigned int)l << (r & 31));
+        }
+        case AST_EXPR_SHR: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return (int)((unsigned int)l >> (r & 31));
+        }
+        case AST_EXPR_BITAND: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l & r;
+        }
+        case AST_EXPR_BITOR: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l | r;
+        }
+        case AST_EXPR_BITXOR: {
+            int l = eval_const_int(e->value.binop.left, names, const_values, n);
+            int r = eval_const_int(e->value.binop.right, names, const_values, n);
+            return l ^ r;
+        }
+        case AST_EXPR_EQ:  return eval_const_int(e->value.binop.left, names, const_values, n) == eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_NE:  return eval_const_int(e->value.binop.left, names, const_values, n) != eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_LT:  return eval_const_int(e->value.binop.left, names, const_values, n) <  eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_LE:  return eval_const_int(e->value.binop.left, names, const_values, n) <= eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_GT:  return eval_const_int(e->value.binop.left, names, const_values, n) >  eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_GE:  return eval_const_int(e->value.binop.left, names, const_values, n) >= eval_const_int(e->value.binop.right, names, const_values, n) ? 1 : 0;
+        case AST_EXPR_LOGAND: return (eval_const_int(e->value.binop.left, names, const_values, n) && eval_const_int(e->value.binop.right, names, const_values, n)) ? 1 : 0;
+        case AST_EXPR_LOGOR:  return (eval_const_int(e->value.binop.left, names, const_values, n) || eval_const_int(e->value.binop.right, names, const_values, n)) ? 1 : 0;
+        case AST_EXPR_NEG: {
+            int o = eval_const_int(e->value.unary.operand, names, const_values, n);
+            return -o;
+        }
+        case AST_EXPR_BITNOT: {
+            int o = eval_const_int(e->value.unary.operand, names, const_values, n);
+            return ~o;
+        }
+        case AST_EXPR_LOGNOT: {
+            int o = eval_const_int(e->value.unary.operand, names, const_values, n);
+            return !o ? 1 : 0;
+        }
+        case AST_EXPR_ARRAY_LIT:
+            /* CTFE 扩展：数组字面量在整型上下文中求值为元素个数（数组长度） */
+            return e->value.array_lit.num_elems;
+        default:
+            return 0;
+    }
+}
+
+/**
+ * 若 e 为整型/布尔常量表达式，则求值并设置 const_folded_val/const_folded_valid（CTFE 最小集）。
+ * const_start：当前块 const 在 names 中的起始下标；parent_n_consts：父块 const 个数（names[0..parent_n_consts) 有父 const 值）。
+ */
+static void fold_expr(struct ASTExpr *e, const char **names, const int *const_values, int n_consts, int const_start, int parent_n_consts) {
+    if (!e || !names) return;
+    e->const_folded_valid = 0; /* 默认未折叠，避免 malloc 分配的节点残留垃圾 */
+    switch (e->kind) {
+        case AST_EXPR_LIT:
+        case AST_EXPR_BOOL_LIT:
+            e->const_folded_val = e->value.int_val;
+            e->const_folded_valid = 1;
+            return;
+        case AST_EXPR_FLOAT_LIT:
+            e->const_folded_val = (int)e->value.float_val;
+            e->const_folded_valid = 1;
+            return;
+        case AST_EXPR_VAR:
+            if (const_values) {
+                const char *name = e->value.var.name;
+                int i;
+                for (i = 0; i < parent_n_consts; i++)
+                    if (names[i] && name && strcmp(names[i], name) == 0) {
+                        e->const_folded_val = const_values[i];
+                        e->const_folded_valid = 1;
+                        return;
+                    }
+                for (i = const_start; i < const_start + n_consts; i++)
+                    if (names[i] && name && strcmp(names[i], name) == 0) {
+                        e->const_folded_val = const_values[i];
+                        e->const_folded_valid = 1;
+                        return;
+                    }
+            }
+            return;
+        case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV: case AST_EXPR_MOD:
+        case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
+        case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
+        case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: {
+            fold_expr(e->value.binop.left, names, const_values, n_consts, const_start, parent_n_consts);
+            fold_expr(e->value.binop.right, names, const_values, n_consts, const_start, parent_n_consts);
+            if (e->value.binop.left->const_folded_valid && e->value.binop.right->const_folded_valid && e->resolved_type &&
+                (e->resolved_type->kind == AST_TYPE_I32 || e->resolved_type->kind == AST_TYPE_BOOL ||
+                 e->resolved_type->kind == AST_TYPE_U8 || e->resolved_type->kind == AST_TYPE_U32 ||
+                 e->resolved_type->kind == AST_TYPE_I64 || e->resolved_type->kind == AST_TYPE_USIZE || e->resolved_type->kind == AST_TYPE_ISIZE)) {
+                int l = e->value.binop.left->const_folded_val, r = e->value.binop.right->const_folded_val;
+                switch (e->kind) {
+                    case AST_EXPR_ADD: e->const_folded_val = l + r; break;
+                    case AST_EXPR_SUB: e->const_folded_val = l - r; break;
+                    case AST_EXPR_MUL: e->const_folded_val = l * r; break;
+                    case AST_EXPR_DIV: e->const_folded_val = (r != 0) ? (l / r) : 0; break;
+                    case AST_EXPR_MOD: e->const_folded_val = (r != 0) ? (l % r) : 0; break;
+                    case AST_EXPR_SHL: e->const_folded_val = (int)((unsigned int)l << (r & 31)); break;
+                    case AST_EXPR_SHR: e->const_folded_val = (int)((unsigned int)l >> (r & 31)); break;
+                    case AST_EXPR_BITAND: e->const_folded_val = l & r; break;
+                    case AST_EXPR_BITOR: e->const_folded_val = l | r; break;
+                    case AST_EXPR_BITXOR: e->const_folded_val = l ^ r; break;
+                    case AST_EXPR_EQ: e->const_folded_val = (l == r) ? 1 : 0; break;
+                    case AST_EXPR_NE: e->const_folded_val = (l != r) ? 1 : 0; break;
+                    case AST_EXPR_LT: e->const_folded_val = (l < r) ? 1 : 0; break;
+                    case AST_EXPR_LE: e->const_folded_val = (l <= r) ? 1 : 0; break;
+                    case AST_EXPR_GT: e->const_folded_val = (l > r) ? 1 : 0; break;
+                    case AST_EXPR_GE: e->const_folded_val = (l >= r) ? 1 : 0; break;
+                    case AST_EXPR_LOGAND: e->const_folded_val = (l && r) ? 1 : 0; break;
+                    case AST_EXPR_LOGOR: e->const_folded_val = (l || r) ? 1 : 0; break;
+                    default: break;
+                }
+                e->const_folded_valid = 1;
+            }
+            return;
+        }
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
+            fold_expr(e->value.unary.operand, names, const_values, n_consts, const_start, parent_n_consts);
+            if (e->value.unary.operand->const_folded_valid && e->resolved_type &&
+                (e->resolved_type->kind == AST_TYPE_I32 || e->resolved_type->kind == AST_TYPE_BOOL ||
+                 e->resolved_type->kind == AST_TYPE_U8 || e->resolved_type->kind == AST_TYPE_U32 ||
+                 e->resolved_type->kind == AST_TYPE_I64 || e->resolved_type->kind == AST_TYPE_USIZE || e->resolved_type->kind == AST_TYPE_ISIZE)) {
+                int o = e->value.unary.operand->const_folded_val;
+                if (e->kind == AST_EXPR_NEG) e->const_folded_val = -o;
+                else if (e->kind == AST_EXPR_BITNOT) e->const_folded_val = ~o;
+                else e->const_folded_val = !o ? 1 : 0;
+                e->const_folded_valid = 1;
+            }
+            return;
+        default:
+            return;
     }
 }
 
@@ -447,10 +647,10 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
         int base_kind;
         const char *base_name = NULL;
         if (get_expr_type(e->value.field_access.base, names, type_kinds, type_names, n, type_ptrs, struct_defs, num_structs, enum_defs, num_enums, &base_kind, &base_name, NULL) != 0) return -1;
-        /* 切片 []T 的 .len 字段：类型为 usize（C 侧 struct 的 len 为 size_t） */
+        /* 切片 []T 的 .length 字段：类型为 usize（C 侧 struct 的 length 为 size_t） */
         if (base_kind == AST_TYPE_SLICE) {
             const char *field = e->value.field_access.field_name;
-            if (field && strcmp(field, "len") == 0) {
+            if (field && strcmp(field, "length") == 0) {
                 *out_kind = AST_TYPE_USIZE;
                 *out_name = NULL;
                 return 0;
@@ -690,14 +890,14 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 typeck_err_loc(e);
                 return -1;
             }
-            /* 切片 []T 仅支持 .len，类型为 usize */
+            /* 切片 []T 仅支持 .length，类型为 usize */
             if (base_kind == AST_TYPE_SLICE) {
                 const char *field = e->value.field_access.field_name;
-                if (field && strcmp(field, "len") == 0) {
+                if (field && strcmp(field, "length") == 0) {
                     ((struct ASTExpr *)e)->resolved_type = &static_type_usize;
                     return 0;
                 }
-                fprintf(stderr, "typeck error: slice only has field 'len'");
+                fprintf(stderr, "typeck error: slice only has field 'length'");
                 typeck_err_loc(e);
                 return -1;
             }
@@ -763,6 +963,31 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 return -1;
             }
             ((struct ASTExpr *)e)->value.index.base_is_slice = (base_kind == AST_TYPE_SLICE);
+            /* BCE：下标为字面量 0 且 base 为长度≥1 的数组时，可证明在界内，codegen 可省略边界检查 */
+            {
+                const struct ASTExpr *idx = e->value.index.index_expr;
+                const struct ASTType *base_ty = e->value.index.base->resolved_type;
+                if (idx->kind == AST_EXPR_LIT && idx->value.int_val == 0 && base_ty &&
+                    base_ty->kind == AST_TYPE_ARRAY && base_ty->array_size >= 1)
+                    ((struct ASTExpr *)e)->index_proven_in_bounds = 1;
+            }
+            /* BCE 扩展：循环内值域——若下标为变量且在当前 for 的 [0, bound) 上下文中，且 base 长度与 bound 一致则标为在界内 */
+            if (!((struct ASTExpr *)e)->index_proven_in_bounds && e->value.index.index_expr->kind == AST_EXPR_VAR) {
+                const char *idx_name = e->value.index.index_expr->value.var.name;
+                const struct ASTType *base_ty = e->value.index.base->resolved_type;
+                for (int k = 0; k < bce_n && idx_name; k++) {
+                    if (!bce_var_names[k] || strcmp(bce_var_names[k], idx_name) != 0) continue;
+                    if (bce_bound_const[k]) {
+                        if (base_ty && base_ty->kind == AST_TYPE_ARRAY && base_ty->array_size == bce_bound_val[k])
+                            ((struct ASTExpr *)e)->index_proven_in_bounds = 1;
+                        break;
+                    }
+                    if (base_kind == AST_TYPE_SLICE && bce_bound_base[k] &&
+                        e->value.index.base == bce_bound_base[k])
+                        ((struct ASTExpr *)e)->index_proven_in_bounds = 1;
+                    break;
+                }
+            }
             return 0;
         }
         case AST_EXPR_CALL: {
@@ -992,10 +1217,12 @@ static int block_has_implicit_return(const struct ASTBlock *b) {
 }
 
 /**
- * 对块做类型检查；parent_names/... 为外层符号表；inside_loop 表示当前块是否为某 while 体；struct_defs/num_structs 为顶层结构体；enum_defs/num_enums 为顶层枚举。
+ * 对块做类型检查；parent_names/... 为外层符号表；parent_const_values/parent_n_consts 为外层 const 求值结果（CTFE）；inside_loop 表示当前块是否为某 while 体。
  */
 static int typeck_block(const struct ASTBlock *b, const char **parent_names,
-    const int *parent_type_kinds, const char **parent_type_names, const struct ASTType **parent_type_ptrs, int parent_n, int inside_loop,
+    const int *parent_type_kinds, const char **parent_type_names, const struct ASTType **parent_type_ptrs, int parent_n,
+    const int *parent_const_values, int parent_n_consts,
+    int inside_loop,
     struct ASTStructDef **struct_defs, int num_structs, struct ASTEnumDef **enum_defs, int num_enums, const struct ASTModule *m) {
     if (!b) return -1;
     if (!b->final_expr && b->num_labeled_stmts == 0) return -1;
@@ -1003,14 +1230,17 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     int type_kinds[MAX_SYMTAB];
     const char *type_names[MAX_SYMTAB];
     const struct ASTType *type_ptrs[MAX_SYMTAB];
+    int const_values[MAX_SYMTAB]; /* CTFE：当前作用域 const 的求值结果，仅 names[0..n_consts) 为 const */
     int n = parent_n < MAX_SYMTAB ? parent_n : 0;
     for (int i = 0; i < n && parent_names; i++) {
         names[i] = parent_names[i];
         type_kinds[i] = (parent_type_kinds && i < parent_n) ? parent_type_kinds[i] : AST_TYPE_I32;
         type_names[i] = (parent_type_names && i < parent_n) ? parent_type_names[i] : NULL;
         type_ptrs[i] = (parent_type_ptrs && i < parent_n) ? parent_type_ptrs[i] : NULL;
+        const_values[i] = (parent_const_values && i < parent_n_consts) ? parent_const_values[i] : 0;
     }
-    int n_consts = n;
+    int const_start = n; /* 当前块 const 在 names 中的起始下标（进入 const 循环前 n = parent_n） */
+    int n_consts = 0;
     for (int i = 0; i < b->num_consts; i++) {
         if (n >= MAX_SYMTAB) {
             fprintf(stderr, "typeck error: too many declarations\n");
@@ -1021,6 +1251,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             return -1;
         }
         if (typeck_expr_sym(b->const_decls[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        const_values[n] = eval_const_int(b->const_decls[i].init, names, const_values, n);
+        fold_expr((struct ASTExpr *)b->const_decls[i].init, names, const_values, i, const_start, parent_n_consts);
         if (b->const_decls[i].type && b->const_decls[i].type->kind == AST_TYPE_ARRAY &&
             b->const_decls[i].init && b->const_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             if (b->const_decls[i].init->value.array_lit.num_elems != b->const_decls[i].type->array_size) {
@@ -1062,7 +1294,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
         type_names[n] = (b->const_decls[i].type && b->const_decls[i].type->kind == AST_TYPE_NAMED) ? b->const_decls[i].type->name : NULL;
         type_ptrs[n] = b->const_decls[i].type;
         names[n++] = b->const_decls[i].name;
-        n_consts = n;
+        n_consts++;
     }
     for (int i = 0; i < b->num_lets; i++) {
         if (n >= MAX_SYMTAB) {
@@ -1070,6 +1302,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             return -1;
         }
         if (typeck_expr_sym(b->let_decls[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        fold_expr((struct ASTExpr *)b->let_decls[i].init, names, const_values, n_consts, const_start, parent_n_consts);
         if (b->let_decls[i].type && b->let_decls[i].type->kind == AST_TYPE_ARRAY &&
             b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             if (b->let_decls[i].init->value.array_lit.num_elems != b->let_decls[i].type->array_size) {
@@ -1116,34 +1349,76 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     }
     for (int i = 0; i < b->num_loops; i++) {
         if (typeck_expr_sym(b->loops[i].cond, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        fold_expr((struct ASTExpr *)b->loops[i].cond, names, const_values, n_consts, const_start, parent_n_consts);
         if (!expr_produces_bool(b->loops[i].cond, names, type_kinds, n)) {
             fprintf(stderr, "typeck error: while condition must be bool (no implicit int-to-bool)\n");
             return -1;
         }
-        if (typeck_block(b->loops[i].body, names, type_kinds, type_names, type_ptrs, n, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (typeck_block(b->loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
     }
     for (int i = 0; i < b->num_for_loops; i++) {
         if (b->for_loops[i].init && typeck_expr_sym(b->for_loops[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (b->for_loops[i].init) fold_expr((struct ASTExpr *)b->for_loops[i].init, names, const_values, n_consts, const_start, parent_n_consts);
         if (b->for_loops[i].cond) {
             if (typeck_expr_sym(b->for_loops[i].cond, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            fold_expr((struct ASTExpr *)b->for_loops[i].cond, names, const_values, n_consts, const_start, parent_n_consts);
             if (!expr_produces_bool(b->for_loops[i].cond, names, type_kinds, n)) {
                 fprintf(stderr, "typeck error: for condition must be bool (no implicit int-to-bool)\n");
                 return -1;
             }
         }
         if (b->for_loops[i].step && typeck_expr_sym(b->for_loops[i].step, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
-        if (typeck_block(b->for_loops[i].body, names, type_kinds, type_names, type_ptrs, n, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (b->for_loops[i].step) fold_expr((struct ASTExpr *)b->for_loops[i].step, names, const_values, n_consts, const_start, parent_n_consts);
+        /* BCE 扩展：从 for 条件 i < bound 推断循环变量值域 [0, bound)，供体内 INDEX 消除边界检查 */
+        {
+            int saved_bce = bce_n;
+            const struct ASTExpr *cond = b->for_loops[i].cond;
+            if (cond && cond->kind == AST_EXPR_LT && bce_n < MAX_BCE_RANGES) {
+                const struct ASTExpr *left = cond->value.binop.left;
+                const struct ASTExpr *right = cond->value.binop.right;
+                if (left && left->kind == AST_EXPR_VAR && left->value.var.name) {
+                    bce_var_names[bce_n] = left->value.var.name;
+                    if (right->kind == AST_EXPR_LIT) {
+                        bce_bound_const[bce_n] = 1;
+                        bce_bound_val[bce_n] = right->value.int_val;
+                        bce_bound_base[bce_n] = NULL;
+                        bce_n++;
+                    } else if (right->kind == AST_EXPR_VAR && right->value.var.name) {
+                        int j;
+                        for (j = 0; j < n && (!names[j] || strcmp(names[j], right->value.var.name) != 0); j++) ;
+                        if (j < n && j >= const_start && j < const_start + n_consts) {
+                            bce_bound_const[bce_n] = 1;
+                            bce_bound_val[bce_n] = const_values[j];
+                            bce_bound_base[bce_n] = NULL;
+                            bce_n++;
+                        }
+                    } else if (right->kind == AST_EXPR_FIELD_ACCESS && right->value.field_access.field_name &&
+                               strcmp(right->value.field_access.field_name, "length") == 0 &&
+                               right->value.field_access.base) {
+                        bce_bound_const[bce_n] = 0;
+                        bce_bound_val[bce_n] = 0;
+                        bce_bound_base[bce_n] = right->value.field_access.base;
+                        bce_n++;
+                    }
+                }
+            }
+            if (typeck_block(b->for_loops[i].body, names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, 1, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            bce_n = saved_bce;
+        }
     }
     for (int i = 0; i < b->num_defers; i++) {
-        if (typeck_block(b->defer_blocks[i], names, type_kinds, type_names, type_ptrs, n, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+        if (typeck_block(b->defer_blocks[i], names, type_kinds, type_names, type_ptrs, n, const_values, n_consts, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
     }
     for (int i = 0; i < b->num_labeled_stmts; i++) {
         if (b->labeled_stmts[i].kind == AST_STMT_RETURN && b->labeled_stmts[i].u.return_expr) {
             if (typeck_expr_sym(b->labeled_stmts[i].u.return_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            fold_expr((struct ASTExpr *)b->labeled_stmts[i].u.return_expr, names, const_values, n_consts, const_start, parent_n_consts);
         }
     }
     if (!b->final_expr) return 0;
-    return typeck_expr_sym(b->final_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m);
+    if (typeck_expr_sym(b->final_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+    fold_expr((struct ASTExpr *)b->final_expr, names, const_values, n_consts, const_start, parent_n_consts);
+    return 0;
 }
 
 /**
@@ -1229,7 +1504,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
                     type_names[i] = (f->params[i].type && f->params[i].type->kind == AST_TYPE_NAMED) ? f->params[i].type->name : NULL;
                     type_ptrs[i] = f->params[i].type;
                 }
-                if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+                if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
                     return -1;
                 if (f->return_type && block_has_implicit_return(f->body)) {
                     fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
@@ -1255,7 +1530,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             type_names[j] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
             type_ptrs[j] = f->params[j].type;
         }
-        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
             return -1;
         if (f->return_type && block_has_implicit_return(f->body)) {
             fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
@@ -1279,12 +1554,28 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             type_kinds[j] = type_ptrs[j] ? type_ptrs[j]->kind : AST_TYPE_I32;
             type_names[j] = (type_ptrs[j] && type_ptrs[j]->kind == AST_TYPE_NAMED) ? type_ptrs[j]->name : NULL;
         }
-        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
             return -1;
         if (f->return_type && block_has_implicit_return(f->body)) {
             fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
             return -1;
         }
     }
+    /* noalias 传递：对指针形参标记 is_restrict，codegen 生成 C restrict，便于优化 */
+    for (int i = 0; i < m->num_funcs && m->funcs; i++) {
+        struct ASTFunc *f = (struct ASTFunc *)m->funcs[i];
+        if (!f || !f->params) continue;
+        for (int j = 0; j < f->num_params; j++)
+            if (f->params[j].type && f->params[j].type->kind == AST_TYPE_PTR)
+                f->params[j].is_restrict = 1;
+    }
+    for (int k = 0; k < m->num_impl_blocks && m->impl_blocks; k++)
+        for (int j = 0; j < m->impl_blocks[k]->num_funcs; j++) {
+            struct ASTFunc *f = (struct ASTFunc *)m->impl_blocks[k]->funcs[j];
+            if (!f || !f->params) continue;
+            for (int p = 0; p < f->num_params; p++)
+                if (f->params[p].type && f->params[p].type->kind == AST_TYPE_PTR)
+                    f->params[p].is_restrict = 1;
+        }
     return 0;
 }
