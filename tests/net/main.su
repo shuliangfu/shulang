@@ -2,7 +2,7 @@
 import std.net;
 
 function main(): i32 {
-  let addr: Ipv4Addr = Ipv4Addr { a: 127, b: 0, c: 0, d: 1 };
+  let addr: Ipv4Addr = Ipv4Addr { a: 127, b: 0, c: 0, d: 1 }
   let listener: TcpListener = listen(addr, 8080);
   let stream: TcpStream = accept(listener, 0);
   let stream2: TcpStream = connect(addr, 8080, 0);
