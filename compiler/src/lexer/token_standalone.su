@@ -1,0 +1,8 @@
+// token_standalone.su — 自举 9.1：单独验证 token 模块可被编译与链接的入口
+// 仅 import token 并提供 main；用于 make bootstrap-token（token.su 作为库无 main）。
+
+import token;
+
+function main(): i32 {
+    return 0;
+}
