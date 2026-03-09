@@ -196,6 +196,13 @@ void ast_block_free(ASTBlock *b) {
         b->labeled_stmts = NULL;
         b->num_labeled_stmts = 0;
     }
+    if (b->expr_stmts) {
+        for (int i = 0; i < b->num_expr_stmts; i++)
+            ast_expr_free(b->expr_stmts[i]);
+        free(b->expr_stmts);
+        b->expr_stmts = NULL;
+        b->num_expr_stmts = 0;
+    }
     ast_expr_free(b->final_expr);
     b->final_expr = NULL;
     free(b);
