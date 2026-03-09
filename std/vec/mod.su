@@ -1,8 +1,23 @@
-// std.vec — 动态数组 Vec（依赖泛型，自举前最小实现）
-// 自举前：提供占位 API；Vec<T> 类型与 push/len 等后续在此实现。
+// std.vec — 动态数组 Vec（自举前最小可用实现）
+// 自举前：提供 Vec_i32 与 new/len/get/from_one；完整 push/pop 待 mut 或堆分配后扩展。
 
-// 占位泛型函数，表示本模块已可 import。
+struct Vec_i32 {
+  data: [8]i32;
+  len: i32;
+}
+
 function vec_placeholder<T>(x: T): T { return x; }
 
-// 表示“空 Vec 长度”占位（0），后续扩展为 Vec<T> 的 len。
 function vec_len_empty(): i32 { return 0; }
+
+function vec_new_i32(): Vec_i32 {
+  return Vec_i32 { data: [0, 0, 0, 0, 0, 0, 0, 0], len: 0 };
+}
+
+function vec_len_i32(v: Vec_i32): i32 { return v.len; }
+
+function vec_get_i32(v: Vec_i32, i: i32): i32 { return v.data[i]; }
+
+function vec_from_one_i32(x: i32): Vec_i32 {
+  return Vec_i32 { data: [x, 0, 0, 0, 0, 0, 0, 0], len: 1 };
+}
