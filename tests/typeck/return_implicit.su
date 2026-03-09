@@ -1,0 +1,4 @@
+// 边界：有返回类型但用最终表达式无 return，应报 return value must use explicit return
+function main(): i32 {
+  0
+}
