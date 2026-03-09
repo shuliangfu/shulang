@@ -14,7 +14,7 @@ function string_new(): String {
   return String {
     data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     len: 0
-  };
+  }
 }
 
 function string_len(s: String): i32 { return s.len; }
@@ -23,7 +23,7 @@ function string_from_char(c: u8): String {
   return String {
     data: [c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     len: 1
-  };
+  }
 }
 
 function string_get(s: String, i: i32): u8 { return s.data[i]; }
