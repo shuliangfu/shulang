@@ -662,6 +662,19 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
+        /* 调试：SHUC_DEBUG_C=1 时保留生成 C 到 /tmp/shuc_debug.c 便于排查 codegen 问题 */
+        if (getenv("SHUC_DEBUG_C")) {
+            FILE *dc = fopen(tmp_c, "r");
+            if (dc) {
+                FILE *out = fopen("/tmp/shuc_debug.c", "w");
+                if (out) {
+                    int ch;
+                    while ((ch = getc(dc)) != EOF) putc(ch, out);
+                    fclose(out);
+                }
+                fclose(dc);
+            }
+        }
         c_paths[n_c++] = tmp_c;
 
         /* 每个已加载的传递依赖生成 .c，参与链接（all_dep_* 为拓扑序）；库模块需传入其 import 依赖供跨模块调用前缀 */
