@@ -5,6 +5,6 @@ struct Header packed {
 }
 
 function main(): i32 {
-  let h: Header = Header { tag: 1, len: 42 };
+  let h: Header = Header { tag: 1, len: 42 }
   return 0;
 }
