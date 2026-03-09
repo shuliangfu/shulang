@@ -78,6 +78,21 @@ static int fail(Parser *p, const char *msg) {
 }
 
 /**
+ * 将当前 Token 的 line/col 写入表达式节点，供 typeck 面包屑错误使用。
+ */
+static void set_expr_loc(ASTExpr *e, Parser *p) {
+    const Token *t = peek(p);
+    e->line = t->line;
+    e->col = t->col;
+}
+
+/** 用指定位置设置表达式位置（用于 if/match 等已消费掉起始 token 的复合表达式） */
+static void set_expr_loc_at(ASTExpr *e, int line, int col) {
+    e->line = line;
+    e->col = col;
+}
+
+/**
  * 解析泛型类型参数列表：< T (, U)* >，仅标识符作为类型参数名（阶段 7.1）。
  * 当前 Token 须为 TOKEN_LT；成功后消耗整段包括 >。
  * 参数：p 解析器；out_names 输出参数名数组（strdup，调用方须 free 各元素及数组）；out_count 输出个数。
@@ -319,6 +334,8 @@ static ASTType *parse_type_name(Parser *p) {
  */
 static ASTExpr *parse_if_expr(Parser *p) {
     if (peek(p)->kind != TOKEN_IF) return NULL;
+    int if_start_line = peek(p)->line;
+    int if_start_col = peek(p)->col;
     advance(p);
     if (peek(p)->kind != TOKEN_LPAREN) {
         fail(p, "expected '(' after 'if'");
@@ -397,6 +414,7 @@ static ASTExpr *parse_if_expr(Parser *p) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    set_expr_loc_at(e, if_start_line, if_start_col);
     e->kind = AST_EXPR_IF;
     e->value.if_expr.cond = cond;
     e->value.if_expr.then_expr = then_expr;
@@ -415,6 +433,7 @@ static ASTExpr *parse_primary(Parser *p) {
         advance(p);
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { fprintf(stderr, "parse: out of memory\n"); return NULL; }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_BREAK;
         return e;
     }
@@ -422,6 +441,7 @@ static ASTExpr *parse_primary(Parser *p) {
         advance(p);
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { fprintf(stderr, "parse: out of memory\n"); return NULL; }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_CONTINUE;
         return e;
     }
@@ -432,6 +452,7 @@ static ASTExpr *parse_primary(Parser *p) {
         if (!val) return NULL;
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { ast_expr_free(val); fprintf(stderr, "parse: out of memory\n"); return NULL; }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_RETURN;
         e->value.unary.operand = val;
         return e;
@@ -457,12 +478,15 @@ static ASTExpr *parse_primary(Parser *p) {
         }
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { ast_expr_free(operand); fprintf(stderr, "parse: out of memory\n"); return NULL; }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_PANIC;
         e->value.unary.operand = operand;
         return e;
     }
     /* match expr { lit|_ => expr ; ... }：最小形式仅整数字面量与 _ */
     if (t->kind == TOKEN_MATCH) {
+        int match_line = t->line;
+        int match_col = t->col;
         advance(p);
         ASTExpr *matched = parse_expr(p);
         if (!matched) return NULL;
@@ -572,6 +596,7 @@ static ASTExpr *parse_primary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, match_line, match_col);
         e->kind = AST_EXPR_MATCH;
         e->value.match_expr.matched_expr = matched;
         e->value.match_expr.arms = arms;
@@ -580,6 +605,8 @@ static ASTExpr *parse_primary(Parser *p) {
     }
     /* 数组字面量 [e1, e2, ...]（文档 §6.2）；表达式语境下 [ 即数组字面量 */
     if (t->kind == TOKEN_LBRACKET) {
+        int arr_start_line = t->line;
+        int arr_start_col = t->col;
         advance(p);
         ASTExpr **elems = (ASTExpr **)malloc(32 * sizeof(ASTExpr *));
         if (!elems) { fprintf(stderr, "parse: out of memory\n"); return NULL; }
@@ -623,6 +650,7 @@ static ASTExpr *parse_primary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(arr, arr_start_line, arr_start_col);
         arr->kind = AST_EXPR_ARRAY_LIT;
         arr->value.array_lit.elems = elems;
         arr->value.array_lit.num_elems = num_elems;
@@ -648,12 +676,15 @@ static ASTExpr *parse_primary(Parser *p) {
         advance(p);
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { fprintf(stderr, "parse: out of memory\n"); return NULL; }
+        set_expr_loc_at(e, t->line, t->col);
         e->kind = AST_EXPR_VAR;
         e->value.var.name = strdup("self");
         return e;
     }
     /* 变量/常量引用（标识符）或结构体字面量 TypeName { field: expr, ... } */
     if (t->kind == TOKEN_IDENT) {
+        int ident_line = t->line;
+        int ident_col = t->col;
         char *name = t->ident_len > 0 && t->value.ident
             ? strndup(t->value.ident, (size_t)t->ident_len) : NULL;
         advance(p);
@@ -763,6 +794,7 @@ static ASTExpr *parse_primary(Parser *p) {
                 fprintf(stderr, "parse: out of memory\n");
                 return NULL;
             }
+            set_expr_loc_at(e, ident_line, ident_col);
             e->kind = AST_EXPR_STRUCT_LIT;
             e->value.struct_lit.struct_name = name;
             e->value.struct_lit.field_names = fnames;
@@ -776,6 +808,7 @@ static ASTExpr *parse_primary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, ident_line, ident_col);
         e->kind = AST_EXPR_VAR;
         e->value.var.name = name;
         return e;
@@ -787,6 +820,7 @@ static ASTExpr *parse_primary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, t->line, t->col);
         e->kind = AST_EXPR_BOOL_LIT;
         e->value.int_val = 1;
         return e;
@@ -798,18 +832,21 @@ static ASTExpr *parse_primary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, t->line, t->col);
         e->kind = AST_EXPR_BOOL_LIT;
         e->value.int_val = 0;
         return e;
     }
     if (t->kind == TOKEN_FLOAT) {
         double fval = t->value.float_val;
+        int fline = t->line, fcol = t->col;
         advance(p);
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, fline, fcol);
         e->kind = AST_EXPR_FLOAT_LIT;
         e->value.float_val = fval;
         return e;
@@ -823,6 +860,7 @@ static ASTExpr *parse_primary(Parser *p) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    set_expr_loc(e, p);
     e->kind = AST_EXPR_LIT;
     e->value.int_val = t->value.int_val;
     advance(p);
@@ -900,6 +938,7 @@ static ASTExpr *parse_postfix(Parser *p) {
                 fprintf(stderr, "parse: out of memory\n");
                 return NULL;
             }
+            set_expr_loc(e, p);
             e->kind = AST_EXPR_METHOD_CALL;
             e->value.method_call.base = left;
             e->value.method_call.method_name = field_name;
@@ -915,6 +954,7 @@ static ASTExpr *parse_postfix(Parser *p) {
                 fprintf(stderr, "parse: out of memory\n");
                 return NULL;
             }
+            set_expr_loc(e, p);
             e->kind = AST_EXPR_FIELD_ACCESS;
             e->value.field_access.base = left;
             e->value.field_access.field_name = field_name;
@@ -944,6 +984,7 @@ static ASTExpr *parse_postfix(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_INDEX;
         e->value.index.base = left;
         e->value.index.index_expr = idx;
@@ -1062,6 +1103,7 @@ static ASTExpr *parse_postfix(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc(e, p);
         e->kind = AST_EXPR_CALL;
         e->value.call.callee = left;
         e->value.call.args = args;
@@ -1080,6 +1122,8 @@ static ASTExpr *parse_postfix(Parser *p) {
 static ASTExpr *parse_unary(Parser *p) {
     TokenKind k = peek(p)->kind;
     if (k == TOKEN_MINUS || k == TOKEN_TILDE || k == TOKEN_BANG) {
+        int unary_line = peek(p)->line;
+        int unary_col = peek(p)->col;
         advance(p);
         ASTExpr *inner = parse_unary(p);
         if (!inner) return NULL;
@@ -1089,6 +1133,7 @@ static ASTExpr *parse_unary(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(e, unary_line, unary_col);
         e->kind = (k == TOKEN_MINUS) ? AST_EXPR_NEG : (k == TOKEN_TILDE) ? AST_EXPR_BITNOT : AST_EXPR_LOGNOT;
         e->value.unary.operand = inner;
         return e;
@@ -1121,6 +1166,7 @@ static ASTExpr *parse_term(Parser *p) {
             fprintf(stderr, "parse: out of memory\n");
             return NULL;
         }
+        set_expr_loc_at(bin, t->line, t->col);
         bin->kind = (op == TOKEN_STAR) ? AST_EXPR_MUL : (op == TOKEN_SLASH) ? AST_EXPR_DIV : AST_EXPR_MOD;
         bin->value.binop.left = left;
         bin->value.binop.right = right;
@@ -1128,8 +1174,8 @@ static ASTExpr *parse_term(Parser *p) {
     }
 }
 
-/** 辅助：用 left、right 与 kind 构建二元节点，失败时释放 left/right 并返回 NULL */
-static ASTExpr *parse_binop_right(Parser *p, ASTExpr *left, ASTExpr *right, int op, ASTExprKind kind) {
+/** 辅助：用 left、right 与 kind 构建二元节点，失败时释放 left/right 并返回 NULL；line/col 为运算符位置。 */
+static ASTExpr *parse_binop_right(Parser *p, ASTExpr *left, ASTExpr *right, int op, ASTExprKind kind, int line, int col) {
     (void)p;
     (void)op;
     ASTExpr *bin = (ASTExpr *)calloc(1, sizeof(ASTExpr));
@@ -1139,6 +1185,7 @@ static ASTExpr *parse_binop_right(Parser *p, ASTExpr *left, ASTExpr *right, int 
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    set_expr_loc_at(bin, line, col);
     bin->kind = kind;
     bin->value.binop.left = left;
     bin->value.binop.right = right;
@@ -1156,7 +1203,7 @@ static ASTExpr *parse_addsub(Parser *p) {
         advance(p);
         ASTExpr *right = parse_term(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, op, (op == TOKEN_PLUS) ? AST_EXPR_ADD : AST_EXPR_SUB);
+        left = parse_binop_right(p, left, right, op, (op == TOKEN_PLUS) ? AST_EXPR_ADD : AST_EXPR_SUB, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1172,7 +1219,7 @@ static ASTExpr *parse_shift(Parser *p) {
         advance(p);
         ASTExpr *right = parse_addsub(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, op, (op == TOKEN_LSHIFT) ? AST_EXPR_SHL : AST_EXPR_SHR);
+        left = parse_binop_right(p, left, right, op, (op == TOKEN_LSHIFT) ? AST_EXPR_SHL : AST_EXPR_SHR, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1192,7 +1239,7 @@ static ASTExpr *parse_compare(Parser *p) {
         advance(p);
         ASTExpr *right = parse_shift(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, 0, k);
+        left = parse_binop_right(p, left, right, 0, k, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1208,7 +1255,7 @@ static ASTExpr *parse_eq(Parser *p) {
         advance(p);
         ASTExpr *right = parse_compare(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, op, (op == TOKEN_EQ) ? AST_EXPR_EQ : AST_EXPR_NE);
+        left = parse_binop_right(p, left, right, op, (op == TOKEN_EQ) ? AST_EXPR_EQ : AST_EXPR_NE, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1218,11 +1265,12 @@ static ASTExpr *parse_bitand(Parser *p) {
     ASTExpr *left = parse_eq(p);
     if (!left) return NULL;
     for (;;) {
-        if (peek(p)->kind != TOKEN_AMP) return left;
+        const Token *t = peek(p);
+        if (t->kind != TOKEN_AMP) return left;
         advance(p);
         ASTExpr *right = parse_eq(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, TOKEN_AMP, AST_EXPR_BITAND);
+        left = parse_binop_right(p, left, right, TOKEN_AMP, AST_EXPR_BITAND, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1232,11 +1280,12 @@ static ASTExpr *parse_bitxor(Parser *p) {
     ASTExpr *left = parse_bitand(p);
     if (!left) return NULL;
     for (;;) {
-        if (peek(p)->kind != TOKEN_CARET) return left;
+        const Token *t = peek(p);
+        if (t->kind != TOKEN_CARET) return left;
         advance(p);
         ASTExpr *right = parse_bitand(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, TOKEN_CARET, AST_EXPR_BITXOR);
+        left = parse_binop_right(p, left, right, TOKEN_CARET, AST_EXPR_BITXOR, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1246,11 +1295,12 @@ static ASTExpr *parse_bitor(Parser *p) {
     ASTExpr *left = parse_bitxor(p);
     if (!left) return NULL;
     for (;;) {
-        if (peek(p)->kind != TOKEN_PIPE) return left;
+        const Token *t = peek(p);
+        if (t->kind != TOKEN_PIPE) return left;
         advance(p);
         ASTExpr *right = parse_bitxor(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, TOKEN_PIPE, AST_EXPR_BITOR);
+        left = parse_binop_right(p, left, right, TOKEN_PIPE, AST_EXPR_BITOR, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1260,11 +1310,12 @@ static ASTExpr *parse_logand(Parser *p) {
     ASTExpr *left = parse_bitor(p);
     if (!left) return NULL;
     for (;;) {
-        if (peek(p)->kind != TOKEN_AMPAMP) return left;
+        const Token *t = peek(p);
+        if (t->kind != TOKEN_AMPAMP) return left;
         advance(p);
         ASTExpr *right = parse_bitor(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, TOKEN_AMPAMP, AST_EXPR_LOGAND);
+        left = parse_binop_right(p, left, right, TOKEN_AMPAMP, AST_EXPR_LOGAND, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -1274,11 +1325,12 @@ static ASTExpr *parse_logor(Parser *p) {
     ASTExpr *left = parse_logand(p);
     if (!left) return NULL;
     for (;;) {
-        if (peek(p)->kind != TOKEN_PIPEPIPE) return left;
+        const Token *t = peek(p);
+        if (t->kind != TOKEN_PIPEPIPE) return left;
         advance(p);
         ASTExpr *right = parse_logand(p);
         if (!right) { ast_expr_free(left); return NULL; }
-        left = parse_binop_right(p, left, right, TOKEN_PIPEPIPE, AST_EXPR_LOGOR);
+        left = parse_binop_right(p, left, right, TOKEN_PIPEPIPE, AST_EXPR_LOGOR, t->line, t->col);
         if (!left) return NULL;
     }
 }
@@ -2138,6 +2190,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                     fprintf(stderr, "parse: out of memory\n");
                     return NULL;
                 }
+                set_expr_loc(cond, p);
                 cond->kind = AST_EXPR_BOOL_LIT;  /* loop 等价 while true */
                 cond->value.int_val = 1;
             } else {
