@@ -12,5 +12,5 @@ function main(): i32 {
     Color.Green => 1;
     Color.Blue => 2;
     _ => -1;
-  };
+  }
 }
