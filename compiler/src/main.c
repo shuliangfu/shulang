@@ -322,11 +322,11 @@ static char *read_file(const char *path) {
 
 /**
  * 调用系统 cc 将多个 C 文件编译链接为可执行文件。
- * 功能说明：阶段 7.3 多文件；阶段 8 优化：向 cc 传入 -O<level>（默认 -O2）。fork 子进程 execvp("cc", ...)，将 c_paths 中所有 .c 与 -o out_path、可选 -target、-O 一并传入 cc。
- * 参数：c_paths 生成的 .c 文件路径数组；n 文件个数；out_path 输出可执行文件路径；target 可选目标三元组，NULL 或空表示本机；opt_level 优化级别 "0"/"2"/"s"，NULL 表示用默认 "2"。
+ * 功能说明：阶段 7.3 多文件；阶段 8 优化：向 cc 传入 -O<level>（默认 -O2）与 -o out_path。不向 cc 传 -target（仅 Clang 支持，GCC 报错）；shuc 的 -target 仅用于预处理注入 OS_LINUX 等宏。
  * 返回值：0 表示 cc 执行成功且退出码为 0；-1 表示参数非法、fork/exec 失败或 cc 非零退出。
  */
 static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target, const char *opt_level) {
+    (void)target;
     if (!c_paths || n < 1) return -1;
     if (!opt_level || !*opt_level) opt_level = "2";
     pid_t pid = fork();
@@ -338,10 +338,6 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         char *argv[MAX_C_FILES + 10];
         int i = 0;
         argv[i++] = (char *)"cc";
-        if (target && target[0]) {
-            argv[i++] = (char *)"-target";
-            argv[i++] = (char *)target;
-        }
         {
             static char oopt_buf[8];
             (void)snprintf(oopt_buf, sizeof(oopt_buf), "-O%s", opt_level);

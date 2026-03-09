@@ -46,9 +46,9 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: MSYS
           update: true
-          install: make mingw-w64-x86_64-gcc
+          install: make gcc
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         shell: msys2 {0}
