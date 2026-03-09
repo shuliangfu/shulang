@@ -4,5 +4,5 @@ import std.vec;
 function main(): i32 {
   let n: i32 = vec_len_empty();
   let x: i32 = vec_placeholder<i32>(1);
-  return if (x != 1) { 1 } else { n };
+  return if (x != 1) { 1 } else { n }
 }
