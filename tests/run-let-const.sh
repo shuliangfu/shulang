@@ -26,4 +26,8 @@ exitcode=0; /tmp/shuc_mixed >/dev/null 2>&1 || exitcode=$?
 exitcode=0; /tmp/shuc_const_expr >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 10 ] && { echo "expected 10 (const_expr), got $exitcode"; exit 1; }
 
+# 边界：const 初始化为非常量表达式，应报 const init must be constant expression
+err=$(./compiler/shuc tests/let-const/const_non_const.su -o /tmp/shuc_const_fail 2>&1) || true
+echo "$err" | grep -q "const init must be constant expression" || { echo "expected const init error, got: $err"; exit 1; }
+
 echo "let/const test OK"
