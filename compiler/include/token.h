@@ -56,6 +56,7 @@ typedef enum TokenKind {
     TOKEN_FALSE,    /**< 布尔字面量 false */
     TOKEN_F32,      /**< 类型名 f32（32 位浮点，文档阶段 8+） */
     TOKEN_F64,      /**< 类型名 f64（64 位浮点） */
+    TOKEN_VOID,     /**< 类型名 void（仅用于函数返回类型，如 extern function foo(): void;） */
     TOKEN_INT,      /**< 整数字面量 */
     TOKEN_FLOAT,    /**< 浮点字面量（如 0.0、1.5） */
     TOKEN_LPAREN,   /**< ( */
