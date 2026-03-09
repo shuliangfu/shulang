@@ -661,6 +661,18 @@ static int codegen_init(const struct ASTType *ty, const struct ASTExpr *init, FI
         fprintf(out, " }");
         return 0;
     }
+    /* 数组变量/常量初始化须用 { e1, e2, ... }，不能用 (type[]){ ... }，否则 GCC 报 "array initialized from non-constant array expression"（Clang 可过） */
+    if (ty && ty->kind == AST_TYPE_ARRAY && init->kind == AST_EXPR_ARRAY_LIT) {
+        struct ASTExpr **elems = init->value.array_lit.elems;
+        int num = init->value.array_lit.num_elems;
+        fprintf(out, "{ ");
+        for (int i = 0; i < num; i++) {
+            if (i) fprintf(out, ", ");
+            if (codegen_expr(elems[i], out) != 0) return -1;
+        }
+        fprintf(out, " }");
+        return 0;
+    }
     if (ty && ty->kind == AST_TYPE_SLICE && init && init->kind == AST_EXPR_VAR && block) {
         const char *name = init->value.var.name;
         for (int i = 0; i < block->num_consts; i++)
