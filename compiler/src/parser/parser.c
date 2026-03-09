@@ -308,6 +308,20 @@ static ASTType *parse_type_name(Parser *p) {
             ty->kind = AST_TYPE_VECTOR; ty->elem_type = elem; ty->array_size = 8;
             advance(p); return ty;
         }
+        case TOKEN_I32X16: {
+            ASTType *elem = (ASTType *)malloc(sizeof(ASTType));
+            if (!elem) { free(ty); fprintf(stderr, "parse: out of memory\n"); return NULL; }
+            elem->kind = AST_TYPE_I32; elem->name = NULL; elem->elem_type = NULL; elem->array_size = 0;
+            ty->kind = AST_TYPE_VECTOR; ty->elem_type = elem; ty->array_size = 16;
+            advance(p); return ty;
+        }
+        case TOKEN_U32X16: {
+            ASTType *elem = (ASTType *)malloc(sizeof(ASTType));
+            if (!elem) { free(ty); fprintf(stderr, "parse: out of memory\n"); return NULL; }
+            elem->kind = AST_TYPE_U32; elem->name = NULL; elem->elem_type = NULL; elem->array_size = 0;
+            ty->kind = AST_TYPE_VECTOR; ty->elem_type = elem; ty->array_size = 16;
+            advance(p); return ty;
+        }
         case TOKEN_IDENT:
             if (t->ident_len > 0 && t->value.ident) {
                 ty->kind = AST_TYPE_NAMED;
@@ -997,7 +1011,7 @@ static ASTExpr *parse_postfix(Parser *p) {
     if (peek(p)->kind == TOKEN_LT) {
         const Token *n = peek_next(p);
         TokenKind k = n->kind;
-        int type_start = (k == TOKEN_IDENT || k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
+        int type_start = (k == TOKEN_IDENT || k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_I32X16 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_U32X16 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
         if (!type_start) {
             /* 视为小于运算，不解析类型实参 */
         } else {
@@ -1815,6 +1829,7 @@ static ASTFunc *parse_impl_method(Parser *p, const char *trait_name, const char 
     if (!self_type) { free(meth_name); return NULL; }
     ASTParam *params = (ASTParam *)malloc((size_t)AST_FUNC_MAX_PARAMS * sizeof(ASTParam));
     if (!params) { free(meth_name); ast_type_free(self_type); fprintf(stderr, "parse: out of memory\n"); return NULL; }
+    (void)memset(params, 0, (size_t)AST_FUNC_MAX_PARAMS * sizeof(ASTParam));
     params[0].name = strdup("self");
     params[0].type = self_type;
     int num_params = 1;
@@ -2611,6 +2626,7 @@ static ASTFunc *parse_one_function(Parser *p, int is_extern) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    (void)memset(params, 0, (size_t)AST_FUNC_MAX_PARAMS * sizeof(ASTParam));
     int num_params = 0;
     while (peek(p)->kind != TOKEN_RPAREN) {
         if (num_params >= AST_FUNC_MAX_PARAMS) {
