@@ -1,0 +1,103 @@
+// token.su — 词法单元（Token）定义（自举 9.1：与 token.h 对应）
+// 与 compiler/include/token.h 一致；与 C 并存，完成后删 lexer.c 留本文件。
+
+// Token 种类枚举（与 token.h TokenKind 顺序一致）
+enum TokenKind {
+    TOKEN_EOF,
+    TOKEN_FUNCTION,
+    TOKEN_LET,
+    TOKEN_CONST,
+    TOKEN_IF,
+    TOKEN_ELSE,
+    TOKEN_WHILE,
+    TOKEN_LOOP,
+    TOKEN_FOR,
+    TOKEN_BREAK,
+    TOKEN_CONTINUE,
+    TOKEN_RETURN,
+    TOKEN_PANIC,
+    TOKEN_DEFER,
+    TOKEN_MATCH,
+    TOKEN_STRUCT,
+    TOKEN_PACKED,
+    TOKEN_ENUM,
+    TOKEN_GOTO,
+    TOKEN_TRAIT,
+    TOKEN_IMPL,
+    TOKEN_SELF,
+    TOKEN_UNDERSCORE,
+    TOKEN_IMPORT,
+    TOKEN_EXTERN,
+    TOKEN_IDENT,
+    TOKEN_I32,
+    TOKEN_BOOL,
+    TOKEN_U8,
+    TOKEN_U32,
+    TOKEN_U64,
+    TOKEN_I64,
+    TOKEN_USIZE,
+    TOKEN_ISIZE,
+    TOKEN_I32X4,
+    TOKEN_I32X8,
+    TOKEN_I32X16,
+    TOKEN_U32X4,
+    TOKEN_U32X8,
+    TOKEN_U32X16,
+    TOKEN_TRUE,
+    TOKEN_FALSE,
+    TOKEN_F32,
+    TOKEN_F64,
+    TOKEN_VOID,
+    TOKEN_INT,
+    TOKEN_FLOAT,
+    TOKEN_LPAREN,
+    TOKEN_RPAREN,
+    TOKEN_LBRACE,
+    TOKEN_RBRACE,
+    TOKEN_LBRACKET,
+    TOKEN_RBRACKET,
+    TOKEN_ARROW,
+    TOKEN_FATARROW,
+    TOKEN_COMMA,
+    TOKEN_COLON,
+    TOKEN_DOT,
+    TOKEN_SEMICOLON,
+    TOKEN_PLUS,
+    TOKEN_MINUS,
+    TOKEN_STAR,
+    TOKEN_SLASH,
+    TOKEN_PERCENT,
+    TOKEN_AMP,
+    TOKEN_PIPE,
+    TOKEN_CARET,
+    TOKEN_LSHIFT,
+    TOKEN_RSHIFT,
+    TOKEN_TILDE,
+    TOKEN_ASSIGN,
+    TOKEN_EQ,
+    TOKEN_NE,
+    TOKEN_LT,
+    TOKEN_GT,
+    TOKEN_LE,
+    TOKEN_GE,
+    TOKEN_AMPAMP,
+    TOKEN_PIPEPIPE,
+    TOKEN_BANG,
+    TOKEN_QUESTION,
+}
+
+// 单个 Token：类型 + 源码位置 + 字面量/标识符（.su 无 union，用独立字段）；allow(padding) 与 C 端布局兼容
+allow(padding) struct Token {
+    kind: TokenKind;
+    line: i32;
+    col: i32;
+    int_val: i32;
+    float_val: f64;
+    ident: *u8;
+    ident_len: i32;
+}
+
+// 是否为 EOF，供后续 lexer 使用
+function token_is_eof(t: Token): bool {
+    return t.kind == TokenKind.TOKEN_EOF;
+}
