@@ -30,7 +30,7 @@ typedef enum ASTTypeKind {
     AST_TYPE_NAMED,  /**< 用户自定义类型名（如结构体/枚举），name 保存标识符文本 */
     AST_TYPE_PTR,    /**< 裸指针 *T，elem_type 指向元素类型（见 §5.1） */
     AST_TYPE_ARRAY,  /**< 固定长数组 [N]T，elem_type 为元素类型，array_size 为 N（文档 §6.2） */
-    AST_TYPE_SLICE,  /**< 切片 []T，elem_type 为元素类型；语义为 { ptr, len }（文档 §6.3） */
+    AST_TYPE_SLICE,  /**< 切片 []T，elem_type 为元素类型；语义为 { ptr, length }（文档 §6.3） */
     AST_TYPE_VECTOR, /**< 向量类型如 i32x4；elem_type 为元素类型，array_size 为 lane 数（文档 §10，先用 struct 模拟） */
     AST_TYPE_F32,    /**< 32 位浮点（文档阶段 8+ 可选） */
     AST_TYPE_F64     /**< 64 位浮点 */
@@ -169,6 +169,11 @@ typedef struct ASTExpr {
             struct ASTFunc *resolved_impl_func; /**< 由 typeck 填写：实际调用的 impl 函数；不释放，归属 impl 块 */
         } method_call;
     } value;
+    /** CTFE 最小集：typeck 对常量表达式求值后填写，codegen 直接输出 const_folded_val 避免运行时计算 */
+    int const_folded_val;        /**< 折叠后的整型值（仅当 const_folded_valid 为 1 时有效） */
+    unsigned char const_folded_valid; /**< 1 表示本表达式已折叠为整型常量 */
+    /** BCE：仅当 kind 为 AST_EXPR_INDEX 时有效；1 表示下标已证明在 [0,len) 内，codegen 可省略边界检查 */
+    unsigned char index_proven_in_bounds;
 } ASTExpr;
 
 /** 块内语句类型：goto 或 return（在 final_expr 前出现） */
@@ -269,11 +274,12 @@ typedef struct ASTBlock {
     struct ASTExpr *final_expr;
 } ASTBlock;
 
-/** 函数形参：名称与类型（与 analysis/自举前路线分析.md 多函数 一致） */
+/** 函数形参：名称与类型（与 analysis/自举前路线分析.md 多函数 一致）；is_restrict 供 noalias 传递生成 C restrict。 */
 #define AST_FUNC_MAX_PARAMS 16
 typedef struct ASTParam {
     const char *name;       /**< 参数名（strdup），由 ast_module_free 释放 */
     struct ASTType *type;   /**< 参数类型，不可为 NULL */
+    unsigned is_restrict;   /**< 1 表示生成 C 时该指针参数加 restrict（noalias），由 typeck 推断或 parser 设置 */
 } ASTParam;
 
 /** 函数节点：name、参数列表、返回类型、体为块（含 const/let + 最终表达式）。阶段 7.1 支持泛型 function name<T>(...) { ... }。 */
