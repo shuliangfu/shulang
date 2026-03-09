@@ -12,4 +12,8 @@ exitcode=0; /tmp/shuc_array_main >/dev/null 2>&1 || exitcode=$?
 exitcode=0; /tmp/shuc_array_lit >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 1 ] && { echo "expected 1 (array literal a[0]), got $exitcode"; exit 1; }
 
+# 边界：下标基类型非数组/切片，应报 subscript base must be array or slice
+err=$(./compiler/shuc tests/array/subscript_not_array.su -o /tmp/shuc_array_fail 2>&1) || true
+echo "$err" | grep -q "subscript base must be array or slice" || { echo "expected subscript base error, got: $err"; exit 1; }
+
 echo "array test OK"
