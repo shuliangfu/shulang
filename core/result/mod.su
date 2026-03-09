@@ -11,12 +11,12 @@ allow(padding) struct Result_i32 {
 
 // 构造成功值：第一槽为值，第二槽为 0
 function ok_i32(x: i32): Result_i32 {
-  return Result_i32 { value: x, _pad1: 0, err: 0, _pad2: 0 };
+  return Result_i32 { value: x, _pad1: 0, err: 0, _pad2: 0 }
 }
 
 // 构造错误值：第二槽为错误码
 function err_i32(e: i32): Result_i32 {
-  return Result_i32 { value: 0, _pad1: 0, err: e, _pad2: 0 };
+  return Result_i32 { value: 0, _pad1: 0, err: e, _pad2: 0 }
 }
 
 // 成功则返回值，否则返回默认值（错误检查为 err==0，零内存访问）
