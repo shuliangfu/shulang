@@ -1,0 +1,47 @@
+# Shulang CI：多端构建与全量测试
+# 在 push/PR 时于 Linux、macOS、Windows 上分别构建 compiler（C 版 shuc）并执行 tests/run-all.sh。
+# Linux/macOS：系统 cc（gcc/clang）、make、bash。Windows：通过 WSL 执行相同命令。
+
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build compiler (shuc)
+        run: make -C compiler OPT=1
+        env:
+          CC: cc
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
+
+  mac:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build compiler (shuc)
+        run: make -C compiler OPT=1
+        env:
+          CC: cc
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
+
+  windows:
+    name: Windows (WSL)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build and test in WSL
+        run: wsl -e bash -c 'cd "$(wslpath -u "'"$env:GITHUB_WORKSPACE"'")" && make -C compiler OPT=1 && ./tests/run-all.sh'
