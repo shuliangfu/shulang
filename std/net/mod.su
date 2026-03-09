@@ -24,17 +24,17 @@ struct TcpListener {
 
 // ——— connect：连接至 addr:port；timeout_ms 毫秒（0=无超时）；占位返回无效 TcpStream（fd -1）；自举后可与 Completion 对接、预留批量 connect ———
 function connect(addr: Ipv4Addr, port: u32, timeout_ms: u32): TcpStream {
-  return TcpStream { fd: -1 };
+  return TcpStream { fd: -1 }
 }
 
 // ——— listen：在 addr:port 监听；占位返回无效 TcpListener ———
 function listen(addr: Ipv4Addr, port: u32): TcpListener {
-  return TcpListener { fd: -1 };
+  return TcpListener { fd: -1 }
 }
 
 // ——— accept：从 listener 接受连接；timeout_ms 毫秒（0=无超时）；自举后与 driver Completion 对接、预留批量 accept；占位返回无效 TcpStream ———
 function accept(listener: TcpListener, timeout_ms: u32): TcpStream {
-  return TcpStream { fd: -1 };
+  return TcpStream { fd: -1 }
 }
 
 // ——— accept_many：批量接受连接，写入 out[0..n]，返回实际接受数量 n；timeout_ms 毫秒（0=无超时）；占位 return 0；自举后与 driver Completion 对接 ———
