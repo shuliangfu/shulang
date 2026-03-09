@@ -11,7 +11,7 @@ TARGET  = shuc
 SRCS    = src/main.c src/preprocess.c src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/typeck/typeck.c src/codegen/codegen.c
 OBJS    = src/main.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
-.PHONY: all clean test size-baseline perf-baseline
+.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer
 
 all: $(TARGET)
 
@@ -99,6 +99,15 @@ test:
 	@if [ -f ../tests/run-io-driver.sh ]; then (cd .. && chmod +x tests/run-io-driver.sh && ./tests/run-io-driver.sh); fi
 	@if [ -f ../tests/run-ub.sh ]; then (cd .. && chmod +x tests/run-ub.sh && ./tests/run-ub.sh); fi
 	@if [ -f ../tests/run-abi-layout.sh ]; then (cd .. && chmod +x tests/run-abi-layout.sh && ./tests/run-abi-layout.sh); fi
+
+# 自举 9.1：用 shuc 编译 token 模块（库）+ token_standalone.su（入口），验证 .su 前端数据定义可由宿主编译
+bootstrap-token: $(TARGET)
+	./$(TARGET) -L src/lexer src/lexer/token_standalone.su -o /tmp/shuc_token_test && /tmp/shuc_token_test && echo "bootstrap-token OK"
+
+# 自举 9.1：用 shuc 编译 lexer.su（入口，import token），验证多文件 + 跨模块 enum 可编译链接
+bootstrap-lexer: $(TARGET)
+	./$(TARGET) -L src/lexer src/lexer/lexer.su -o /tmp/shuc_lexer_test && /tmp/shuc_lexer_test && echo "bootstrap-lexer OK"
+
 # 阶段 8 体积基线：编译固定用例并输出可执行文件大小
 size-baseline:
 	@if [ -f ../tests/run-size-baseline.sh ]; then (cd .. && chmod +x tests/run-size-baseline.sh && ./tests/run-size-baseline.sh); fi
