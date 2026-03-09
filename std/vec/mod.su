@@ -11,7 +11,7 @@ function vec_placeholder<T>(x: T): T { return x; }
 function vec_len_empty(): i32 { return 0; }
 
 function vec_new_i32(): Vec_i32 {
-  return Vec_i32 { data: [0, 0, 0, 0, 0, 0, 0, 0], len: 0 };
+  return Vec_i32 { data: [0, 0, 0, 0, 0, 0, 0, 0], len: 0 }
 }
 
 function vec_len_i32(v: Vec_i32): i32 { return v.len; }
@@ -19,5 +19,5 @@ function vec_len_i32(v: Vec_i32): i32 { return v.len; }
 function vec_get_i32(v: Vec_i32, i: i32): i32 { return v.data[i]; }
 
 function vec_from_one_i32(x: i32): Vec_i32 {
-  return Vec_i32 { data: [x, 0, 0, 0, 0, 0, 0, 0], len: 1 };
+  return Vec_i32 { data: [x, 0, 0, 0, 0, 0, 0, 0], len: 1 }
 }

@@ -16,13 +16,13 @@ function map_new_i32_i32(): Map_i32_i32 {
     keys: [0, 0, 0, 0, 0, 0, 0, 0],
     vals: [0, 0, 0, 0, 0, 0, 0, 0],
     len: 0
-  };
+  }
 }
 
 function map_size_i32_i32(m: Map_i32_i32): i32 { return m.len; }
 
 function map_get_loop(m: Map_i32_i32, k: i32, default_val: i32, i: i32): i32 {
-  return if (i >= m.len) { default_val } else { if (m.keys[i] == k) { m.vals[i] } else { map_get_loop(m, k, default_val, i + 1) } };
+  return if (i >= m.len) { default_val } else { if (m.keys[i] == k) { m.vals[i] } else { map_get_loop(m, k, default_val, i + 1) } }
 }
 
 function map_get_i32_i32(m: Map_i32_i32, k: i32, default_val: i32): i32 {
@@ -34,5 +34,5 @@ function map_from_one_i32_i32(k: i32, v: i32): Map_i32_i32 {
     keys: [k, 0, 0, 0, 0, 0, 0, 0],
     vals: [v, 0, 0, 0, 0, 0, 0, 0],
     len: 1
-  };
+  }
 }
