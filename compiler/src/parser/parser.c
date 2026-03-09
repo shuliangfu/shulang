@@ -93,6 +93,25 @@ static void set_expr_loc_at(ASTExpr *e, int line, int col) {
 }
 
 /**
+ * 若当前 token 为分号则报错「} 后禁止写分号」并返回 -1；否则返回 0。
+ * 在每次消费 RBRACE 后调用，保证 } 后不允许紧跟 ;。
+ */
+static int fail_if_semicolon_after_brace(Parser *p) {
+    if (peek(p)->kind != TOKEN_SEMICOLON) return 0;
+    fail(p, "semicolon not allowed after '}'");
+    return -1;
+}
+
+/**
+ * 判断表达式是否以 } 结尾（结构体字面量、if/match 等），用于 return 分号规则：
+ * return expr 以 } 结尾时不需要且不能写分号，否则必须写分号。
+ */
+static int expr_ends_with_brace(const ASTExpr *e) {
+    if (!e) return 0;
+    return e->kind == AST_EXPR_STRUCT_LIT || e->kind == AST_EXPR_IF || e->kind == AST_EXPR_MATCH;
+}
+
+/**
  * 解析泛型类型参数列表：< T (, U)* >，仅标识符作为类型参数名（阶段 7.1）。
  * 当前 Token 须为 TOKEN_LT；成功后消耗整段包括 >。
  * 参数：p 解析器；out_names 输出参数名数组（strdup，调用方须 free 各元素及数组）；out_count 输出个数。
@@ -280,6 +299,10 @@ static ASTType *parse_type_name(Parser *p) {
             ty->kind = AST_TYPE_F64;
             advance(p);
             return ty;
+        case TOKEN_VOID:
+            ty->kind = AST_TYPE_VOID;
+            advance(p);
+            return ty;
         case TOKEN_I32X4: {
             ASTType *elem = (ASTType *)malloc(sizeof(ASTType));
             if (!elem) { free(ty); fprintf(stderr, "parse: out of memory\n"); return NULL; }
@@ -383,6 +406,11 @@ static ASTExpr *parse_if_expr(Parser *p) {
         return NULL;
     }
     advance(p);
+    if (fail_if_semicolon_after_brace(p) != 0) {
+        ast_expr_free(cond);
+        ast_expr_free(then_expr);
+        return NULL;
+    }
     /* else 后可为 else if cond { block } 或 else { block }，实现链式条件 */
     ASTExpr *else_expr = NULL;
     if (peek(p)->kind == TOKEN_ELSE) {
@@ -409,7 +437,6 @@ static ASTExpr *parse_if_expr(Parser *p) {
                 ast_expr_free(then_expr);
                 return NULL;
             }
-            if (peek(p)->kind == TOKEN_SEMICOLON) advance(p);
             if (peek(p)->kind != TOKEN_RBRACE) {
                 ast_expr_free(cond);
                 ast_expr_free(then_expr);
@@ -418,6 +445,12 @@ static ASTExpr *parse_if_expr(Parser *p) {
                 return NULL;
             }
             advance(p);
+            if (fail_if_semicolon_after_brace(p) != 0) {
+                ast_expr_free(cond);
+                ast_expr_free(then_expr);
+                ast_expr_free(else_expr);
+                return NULL;
+            }
         }
     }
     ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
@@ -459,11 +492,27 @@ static ASTExpr *parse_primary(Parser *p) {
         e->kind = AST_EXPR_CONTINUE;
         return e;
     }
-    /* return expr：显式返回，仅允许在函数体内，由 typeck 校验 */
+    /* return expr 或 return;：显式返回，仅允许在函数体内，由 typeck 校验（文档 01：return expr; / return;） */
     if (t->kind == TOKEN_RETURN) {
         advance(p);
-        ASTExpr *val = parse_expr(p);
-        if (!val) return NULL;
+        ASTExpr *val = NULL;
+        if (peek(p)->kind != TOKEN_SEMICOLON && peek(p)->kind != TOKEN_RBRACE)
+            val = parse_expr(p);
+        /* } 后禁止分号；return 以 } 结尾时不需要分号；其他 return 必须带分号（分号在表达式后、} 前，如 return 10; }） */
+        if (val && expr_ends_with_brace(val)) {
+            if (peek(p)->kind == TOKEN_SEMICOLON) {
+                ast_expr_free(val);
+                fail(p, "semicolon not allowed after '}'");
+                return NULL;
+            }
+        } else {
+            if (peek(p)->kind != TOKEN_SEMICOLON) {
+                ast_expr_free(val);
+                fail(p, "expected ';' after return");
+                return NULL;
+            }
+            advance(p);
+        }
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) { ast_expr_free(val); fprintf(stderr, "parse: out of memory\n"); return NULL; }
         set_expr_loc(e, p);
@@ -602,6 +651,12 @@ static ASTExpr *parse_primary(Parser *p) {
             return NULL;
         }
         advance(p);
+        if (fail_if_semicolon_after_brace(p) != 0) {
+            while (num_arms--) ast_expr_free(arms[num_arms].result);
+            free(arms);
+            ast_expr_free(matched);
+            return NULL;
+        }
         ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
         if (!e) {
             while (num_arms--) ast_expr_free(arms[num_arms].result);
@@ -796,6 +851,16 @@ static ASTExpr *parse_primary(Parser *p) {
                 return NULL;
             }
             advance(p);
+            if (fail_if_semicolon_after_brace(p) != 0) {
+                free(name);
+                for (int i = 0; i < nf; i++) {
+                    free((void *)fnames[i]);
+                    ast_expr_free(inits[i]);
+                }
+                free(fnames);
+                free(inits);
+                return NULL;
+            }
             ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
             if (!e) {
                 free(name);
@@ -1011,7 +1076,7 @@ static ASTExpr *parse_postfix(Parser *p) {
     if (peek(p)->kind == TOKEN_LT) {
         const Token *n = peek_next(p);
         TokenKind k = n->kind;
-        int type_start = (k == TOKEN_IDENT || k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_I32X16 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_U32X16 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
+        int type_start = (k == TOKEN_IDENT || k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_VOID || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_I32X16 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_U32X16 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
         if (!type_start) {
             /* 视为小于运算，不解析类型实参 */
         } else {
@@ -1453,8 +1518,8 @@ static ASTExpr *parse_expr(Parser *p) {
 #define MAX_ENUMS 16
 /** 单 struct 定义最大字段数（parse_one_struct 用） */
 #define MAX_STRUCT_FIELDS_DEF 32
-/** 单 enum 定义最大变体数 */
-#define MAX_ENUM_VARIANTS 32
+/** 单 enum 定义最大变体数（自举 9.1：TokenKind 等超 32 项，故提高上限） */
+#define MAX_ENUM_VARIANTS 128
 /** 块内最大 const/let 声明数 */
 #define MAX_CONST_DECLS 32
 #define MAX_LET_DECLS 32
@@ -1463,6 +1528,7 @@ static ASTExpr *parse_expr(Parser *p) {
 #define MAX_FOR_LOOPS 32
 #define MAX_DEFERS 16
 #define MAX_LABELED_STMTS 32
+#define MAX_EXPR_STMTS 128
 
 /**
  * 解析单条 import 路径：IDENT 或 I32 后接零个或多个 . IDENT/I32，拼成 "core.types" 形式。
@@ -1630,6 +1696,16 @@ static ASTStructDef *parse_one_struct(Parser *p, int allow_padding) {
         if (peek(p)->kind == TOKEN_SEMICOLON) advance(p);
     }
     advance(p); /* consume RBRACE */
+    if (fail_if_semicolon_after_brace(p) != 0) {
+        free(name);
+        if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
+        for (int i = 0; i < num_fields; i++) {
+            free((void *)fields[i].name);
+            ast_type_free(fields[i].type);
+        }
+        free(fields);
+        return NULL;
+    }
     ASTStructDef *s = (ASTStructDef *)malloc(sizeof(ASTStructDef));
     if (!s) {
         free(name);
@@ -1703,6 +1779,12 @@ static ASTEnumDef *parse_one_enum(Parser *p) {
         if (peek(p)->kind == TOKEN_COMMA) advance(p);
     }
     advance(p); /* consume RBRACE */
+    if (fail_if_semicolon_after_brace(p) != 0) {
+        free(name);
+        for (int i = 0; i < num_variants; i++) free((void *)variants[i]);
+        free(variants);
+        return NULL;
+    }
     ASTEnumDef *e = (ASTEnumDef *)malloc(sizeof(ASTEnumDef));
     if (!e) {
         free(name);
@@ -1778,6 +1860,12 @@ static ASTTraitDef *parse_one_trait(Parser *p) {
         free(m);
     }
     advance(p); /* consume RBRACE */
+    if (fail_if_semicolon_after_brace(p) != 0) {
+        free(name);
+        for (int i = 0; i < num_methods; i++) { free((void *)methods[i].name); ast_type_free(methods[i].return_type); }
+        free(methods);
+        return NULL;
+    }
     ASTTraitDef *t = (ASTTraitDef *)malloc(sizeof(ASTTraitDef));
     if (!t) {
         free(name);
@@ -2002,6 +2090,19 @@ static ASTImplBlock *parse_one_impl(Parser *p) {
         funcs[nfuncs++] = meth;
     }
     advance(p); /* consume RBRACE */
+    if (fail_if_semicolon_after_brace(p) != 0) {
+        free(trait_name); free(type_name);
+        for (int i = 0; i < nfuncs; i++) {
+            ASTFunc *f = funcs[i];
+            if (f->name) free((void *)f->name);
+            if (f->params) { for (int j = 0; j < f->num_params; j++) { free((void *)f->params[j].name); ast_type_free(f->params[j].type); } free(f->params); }
+            if (f->return_type) ast_type_free(f->return_type);
+            if (f->body) ast_block_free(f->body);
+            free(f);
+        }
+        free(funcs);
+        return NULL;
+    }
     ASTImplBlock *impl = (ASTImplBlock *)malloc(sizeof(ASTImplBlock));
     if (!impl) {
         free(trait_name); free(type_name);
@@ -2046,6 +2147,8 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
     b->num_defers = 0;
     b->labeled_stmts = NULL;
     b->num_labeled_stmts = 0;
+    b->expr_stmts = NULL;
+    b->num_expr_stmts = 0;
     b->final_expr = NULL;
     if (!b->const_decls || !b->let_decls) {
         if (b->const_decls) free(b->const_decls);
@@ -2099,16 +2202,27 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 ast_block_free(b);
                 return NULL;
             }
-            /* 分号强制：const/let/return/goto 等语句后必须写 ;，风格与 C 一致 */
-            if (peek(p)->kind != TOKEN_SEMICOLON) {
-                free(name);
-                if (type) free((void *)type);
-                ast_expr_free(init);
-                fail(p, "expected ';' after const init");
-                ast_block_free(b);
-                return NULL;
+            /* } 后禁止分号；const 以 } 结尾时不能写分号，否则必须写分号 */
+            if (expr_ends_with_brace(init)) {
+                if (peek(p)->kind == TOKEN_SEMICOLON) {
+                    ast_expr_free(init);
+                    free(name);
+                    if (type) free((void *)type);
+                    fail(p, "semicolon not allowed after '}'");
+                    ast_block_free(b);
+                    return NULL;
+                }
+            } else {
+                if (peek(p)->kind != TOKEN_SEMICOLON) {
+                    ast_expr_free(init);
+                    free(name);
+                    if (type) free((void *)type);
+                    fail(p, "expected ';' after const");
+                    ast_block_free(b);
+                    return NULL;
+                }
+                advance(p);
             }
-            advance(p);
             b->const_decls[b->num_consts].name = name;
             b->const_decls[b->num_consts].type = type;
             b->const_decls[b->num_consts].init = init;
@@ -2160,15 +2274,27 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 ast_block_free(b);
                 return NULL;
             }
-            if (peek(p)->kind != TOKEN_SEMICOLON) {
-                free(name);
-                free((void *)type);
-                ast_expr_free(init);
-                fail(p, "expected ';' after let init");
-                ast_block_free(b);
-                return NULL;
+            /* } 后禁止分号；let 以 } 结尾时不能写分号，否则必须写分号 */
+            if (expr_ends_with_brace(init)) {
+                if (peek(p)->kind == TOKEN_SEMICOLON) {
+                    ast_expr_free(init);
+                    free(name);
+                    free((void *)type);
+                    fail(p, "semicolon not allowed after '}'");
+                    ast_block_free(b);
+                    return NULL;
+                }
+            } else {
+                if (peek(p)->kind != TOKEN_SEMICOLON) {
+                    ast_expr_free(init);
+                    free(name);
+                    free((void *)type);
+                    fail(p, "expected ';' after let");
+                    ast_block_free(b);
+                    return NULL;
+                }
+                advance(p);
             }
-            advance(p);
             b->let_decls[b->num_lets].name = name;
             b->let_decls[b->num_lets].type = type;
             b->let_decls[b->num_lets].init = init;
@@ -2252,6 +2378,12 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 return NULL;
             }
             advance(p);
+            if (fail_if_semicolon_after_brace(p) != 0) {
+                ast_expr_free(cond);
+                ast_block_free(body);
+                ast_block_free(b);
+                return NULL;
+            }
             b->loops[b->num_loops].cond = cond;
             b->loops[b->num_loops].body = body;
             b->num_loops++;
@@ -2405,9 +2537,6 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 ast_block_free(b);
                 return NULL;
             }
-            /* for 体块允许 final_expr 后带分号；若块解析未消费，此处补消费以便看到 } */
-            while (peek(p)->kind == TOKEN_SEMICOLON)
-                advance(p);
             if (peek(p)->kind != TOKEN_RBRACE) {
                 ast_expr_free(init);
                 ast_expr_free(cond);
@@ -2418,6 +2547,14 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 return NULL;
             }
             advance(p);
+            if (fail_if_semicolon_after_brace(p) != 0) {
+                ast_expr_free(init);
+                ast_expr_free(cond);
+                ast_expr_free(step);
+                ast_block_free(body);
+                ast_block_free(b);
+                return NULL;
+            }
             b->for_loops[b->num_for_loops].init = init;
             b->for_loops[b->num_for_loops].cond = cond;
             b->for_loops[b->num_for_loops].step = step;
@@ -2451,6 +2588,11 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
             return NULL;
         }
         advance(p);
+        if (fail_if_semicolon_after_brace(p) != 0) {
+            ast_block_free(db);
+            ast_block_free(b);
+            return NULL;
+        }
         if (!b->defer_blocks) {
             b->defer_blocks = (ASTBlock **)malloc((size_t)MAX_DEFERS * sizeof(ASTBlock *));
             if (!b->defer_blocks) {
@@ -2523,21 +2665,29 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
         }
         if (peek(p)->kind == TOKEN_RETURN) {
             advance(p);
-            ASTExpr *ret_expr = parse_expr(p);
-            if (!ret_expr) {
-                if (label) free(label);
-                ast_block_free(b);
-                return NULL;
+            /* 支持 return;（无表达式）与 return expr;（文档 01：return expr; / return;） */
+            ASTExpr *ret_expr = NULL;
+            if (peek(p)->kind != TOKEN_SEMICOLON && peek(p)->kind != TOKEN_RBRACE)
+                ret_expr = parse_expr(p);
+            /* } 后禁止分号；return 以 } 结尾时不需要分号；其他 return 必须带分号（分号在表达式后、} 前，如 return 10; }） */
+            if (ret_expr && expr_ends_with_brace(ret_expr)) {
+                if (peek(p)->kind == TOKEN_SEMICOLON) {
+                    ast_expr_free(ret_expr);
+                    if (label) free(label);
+                    fail(p, "semicolon not allowed after '}'");
+                    ast_block_free(b);
+                    return NULL;
+                }
+            } else {
+                if (peek(p)->kind != TOKEN_SEMICOLON) {
+                    ast_expr_free(ret_expr);
+                    if (label) free(label);
+                    fail(p, "expected ';' after return");
+                    ast_block_free(b);
+                    return NULL;
+                }
+                advance(p);
             }
-            /* 统一规则：return expr 后必须加分号 */
-            if (peek(p)->kind != TOKEN_SEMICOLON) {
-                ast_expr_free(ret_expr);
-                if (label) free(label);
-                ast_block_free(b);
-                fail(p, "expected ';' after return expr");
-                return NULL;
-            }
-            advance(p);
             if (b->num_labeled_stmts >= MAX_LABELED_STMTS) {
                 ast_expr_free(ret_expr);
                 if (label) free(label);
@@ -2563,14 +2713,46 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
         if (label) free(label);
         break;
     }
-    /* 当块以 return/goto 结尾且下一 token 为 } 时，final_expr 可选（无需占位表达式） */
+    /* 解析 (expr;)* 与可选的最终表达式；当块以 } 结尾时无 final_expr（文档 01：块为 { stmt; stmt; ... expr }） */
     if (allow_while && peek(p)->kind == TOKEN_RBRACE) {
         b->final_expr = NULL;
     } else {
-        b->final_expr = parse_expr(p);
-        if (!b->final_expr) {
-            ast_block_free(b);
-            return NULL;
+        for (;;) {
+            ASTExpr *e = parse_expr(p);
+            if (!e) {
+                ast_block_free(b);
+                return NULL;
+            }
+            if (peek(p)->kind == TOKEN_SEMICOLON) {
+                /* } 后禁止分号；表达式以 } 结尾时不能写分号，视为块尾 final_expr */
+                if (expr_ends_with_brace(e)) {
+                    fail(p, "semicolon not allowed after '}'");
+                    ast_expr_free(e);
+                    ast_block_free(b);
+                    return NULL;
+                }
+                if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
+                    ast_expr_free(e);
+                    ast_block_free(b);
+                    fail(p, "too many expression statements");
+                    return NULL;
+                }
+                if (!b->expr_stmts) {
+                    b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
+                    if (!b->expr_stmts) {
+                        ast_expr_free(e);
+                        ast_block_free(b);
+                        fprintf(stderr, "parse: out of memory\n");
+                        return NULL;
+                    }
+                }
+                b->expr_stmts[b->num_expr_stmts++] = e;
+                advance(p);
+            } else {
+                /* 无分号：视为块尾 final_expr */
+                b->final_expr = e;
+                break;
+            }
         }
         /* allow_while 为 0 时（如 for 体）：允许 final_expr 后带分号，与常见写法一致；循环消费避免漏消费 */
         if (!allow_while)
@@ -2582,7 +2764,13 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
         fail(p, "expected '}'");
         return NULL;
     }
-    if (allow_while) advance(p);
+    if (allow_while) {
+        advance(p);
+        if (fail_if_semicolon_after_brace(p) != 0) {
+            ast_block_free(b);
+            return NULL;
+        }
+    }
     return b;
 }
 
@@ -2846,11 +3034,33 @@ int parse(Lexer *lex, ASTModule **out) {
         import_list[nimports++] = path;
     }
 
-    /* [ allow(padding) ]? struct Name { field : Type ; ... } 可重复；§11.1 allow(padding) 表示允许隐式 padding */
+    /* [ enum Name { A, B, C } ]*（§7.4 无负载枚举）；允许在 struct 前，便于 struct 字段引用 enum 类型 */
     ASTStructDef *struct_list[MAX_STRUCTS];
     int nstructs = 0;
     ASTEnumDef *enum_list[MAX_ENUMS];
     int nenums = 0;
+    while (peek(&prs)->kind == TOKEN_ENUM) {
+        ASTEnumDef *e = parse_one_enum(&prs);
+        if (!e) {
+            while (nimports--) free(import_list[nimports]);
+            while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
+            while (nenums--) ast_enum_def_free(enum_list[nenums]);
+            free(mod);
+            return -1;
+        }
+        if (nenums >= MAX_ENUMS) {
+            ast_enum_def_free(e);
+            while (nimports--) free(import_list[nimports]);
+            while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
+            while (nenums--) ast_enum_def_free(enum_list[nenums]);
+            free(mod);
+            fail(&prs, "too many enum definitions");
+            return -1;
+        }
+        enum_list[nenums++] = e;
+    }
+
+    /* [ allow(padding) ]? struct Name { field : Type ; ... } 可重复；§11.1 allow(padding) 表示允许隐式 padding */
     while (1) {
         int allow_padding = 0;
         if (is_ident_str(&prs, "allow", 5)) {
@@ -2858,7 +3068,7 @@ int parse(Lexer *lex, ASTModule **out) {
             if (peek(&prs)->kind != TOKEN_LPAREN) {
                 while (nimports--) free(import_list[nimports]);
                 while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
-            while (nenums--) ast_enum_def_free(enum_list[nenums]);
+                while (nenums--) ast_enum_def_free(enum_list[nenums]);
                 free(mod);
                 fail(&prs, "expected '(' after 'allow'");
                 return -1;
@@ -2867,7 +3077,7 @@ int parse(Lexer *lex, ASTModule **out) {
             if (!is_ident_str(&prs, "padding", 7)) {
                 while (nimports--) free(import_list[nimports]);
                 while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
-            while (nenums--) ast_enum_def_free(enum_list[nenums]);
+                while (nenums--) ast_enum_def_free(enum_list[nenums]);
                 free(mod);
                 fail(&prs, "expected 'padding' inside allow(...)");
                 return -1;
@@ -2876,7 +3086,7 @@ int parse(Lexer *lex, ASTModule **out) {
             if (peek(&prs)->kind != TOKEN_RPAREN) {
                 while (nimports--) free(import_list[nimports]);
                 while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
-            while (nenums--) ast_enum_def_free(enum_list[nenums]);
+                while (nenums--) ast_enum_def_free(enum_list[nenums]);
                 free(mod);
                 fail(&prs, "expected ')' to close allow(...)");
                 return -1;
@@ -2903,28 +3113,6 @@ int parse(Lexer *lex, ASTModule **out) {
             return -1;
         }
         struct_list[nstructs++] = s;
-    }
-
-    /* [ enum Name { A, B, C } ]*（§7.4 无负载枚举） */
-    while (peek(&prs)->kind == TOKEN_ENUM) {
-        ASTEnumDef *e = parse_one_enum(&prs);
-        if (!e) {
-            while (nimports--) free(import_list[nimports]);
-            while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
-            while (nenums--) ast_enum_def_free(enum_list[nenums]);
-            free(mod);
-            return -1;
-        }
-        if (nenums >= MAX_ENUMS) {
-            ast_enum_def_free(e);
-            while (nimports--) free(import_list[nimports]);
-            while (nstructs--) ast_struct_def_free(struct_list[nstructs]);
-            while (nenums--) ast_enum_def_free(enum_list[nenums]);
-            free(mod);
-            fail(&prs, "too many enum definitions");
-            return -1;
-        }
-        enum_list[nenums++] = e;
     }
 
     /* [ trait Name { function method(self) -> type ; ... } ]*（阶段 7.2） */
