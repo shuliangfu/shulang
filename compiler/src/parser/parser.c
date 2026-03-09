@@ -13,13 +13,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** 解析器内部状态：Lexer 引用 + 当前 lookahead Token + 下一 Token（用于 label: 判断） */
+/** 解析器内部状态：Lexer 引用 + 当前 lookahead Token + 下一/再下一 Token（用于 label: 与 < 歧义消解） */
 typedef struct {
     Lexer *lex;
     Token cur;
-    int cur_loaded;  /**< 1 表示 cur 已加载有效 Token */
-    Token next;      /**< 下一 Token，用于 peek_next（如 ident 后是否 : ） */
-    int next_loaded; /**< 1 表示 next 已加载 */
+    int cur_loaded;   /**< 1 表示 cur 已加载有效 Token */
+    Token next;       /**< 下一 Token，用于 peek_next */
+    int next_loaded;
+    Token next_next;  /**< 再下一 Token，用于 < 后 IDENT 时区分比较与泛型 */
+    int next_next_loaded;
 } Parser;
 
 /**
@@ -29,7 +31,13 @@ typedef struct {
 static void advance(Parser *p) {
     if (p->next_loaded) {
         p->cur = p->next;
-        p->next_loaded = 0;
+        p->next_loaded = p->next_next_loaded;
+        if (p->next_next_loaded) {
+            p->next = p->next_next;
+            p->next_next_loaded = 0;
+        } else {
+            p->next_loaded = 0;
+        }
     } else {
         lexer_next(p->lex, &p->cur);
     }
@@ -55,6 +63,16 @@ static const Token *peek_next(Parser *p) {
         p->next_loaded = 1;
     }
     return &p->next;
+}
+
+/** 返回再下一 Token（用于 < 后 IDENT 时区分 i < len 与 f<T>）；可能消耗 lexer 一次。 */
+static const Token *peek_next_next(Parser *p) {
+    (void)peek_next(p);
+    if (!p->next_next_loaded) {
+        lexer_next(p->lex, &p->next_next);
+        p->next_next_loaded = 1;
+    }
+    return &p->next_next;
 }
 
 /**
@@ -174,7 +192,7 @@ static ASTExpr *parse_expr(Parser *p);
 static ASTExpr *parse_term(Parser *p);
 
 static ASTExpr *parse_postfix(Parser *p);
-static ASTBlock *parse_block(Parser *p, int allow_while);
+static ASTBlock *parse_block(Parser *p, int allow_while, int consume_rbrace);
 
 /**
  * 解析类型名称（内建/标识符类型名、裸指针 *T；* 后递归解析元素类型）。
@@ -392,25 +410,34 @@ static ASTExpr *parse_if_expr(Parser *p) {
         fail(p, "expected '{' after if condition");
         return NULL;
     }
-    advance(p);
-    ASTExpr *then_expr = parse_expr(p);
-    if (!then_expr) {
+    advance(p);  /* 已消费 '{'，当前在块内首 token */
+    ASTBlock *then_block = parse_block(p, 1, 0);
+    if (!then_block) {
         ast_expr_free(cond);
         return NULL;
     }
-    if (peek(p)->kind == TOKEN_SEMICOLON) advance(p);
     if (peek(p)->kind != TOKEN_RBRACE) {
         ast_expr_free(cond);
-        ast_expr_free(then_expr);
+        ast_block_free(then_block);
         fail(p, "expected '}' after if body");
         return NULL;
     }
     advance(p);
     if (fail_if_semicolon_after_brace(p) != 0) {
         ast_expr_free(cond);
-        ast_expr_free(then_expr);
+        ast_block_free(then_block);
         return NULL;
     }
+    ASTExpr *then_expr = (ASTExpr *)calloc(1, sizeof(ASTExpr));
+    if (!then_expr) {
+        ast_expr_free(cond);
+        ast_block_free(then_block);
+        fprintf(stderr, "parse: out of memory\n");
+        return NULL;
+    }
+    set_expr_loc_at(then_expr, if_start_line, if_start_col);
+    then_expr->kind = AST_EXPR_BLOCK;
+    then_expr->value.block = then_block;
     /* else 后可为 else if cond { block } 或 else { block }，实现链式条件 */
     ASTExpr *else_expr = NULL;
     if (peek(p)->kind == TOKEN_ELSE) {
@@ -430,9 +457,9 @@ static ASTExpr *parse_if_expr(Parser *p) {
                 fail(p, "expected '{' or 'if' after else");
                 return NULL;
             }
-            advance(p);
-            else_expr = parse_expr(p);
-            if (!else_expr) {
+            advance(p);  /* 已消费 '{'，当前在 else 块内首 token */
+            ASTBlock *else_block = parse_block(p, 1, 0);
+            if (!else_block) {
                 ast_expr_free(cond);
                 ast_expr_free(then_expr);
                 return NULL;
@@ -440,7 +467,7 @@ static ASTExpr *parse_if_expr(Parser *p) {
             if (peek(p)->kind != TOKEN_RBRACE) {
                 ast_expr_free(cond);
                 ast_expr_free(then_expr);
-                ast_expr_free(else_expr);
+                ast_block_free(else_block);
                 fail(p, "expected '}' after else body");
                 return NULL;
             }
@@ -448,9 +475,20 @@ static ASTExpr *parse_if_expr(Parser *p) {
             if (fail_if_semicolon_after_brace(p) != 0) {
                 ast_expr_free(cond);
                 ast_expr_free(then_expr);
-                ast_expr_free(else_expr);
+                ast_block_free(else_block);
                 return NULL;
             }
+            else_expr = (ASTExpr *)calloc(1, sizeof(ASTExpr));
+            if (!else_expr) {
+                ast_expr_free(cond);
+                ast_expr_free(then_expr);
+                ast_block_free(else_block);
+                fprintf(stderr, "parse: out of memory\n");
+                return NULL;
+            }
+            set_expr_loc_at(else_expr, if_start_line, if_start_col);
+            else_expr->kind = AST_EXPR_BLOCK;
+            else_expr->value.block = else_block;
         }
     }
     ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
@@ -931,6 +969,7 @@ static ASTExpr *parse_primary(Parser *p) {
         return e;
     }
     if (t->kind != TOKEN_INT) {
+        fprintf(stderr, "parse_primary: at %d:%d unexpected token kind=%d (expected INT/IDENT/...)\n", t->line, t->col, (int)t->kind);
         fail(p, "expected integer literal, float literal, identifier, 'true', 'false', 'if', 'break', 'continue', 'return', 'panic', 'match', or '('");
         return NULL;
     }
@@ -1076,7 +1115,14 @@ static ASTExpr *parse_postfix(Parser *p) {
     if (peek(p)->kind == TOKEN_LT) {
         const Token *n = peek_next(p);
         TokenKind k = n->kind;
-        int type_start = (k == TOKEN_IDENT || k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_VOID || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_I32X16 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_U32X16 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
+        int type_start;
+        if (k == TOKEN_IDENT) {
+            /* i < len 与 f<T>(...) 歧义：仅当 IDENT 后为 > 或 , 时视为泛型实参 */
+            const Token *nn = peek_next_next(p);
+            type_start = (nn->kind == TOKEN_GT || nn->kind == TOKEN_COMMA);
+        } else {
+            type_start = (k == TOKEN_I32 || k == TOKEN_BOOL || k == TOKEN_U8 || k == TOKEN_U32 || k == TOKEN_U64 || k == TOKEN_I64 || k == TOKEN_USIZE || k == TOKEN_ISIZE || k == TOKEN_F32 || k == TOKEN_F64 || k == TOKEN_VOID || k == TOKEN_I32X4 || k == TOKEN_I32X8 || k == TOKEN_I32X16 || k == TOKEN_U32X4 || k == TOKEN_U32X8 || k == TOKEN_U32X16 || k == TOKEN_STAR || k == TOKEN_LBRACKET);
+        }
         if (!type_start) {
             /* 视为小于运算，不解析类型实参 */
         } else {
@@ -1995,7 +2041,7 @@ static ASTFunc *parse_impl_method(Parser *p, const char *trait_name, const char 
         return NULL;
     }
     advance(p);  /* consume '{' before block body */
-    ASTBlock *body = parse_block(p, 1);
+    ASTBlock *body = parse_block(p, 1, 1);
     if (!body) {
         free(meth_name); ast_type_free(ret);
         for (int j = 0; j < num_params; j++) { free((void *)params[j].name); ast_type_free(params[j].type); }
@@ -2125,11 +2171,69 @@ static ASTImplBlock *parse_one_impl(Parser *p) {
     return impl;
 }
 
+/** 将一条语句顺序追加到块 b；kind 0=const, 1=let, 2=expr_stmt, 3=loop, 4=for；idx 为对应数组下标。 */
+static void push_stmt_order(ASTBlock *b, int kind, int idx) {
+    if (b->num_stmt_order < MAX_BLOCK_STMT_ORDER) {
+        b->stmt_order[b->num_stmt_order].kind = (unsigned char)kind;
+        b->stmt_order[b->num_stmt_order].idx = idx;
+        b->num_stmt_order++;
+    }
+}
+
+/**
+ * 解析单条 const 或 let 并追加到块 b；当前 token 须为 TOKEN_CONST 或 TOKEN_LET。
+ * 返回值：1 表示已解析并追加一条，0 表示当前不是 const/let，-1 表示失败并已 fail。
+ */
+static int parse_one_const_or_let(Parser *p, ASTBlock *b) {
+    if (peek(p)->kind == TOKEN_CONST) {
+        if (b->num_consts >= MAX_CONST_DECLS) { fail(p, "too many const declarations"); ast_block_free(b); return -1; }
+        advance(p);
+        if (peek(p)->kind != TOKEN_IDENT && peek(p)->kind != TOKEN_I32) { fail(p, "expected identifier after const"); ast_block_free(b); return -1; }
+        char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident) ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : (peek(p)->kind == TOKEN_I32 ? strdup("i32") : NULL);
+        advance(p);
+        if (!name) { ast_block_free(b); return -1; }
+        ASTType *type = NULL;
+        if (peek(p)->kind == TOKEN_COLON) { advance(p); type = parse_type_name(p); if (!type) { free(name); ast_block_free(b); return -1; } }
+        if (peek(p)->kind != TOKEN_ASSIGN) { free(name); if (type) free((void *)type); fail(p, "expected '=' in const"); ast_block_free(b); return -1; }
+        advance(p);
+        ASTExpr *init = parse_expr(p);
+        if (!init) { free(name); if (type) free((void *)type); ast_block_free(b); return -1; }
+        if (expr_ends_with_brace(init)) { if (peek(p)->kind == TOKEN_SEMICOLON) { ast_expr_free(init); free(name); if (type) free((void *)type); fail(p, "semicolon not allowed after '}'"); ast_block_free(b); return -1; } }
+        else { if (peek(p)->kind != TOKEN_SEMICOLON) { ast_expr_free(init); free(name); if (type) free((void *)type); fail(p, "expected ';' after const"); ast_block_free(b); return -1; } advance(p); }
+        b->const_decls[b->num_consts].name = name; b->const_decls[b->num_consts].type = type; b->const_decls[b->num_consts].init = init; b->num_consts++;
+        push_stmt_order(b, 0, b->num_consts - 1);
+        return 1;
+    }
+    if (peek(p)->kind == TOKEN_LET) {
+        if (b->num_lets >= MAX_LET_DECLS) { fail(p, "too many let declarations"); ast_block_free(b); return -1; }
+        advance(p);
+        if (peek(p)->kind != TOKEN_IDENT) { fail(p, "expected identifier after let"); ast_block_free(b); return -1; }
+        char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident) ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL;
+        advance(p);
+        if (!name) { ast_block_free(b); return -1; }
+        if (peek(p)->kind != TOKEN_COLON) { free(name); fail(p, "expected ':' and type in let"); ast_block_free(b); return -1; }
+        advance(p);
+        ASTType *type = parse_type_name(p);
+        if (!type) { free(name); ast_block_free(b); return -1; }
+        if (peek(p)->kind != TOKEN_ASSIGN) { free(name); free((void *)type); fail(p, "expected '=' in let"); ast_block_free(b); return -1; }
+        advance(p);
+        ASTExpr *init = parse_expr(p);
+        if (!init) { free(name); free((void *)type); ast_block_free(b); return -1; }
+        if (expr_ends_with_brace(init)) { if (peek(p)->kind == TOKEN_SEMICOLON) { ast_expr_free(init); free(name); free((void *)type); fail(p, "semicolon not allowed after '}'"); ast_block_free(b); return -1; } }
+        else { if (peek(p)->kind != TOKEN_SEMICOLON) { ast_expr_free(init); free(name); free((void *)type); fail(p, "expected ';' after let"); ast_block_free(b); return -1; } advance(p); }
+        b->let_decls[b->num_lets].name = name; b->let_decls[b->num_lets].type = type; b->let_decls[b->num_lets].init = init; b->num_lets++;
+        push_stmt_order(b, 1, b->num_lets - 1);
+        return 1;
+    }
+    return 0;
+}
+
 /**
  * 解析块体：(const|let)* (while 条件 { 块 })* 最终表达式；可选是否解析 while 及结尾 }。
- * 参数：p 解析器状态；allow_while 1 表示解析 while 并在最后消耗 RBRACE，0 表示仅 (const|let)* expr（用于 while 体）。返回值：成功返回 ASTBlock*；失败返回 NULL。
+ * 块中部（(expr;)* 前或之间）也允许 const/let、while/for。
+ * 参数：p 解析器状态；allow_while 1 表示允许解析 while/for；consume_rbrace 1 表示最后消耗结尾 }（函数体等），0 表示不消耗（if/while/for 体由调用方消耗）。返回值：成功返回 ASTBlock*；失败返回 NULL。
  */
-static ASTBlock *parse_block(Parser *p, int allow_while) {
+static ASTBlock *parse_block(Parser *p, int allow_while, int consume_rbrace) {
     ASTBlock *b = (ASTBlock *)malloc(sizeof(ASTBlock));
     if (!b) {
         fprintf(stderr, "parse: out of memory\n");
@@ -2137,6 +2241,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
     }
     b->num_consts = 0;
     b->num_lets = 0;
+    b->num_early_lets = 0;
     b->const_decls = (ASTConstDecl *)malloc((size_t)MAX_CONST_DECLS * sizeof(ASTConstDecl));
     b->let_decls = (ASTLetDecl *)malloc((size_t)MAX_LET_DECLS * sizeof(ASTLetDecl));
     b->loops = NULL;
@@ -2150,159 +2255,21 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
     b->expr_stmts = NULL;
     b->num_expr_stmts = 0;
     b->final_expr = NULL;
+    b->num_stmt_order = 0;
     if (!b->const_decls || !b->let_decls) {
         if (b->const_decls) free(b->const_decls);
         if (b->let_decls) free(b->let_decls);
         free(b);
         return NULL;
     }
-    for (;;) {
-        if (peek(p)->kind == TOKEN_CONST) {
-            if (b->num_consts >= MAX_CONST_DECLS) {
-                fail(p, "too many const declarations");
-                ast_block_free(b);
-                return NULL;
-            }
-            advance(p);
-            if (peek(p)->kind != TOKEN_IDENT && peek(p)->kind != TOKEN_I32) {
-                fail(p, "expected identifier after const");
-                ast_block_free(b);
-                return NULL;
-            }
-            char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident)
-                ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len)
-                : (peek(p)->kind == TOKEN_I32 ? strdup("i32") : NULL);
-            advance(p);
-            if (!name) {
-                ast_block_free(b);
-                return NULL;
-            }
-            ASTType *type = NULL;
-        if (peek(p)->kind == TOKEN_COLON) {
-                advance(p);
-                type = parse_type_name(p);
-                if (!type) {
-                free(name);
-                ast_block_free(b);
-                return NULL;
-            }
-        }
-            if (peek(p)->kind != TOKEN_ASSIGN) {
-                free(name);
-                if (type) free((void *)type);
-                fail(p, "expected '=' in const");
-                ast_block_free(b);
-                return NULL;
-            }
-            advance(p);
-            ASTExpr *init = parse_expr(p);
-            if (!init) {
-                free(name);
-                if (type) free((void *)type);
-                ast_block_free(b);
-                return NULL;
-            }
-            /* } 后禁止分号；const 以 } 结尾时不能写分号，否则必须写分号 */
-            if (expr_ends_with_brace(init)) {
-                if (peek(p)->kind == TOKEN_SEMICOLON) {
-                    ast_expr_free(init);
-                    free(name);
-                    if (type) free((void *)type);
-                    fail(p, "semicolon not allowed after '}'");
-                    ast_block_free(b);
-                    return NULL;
-                }
-            } else {
-                if (peek(p)->kind != TOKEN_SEMICOLON) {
-                    ast_expr_free(init);
-                    free(name);
-                    if (type) free((void *)type);
-                    fail(p, "expected ';' after const");
-                    ast_block_free(b);
-                    return NULL;
-                }
-                advance(p);
-            }
-            b->const_decls[b->num_consts].name = name;
-            b->const_decls[b->num_consts].type = type;
-            b->const_decls[b->num_consts].init = init;
-            b->num_consts++;
-        } else if (peek(p)->kind == TOKEN_LET) {
-            if (b->num_lets >= MAX_LET_DECLS) {
-                fail(p, "too many let declarations");
-                ast_block_free(b);
-                return NULL;
-            }
-            advance(p);
-            if (peek(p)->kind != TOKEN_IDENT) {
-                fail(p, "expected identifier after let");
-                ast_block_free(b);
-                return NULL;
-            }
-            char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident)
-                ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL;
-            advance(p);
-            if (!name) {
-                ast_block_free(b);
-                return NULL;
-            }
-            if (peek(p)->kind != TOKEN_COLON) {
-                free(name);
-                fail(p, "expected ':' and type in let");
-                ast_block_free(b);
-                return NULL;
-            }
-            advance(p);
-            ASTType *type = parse_type_name(p);
-            if (!type) {
-                free(name);
-                ast_block_free(b);
-                return NULL;
-            }
-            if (peek(p)->kind != TOKEN_ASSIGN) {
-                free(name);
-                free((void *)type);
-                fail(p, "expected '=' in let");
-                ast_block_free(b);
-                return NULL;
-            }
-            advance(p);
-            ASTExpr *init = parse_expr(p);
-            if (!init) {
-                free(name);
-                free((void *)type);
-                ast_block_free(b);
-                return NULL;
-            }
-            /* } 后禁止分号；let 以 } 结尾时不能写分号，否则必须写分号 */
-            if (expr_ends_with_brace(init)) {
-                if (peek(p)->kind == TOKEN_SEMICOLON) {
-                    ast_expr_free(init);
-                    free(name);
-                    free((void *)type);
-                    fail(p, "semicolon not allowed after '}'");
-                    ast_block_free(b);
-                    return NULL;
-                }
-            } else {
-                if (peek(p)->kind != TOKEN_SEMICOLON) {
-                    ast_expr_free(init);
-                    free(name);
-                    free((void *)type);
-                    fail(p, "expected ';' after let");
-                    ast_block_free(b);
-                    return NULL;
-                }
-                advance(p);
-            }
-            b->let_decls[b->num_lets].name = name;
-            b->let_decls[b->num_lets].type = type;
-            b->let_decls[b->num_lets].init = init;
-            b->num_lets++;
-        } else
-            break;
+    {
+        int r;
+        while ((r = parse_one_const_or_let(p, b)) == 1) ;
+        if (r == -1) return NULL;
+        b->num_early_lets = b->num_lets;  /* codegen 用：块开头 let 数量，之后 expr/while/for 再出现的 let 为 late */
     }
-    /* 可选：解析 while 条件 { 块 } 或 loop { 块 }（loop 等价 while 1） */
+    /* 可选：解析 while 条件 { 块 } 或 loop { 块 }（loop 等价 while 1）；块中部 (expr;)* 遇 while/for 时也跳转至此解析一条 */
+parse_while_start:
     if (allow_while) {
         while (peek(p)->kind == TOKEN_WHILE || peek(p)->kind == TOKEN_LOOP) {
             if (b->num_loops >= MAX_WHILE_LOOPS) {
@@ -2364,7 +2331,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 }
             }
             advance(p);
-            ASTBlock *body = parse_block(p, 0);  /* 体不包含嵌套 while/loop，不消耗 } */
+            ASTBlock *body = parse_block(p, 1, 0);  /* 体可含嵌套 while/for，不消耗 } 由调用方消耗 */
             if (!body) {
                 ast_expr_free(cond);
                 ast_block_free(b);
@@ -2387,8 +2354,10 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
             b->loops[b->num_loops].cond = cond;
             b->loops[b->num_loops].body = body;
             b->num_loops++;
+            push_stmt_order(b, 3, b->num_loops - 1);
         }
-        /* 解析 for ( [init]; [cond]; [step] ) { body } */
+        /* 解析 for ( [init]; [cond]; [step] ) { body }；块中部遇 for 时也跳转至此解析一条 */
+parse_for_start:
         while (allow_while && peek(p)->kind == TOKEN_FOR) {
             if (b->num_for_loops >= MAX_FOR_LOOPS) {
                 fail(p, "too many for loops");
@@ -2469,6 +2438,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 b->let_decls[b->num_lets].type = type;
                 b->let_decls[b->num_lets].init = let_init;
                 b->num_lets++;
+                push_stmt_order(b, 1, b->num_lets - 1);
             } else if (peek(p)->kind != TOKEN_SEMICOLON) {
                 init = parse_expr(p);
                 if (!init) { ast_block_free(b); return NULL; }
@@ -2529,7 +2499,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                 return NULL;
             }
             advance(p);
-            ASTBlock *body = parse_block(p, 0);
+            ASTBlock *body = parse_block(p, 0, 0);
             if (!body) {
                 ast_expr_free(init);
                 ast_expr_free(cond);
@@ -2560,6 +2530,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
             b->for_loops[b->num_for_loops].step = step;
             b->for_loops[b->num_for_loops].body = body;
             b->num_for_loops++;
+            push_stmt_order(b, 4, b->num_for_loops - 1);
         }
     }
     /* 解析 defer { block }*：块退出时逆序执行 */
@@ -2576,7 +2547,7 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
             return NULL;
         }
         advance(p);
-        ASTBlock *db = parse_block(p, 0);
+        ASTBlock *db = parse_block(p, 0, 0);
         if (!db) {
             ast_block_free(b);
             return NULL;
@@ -2713,11 +2684,20 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
         if (label) free(label);
         break;
     }
-    /* 解析 (expr;)* 与可选的最终表达式；当块以 } 结尾时无 final_expr（文档 01：块为 { stmt; stmt; ... expr }） */
-    if (allow_while && peek(p)->kind == TOKEN_RBRACE) {
+    /* 解析 (expr;)* 与可选的最终表达式；当块以 } 结尾时无 final_expr（文档 01：块为 { stmt; stmt; ... expr }）。块中部允许 const/let。 */
+    if (consume_rbrace && peek(p)->kind == TOKEN_RBRACE) {
         b->final_expr = NULL;
     } else {
         for (;;) {
+            if (peek(p)->kind == TOKEN_RBRACE)
+                break;
+            {
+                int r = parse_one_const_or_let(p, b);
+                if (r == 1) continue;
+                if (r == -1) return NULL;
+            }
+            if (allow_while && (peek(p)->kind == TOKEN_WHILE || peek(p)->kind == TOKEN_LOOP)) goto parse_while_start;
+            if (allow_while && peek(p)->kind == TOKEN_FOR) goto parse_for_start;
             ASTExpr *e = parse_expr(p);
             if (!e) {
                 ast_block_free(b);
@@ -2747,9 +2727,30 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
                     }
                 }
                 b->expr_stmts[b->num_expr_stmts++] = e;
+                push_stmt_order(b, 2, b->num_expr_stmts - 1);
                 advance(p);
             } else {
-                /* 无分号：视为块尾 final_expr */
+                /* 无分号：以 } 结尾且下一 token 为 } 时视为块尾 final_expr；否则视为表达式语句并继续（便于 if { } return ... 不写 };） */
+                if (expr_ends_with_brace(e) && peek(p)->kind != TOKEN_RBRACE) {
+                    if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
+                        ast_expr_free(e);
+                        ast_block_free(b);
+                        fail(p, "too many expression statements");
+                        return NULL;
+                    }
+                    if (!b->expr_stmts) {
+                        b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
+                        if (!b->expr_stmts) {
+                            ast_expr_free(e);
+                            ast_block_free(b);
+                            fprintf(stderr, "parse: out of memory\n");
+                            return NULL;
+                        }
+                    }
+                    b->expr_stmts[b->num_expr_stmts++] = e;
+                    push_stmt_order(b, 2, b->num_expr_stmts - 1);
+                    continue;
+                }
                 b->final_expr = e;
                 break;
             }
@@ -2759,12 +2760,12 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
             while (peek(p)->kind == TOKEN_SEMICOLON)
                 advance(p);
     }
-    if (allow_while && peek(p)->kind != TOKEN_RBRACE) {
+    if (consume_rbrace && peek(p)->kind != TOKEN_RBRACE) {
         ast_block_free(b);
         fail(p, "expected '}'");
         return NULL;
     }
-    if (allow_while) {
+    if (consume_rbrace) {
         advance(p);
         if (fail_if_semicolon_after_brace(p) != 0) {
             ast_block_free(b);
@@ -2936,7 +2937,7 @@ static ASTFunc *parse_one_function(Parser *p, int is_extern) {
             return NULL;
         }
         advance(p);
-        body = parse_block(p, 1);
+        body = parse_block(p, 1, 1);
         if (!body) {
             free(name);
             if (gp_names) { for (int i = 0; i < n_gp; i++) free(gp_names[i]); free(gp_names); }
@@ -2982,7 +2983,7 @@ int parse(Lexer *lex, ASTModule **out) {
     if (!out) return -1;
     *out = NULL;
 
-    Parser prs = { .lex = lex, .cur_loaded = 0, .next_loaded = 0 };
+    Parser prs = { .lex = lex, .cur_loaded = 0, .next_loaded = 0, .next_next_loaded = 0 };
 
     ASTModule *mod = (ASTModule *)malloc(sizeof(ASTModule));
     if (!mod) {
