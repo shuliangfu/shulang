@@ -73,6 +73,7 @@ typedef enum ASTExprKind {
     AST_EXPR_BITNOT, /**< 一元 ~ */
     AST_EXPR_LOGNOT, /**< 一元 ! */
     AST_EXPR_IF,     /**< if cond { then_expr } else { else_expr }（条件表达式） */
+    AST_EXPR_BLOCK,  /**< 块表达式：{ const/let; stmts; expr }，用于 if 的 then/else 体（可含 let/return） */
     AST_EXPR_TERNARY,/**< cond ? then_expr : else_expr（三元运算符） */
     AST_EXPR_ASSIGN,  /**< 赋值表达式 left = right（如 for 的 step）；复用 value.binop：left 为左值，right 为右值 */
     AST_EXPR_BREAK,   /**< break（仅允许在循环体内） */
@@ -121,9 +122,10 @@ typedef struct ASTExpr {
         } unary;
         struct {
             struct ASTExpr *cond;       /**< AST_EXPR_IF 条件 */
-            struct ASTExpr *then_expr;  /**< then 分支表达式 */
-            struct ASTExpr *else_expr;  /**< else 分支表达式（可为 NULL，生成时按 0 处理） */
+            struct ASTExpr *then_expr;  /**< then 分支表达式（可为 AST_EXPR_BLOCK） */
+            struct ASTExpr *else_expr;  /**< else 分支表达式（可为 NULL 或 AST_EXPR_BLOCK） */
         } if_expr;
+        struct ASTBlock *block;         /**< AST_EXPR_BLOCK 时指向块（const/let + stmts + final_expr） */
         struct {
             struct ASTExpr *matched_expr;  /**< match 的待匹配表达式 */
             struct ASTMatchArm *arms;     /**< 分支数组 */
@@ -258,12 +260,22 @@ typedef struct ASTForLoop {
     struct ASTBlock *body;  /**< 循环体块 */
 } ASTForLoop;
 
-/** 块：const/let + while/for + defer 块列表 + 可选 label/goto/return 语句 + 可选表达式语句序列 (expr;) + 最终表达式 */
+/** 块内语句顺序：kind 0=const, 1=let, 2=expr_stmt, 3=loop, 4=for；idx 为对应数组下标；codegen 按此顺序生成保证 let/expr/loop 交错正确。 */
+#define MAX_BLOCK_STMT_ORDER 96
+typedef struct ASTBlockStmtOrder {
+    unsigned char kind;
+    int idx;
+} ASTBlockStmtOrder;
+
+/** 块：const/let + while/for + defer 块列表 + 可选 label/goto/return 语句 + 可选表达式语句序列 (expr;) + 最终表达式。
+ * num_early_lets：块开头连续 const/let 之后、首条 expr/while/for 之前的 let 个数；由 parser 设置。
+ * stmt_order：parser 按源码顺序 push (kind, idx)，codegen 在 num_stmt_order>0 时按序输出 const/let/expr/loop/for；0 表示未用，回退原逻辑。 */
 typedef struct ASTBlock {
     ASTConstDecl *const_decls;
     int num_consts;
     ASTLetDecl *let_decls;
     int num_lets;
+    int num_early_lets;  /**< 仅 codegen 用；0 表示未设置 */
     ASTWhileLoop *loops;    /**< while/loop 循环列表，可为 NULL */
     int num_loops;
     ASTForLoop *for_loops;   /**< for 循环列表，可为 NULL */
@@ -275,6 +287,8 @@ typedef struct ASTBlock {
     struct ASTExpr **expr_stmts;     /**< 表达式语句 (expr;) 序列，可为 NULL；与文档 01 块内 stmt; 一致 */
     int num_expr_stmts;
     struct ASTExpr *final_expr;
+    int num_stmt_order;             /**< 语句顺序条数；>0 时 codegen 按 stmt_order 输出 */
+    ASTBlockStmtOrder stmt_order[MAX_BLOCK_STMT_ORDER];  /**< 源码顺序：const(0)/let(1)/expr(2)/loop(3)/for(4) */
 } ASTBlock;
 
 /** 函数形参：名称与类型（与 analysis/自举前路线分析.md 多函数 一致）；is_restrict 供 noalias 传递生成 C restrict。 */
