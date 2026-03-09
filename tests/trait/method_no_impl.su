@@ -1,6 +1,6 @@
 // 边界：对无 impl 的类型调用方法，应报 no impl for type ... with method ...
 struct S {}
 function main(): i32 {
-  let s: S = S {};
+  let s: S = S {}
   return s.double();
 }
