@@ -1,8 +1,19 @@
-// std.fs — open/read/write/close、文件路径（自举前最小实现）
-// 自举前：提供最小可调用 API；文件系统接口后续扩展。
+// std.fs — open/read/write/close、文件路径（自举前最小可用实现）
+// 自举前：提供与 libc 一致的 extern 声明及薄封装，便于读 .su 源码、写目标文件。
 
-// 占位函数，表示本模块已可 import。
+extern function open(path: *u8, flags: i32): i32;
+extern function read(fd: i32, buf: *u8, count: usize): isize;
+extern function write(fd: i32, buf: *u8, count: usize): isize;
+extern function close(fd: i32): i32;
+
 function placeholder(): i32 { return 0; }
 
-// 表示“未打开的文件句柄”占位（-1），后续扩展为 open/read/write/close。
 function fs_invalid_handle(): i32 { return -1; }
+
+function fs_open_read(path: *u8): i32 { return open(path, 0); }
+
+function fs_close(fd: i32): i32 { return close(fd); }
+
+function fs_read(fd: i32, buf: *u8, count: usize): isize { return read(fd, buf, count); }
+
+function fs_write(fd: i32, buf: *u8, count: usize): isize { return write(fd, buf, count); }
