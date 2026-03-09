@@ -1,8 +1,38 @@
-// std.map — 映射/字典（自举前最小实现）
-// 自举前：提供最小可调用 API；映射/字典后续扩展。
+// std.map — 映射/字典（自举前最小可用实现）
+// 自举前：提供 Map_i32_i32 与 new/get/size/from_one；完整 insert 待 mut 后扩展。
 
-// 占位函数，表示本模块已可 import。
+struct Map_i32_i32 {
+  keys: [8]i32;
+  vals: [8]i32;
+  len: i32;
+}
+
 function placeholder(): i32 { return 0; }
 
-// 表示“空 map 大小”占位（0），后续扩展为 Map<K,V> 与 len。
 function map_empty_size(): i32 { return 0; }
+
+function map_new_i32_i32(): Map_i32_i32 {
+  return Map_i32_i32 {
+    keys: [0, 0, 0, 0, 0, 0, 0, 0],
+    vals: [0, 0, 0, 0, 0, 0, 0, 0],
+    len: 0
+  };
+}
+
+function map_size_i32_i32(m: Map_i32_i32): i32 { return m.len; }
+
+function map_get_loop(m: Map_i32_i32, k: i32, default_val: i32, i: i32): i32 {
+  return if (i >= m.len) { default_val } else { if (m.keys[i] == k) { m.vals[i] } else { map_get_loop(m, k, default_val, i + 1) } };
+}
+
+function map_get_i32_i32(m: Map_i32_i32, k: i32, default_val: i32): i32 {
+  return map_get_loop(m, k, default_val, 0);
+}
+
+function map_from_one_i32_i32(k: i32, v: i32): Map_i32_i32 {
+  return Map_i32_i32 {
+    keys: [k, 0, 0, 0, 0, 0, 0, 0],
+    vals: [v, 0, 0, 0, 0, 0, 0, 0],
+    len: 1
+  };
+}
