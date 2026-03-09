@@ -1,0 +1,857 @@
+// lexer.su — 词法分析器（自举 9.1：.su 实现，与 lexer.c 并存）
+// 职责：提供 Lexer、lexer_init、lexer_next；将 .su 源码按字符流切分为 Token 流。
+// 依赖：token.su（Token/TokenKind）。源码以 []u8 传入，IDENT 的 ident 暂置 0，仅填 ident_len。
+
+import token;
+
+/** Lexer 状态：当前扫描位置与行号列号；源码由调用方在 lexer_next 时以 []u8 传入。 */
+struct Lexer {
+  pos: usize;
+  line: i32;
+  col: i32;
+}
+
+/** 一次 lexer_next 的返回：更新后的 Lexer 状态与本次读到的 Token。 */
+struct LexerResult {
+  next_lex: Lexer;
+  tok: Token;
+}
+
+/** 返回初始 Lexer 状态（pos=0, line=1, col=1）。 */
+function lexer_init(): Lexer {
+  return Lexer { pos: 0, line: 1, col: 1 }
+}
+
+/** 消费一个字符，返回新的 Lexer 状态（pos+1，换行时 line+1、col 置 1，否则 col+1）。 */
+function advance_one(lex: Lexer, c: u8): Lexer {
+  if (c == 10) {
+    return Lexer { pos: lex.pos + 1, line: lex.line + 1, col: 1 }
+  }
+  return Lexer { pos: lex.pos + 1, line: lex.line, col: lex.col + 1 }
+}
+
+/** 判断是否为字母或下划线（标识符/关键字首字符）。 */
+function is_alpha(c: u8): bool {
+  if (c >= 97 && c <= 122) { return true; }
+  if (c >= 65 && c <= 90) { return true; }
+  return c == 95;
+}
+
+/** 判断是否为数字 0–9。 */
+function is_digit(c: u8): bool {
+  return c >= 48 && c <= 57;
+}
+
+/** 判断是否为字母、数字或下划线（标识符后续字符）。 */
+function is_alnum_underscore(c: u8): bool {
+  return is_alpha(c) || is_digit(c);
+}
+
+/** 比较 data[start..start+len] 与 keyword 的前 len 字节是否相等；要求 keyword 长度 >= len。 */
+function match_keyword(data: []u8, start: usize, len: usize, keyword: []u8): bool {
+  let i: usize = 0;
+  while (i < len) {
+    if (data[start + i] != keyword[i]) { return false; }
+    i = i + 1;
+  }
+  return true;
+}
+
+/** 根据已扫描的标识符 (data, start, len) 判断关键字；若是关键字返回对应 Token，否则返回 TOKEN_IDENT（ident 置 0，ident_len 为 len）。多行构造便于阅读与维护。 */
+function try_keyword(data: []u8, start: usize, len: usize, line0: i32, col0: i32): Token {
+  if (len == 8 && match_keyword(data, start, 8, [102, 117, 110, 99, 116, 105, 111, 110])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_FUNCTION,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [108, 101, 116])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_LET,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [99, 111, 110, 115, 116])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_CONST,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 2 && match_keyword(data, start, 2, [105, 102])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_IF,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [101, 108, 115, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_ELSE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [119, 104, 105, 108, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_WHILE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [108, 111, 111, 112])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_LOOP,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [102, 111, 114])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_FOR,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [98, 114, 101, 97, 107])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_BREAK,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 8 && match_keyword(data, start, 8, [99, 111, 110, 116, 105, 110, 117, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_CONTINUE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [114, 101, 116, 117, 114, 110])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_RETURN,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [112, 97, 110, 105, 99])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_PANIC,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [100, 101, 102, 101, 114])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_DEFER,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [109, 97, 116, 99, 104])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_MATCH,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [115, 116, 114, 117, 99, 116])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_STRUCT,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [112, 97, 99, 107, 101, 100])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_PACKED,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [101, 110, 117, 109])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_ENUM,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [103, 111, 116, 111])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_GOTO,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [116, 114, 97, 105, 116])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_TRAIT,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [105, 109, 112, 108])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_IMPL,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [115, 101, 108, 102])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_SELF,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 1 && data[start] == 95) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_UNDERSCORE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [105, 109, 112, 111, 114, 116])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_IMPORT,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [101, 120, 116, 101, 114, 110])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_EXTERN,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [105, 51, 50])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_I32,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [98, 111, 111, 108])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_BOOL,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 2 && match_keyword(data, start, 2, [117, 56])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U8,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [117, 51, 50])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U32,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [117, 54, 52])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U64,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [105, 54, 52])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_I64,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [117, 115, 105, 122, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_USIZE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [105, 115, 105, 122, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_ISIZE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [116, 114, 117, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_TRUE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [102, 97, 108, 115, 101])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_FALSE,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [102, 51, 50])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_F32,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 3 && match_keyword(data, start, 3, [102, 54, 52])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_F64,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 4 && match_keyword(data, start, 4, [118, 111, 105, 100])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_VOID,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [105, 51, 120, 52])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_I32X4,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [105, 51, 120, 56])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_I32X8,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [105, 51, 120, 49, 54])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_I32X16,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [117, 51, 120, 52])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U32X4,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 5 && match_keyword(data, start, 5, [117, 51, 120, 56])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U32X8,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  if (len == 6 && match_keyword(data, start, 6, [117, 51, 120, 49, 54])) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_U32X16,
+      line: line0,
+      col: col0,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return t;
+  }
+  let t: Token = Token {
+    kind: TokenKind.TOKEN_IDENT,
+    line: line0,
+    col: col0,
+    int_val: 0,
+    float_val: 0.0,
+    ident: 0,
+    ident_len: 0
+  }
+  return t;
+}
+
+/** 跳过空白与注释，返回新的 Lexer 状态；若已到末尾则返回当前 lex。 */
+function skip_whitespace_and_comments(lex: Lexer, data: []u8): Lexer {
+  let l: Lexer = lex;
+  while (l.pos < data.length) {
+    let c: u8 = data[l.pos];
+    if (c == 32 || c == 9 || c == 10 || c == 13) {
+      l = advance_one(l, c);
+      continue;
+    }
+    if (c == 47 && l.pos + 1 < data.length && data[l.pos + 1] == 47) {
+      while (l.pos < data.length && data[l.pos] != 10) {
+        l = advance_one(l, data[l.pos]);
+      }
+      continue;
+    }
+    if (c == 47 && l.pos + 1 < data.length && data[l.pos + 1] == 42) {
+      l = advance_one(l, 47);
+      l = advance_one(l, 42);
+      while (l.pos + 1 < data.length) {
+        if (data[l.pos] == 42 && data[l.pos + 1] == 47) {
+          l = advance_one(l, 42);
+          l = advance_one(l, 47);
+          break;
+        }
+        l = advance_one(l, data[l.pos]);
+      }
+      continue;
+    }
+    if (c == 35) {
+      while (l.pos < data.length && data[l.pos] != 10) {
+        l = advance_one(l, data[l.pos]);
+      }
+      continue;
+    }
+    return l;
+  }
+  return l;
+}
+
+/** 取下一个 Token；跳过空白与注释后，识别关键字/标识符/数字/符号，写 tok 并返回新状态。IDENT 时 ident 置 0，仅 ident_len 有效。 */
+function lexer_next(lex: Lexer, data: []u8): LexerResult {
+  let l: Lexer = skip_whitespace_and_comments(lex, data);
+  if (l.pos >= data.length) {
+    let t: Token = Token {
+      kind: TokenKind.TOKEN_EOF,
+      line: l.line,
+      col: l.col,
+      int_val: 0,
+      float_val: 0.0,
+      ident: 0,
+      ident_len: 0
+    }
+    return LexerResult { next_lex: l, tok: t }
+  }
+  let c: u8 = data[l.pos];
+  if (is_alpha(c)) {
+    let start: usize = l.pos;
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    l = advance_one(l, c);
+    while (l.pos < data.length && is_alnum_underscore(data[l.pos])) {
+      l = advance_one(l, data[l.pos]);
+    }
+    let len: usize = l.pos - start;
+    let tok: Token = try_keyword(data, start, len, line0, col0);
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (is_digit(c)) {
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    let ival: i32 = 0;
+    l = advance_one(l, c);
+    ival = ival * 10 + (c - 48);
+    while (l.pos < data.length && is_digit(data[l.pos])) {
+      let d: u8 = data[l.pos];
+      l = advance_one(l, d);
+      ival = ival * 10 + (d - 48);
+    }
+    if (l.pos < data.length && data[l.pos] == 46 && l.pos + 1 < data.length && is_digit(data[l.pos + 1])) {
+      l = advance_one(l, 46);
+      let fval: f64 = ival;
+      let frac: f64 = 0.1;
+      while (l.pos < data.length && is_digit(data[l.pos])) {
+        let d: u8 = data[l.pos];
+        l = advance_one(l, d);
+        fval = fval + frac * (d - 48);
+        frac = frac * 0.1;
+      }
+      let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 }
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    if (l.pos < data.length && (data[l.pos] == 101 || data[l.pos] == 69)) {
+      l = advance_one(l, data[l.pos]);
+      let exp_sign: i32 = 1;
+      if (l.pos < data.length && data[l.pos] == 45) {
+        exp_sign = -1;
+        l = advance_one(l, 45);
+      } else {
+        if (l.pos < data.length && data[l.pos] == 43) { l = advance_one(l, 43); }
+      }
+      let exp: i32 = 0;
+      while (l.pos < data.length && is_digit(data[l.pos])) {
+        let d: u8 = data[l.pos];
+        l = advance_one(l, d);
+        exp = exp * 10 + (d - 48);
+      }
+      exp = exp * exp_sign;
+      let scale: f64 = 1.0;
+      let e: i32 = 0;
+      if (exp > 0) {
+        while (e < exp) {
+          scale = scale * 10.0;
+          e = e + 1;
+        }
+      } else {
+        while (e > exp) {
+          scale = scale * 0.1;
+          e = e - 1;
+        }
+      }
+      let fval: f64 = ival * scale;
+      let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 }
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    let tok: Token = Token { kind: TokenKind.TOKEN_INT, line: line0, col: col0, int_val: ival, float_val: 0.0, ident: 0, ident_len: 0 }
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 46 && l.pos + 1 < data.length && is_digit(data[l.pos + 1])) {
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    l = advance_one(l, 46);
+    let fval: f64 = 0.0;
+    let frac: f64 = 0.1;
+    while (l.pos < data.length && is_digit(data[l.pos])) {
+      let d: u8 = data[l.pos];
+      l = advance_one(l, d);
+      fval = fval + frac * (d - 48);
+      frac = frac * 0.1;
+    }
+    let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 }
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  let line0: i32 = l.line;
+  let col0: i32 = l.col;
+  l = advance_one(l, c);
+  let tok: Token = Token { kind: TokenKind.TOKEN_EOF, line: line0, col: col0, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 }
+  if (c == 40) { tok.kind = TokenKind.TOKEN_LPAREN; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 41) { tok.kind = TokenKind.TOKEN_RPAREN; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 123) { tok.kind = TokenKind.TOKEN_LBRACE; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 125) { tok.kind = TokenKind.TOKEN_RBRACE; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 91) { tok.kind = TokenKind.TOKEN_LBRACKET; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 93) { tok.kind = TokenKind.TOKEN_RBRACKET; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 44) { tok.kind = TokenKind.TOKEN_COMMA; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 58) { tok.kind = TokenKind.TOKEN_COLON; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 46) { tok.kind = TokenKind.TOKEN_DOT; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 59) { tok.kind = TokenKind.TOKEN_SEMICOLON; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 43) { tok.kind = TokenKind.TOKEN_PLUS; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 45) {
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_ARROW;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_MINUS;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 42) { tok.kind = TokenKind.TOKEN_STAR; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 47) { tok.kind = TokenKind.TOKEN_SLASH; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 37) { tok.kind = TokenKind.TOKEN_PERCENT; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 94) { tok.kind = TokenKind.TOKEN_CARET; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 126) { tok.kind = TokenKind.TOKEN_TILDE; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 38) {
+    if (l.pos < data.length && data[l.pos] == 38) {
+      l = advance_one(l, 38);
+      tok.kind = TokenKind.TOKEN_AMPAMP;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_AMP;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 124) {
+    if (l.pos < data.length && data[l.pos] == 124) {
+      l = advance_one(l, 124);
+      tok.kind = TokenKind.TOKEN_PIPEPIPE;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_PIPE;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 60) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_LE;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    if (l.pos < data.length && data[l.pos] == 60) {
+      l = advance_one(l, 60);
+      tok.kind = TokenKind.TOKEN_LSHIFT;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_LT;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 62) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_GE;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_RSHIFT;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_GT;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 33) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_NE;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_BANG;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  if (c == 63) { tok.kind = TokenKind.TOKEN_QUESTION; return LexerResult { next_lex: l, tok: tok } }
+  if (c == 61) {
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_FATARROW;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_EQ;
+      return LexerResult { next_lex: l, tok: tok }
+    }
+    tok.kind = TokenKind.TOKEN_ASSIGN;
+    return LexerResult { next_lex: l, tok: tok }
+  }
+  return LexerResult { next_lex: l, tok: tok }
+}
+
+/** 自举 9.1 测试：初始化 Lexer，用固定源码调用 lexer_next 若干次，确认 TOKEN_LET/TOKEN_IDENT/TOKEN_ASSIGN/TOKEN_INT/TOKEN_EOF。 */
+function main(): i32 {
+  let src: [32]u8 = [108, 101, 116, 32, 120, 32, 61, 32, 49, 59, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let sl: []u8 = src;
+  let lex: Lexer = lexer_init();
+  let r: LexerResult = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_LET) { return 1; }
+  lex = r.next_lex;
+  r = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_IDENT) { return 2; }
+  lex = r.next_lex;
+  r = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_ASSIGN) { return 3; }
+  lex = r.next_lex;
+  r = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_INT) { return 4; }
+  lex = r.next_lex;
+  r = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_SEMICOLON) { return 5; }
+  lex = r.next_lex;
+  r = lexer_next(lex, sl);
+  if (r.tok.kind != TokenKind.TOKEN_EOF) { return 6; }
+  return 0;
+}
