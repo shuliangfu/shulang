@@ -9,6 +9,7 @@
 
 #include "lexer/lexer.h"
 #include "parser/parser.h"
+#include "preprocess.h"
 #include "typeck/typeck.h"
 #include "codegen/codegen.h"
 #include "ast.h"
@@ -95,18 +96,26 @@ static void resolve_import_file_path(const char *lib_root, const char *entry_dir
 
 /**
  * 解析并类型检查所有 import 依赖，将依赖模块填入 dep_mods，供 typeck 跨模块解析与 -o 时 codegen 使用（阶段 7.3 跨模块调用）。
- * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；dep_mods 输出依赖 AST 数组；ndep_out 输出依赖个数；max_deps 最多保留个数。
+ * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；defines/ndefines 条件编译符号；dep_mods 输出依赖 AST 数组；ndep_out 输出依赖个数；max_deps 最多保留个数。
  * 返回值：0 成功；-1 打开/解析/typeck 失败，且已释放已加载的 dep_mods。
  */
 static int resolve_and_load_imports(ASTModule *mod, const char *lib_root, const char *entry_dir,
+    const char **defines, int ndefines,
     ASTModule **dep_mods, int *ndep_out, int max_deps) {
     char path[512];
     int ndep = 0;
     for (int i = 0; i < mod->num_imports && ndep < max_deps; i++) {
         resolve_import_file_path(lib_root, entry_dir, mod->import_paths[i], path, sizeof(path));
-        char *src = read_file(path);
-        if (!src) {
+        char *raw = read_file(path);
+        if (!raw) {
             fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", mod->import_paths[i], path);
+            while (ndep--) ast_module_free(dep_mods[ndep]);
+            return -1;
+        }
+        char *src = preprocess(raw, defines, ndefines);
+        free(raw);
+        if (!src) {
+            fprintf(stderr, "shuc: preprocess failed for import '%s'\n", mod->import_paths[i]);
             while (ndep--) ast_module_free(dep_mods[ndep]);
             return -1;
         }
@@ -360,6 +369,7 @@ static int dce_is_type_used(void *ctx, const ASTModule *mod, const char *type_na
  * 错误与边界：无输入文件时打印用法并返回 0；-o 指定但无 main 时返回 1；import 数量超过 32 时仅处理前 32 个。
  * 副作用与约定：可能创建/删除 /tmp 下临时文件；依赖 getenv("SHULANG_LIB")；多文件时可能多次解析同一 import 的 .su。
  */
+#define MAX_DEFINES 64
 int main(int argc, char **argv) {
     const char *input_path = NULL;
     const char *out_path = NULL;
@@ -367,13 +377,33 @@ int main(int argc, char **argv) {
     const char *target = NULL;
     const char *opt_level = NULL;  /* -O 优化级别：0/2/s，默认 2（阶段 8） */
     int emit_c_only = 0;  /* -E：仅生成 C 到 stdout，不调用 cc */
+    const char *defines[MAX_DEFINES];
+    int ndefines = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-E") == 0) {
             emit_c_only = 1;
+        } else if (strcmp(argv[i], "-D") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                return 1;
+            }
+            if (ndefines >= MAX_DEFINES) {
+                fprintf(stderr, "shuc: too many -D defines\n");
+                return 1;
+            }
+            defines[ndefines++] = argv[i + 1];
+            i++;
+        } else if (strncmp(argv[i], "-D", 2) == 0 && argv[i][2] != '\0') {
+            /* -DSYMBOL 形式 */
+            if (ndefines >= MAX_DEFINES) {
+                fprintf(stderr, "shuc: too many -D defines\n");
+                return 1;
+            }
+            defines[ndefines++] = argv[i] + 2;
         } else if (strcmp(argv[i], "-O") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             opt_level = argv[i + 1];
@@ -384,21 +414,21 @@ int main(int argc, char **argv) {
             i++;
         } else if (strcmp(argv[i], "-o") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             out_path = argv[i + 1];
             i++;
         } else if (strcmp(argv[i], "-L") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             lib_root = argv[i + 1];
             i++;
         } else if (strcmp(argv[i], "-target") == 0) {
             if (i + 1 >= argc) {
-                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+                fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
             target = argv[i + 1];
@@ -407,19 +437,35 @@ int main(int argc, char **argv) {
             input_path = argv[i];
         }
     }
+    /* 由 -target 推导 OS 宏，供 #if OS_LINUX 等使用 */
+    if (target && ndefines < MAX_DEFINES) {
+        if (strstr(target, "linux") != NULL) {
+            defines[ndefines++] = "OS_LINUX";
+        } else if (strstr(target, "darwin") != NULL || strstr(target, "apple") != NULL) {
+            defines[ndefines++] = "OS_MACOS";
+        } else if (strstr(target, "windows") != NULL) {
+            defines[ndefines++] = "OS_WINDOWS";
+        }
+    }
     if (!lib_root) lib_root = getenv("SHULANG_LIB");
     if (!lib_root) lib_root = ".";
     if (!opt_level) opt_level = getenv("SHULANG_OPT");
     if (!opt_level || !*opt_level) opt_level = "2";
 
     if (!input_path) {
-        fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
+        fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
         return 0;
     }
 
-    char *src = read_file(input_path);
-    if (!src) {
+    char *raw_src = read_file(input_path);
+    if (!raw_src) {
         fprintf(stderr, "Error: cannot read file '%s'\n", input_path);
+        return 1;
+    }
+    char *src = preprocess(raw_src, ndefines > 0 ? defines : NULL, ndefines);
+    free(raw_src);
+    if (!src) {
+        fprintf(stderr, "shuc: preprocess failed for '%s'\n", input_path);
         return 1;
     }
 
@@ -439,7 +485,7 @@ int main(int argc, char **argv) {
 
     ASTModule *dep_mods[32];
     int ndep = 0;
-    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, dep_mods, &ndep, 32) != 0) {
+    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, ndefines > 0 ? defines : NULL, ndefines, dep_mods, &ndep, 32) != 0) {
         ast_module_free(mod);
         free(src);
         return 1;
