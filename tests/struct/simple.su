@@ -5,6 +5,6 @@ struct Point {
 }
 
 function main(): i32 {
-  let p: Point = Point { x: 1, y: 2 };
+  let p: Point = Point { x: 1, y: 2 }
   return p.x;
 }
