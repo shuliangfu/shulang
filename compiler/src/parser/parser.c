@@ -2034,6 +2034,8 @@ static ASTBlock *parse_block(Parser *p, int allow_while) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    b->num_consts = 0;
+    b->num_lets = 0;
     b->const_decls = (ASTConstDecl *)malloc((size_t)MAX_CONST_DECLS * sizeof(ASTConstDecl));
     b->let_decls = (ASTLetDecl *)malloc((size_t)MAX_LET_DECLS * sizeof(ASTLetDecl));
     b->loops = NULL;
