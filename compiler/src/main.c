@@ -13,11 +13,13 @@
 #include "typeck/typeck.h"
 #include "codegen/codegen.h"
 #include "ast.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/utsname.h>
 
 /**
  * 读入整个文件为 NUL 结尾的堆分配字符串。
@@ -94,50 +96,113 @@ static void resolve_import_file_path(const char *lib_root, const char *entry_dir
     }
 }
 
+#define MAX_ALL_DEPS 32
+
 /**
- * 解析并类型检查所有 import 依赖，将依赖模块填入 dep_mods，供 typeck 跨模块解析与 -o 时 codegen 使用（阶段 7.3 跨模块调用）。
- * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；defines/ndefines 条件编译符号；dep_mods 输出依赖 AST 数组；ndep_out 输出依赖个数；max_deps 最多保留个数。
- * 返回值：0 成功；-1 打开/解析/typeck 失败，且已释放已加载的 dep_mods。
+ * 在已加载列表中按 import 路径查找模块下标；用于递归加载时判断是否已加载、以及 typeck 时取 dep 数组。
+ * 参数：import_path 如 "std.io.core"；all_paths 已加载路径数组；n_all 个数。
+ * 返回值：下标 0..n_all-1，未找到返回 -1。
+ */
+static int find_loaded_index(const char *import_path, char **all_paths, int n_all) {
+    for (int i = 0; i < n_all; i++)
+        if (all_paths[i] && strcmp(all_paths[i], import_path) == 0)
+            return i;
+    return -1;
+}
+
+/**
+ * 递归加载单条 import：若已存在于 all_dep_mods/all_dep_paths 则直接返回；否则解析→递归加载其 import→typeck(其 deps)→加入列表。
+ * 参数：import_path 如 "std.io.driver"；lib_root、entry_dir、defines/ndefines 同 resolve_import_file_path；all_dep_mods/all_dep_paths 输出列表；n_all 当前个数（会递增）；max_all 上限。
+ * 返回值：成功返回对应 ASTModule*；失败返回 NULL（调用方须释放已写入的 all_dep_*）。
+ */
+static ASTModule *load_one_import(const char *import_path, const char *lib_root, const char *entry_dir,
+    const char **defines, int ndefines,
+    ASTModule **all_dep_mods, char **all_dep_paths, int *n_all, int max_all) {
+    int idx = find_loaded_index(import_path, all_dep_paths, *n_all);
+    if (idx >= 0)
+        return all_dep_mods[idx];
+    if (*n_all >= max_all) {
+        fprintf(stderr, "shuc: too many transitive imports\n");
+        return NULL;
+    }
+    char path[512];
+    resolve_import_file_path(lib_root, entry_dir, import_path, path, sizeof(path));
+    char *raw = read_file(path);
+    if (!raw) {
+        fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", import_path, path);
+        return NULL;
+    }
+    char *src = preprocess(raw, defines, ndefines);
+    free(raw);
+    if (!src) {
+        fprintf(stderr, "shuc: preprocess failed for import '%s'\n", import_path);
+        return NULL;
+    }
+    Lexer *lex = lexer_new(src);
+    ASTModule *dep = NULL;
+    int pr = parse(lex, &dep);
+    lexer_free(lex);
+    free(src);
+    if (pr != 0 || !dep) {
+        fprintf(stderr, "shuc: failed to parse import '%s'\n", import_path);
+        return NULL;
+    }
+    /* 先递归加载该模块的 import，保证 typeck 时其 deps 已在 all_dep_mods 中 */
+    for (int i = 0; i < dep->num_imports; i++) {
+        ASTModule *sub = load_one_import(dep->import_paths[i], lib_root, entry_dir, defines, ndefines,
+            all_dep_mods, all_dep_paths, n_all, max_all);
+        if (!sub) {
+            ast_module_free(dep);
+            return NULL;
+        }
+    }
+    /* 构建该模块的 dep 数组（与 dep->import_paths 顺序一致），供 typeck */
+    ASTModule *deps[32];
+    int ndeps = 0;
+    for (int j = 0; j < dep->num_imports && ndeps < 32; j++) {
+        idx = find_loaded_index(dep->import_paths[j], all_dep_paths, *n_all);
+        if (idx >= 0)
+            deps[ndeps++] = all_dep_mods[idx];
+    }
+    if (typeck_module(dep, deps, ndeps) != 0) {
+        fprintf(stderr, "shuc: typeck failed for import '%s'\n", import_path);
+        ast_module_free(dep);
+        return NULL;
+    }
+    all_dep_mods[*n_all] = dep;
+    all_dep_paths[*n_all] = strdup(import_path);
+    if (!all_dep_paths[*n_all]) {
+        ast_module_free(dep);
+        return NULL;
+    }
+    (*n_all)++;
+    return dep;
+}
+
+/**
+ * 解析并类型检查所有 import 依赖（含传递依赖）；填入 direct dep_mods（与 mod->import_paths 一一对应）供 typeck/codegen 入口使用，并填入 all_dep_mods/all_dep_paths（拓扑序）供 -o 时为每个依赖生成 .c（阶段 7.3 跨模块调用 + 传递依赖）。
+ * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；defines/ndefines 条件编译符号；dep_mods/ndep_out 仅直接依赖；all_dep_mods、all_dep_paths、n_all_out 为全部传递依赖（all_dep_paths 由本函数 strdup，调用方须 free）；max_deps 为 direct 与 all 共用上限。
+ * 返回值：0 成功；-1 失败且已释放已写入的 all_dep_*。
  */
 static int resolve_and_load_imports(ASTModule *mod, const char *lib_root, const char *entry_dir,
     const char **defines, int ndefines,
-    ASTModule **dep_mods, int *ndep_out, int max_deps) {
-    char path[512];
-    int ndep = 0;
-    for (int i = 0; i < mod->num_imports && ndep < max_deps; i++) {
-        resolve_import_file_path(lib_root, entry_dir, mod->import_paths[i], path, sizeof(path));
-        char *raw = read_file(path);
-        if (!raw) {
-            fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", mod->import_paths[i], path);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+    ASTModule **dep_mods, int *ndep_out,
+    ASTModule **all_dep_mods, char **all_dep_paths, int *n_all_out, int max_deps) {
+    int n_all = 0;
+    for (int i = 0; i < mod->num_imports && i < max_deps; i++) {
+        ASTModule *m = load_one_import(mod->import_paths[i], lib_root, entry_dir, defines, ndefines,
+            all_dep_mods, all_dep_paths, &n_all, max_deps);
+        if (!m) {
+            while (n_all--) {
+                free(all_dep_paths[n_all]);
+                ast_module_free(all_dep_mods[n_all]);
+            }
             return -1;
         }
-        char *src = preprocess(raw, defines, ndefines);
-        free(raw);
-        if (!src) {
-            fprintf(stderr, "shuc: preprocess failed for import '%s'\n", mod->import_paths[i]);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
-            return -1;
-        }
-        Lexer *lex = lexer_new(src);
-        ASTModule *dep = NULL;
-        int pr = parse(lex, &dep);
-        lexer_free(lex);
-        free(src);
-        if (pr != 0 || !dep) {
-            fprintf(stderr, "shuc: failed to parse import '%s'\n", mod->import_paths[i]);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
-            return -1;
-        }
-        if (typeck_module(dep, NULL, 0) != 0) {
-            fprintf(stderr, "shuc: typeck failed for import '%s'\n", mod->import_paths[i]);
-            ast_module_free(dep);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
-            return -1;
-        }
-        dep_mods[ndep++] = dep;
+        dep_mods[i] = m;
     }
-    *ndep_out = ndep;
+    *ndep_out = mod->num_imports;
+    *n_all_out = n_all;
     return 0;
 }
 
@@ -185,8 +250,10 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_ISIZE:   return "ISIZE";
         case TOKEN_I32X4:   return "I32X4";
         case TOKEN_I32X8:   return "I32X8";
+        case TOKEN_I32X16:  return "I32X16";
         case TOKEN_U32X4:   return "U32X4";
         case TOKEN_U32X8:   return "U32X8";
+        case TOKEN_U32X16:  return "U32X16";
         case TOKEN_TRUE:    return "TRUE";
         case TOKEN_FALSE:   return "FALSE";
         case TOKEN_F32:     return "F32";
@@ -447,6 +514,19 @@ int main(int argc, char **argv) {
             defines[ndefines++] = "OS_WINDOWS";
         }
     }
+    /* §3.4 条件编译与平台选择：无 -target 时用 uname 注入 SHU_OS_<SYSNAME>、SHU_ARCH_<MACHINE>（全大写）供 .su #if 使用 */
+    if (ndefines + 2 <= MAX_DEFINES) {
+        struct utsname u;
+        static char shu_os_def[64], shu_arch_def[64];
+        if (uname(&u) == 0) {
+            (void)snprintf(shu_os_def, sizeof(shu_os_def), "SHU_OS_%s", u.sysname);
+            (void)snprintf(shu_arch_def, sizeof(shu_arch_def), "SHU_ARCH_%s", u.machine);
+            for (char *p = shu_os_def + 7; *p; p++) *p = (char)toupper((unsigned char)*p);
+            for (char *p = shu_arch_def + 9; *p; p++) *p = (char)toupper((unsigned char)*p);
+            defines[ndefines++] = shu_os_def;
+            defines[ndefines++] = shu_arch_def;
+        }
+    }
     if (!lib_root) lib_root = getenv("SHULANG_LIB");
     if (!lib_root) lib_root = ".";
     if (!opt_level) opt_level = getenv("SHULANG_OPT");
@@ -483,15 +563,18 @@ int main(int argc, char **argv) {
     get_entry_dir(input_path, entry_dir_buf, sizeof(entry_dir_buf));
     const char *entry_dir = entry_dir_buf;
 
-    ASTModule *dep_mods[32];
-    int ndep = 0;
-    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, ndefines > 0 ? defines : NULL, ndefines, dep_mods, &ndep, 32) != 0) {
+    ASTModule *dep_mods[32];       /* 入口直接依赖，与 mod->import_paths 一一对应，供 typeck/codegen 入口 */
+    ASTModule *all_dep_mods[MAX_ALL_DEPS];
+    char *all_dep_paths[MAX_ALL_DEPS];
+    int ndep = 0, n_all = 0;
+    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, ndefines > 0 ? defines : NULL, ndefines,
+            dep_mods, &ndep, all_dep_mods, all_dep_paths, &n_all, 32) != 0) {
         ast_module_free(mod);
         free(src);
         return 1;
     }
     if (typeck_module(mod, ndep > 0 ? dep_mods : NULL, ndep) != 0) {
-        while (ndep--) ast_module_free(dep_mods[ndep]);
+        while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
         free(src);
         return 1;
@@ -501,23 +584,23 @@ int main(int argc, char **argv) {
     if (emit_c_only) {
         if (!mod->main_func || !mod->main_func->body) {
             fprintf(stderr, "shuc: no main function (cannot emit C)\n");
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
             ast_module_free(mod);
             free(src);
             return 1;
         }
         int ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0, NULL, NULL, NULL, NULL);
-        while (ndep--) ast_module_free(dep_mods[ndep]);
+        while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
         free(src);
         return ec != 0 ? 1 : 0;
     }
 
-    /* 若指定 -o：需有 main，生成 C（含 import 的 .c）→ 调用 cc 链接；依赖使用已加载的 dep_mods（7.3 跨模块调用）；阶段 8.1 DCE 仅生成被引用函数与单态化 */
+    /* 若指定 -o：需有 main，生成 C（含 import 的 .c）→ 调用 cc 链接；依赖使用已加载的 dep_mods（7.3 跨模块调用 + 传递依赖）；阶段 8.1 DCE 仅生成被引用函数与单态化 */
     if (out_path) {
         if (!mod->main_func || !mod->main_func->body) {
             fprintf(stderr, "shuc: no main function (cannot emit executable)\n");
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
             ast_module_free(mod);
             free(src);
             return 1;
@@ -531,12 +614,12 @@ int main(int argc, char **argv) {
         const char *used_type_names[64];
         int n_used_types = 0;
         int dce_done = 0;
-        if (ndep >= 0 && ndep < MAX_DCE_MODULES - 1) {
-            codegen_compute_used(mod, dep_mods, ndep, used_funcs, &n_used, MAX_USED_FUNCS, used_mono);
-            codegen_compute_used_types(mod, dep_mods, ndep, used_funcs, n_used, used_type_names, &n_used_types, 64);
+        if (n_all >= 0 && n_all < MAX_DCE_MODULES - 1) {
+            codegen_compute_used(mod, all_dep_mods, n_all, used_funcs, &n_used, MAX_USED_FUNCS, used_mono);
+            codegen_compute_used_types(mod, all_dep_mods, n_all, used_funcs, n_used, used_type_names, &n_used_types, 64);
             dce_done = 1;
         }
-        struct dce_ctx dce = { used_funcs, n_used, used_mono, 1 + ndep, dce_done ? used_type_names : NULL, n_used_types, mod, dep_mods, ndep };
+        struct dce_ctx dce = { used_funcs, n_used, used_mono, 1 + n_all, dce_done ? used_type_names : NULL, n_used_types, mod, all_dep_mods, n_all };
         void *dce_ctx_arg = dce_done ? (void *)&dce : NULL;
 
         const char *c_paths[MAX_C_FILES];
@@ -550,7 +633,7 @@ int main(int argc, char **argv) {
         int fd = mkstemp(tmp);
         if (fd < 0) {
             perror("shuc: mkstemp");
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
             ast_module_free(mod);
             free(src);
             return 1;
@@ -559,7 +642,7 @@ int main(int argc, char **argv) {
         if (!cf) {
             close(fd);
             unlink(tmp);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
             ast_module_free(mod);
             free(src);
             return 1;
@@ -567,7 +650,7 @@ int main(int argc, char **argv) {
         if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
             fclose(cf);
             unlink(tmp);
-            while (ndep--) ast_module_free(dep_mods[ndep]);
+            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
             ast_module_free(mod);
             free(src);
             return 1;
@@ -584,26 +667,37 @@ int main(int argc, char **argv) {
         }
         c_paths[n_c++] = tmp_c;
 
-        /* 每个已加载的依赖生成 .c，参与链接（不再重复解析） */
-        for (int i = 0; i < ndep && ndep_c < 32; i++) {
+        /* 每个已加载的传递依赖生成 .c，参与链接（all_dep_* 为拓扑序）；库模块需传入其 import 依赖供跨模块调用前缀 */
+        for (int i = 0; i < n_all && ndep_c < 32; i++) {
+            ASTModule *lib_deps[32];
+            const char *lib_dep_paths[32];
+            int n_lib = 0;
+            for (int j = 0; j < all_dep_mods[i]->num_imports && n_lib < 32; j++) {
+                int idx = find_loaded_index(all_dep_mods[i]->import_paths[j], all_dep_paths, n_all);
+                if (idx >= 0) {
+                    lib_deps[n_lib] = all_dep_mods[idx];
+                    lib_dep_paths[n_lib] = all_dep_paths[idx];
+                    n_lib++;
+                }
+            }
             char tmpd[] = "/tmp/shuc_XXXXXX";
             int fdd = mkstemp(tmpd);
             if (fdd < 0) {
                 while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
-                while (ndep--) ast_module_free(dep_mods[ndep]);
+                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
                 ast_module_free(mod);
                 free(src);
                 return 1;
             }
             FILE *dcf = fdopen(fdd, "w");
-            if (!dcf || codegen_library_module_to_c(dep_mods[i], mod->import_paths[i], dcf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
+            if (!dcf || codegen_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, dcf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
                 if (dcf) fclose(dcf);
                 else close(fdd);
                 unlink(tmpd);
                 while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
-                while (ndep--) ast_module_free(dep_mods[ndep]);
+                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
                 ast_module_free(mod);
                 free(src);
                 return 1;
@@ -614,7 +708,7 @@ int main(int argc, char **argv) {
                 unlink(tmpd);
                 while (ndep_c--) unlink(dep_c_paths[ndep_c]);
                 unlink(tmp_c);
-                while (ndep--) ast_module_free(dep_mods[ndep]);
+                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
                 ast_module_free(mod);
                 free(src);
                 return 1;
@@ -626,7 +720,7 @@ int main(int argc, char **argv) {
         int cc_ok = invoke_cc(c_paths, n_c, out_path, target, opt_level);
         while (ndep_c--) unlink(dep_c_paths[ndep_c]);
         unlink(tmp_c);
-        while (ndep--) ast_module_free(dep_mods[ndep]);
+        while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
         free(src);
         return cc_ok == 0 ? 0 : 1;
@@ -670,7 +764,7 @@ int main(int argc, char **argv) {
     } else
         printf("parse OK (library module)\n");
     printf("typeck OK\n");
-    while (ndep--) ast_module_free(dep_mods[ndep]);
+    while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
     ast_module_free(mod);
     free(src);
     return 0;
