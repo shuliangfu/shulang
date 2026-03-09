@@ -7,5 +7,5 @@ function main(): i32 {
   let sb: i32 = size_of_bool();
   let ok1: i32 = assert(s32 == 4);
   let ok2: i32 = assert(sb == 1);
-  return if (s32 != 4) { 1 } else if (sb != 1) { 2 } else { 0 };
+  return if (s32 != 4) { 1 } else if (sb != 1) { 2 } else { 0 }
 }
