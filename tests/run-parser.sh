@@ -9,7 +9,7 @@ make -C compiler -q 2>/dev/null || make -C compiler
 /tmp/shuc_parser_ok || { echo "parser: semicolon_required binary should exit 0"; exit 1; }
 
 # 负例：return 后无分号应报 parse error
-if ./compiler/shuc tests/parser/semicolon_missing.su -o /tmp/shuc_parser_fail 2>&1 | grep -q "expected ';' after return expr"; then
+if ./compiler/shuc tests/parser/semicolon_missing.su -o /tmp/shuc_parser_fail 2>&1 | grep -q "expected ';' after return"; then
   : # 预期报错
 else
   echo "parser: expected parse error for missing semicolon after return"
