@@ -9,7 +9,7 @@
 /* 切片 []T 的 C 侧布局：与 codegen 生成的 struct shulang_slice_<elem> 一致 */
 struct shulang_slice_u8 {
     uint8_t *data;
-    size_t len;
+    size_t length;
 };
 
 /* packed 结构体：无填充，1+4=5 字节（与 tests/memory-contract/packed_struct.su 中 Header 一致） */
@@ -26,11 +26,11 @@ struct std_mem_Buffer {
 };
 
 int main(void) {
-    /* 切片：64 位下 8+8=16 字节，data 偏移 0，len 偏移 8 */
+    /* 切片：64 位下 8+8=16 字节，data 偏移 0，length 偏移 8 */
     if (sizeof(size_t) == 8) {
         if (sizeof(struct shulang_slice_u8) != 16) return 1;
         if (offsetof(struct shulang_slice_u8, data) != 0) return 2;
-        if (offsetof(struct shulang_slice_u8, len) != 8) return 3;
+        if (offsetof(struct shulang_slice_u8, length) != 8) return 3;
     }
     /* packed Header：1+4=5 */
     if (sizeof(struct Header_packed) != 5) return 4;
