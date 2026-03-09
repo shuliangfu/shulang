@@ -1,0 +1,255 @@
+// codegen.su — 自举 6.2：codegen 入口（.su 实现，与 C codegen 并存）
+//
+// 职责：提供 codegen_entry_module_to_c 与 codegen_entry_library_module_to_c，供 C driver 调用；内部转调 C 的 codegen_module_to_c / codegen_library_module_to_c。
+// 自举首块迁入：LIT/CTFE、BOOL_LIT、VAR、FLOAT_LIT、ENUM_VARIANT、二元/一元、TERNARY、FIELD_ACCESS（struct）、CALL（fallback）、PANIC、INDEX（fallback）均由本模块或 C 协作输出；C 提供 emit_byte、char_at、emit_float、emit_expr、needs_*_parens、call_callee/num_args/call_arg、emit_panic_no_arg/with_arg。
+// 依赖：无 import；仅声明 extern C 函数，参数以 *u8 / i32 传递，ABI 与 C 一致。
+// 与 C 后端关系：main 在 SHUC_USE_SU_CODEGEN 下调用本模块入口，形成 .su codegen 入口与 C AST 对接。
+
+/** C：将入口模块（含 main）生成 C 写入 out；其余参数为 DCE/去重用，以不透明指针传递。 */
+extern function codegen_module_to_c(m: *u8, out: *u8, dep_mods: *u8, dep_import_paths: *u8, ndep: i32, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32;
+
+/** C：将库模块生成 C 写入 out；import_path 等以不透明指针传递。 */
+extern function codegen_library_module_to_c(m: *u8, import_path: *u8, lib_dep_mods: *u8, lib_dep_paths: *u8, n_lib_dep: i32, out: *u8, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32;
+
+/** C 提供的写单字节接口：out 为 FILE* 的不透明指针，b 为要输出的字节（0..255）。返回 0 成功，非 0 失败。 */
+extern function codegen_su_emit_byte(out: *u8, b: i32): i32;
+/** C 提供的读单字节接口：返回 ptr[i] 的 0..255 值，供 .su 逐字节输出 C 字符串用。 */
+extern function codegen_su_char_at(ptr: *u8, i: i32): i32;
+/** C 提供的浮点字面量输出：ptr 指向 double，is_f32 非 0 时输出 f32 后缀（0.0f/%gf）。返回 0 成功。 */
+extern function codegen_su_emit_float(out: *u8, ptr: *u8, is_f32: i32): i32;
+/** C 提供的“输出整棵表达式”接口：递归生成子表达式，供二元运算等使用。返回 0 成功，-1 失败。 */
+extern function codegen_su_emit_expr(out: *u8, expr: *u8): i32;
+/** C 提供的括号判断：子表达式为比较/逻辑运算符时作为加减操作数需加括号，返回 1 否则 0。 */
+extern function codegen_su_expr_needs_compare_parens(expr: *u8): i32;
+/** C 提供的括号判断：子表达式为加减时作为乘除操作数需加括号，返回 1 否则 0。 */
+extern function codegen_su_expr_needs_addsub_parens(expr: *u8): i32;
+/** C 提供的整数除法输出（含除零检查）。 */
+extern function codegen_su_emit_int_div(out: *u8, left: *u8, right: *u8): i32;
+/** C 提供的整数取模输出（含取模零检查）。 */
+extern function codegen_su_emit_int_mod(out: *u8, left: *u8, right: *u8): i32;
+/** C 提供的 CALL 访问器：callee、实参个数、第 i 个实参。 */
+extern function codegen_su_call_callee(expr: *u8): *u8;
+extern function codegen_su_call_num_args(expr: *u8): i32;
+extern function codegen_su_call_arg(expr: *u8, i: i32): *u8;
+/** C 提供的 panic 输出：无参 / 有参。 */
+extern function codegen_su_emit_panic_no_arg(out: *u8): i32;
+extern function codegen_su_emit_panic_with_arg(out: *u8, operand: *u8): i32;
+
+/**
+ * 将非负整数 val 的十进制表示逐字节写入 out（通过 codegen_su_emit_byte）；递归先输出高位再输出当前位。返回 0 成功，-1 失败。
+ */
+function format_uint(out: *u8, val: i32): i32 {
+  if (val >= 10) {
+    let q: i32 = val / 10;
+    let r: i32 = val % 10;
+    if (format_uint(out, q) != 0) { return -1; }
+    if (codegen_su_emit_byte(out, 48 + r) != 0) { return -1; }
+    return 0;
+  }
+  if (codegen_su_emit_byte(out, 48 + val) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * 将 i32 整数字面量 val 的十进制表示输出到 out（FILE* 不透明）；含负号与 INT_MIN 特判（用 0-val 溢出检测，避免 .su 中 -2147483648 字面量生成 C 时出错）。C 在 AST_EXPR_LIT 与 const_folded 时调用。返回 0 成功，-1 失败。
+ */
+function codegen_su_format_int_lit(out: *u8, val: i32): i32 {
+  if (val < 0) {
+    let neg: i32 = 0 - val;
+    if (neg < 0) {
+      /* 0 - val 溢出说明 val 为 INT_MIN，单独输出 "-2147483648"。 */
+      if (codegen_su_emit_byte(out, 45) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 50) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 49) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 55) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 52) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 56) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 55) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 51) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 54) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 52) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 56) != 0) { return -1; }
+      return 0;
+    }
+    if (codegen_su_emit_byte(out, 45) != 0) { return -1; }
+    return format_uint(out, neg);
+  }
+  return format_uint(out, val);
+}
+
+/**
+ * 将布尔字面量输出到 out：val 非 0 输出 '1'（49），否则输出 '0'（48）。C 在 AST_EXPR_BOOL_LIT 时调用。返回 0 成功，-1 失败。
+ */
+function codegen_su_format_bool_lit(out: *u8, val: i32): i32 {
+  if (val != 0) {
+    if (codegen_su_emit_byte(out, 49) != 0) { return -1; }
+  } else {
+    if (codegen_su_emit_byte(out, 48) != 0) { return -1; }
+  }
+  return 0;
+}
+
+/**
+ * 将 C 字符串 ptr[0..len-1] 逐字节输出到 out；用于 AST_EXPR_VAR 变量名等。C 传入 name 与 strlen(name)。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_c_string(out: *u8, ptr: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (codegen_su_emit_byte(out, codegen_su_char_at(ptr, i)) != 0) { return -1; }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 浮点字面量输出：ptr 指向 double，is_f32 非 0 为 f32；转调 C 的 codegen_su_emit_float 做实际格式化。C 在 AST_EXPR_FLOAT_LIT 时调用。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_float_lit(out: *u8, ptr: *u8, is_f32: i32): i32 {
+  return codegen_su_emit_float(out, ptr, is_f32);
+}
+
+/**
+ * 二元运算输出：左子表达式（可选括号）、运算符串、右子表达式（可选括号）。need_l/need_r 非 0 时在对应子表达式外加括号。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_binop(out: *u8, left: *u8, right: *u8, op_ptr: *u8, op_len: i32, need_l: i32, need_r: i32): i32 {
+  if (need_l != 0) { if (codegen_su_emit_byte(out, 40) != 0) { return -1; } }
+  if (codegen_su_emit_expr(out, left) != 0) { return -1; }
+  if (need_l != 0) { if (codegen_su_emit_byte(out, 41) != 0) { return -1; } }
+  if (codegen_su_emit_c_string(out, op_ptr, op_len) != 0) { return -1; }
+  if (need_r != 0) { if (codegen_su_emit_byte(out, 40) != 0) { return -1; } }
+  if (codegen_su_emit_expr(out, right) != 0) { return -1; }
+  if (need_r != 0) { if (codegen_su_emit_byte(out, 41) != 0) { return -1; } }
+  return 0;
+}
+
+/**
+ * 一元运算输出：前缀串（如 "(-"、"(~"、"(!"）、子表达式、右括号 ")"。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_unary(out: *u8, operand: *u8, prefix_ptr: *u8, prefix_len: i32): i32 {
+  if (codegen_su_emit_c_string(out, prefix_ptr, prefix_len) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, operand) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * 赋值表达式输出：( left = right )。用于 AST_EXPR_ASSIGN。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_assign(out: *u8, left: *u8, right: *u8): i32 {
+  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, left) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 61) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, right) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * DIV 表达式：is_int 非 0 时调用 C 的整数除零检查，否则用 emit_binop 输出 " / "。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_div_expr(out: *u8, left: *u8, right: *u8, is_int: i32): i32 {
+  if (is_int != 0) { return codegen_su_emit_int_div(out, left, right); }
+  let nl: i32 = codegen_su_expr_needs_addsub_parens(left);
+  let nr: i32 = codegen_su_expr_needs_addsub_parens(right);
+  let op: [4]u8 = [32, 47, 32, 0];
+  return codegen_su_emit_binop(out, left, right, op, 3, nl, nr);
+}
+
+/**
+ * MOD 表达式：is_int 非 0 时调用 C 的整数取模零检查，否则用 emit_binop 输出 " % "。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_mod_expr(out: *u8, left: *u8, right: *u8, is_int: i32): i32 {
+  if (is_int != 0) { return codegen_su_emit_int_mod(out, left, right); }
+  let nl: i32 = codegen_su_expr_needs_addsub_parens(left);
+  let nr: i32 = codegen_su_expr_needs_addsub_parens(right);
+  let op: [4]u8 = [32, 37, 32, 0];
+  return codegen_su_emit_binop(out, left, right, op, 3, nl, nr);
+}
+
+/**
+ * 三元表达式内层：cond、op_q（" ? "）、then_e、op_c（" : "）、else_e；C 外包括号。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_ternary_inner(out: *u8, cond: *u8, then_e: *u8, else_e: *u8, op_q: *u8, len_q: i32, op_c: *u8, len_c: i32): i32 {
+  if (codegen_su_emit_expr(out, cond) != 0) { return -1; }
+  if (codegen_su_emit_c_string(out, op_q, len_q) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, then_e) != 0) { return -1; }
+  if (codegen_su_emit_c_string(out, op_c, len_c) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, else_e) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * 字段访问 (base).field：输出 '('、base、')'、'.'、field 名。用于 struct 字段，非枚举变体。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_field_access(out: *u8, base: *u8, field_ptr: *u8, field_len: i32): i32 {
+  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, base) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 46) != 0) { return -1; }
+  if (codegen_su_emit_c_string(out, field_ptr, field_len) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * 函数调用 fallback：callee(arg0, arg1, ...)。用 C 的 call_callee/num_args/call_arg 遍历实参。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_call(out: *u8, call_expr: *u8): i32 {
+  let callee: *u8 = codegen_su_call_callee(call_expr);
+  if (callee == 0) { return -1; }
+  if (codegen_su_emit_expr(out, callee) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
+  let i: i32 = 0;
+  while (i < codegen_su_call_num_args(call_expr)) {
+    if (i != 0) {
+      if (codegen_su_emit_byte(out, 44) != 0) { return -1; }
+      if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
+    }
+    let a: *u8 = codegen_su_call_arg(call_expr, i);
+    if (a != 0 && codegen_su_emit_expr(out, a) != 0) { return -1; }
+    i = i + 1;
+  }
+  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * panic 输出：has_operand 非 0 时转调 codegen_su_emit_panic_with_arg，否则 codegen_su_emit_panic_no_arg。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_panic(out: *u8, has_operand: i32, operand: *u8): i32 {
+  if (has_operand != 0) { return codegen_su_emit_panic_with_arg(out, operand); }
+  return codegen_su_emit_panic_no_arg(out);
+}
+
+/**
+ * 下标 fallback：(base)[index] 或 (base).data[index]。is_slice 非 0 时输出 ).data[ ，否则 )[ 。返回 0 成功，-1 失败。
+ */
+function codegen_su_emit_index_fallback(out: *u8, base: *u8, index: *u8, is_slice: i32): i32 {
+  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
+  if (codegen_su_emit_expr(out, base) != 0) { return -1; }
+  if (is_slice != 0) {
+    let dot_data: [8]u8 = [41, 46, 100, 97, 116, 97, 91, 0]; /* ").data[" */
+    if (codegen_su_emit_c_string(out, dot_data, 7) != 0) { return -1; }
+  } else {
+    if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
+    if (codegen_su_emit_byte(out, 91) != 0) { return -1; }
+  }
+  if (codegen_su_emit_expr(out, index) != 0) { return -1; }
+  if (codegen_su_emit_byte(out, 93) != 0) { return -1; }
+  return 0;
+}
+
+/**
+ * codegen 入口：入口模块生成 C；参数与 C codegen_module_to_c 一一对应，转调 C。
+ */
+function codegen_entry_module_to_c(m: *u8, out: *u8, dep_mods: *u8, dep_import_paths: *u8, ndep: i32, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32 {
+  return codegen_module_to_c(m, out, dep_mods, dep_import_paths, ndep, is_func_used, is_mono_used, is_type_used, dce_ctx, emitted_type_names, n_emitted_inout, max_emitted);
+}
+
+/**
+ * codegen 入口：库模块生成 C；参数与 C codegen_library_module_to_c 一一对应，转调 C。
+ */
+function codegen_entry_library_module_to_c(m: *u8, import_path: *u8, lib_dep_mods: *u8, lib_dep_paths: *u8, n_lib_dep: i32, out: *u8, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32 {
+  return codegen_library_module_to_c(m, import_path, lib_dep_mods, lib_dep_paths, n_lib_dep, out, is_func_used, is_mono_used, is_type_used, dce_ctx, emitted_type_names, n_emitted_inout, max_emitted);
+}
