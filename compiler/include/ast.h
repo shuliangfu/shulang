@@ -33,7 +33,8 @@ typedef enum ASTTypeKind {
     AST_TYPE_SLICE,  /**< 切片 []T，elem_type 为元素类型；语义为 { ptr, length }（文档 §6.3） */
     AST_TYPE_VECTOR, /**< 向量类型如 i32x4；elem_type 为元素类型，array_size 为 lane 数（文档 §10，先用 struct 模拟） */
     AST_TYPE_F32,    /**< 32 位浮点（文档阶段 8+ 可选） */
-    AST_TYPE_F64     /**< 64 位浮点 */
+    AST_TYPE_F64,    /**< 64 位浮点 */
+    AST_TYPE_VOID    /**< 无返回值类型（仅用于函数返回类型，如 extern function foo(): void;） */
 } ASTTypeKind;
 
 /** 类型节点：内建/具名/指针/数组/切片等；指针/数组/切片时 elem_type 非 NULL，由 ast_type_free 递归释放 */
@@ -257,7 +258,7 @@ typedef struct ASTForLoop {
     struct ASTBlock *body;  /**< 循环体块 */
 } ASTForLoop;
 
-/** 块：const/let + while/for + defer 块列表 + 可选 label/goto/return 语句 + 最终表达式 */
+/** 块：const/let + while/for + defer 块列表 + 可选 label/goto/return 语句 + 可选表达式语句序列 (expr;) + 最终表达式 */
 typedef struct ASTBlock {
     ASTConstDecl *const_decls;
     int num_consts;
@@ -271,6 +272,8 @@ typedef struct ASTBlock {
     int num_defers;
     ASTLabeledStmt *labeled_stmts;  /**< label: / goto / return 语句序列，可为 NULL */
     int num_labeled_stmts;
+    struct ASTExpr **expr_stmts;     /**< 表达式语句 (expr;) 序列，可为 NULL；与文档 01 块内 stmt; 一致 */
+    int num_expr_stmts;
     struct ASTExpr *final_expr;
 } ASTBlock;
 
