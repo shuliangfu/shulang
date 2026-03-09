@@ -16,4 +16,8 @@ exitcode=0; /tmp/shuc_vec_u32 >/dev/null 2>&1 || exitcode=$?
 exitcode=0; /tmp/shuc_vec_add >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 0 ] && { echo "expected 0 (vec_add), got $exitcode"; exit 1; }
 
+./compiler/shuc tests/vector/i32x16.su -o /tmp/shuc_vec_i32x16 2>&1
+exitcode=0; /tmp/shuc_vec_i32x16 >/dev/null 2>&1 || exitcode=$?
+[ "$exitcode" -ne 0 ] && { echo "expected 0 (i32x16), got $exitcode"; exit 1; }
+
 echo "vector test OK"
