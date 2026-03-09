@@ -13,7 +13,7 @@
 
 **不纳入回归的脚本**：`run-size-baseline.sh`、`run-perf-baseline.sh` 为可选体积/性能基线，需时单独执行。
 
-**CI 多端测试**：push/PR 时 GitHub Actions 在 **Linux（ubuntu-latest）**、**macOS（macos-latest）**、**Windows（windows-latest，通过 WSL 执行 make + run-all.sh）** 上自动构建 compiler 并执行 `./tests/run-all.sh`，见 `.github/workflows/ci.yml`。
+**CI 多端测试**：push/PR 时 GitHub Actions 在 **Linux（ubuntu-latest）**、**macOS（macos-latest）**、**Windows（windows-latest，使用 MSYS2 提供 bash/make/gcc）** 上自动构建 compiler 并执行 `./tests/run-all.sh`，见 `.github/workflows/ci.yml`。
 
 ## 二、测试脚本与覆盖范围
 
@@ -131,5 +131,5 @@ make test
 
 - **位置**：`.github/workflows/ci.yml`
 - **触发**：推送到或 PR 到 `main` / `master` 分支时自动运行。
-- **矩阵**：`ubuntu-latest`（Linux）、`macos-latest`（macOS）、`windows-latest`（Windows）；Linux/macOS 直接执行 `make` 与 `./tests/run-all.sh`，Windows 在 **WSL** 内执行相同命令（因 Windows 无默认 make/bash）。
-- **要求**：Linux/macOS 需系统 `cc`、`make`、`bash`（托管 runner 已满足）；Windows 依赖 runner 自带 WSL。若需更多架构（如 arm64），可在同一 workflow 中增加 matrix 或新 job。
+- **矩阵**：`ubuntu-latest`（Linux）、`macos-latest`（macOS）、`windows-latest`（Windows）；Linux/macOS 直接执行 `make` 与 `./tests/run-all.sh`，Windows 使用 **MSYS2**（msys2/setup-msys2）安装 make 与 mingw-w64-gcc，在 MSYS2 bash 中执行相同命令（不依赖 WSL）。
+- **要求**：Linux/macOS 需系统 `cc`、`make`、`bash`；Windows 由 setup-msys2 提供。若需更多架构（如 arm64），可在同一 workflow 中增加 matrix 或新 job。
