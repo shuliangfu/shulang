@@ -3,6 +3,8 @@
 // 自举前仅解析与类型检查通过，实现可空或 panic；Err(i32) 约定：错误码 i32，正/负由文档约定；AsyncContext 原子位预留。
 // Buffer 与 std.mem.Buffer ABI 一致（ptr+len+handle 24 字节），便于与 std.mem 互通。
 
+import std.io.core;
+
 // ——— Buffer：与 std.mem.Buffer 同布局（ABI 24 字节），本模块自含以简化 codegen ———
 struct Buffer {
   ptr: *u8
@@ -28,19 +30,19 @@ enum IO_Result {
   Cancelled
 }
 
-// ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；占位返回 0 ———
+// ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；调用 std.io.core（舒 IO 核心），当前桩返回 0 ———
 function register(buf: Buffer): i32 {
-  return 0;
+  return shu_io_register(buf.ptr, buf.len, buf.handle);
 }
 
-// ——— 提交读；buf 目标缓冲区，timeout_ms 毫秒（0=无超时）；占位返回 0（Ok）；预留 []Buffer 多段扩展（高吞吐网络 第十节） ———
+// ——— 提交读；buf 目标缓冲区，timeout_ms 毫秒（0=无超时）；预留 []Buffer 多段扩展（高吞吐网络） ———
 function submit_read(buf: Buffer, timeout_ms: u32): i32 {
-  return 0;
+  return shu_io_submit_read(buf.ptr, buf.len, buf.handle, timeout_ms);
 }
 
-// ——— 提交写；占位返回 0（Ok）；预留 []Buffer 多段扩展（高吞吐网络 第十节） ———
+// ——— 提交写；预留 []Buffer 多段扩展 ———
 function submit_write(buf: Buffer, timeout_ms: u32): i32 {
-  return 0;
+  return shu_io_submit_write(buf.ptr, buf.len, buf.handle, timeout_ms);
 }
 
 // 占位，表示本模块可 import
