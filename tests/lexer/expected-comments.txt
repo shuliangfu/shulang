@@ -1,0 +1,14 @@
+FUNCTION @6:1
+IDENT main @6:10
+LPAREN @6:14
+RPAREN @6:15
+COLON @6:16
+I32 @6:18
+LBRACE @6:22
+RETURN @6:24
+INT 0 @6:31
+SEMICOLON @6:32
+RBRACE @6:34
+EOF
+parse OK: main(): i32 { expr }
+typeck OK
