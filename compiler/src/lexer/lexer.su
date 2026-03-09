@@ -48,8 +48,8 @@ function is_alnum_underscore(c: u8): bool {
 }
 
 /** 比较 data[start..start+len] 与 keyword 的前 len 字节是否相等；要求 keyword 长度 >= len。 */
-function match_keyword(data: []u8, start: usize, len: usize, keyword: []u8): bool {
-  let i: usize = 0;
+function match_keyword(data: []u8, start: usize, len: i32, keyword: []u8): bool {
+  let i: i32 = 0;
   while (i < len) {
     if (data[start + i] != keyword[i]) { return false; }
     i = i + 1;
