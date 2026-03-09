@@ -1,6 +1,5 @@
 # Shulang CI：多端构建与全量测试
-# 在 push/PR 时于 Linux、macOS、Windows 上分别构建 compiler（C 版 shuc）并执行 tests/run-all.sh。
-# Linux/macOS：系统 cc（gcc/clang）、make、bash。Windows：使用 MSYS2 提供 bash/make/gcc（不依赖 WSL）。
+# Linux（多版本）、Linux ARM64、macOS（多版本）、Windows、Docker 多发行版（Alpine/Debian）。
 
 name: CI
 
@@ -12,8 +11,25 @@ on:
 
 jobs:
   linux:
-    name: Linux
-    runs-on: ubuntu-latest
+    name: Linux (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-22.04, ubuntu-latest ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build compiler (shuc)
+        run: make -C compiler OPT=1
+        env:
+          CC: cc
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
+
+  linux-arm64:
+    name: Linux (ARM64)
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,8 +41,12 @@ jobs:
         run: ./tests/run-all.sh
 
   mac:
-    name: macOS
-    runs-on: macos-latest
+    name: macOS (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ macos-14, macos-latest ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,3 +77,28 @@ jobs:
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         shell: msys2 {0}
+
+  docker-distro:
+    name: Docker (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ alpine:latest, debian:bookworm-slim ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build and test in ${{ matrix.image }}
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" -w /src \
+            ${{ matrix.image }} \
+            sh -c '
+              if command -v apk >/dev/null 2>&1; then
+                apk add --no-cache make gcc bash diffutils
+              else
+                apt-get update -qq && apt-get install -y -qq build-essential bash diffutils
+              fi &&
+              make -C compiler OPT=1 &&
+              ./tests/run-all.sh
+            '
