@@ -293,6 +293,23 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    /* 16 车道向量（6 字符），须在 i32/u32 之前匹配 */
+    if (len == 6 && memcmp(start, "i32x16", 6) == 0) {
+        out->kind = TOKEN_I32X16;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
+    if (len == 6 && memcmp(start, "u32x16", 6) == 0) {
+        out->kind = TOKEN_U32X16;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
     if (len == 3 && memcmp(start, "i32", 3) == 0) {
         out->kind = TOKEN_I32;
         out->line = line0;
