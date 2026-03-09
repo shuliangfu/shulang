@@ -5,29 +5,29 @@
 
 import std.io.core;
 
-// ——— Buffer：与 std.mem.Buffer 同布局（ABI 24 字节），本模块自含以简化 codegen ———
-struct Buffer {
-  ptr: *u8
-  len: usize
-  handle: usize
-}
-
-// ——— Completion：完成句柄占位，自举后与 submit 回调/结果对接 ———
-struct Completion {
-  tag: i32
-}
-
-// ——— AsyncContext：原子位占位（flags 自举后用于原子状态位） ———
-struct AsyncContext {
-  flags: u32
-}
-
-// ——— IO_Result：Ok/Err/Timeout/Cancelled；Err(i32) 约定（错误码 i32，自举后扩展负载） ———
+// ——— IO_Result：Ok/Err/Timeout/Cancelled；Err(i32) 约定（错误码 i32，自举后扩展负载）；解析顺序要求 enum 在 struct 前 ———
 enum IO_Result {
   Ok,
   Err,
   Timeout,
   Cancelled
+}
+
+// ——— Buffer：与 std.mem.Buffer 同布局（ABI 24 字节），本模块自含以简化 codegen ———
+struct Buffer {
+  ptr: *u8;
+  len: usize;
+  handle: usize;
+}
+
+// ——— Completion：完成句柄占位，自举后与 submit 回调/结果对接 ———
+struct Completion {
+  tag: i32;
+}
+
+// ——— AsyncContext：原子位占位（flags 自举后用于原子状态位） ———
+struct AsyncContext {
+  flags: u32;
 }
 
 // ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；调用 std.io.core（舒 IO 核心），当前桩返回 0 ———
