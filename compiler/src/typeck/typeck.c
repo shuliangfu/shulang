@@ -28,6 +28,7 @@ static int bce_n;
 static struct ASTType static_type_i32 = { AST_TYPE_I32, NULL, NULL, 0 };
 static struct ASTType static_type_i64 = { AST_TYPE_I64, NULL, NULL, 0 };
 static struct ASTType static_type_f64 = { AST_TYPE_F64, NULL, NULL, 0 };
+static struct ASTType static_type_f32 = { AST_TYPE_F32, NULL, NULL, 0 };
 static struct ASTType static_type_bool = { AST_TYPE_BOOL, NULL, NULL, 0 };
 /** 切片 .length 字段类型（与 C 侧 size_t 对应） */
 static struct ASTType static_type_usize = { AST_TYPE_USIZE, NULL, NULL, 0 };
@@ -35,6 +36,13 @@ static struct ASTType static_type_usize = { AST_TYPE_USIZE, NULL, NULL, 0 };
 /** 当前 typeck 的依赖模块列表（与 m->import_paths 顺序一致），供 CALL 跨模块解析；由 typeck_module 设置。 */
 static struct ASTModule **typeck_dep_mods;
 static int typeck_num_deps;
+
+/** 前向声明：typeck_block 在文件后部定义，供 AST_EXPR_BLOCK 的 typeck 调用。 */
+static int typeck_block(const struct ASTBlock *b, const char **parent_names,
+    const int *parent_type_kinds, const char **parent_type_names, const struct ASTType **parent_type_ptrs, int parent_n,
+    const int *parent_const_values, int parent_n_consts, int inside_loop,
+    struct ASTStructDef **struct_defs, int num_structs, struct ASTEnumDef **enum_defs, int num_enums, const struct ASTModule *m,
+    const struct ASTType *func_return_type);
 
 /**
  * 按名称查找结构体定义；用于字段访问与结构体字面量校验。
@@ -380,7 +388,8 @@ static int expr_produces_bool(const struct ASTExpr *e, const char **names,
             return 0;  /* 未定义或非 bool 变量 */
         }
         default:
-            return 0;
+            /* 已 typeck 的表达式：若 resolved_type 为 bool 则视为产生 bool（如返回 bool 的函数调用、字段访问等） */
+            return (e->resolved_type && e->resolved_type->kind == AST_TYPE_BOOL);
     }
 }
 
@@ -649,6 +658,8 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
                     *out_elem_type = type_ptrs[i]->elem_type;
                 return 0;
             }
+        fprintf(stderr, "typeck error: get_expr_type variable '%.*s' not in scope\n", name ? (int)strlen(name) : 0, name ? name : "?");
+        typeck_err_loc((struct ASTExpr *)e);
         return -1;
     }
     if (e->kind == AST_EXPR_FIELD_ACCESS) {
@@ -697,6 +708,8 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
         *out_name = base_elem->name;
         return 0;
     }
+    fprintf(stderr, "typeck error: get_expr_type unhandled expression kind %d\n", (int)e->kind);
+    typeck_err_loc((struct ASTExpr *)e);
     return -1;
 }
 
@@ -780,9 +793,13 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 else if (e->kind == AST_EXPR_LOGAND || e->kind == AST_EXPR_LOGOR)
                     ((struct ASTExpr *)e)->resolved_type = &static_type_bool;
                 else if (lt && rt && e->kind <= AST_EXPR_GE) {
-                    /* 标量算术：i64 与 i32 混合时提升为 i64，否则两类型须一致 */
+                    /* 标量算术：i64 与 i32 混合时提升为 i64；含 f64/f32 时提升为浮点；否则两类型须一致 */
                     if (lt->kind == AST_TYPE_I64 || rt->kind == AST_TYPE_I64)
                         ((struct ASTExpr *)e)->resolved_type = &static_type_i64;
+                    else if (lt->kind == AST_TYPE_F64 || rt->kind == AST_TYPE_F64)
+                        ((struct ASTExpr *)e)->resolved_type = &static_type_f64;
+                    else if (lt->kind == AST_TYPE_F32 || rt->kind == AST_TYPE_F32)
+                        ((struct ASTExpr *)e)->resolved_type = &static_type_f32;
                     else if (type_equal(lt, rt))
                         ((struct ASTExpr *)e)->resolved_type = lt;
                 }
@@ -799,7 +816,29 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             if (typeck_expr_sym(e->value.if_expr.then_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
             if (e->value.if_expr.else_expr && typeck_expr_sym(e->value.if_expr.else_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            /* if 表达式类型：取产生值的分支类型（块仅 return 时视为无值，取另一分支） */
+            {
+                const struct ASTExpr *te = e->value.if_expr.then_expr;
+                const struct ASTExpr *ee = e->value.if_expr.else_expr;
+                const struct ASTType *ty_t = te ? te->resolved_type : NULL;
+                const struct ASTType *ty_e = ee ? ee->resolved_type : NULL;
+                if (ty_t && ty_e) ((struct ASTExpr *)e)->resolved_type = ty_t;
+                else if (ty_t) ((struct ASTExpr *)e)->resolved_type = ty_t;
+                else if (ty_e) ((struct ASTExpr *)e)->resolved_type = ty_e;
+            }
             return 0;
+        case AST_EXPR_BLOCK: {
+            /* 块表达式（if 的 then/else 体）：用块表达式上下文 typeck_block（func_return_type=NULL 允许 return） */
+            const struct ASTBlock *b = e->value.block;
+            if (typeck_block(b, names, type_kinds, type_names, type_ptrs, n, NULL, 0, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m, NULL) != 0) return -1;
+            if (b->final_expr && b->final_expr->kind != AST_EXPR_RETURN)
+                ((struct ASTExpr *)e)->resolved_type = b->final_expr->resolved_type;
+            else if (b->final_expr && b->final_expr->kind == AST_EXPR_RETURN && b->final_expr->value.unary.operand)
+                ((struct ASTExpr *)e)->resolved_type = b->final_expr->value.unary.operand->resolved_type;
+            else if (b->num_labeled_stmts == 1 && b->labeled_stmts[0].kind == AST_STMT_RETURN && b->labeled_stmts[0].u.return_expr)
+                ((struct ASTExpr *)e)->resolved_type = b->labeled_stmts[0].u.return_expr->resolved_type;
+            return 0;
+        }
         case AST_EXPR_TERNARY: {
             /* cond ? then : else：条件须为 bool，两分支类型须一致 */
             if (typeck_expr_sym(e->value.if_expr.cond, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -930,7 +969,11 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             const char *field = e->value.field_access.field_name;
             for (int i = 0; i < sd->num_fields; i++)
-                if (sd->fields[i].name && field && strcmp(sd->fields[i].name, field) == 0) return 0;
+                if (sd->fields[i].name && field && strcmp(sd->fields[i].name, field) == 0) {
+                    if (sd->fields[i].type)
+                        ((struct ASTExpr *)e)->resolved_type = sd->fields[i].type;
+                    return 0;
+                }
             fprintf(stderr, "typeck error: struct '%s' has no field '%s'", base_name, field ? field : "");
             typeck_err_loc(e);
             return -1;
@@ -955,6 +998,9 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     return -1;
                 }
                 if (typeck_expr_sym(e->value.struct_lit.inits[i], names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+                /* 将字段初值的 resolved_type 设为字段类型，供 codegen 生成正确类型（如 [8]i32 的 data 用 int32_t 而非 uint8_t） */
+                if (sd->fields[i].type)
+                    ((struct ASTExpr *)e->value.struct_lit.inits[i])->resolved_type = sd->fields[i].type;
             }
             return 0;
         }
@@ -1003,6 +1049,12 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         ((struct ASTExpr *)e)->index_proven_in_bounds = 1;
                     break;
                 }
+            }
+            /* 下标表达式类型为数组/切片的元素类型（供实参匹配等使用） */
+            {
+                const struct ASTType *base_ty = e->value.index.base->resolved_type;
+                if (base_ty && (base_ty->kind == AST_TYPE_ARRAY || base_ty->kind == AST_TYPE_SLICE) && base_ty->elem_type)
+                    ((struct ASTExpr *)e)->resolved_type = base_ty->elem_type;
             }
             return 0;
         }
@@ -1144,6 +1196,19 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 if (!ok && param_type && param_type->kind == AST_TYPE_I64
                     && e->value.call.args[i]->kind == AST_EXPR_LIT)
                     ok = 1;
+                /* 允许 0..255 整数字面量传给 u8 参数（自举 lexer 中 advance_one(l, 47) 等） */
+                if (!ok && param_type && param_type->kind == AST_TYPE_U8
+                    && e->value.call.args[i]->kind == AST_EXPR_LIT) {
+                    int v = e->value.call.args[i]->value.int_val;
+                    if (v >= 0 && v <= 255) ok = 1;
+                }
+                /* 允许数组字面量 [x, y, ...] 传给 []u8 参数（如 match_keyword 的 keyword）；设 resolved_type 为参数类型供 codegen 生成 slice 复合字面量 */
+                if (!ok && param_type && param_type->kind == AST_TYPE_SLICE && param_type->elem_type
+                    && param_type->elem_type->kind == AST_TYPE_U8
+                    && e->value.call.args[i]->kind == AST_EXPR_ARRAY_LIT) {
+                    ok = 1;
+                    ((struct ASTExpr *)e->value.call.args[i])->resolved_type = param_type;
+                }
                 if (!ok) {
                     char ebuf[80], fbuf[80];
                     type_to_string_buf(param_type, ebuf, sizeof(ebuf));
@@ -1242,7 +1307,10 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     struct ASTStructDef **struct_defs, int num_structs, struct ASTEnumDef **enum_defs, int num_enums, const struct ASTModule *m,
     const struct ASTType *func_return_type) {
     if (!b) return -1;
-    if (!b->final_expr && b->num_labeled_stmts == 0 && b->num_expr_stmts == 0) return -1;
+    /* 允许空块 {}（如 if (x) { } 的 then 体）；仅当块完全为空且无 final_expr 时放行，不视为错误 */
+    if (!b->final_expr && b->num_labeled_stmts == 0 && b->num_expr_stmts == 0
+        && b->num_consts == 0 && b->num_lets == 0 && b->num_loops == 0 && b->num_for_loops == 0 && b->num_defers == 0)
+        return 0;
     const char *names[MAX_SYMTAB];
     int type_kinds[MAX_SYMTAB];
     const char *type_names[MAX_SYMTAB];
@@ -1276,6 +1344,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 fprintf(stderr, "typeck error: array literal length must match declaration size\n");
                 return -1;
             }
+            /* 将数组字面量 resolved_type 设为声明类型，供 codegen 生成正确元素类型（如 [32]u8 → uint8_t） */
+            ((struct ASTExpr *)b->const_decls[i].init)->resolved_type = b->const_decls[i].type;
         }
         if (b->const_decls[i].type && b->const_decls[i].type->kind == AST_TYPE_VECTOR &&
             b->const_decls[i].init && b->const_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
@@ -1297,13 +1367,31 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 return -1;
             }
         }
-        /* f32/f64 初值：浮点字面量或整数字面量 0；浮点字面量设 resolved_type 供 codegen 生成 0.0f/0.0 */
+        /* f32/f64 初值：浮点字面量或整数字面量 0；非零整数字面量禁止（避免隐式截断）；浮点字面量设 resolved_type 供 codegen 生成 0.0f/0.0 */
         if (b->const_decls[i].type && (b->const_decls[i].type->kind == AST_TYPE_F32 || b->const_decls[i].type->kind == AST_TYPE_F64) && b->const_decls[i].init) {
             const struct ASTExpr *init = b->const_decls[i].init;
             if (init->kind == AST_EXPR_FLOAT_LIT)
                 ((struct ASTExpr *)init)->resolved_type = b->const_decls[i].type;
-            else if (init->kind != AST_EXPR_LIT || init->value.int_val != 0) {
+            else if (init->kind == AST_EXPR_LIT && init->value.int_val == 0)
+                ;
+            else if (init->kind == AST_EXPR_LIT && init->value.int_val != 0) {
                 fprintf(stderr, "typeck error: f32/f64 init must be float literal or integer 0\n");
+                return -1;
+            }
+            else if (init->resolved_type && (init->resolved_type->kind == AST_TYPE_I32 || init->resolved_type->kind == AST_TYPE_F32 || init->resolved_type->kind == AST_TYPE_F64))
+                ;
+            else if (init->kind == AST_EXPR_VAR) {
+                const char *v = init->value.var.name;
+                int allow = 0;
+                for (int k = 0; k < n && v; k++)
+                    if (names[k] && strcmp(names[k], v) == 0 && (type_kinds[k] == AST_TYPE_I32 || type_kinds[k] == AST_TYPE_F32 || type_kinds[k] == AST_TYPE_F64)) { allow = 1; break; }
+                if (!allow) {
+                    fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                    return -1;
+                }
+            }
+            else {
+                fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
                 return -1;
             }
         }
@@ -1326,6 +1414,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 fprintf(stderr, "typeck error: array literal length must match declaration size\n");
                 return -1;
             }
+            /* 将数组字面量 resolved_type 设为声明类型，供 codegen 生成正确元素类型（如 [32]u8 → uint8_t） */
+            ((struct ASTExpr *)b->let_decls[i].init)->resolved_type = b->let_decls[i].type;
         }
         /* 向量可从数组字面量初始化：let v: i32x4 = [a,b,c,d]（文档 §10） */
         if (b->let_decls[i].type && b->let_decls[i].type->kind == AST_TYPE_VECTOR &&
@@ -1349,13 +1439,31 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 return -1;
             }
         }
-        /* f32/f64 初值：浮点字面量或整数字面量 0；浮点字面量设 resolved_type 供 codegen 生成 0.0f/0.0 */
+        /* f32/f64 初值：浮点字面量或整数字面量 0；非零整数字面量禁止（避免隐式截断）；浮点字面量设 resolved_type 供 codegen 生成 0.0f/0.0 */
         if (b->let_decls[i].type && (b->let_decls[i].type->kind == AST_TYPE_F32 || b->let_decls[i].type->kind == AST_TYPE_F64) && b->let_decls[i].init) {
             const struct ASTExpr *init = b->let_decls[i].init;
             if (init->kind == AST_EXPR_FLOAT_LIT)
                 ((struct ASTExpr *)init)->resolved_type = b->let_decls[i].type;
-            else if (init->kind != AST_EXPR_LIT || init->value.int_val != 0) {
+            else if (init->kind == AST_EXPR_LIT && init->value.int_val == 0)
+                ;
+            else if (init->kind == AST_EXPR_LIT && init->value.int_val != 0) {
                 fprintf(stderr, "typeck error: f32/f64 init must be float literal or integer 0\n");
+                return -1;
+            }
+            else if (init->resolved_type && (init->resolved_type->kind == AST_TYPE_I32 || init->resolved_type->kind == AST_TYPE_F32 || init->resolved_type->kind == AST_TYPE_F64))
+                ;
+            else if (init->kind == AST_EXPR_VAR) {
+                const char *v = init->value.var.name;
+                int allow = 0;
+                for (int k = 0; k < n && v; k++)
+                    if (names[k] && strcmp(names[k], v) == 0 && (type_kinds[k] == AST_TYPE_I32 || type_kinds[k] == AST_TYPE_F32 || type_kinds[k] == AST_TYPE_F64)) { allow = 1; break; }
+                if (!allow) {
+                    fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                    return -1;
+                }
+            }
+            else {
+                fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
                 return -1;
             }
         }
@@ -1429,7 +1537,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     for (int i = 0; i < b->num_labeled_stmts; i++) {
         if (b->labeled_stmts[i].kind == AST_STMT_RETURN) {
             if (!b->labeled_stmts[i].u.return_expr) {
-                if (!func_return_type || func_return_type->kind != AST_TYPE_VOID) {
+                /* func_return_type 为 NULL 表示块表达式上下文（如 if 体），允许 return; */
+                if (func_return_type && func_return_type->kind != AST_TYPE_VOID) {
                     fprintf(stderr, "typeck error: return; only allowed in void function\n");
                     return -1;
                 }
@@ -1448,7 +1557,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     }
     if (!b->final_expr) return 0;
     if (b->final_expr->kind == AST_EXPR_RETURN && !b->final_expr->value.unary.operand) {
-        if (!func_return_type || func_return_type->kind != AST_TYPE_VOID) {
+        if (func_return_type && func_return_type->kind != AST_TYPE_VOID) {
             fprintf(stderr, "typeck error: return; only allowed in void function\n");
             return -1;
         }
@@ -1471,9 +1580,41 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         fprintf(stderr, "typeck error: null module\n");
         return -1;
     }
-    /* 库模块（仅 import 或无 main）视为通过 */
-    if (!m->main_func)
+    /* 先为所有依赖模块计算结构体布局，以便本模块引用其 NAMED 类型时能取到 struct_size（如 lexer 引用 token.Token） */
+    if (dep_mods && num_deps > 0) {
+        for (int j = 0; j < num_deps; j++) {
+            if (!dep_mods[j]) continue;
+            if (dep_mods[j]->struct_defs && dep_mods[j]->num_structs > 0 &&
+                compute_struct_layouts(dep_mods[j]->struct_defs, dep_mods[j]->num_structs, dep_mods[j]->enum_defs, dep_mods[j]->num_enums) != 0)
+                return -1;
+        }
+    }
+    /* 本模块结构体布局（库模块也计算，供入口模块引用；§11.1） */
+    if (m->struct_defs && m->num_structs > 0 && compute_struct_layouts(m->struct_defs, m->num_structs, m->enum_defs, m->num_enums) != 0)
+        return -1;
+
+    /* 库模块也需对每个函数体做 typeck，以便设置 resolved_type 等供 codegen 使用（如结构体字面量内数组字面量类型） */
+    if (!m->main_func) {
+        for (int i = 0; i < m->num_funcs; i++) {
+            const struct ASTFunc *f = m->funcs[i];
+            if (!f->body) continue;
+            if (f->num_generic_params > 0) continue;
+            const char *names[MAX_SYMTAB];
+            int type_kinds[MAX_SYMTAB];
+            const char *type_names[MAX_SYMTAB];
+            const struct ASTType *type_ptrs[MAX_SYMTAB];
+            int n = (f->num_params < MAX_SYMTAB) ? f->num_params : 0;
+            for (int j = 0; j < n; j++) {
+                names[j] = f->params[j].name;
+                type_kinds[j] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
+                type_names[j] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
+                type_ptrs[j] = f->params[j].type;
+            }
+            if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
+                return -1;
+        }
         return 0;
+    }
 
     if (!m->main_func->return_type ||
         (m->main_func->return_type->kind != AST_TYPE_I32 && m->main_func->return_type->kind != AST_TYPE_I64)) {
@@ -1497,10 +1638,6 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         fprintf(stderr, "typeck error: main cannot be generic\n");
         return -1;
     }
-
-    /* 结构体布局计算（§11.1）：字段偏移、总大小、对齐，供后续 codegen 使用 size_of/offset_of */
-    if (m->struct_defs && m->num_structs > 0 && compute_struct_layouts(m->struct_defs, m->num_structs, m->enum_defs, m->num_enums) != 0)
-        return -1;
 
     /* impl 块校验：trait 存在、类型存在、每个 trait 方法在 impl 中有且签名一致（阶段 7.2） */
     if (m->impl_blocks) {

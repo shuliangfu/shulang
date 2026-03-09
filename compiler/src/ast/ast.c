@@ -40,6 +40,9 @@ void ast_expr_free(ASTExpr *e) {
             ast_expr_free(e->value.if_expr.then_expr);
             ast_expr_free(e->value.if_expr.else_expr);
             break;
+        case AST_EXPR_BLOCK:
+            ast_block_free(e->value.block);
+            break;
         case AST_EXPR_ASSIGN:
             ast_expr_free(e->value.binop.left);
             ast_expr_free(e->value.binop.right);
