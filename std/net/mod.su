@@ -1,7 +1,8 @@
-// std.net — 网络模块占位（高吞吐网络 第八节）
-// Ipv4Addr、TcpStream、TcpListener、connect、listen、accept 占位；自举前解析与类型检查通过，实现可空或 panic。
-// 与 std.io.driver 统一：网络连接实现 Reader/Writer，读写走 driver；accept 带 Completion 占位。
-// 网络协议检查项（高吞吐网络 第十节）：通过 std.net 创建的套接字默认非阻塞，由 std.io.driver 统一调度。
+// std.net — 网络模块占位（高吞吐、高并发网络，与 std.io.driver 统一）
+// 本模块为「对外 API 层」：类型与 connect/listen/accept 签名占位；自举前仅解析与类型检查通过。
+// 调度约定：数据读写统一走 std.io.driver（Buffer + submit_read/submit_write）；本模块只负责连接生命周期。
+// 自举后：TcpStream/TcpListener 的 fd 可与 driver 的 handle 统一（如 usize）；accept/connect 可与 Completion 对接；预留批量 accept/connect 扩展。
+// 高并发网络 第八节 + 高并发IO与多平台 §四、§七。
 
 // ——— Ipv4Addr：IPv4 地址占位（自举后为 4 字节或 u32） ———
 struct Ipv4Addr {
@@ -11,7 +12,7 @@ struct Ipv4Addr {
   d: u8
 }
 
-// ——— TcpStream：TCP 连接占位（fd 或句柄，自举后扩展） ———
+// ——— TcpStream：TCP 连接占位（fd 自举后可与 std.io.driver 的 handle 统一，便于 submit 时用同一套 Buffer） ———
 struct TcpStream {
   fd: i32
 }
@@ -21,8 +22,8 @@ struct TcpListener {
   fd: i32
 }
 
-// ——— connect：连接至 addr:port；port 为 u32（0–65535）；占位返回无效 TcpStream（fd -1） ———
-function connect(addr: Ipv4Addr, port: u32): TcpStream {
+// ——— connect：连接至 addr:port；timeout_ms 毫秒（0=无超时）；占位返回无效 TcpStream（fd -1）；自举后可与 Completion 对接、预留批量 connect ———
+function connect(addr: Ipv4Addr, port: u32, timeout_ms: u32): TcpStream {
   return TcpStream { fd: -1 };
 }
 
@@ -31,9 +32,19 @@ function listen(addr: Ipv4Addr, port: u32): TcpListener {
   return TcpListener { fd: -1 };
 }
 
-// ——— accept：从 listener 接受连接；Completion 占位（自举后与 driver 对接）；占位返回无效 TcpStream ———
-function accept(listener: TcpListener): TcpStream {
+// ——— accept：从 listener 接受连接；timeout_ms 毫秒（0=无超时）；自举后与 driver Completion 对接、预留批量 accept；占位返回无效 TcpStream ———
+function accept(listener: TcpListener, timeout_ms: u32): TcpStream {
   return TcpStream { fd: -1 };
+}
+
+// ——— accept_many：批量接受连接，写入 out[0..n]，返回实际接受数量 n；timeout_ms 毫秒（0=无超时）；占位 return 0；自举后与 driver Completion 对接 ———
+function accept_many(listener: TcpListener, out: []TcpStream, timeout_ms: u32): u32 {
+  return 0;
+}
+
+// ——— connect_many：向同一 addr:port 批量建连（如连接池），写入 out[0..n]，返回实际成功数量 n；timeout_ms 毫秒（0=无超时）；占位 return 0 ———
+function connect_many(addr: Ipv4Addr, port: u32, out: []TcpStream, timeout_ms: u32): u32 {
+  return 0;
 }
 
 // 占位，表示本模块可 import
