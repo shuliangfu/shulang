@@ -8,6 +8,9 @@ make -C compiler
 out=$(mktemp)
 ./compiler/shuc tests/lexer/main.su > "$out"
 diff -u --strip-trailing-cr tests/lexer/expected.txt "$out" || exit 1
+# 三种注释（//、#、/** */）均应被跳过，代码在第 6 行故行号与 main.su 不同
+./compiler/shuc tests/lexer/comments.su > "$out"
+diff -u --strip-trailing-cr tests/lexer/expected-comments.txt "$out" || exit 1
 rm -f "$out"
 
 # 边界：含非法字符（如 $）应报 parse error 或无法编译（预期错误不刷屏）
