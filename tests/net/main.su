@@ -1,10 +1,15 @@
-// 测试 std.net 占位：Ipv4Addr、TcpStream、TcpListener、connect、listen、accept
+// 测试 std.net 占位：Ipv4Addr、TcpStream、TcpListener、connect、listen、accept、accept_many、connect_many
 import std.net;
 
 function main(): i32 {
   let addr: Ipv4Addr = Ipv4Addr { a: 127, b: 0, c: 0, d: 1 };
   let listener: TcpListener = listen(addr, 8080);
-  let stream: TcpStream = accept(listener);
-  let stream2: TcpStream = connect(addr, 8080);
+  let stream: TcpStream = accept(listener, 0);
+  let stream2: TcpStream = connect(addr, 8080, 0);
+  // 批量 API 占位：调用以覆盖 accept_many/connect_many 的编译与链接路径
+  let out_buf: [2]TcpStream = 0;
+  let out: []TcpStream = out_buf;
+  let n_accept: u32 = accept_many(listener, out, 0);
+  let n_connect: u32 = connect_many(addr, 8080, out, 0);
   return 0;
 }
