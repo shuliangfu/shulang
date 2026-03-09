@@ -33,6 +33,11 @@ static const char *skip_ws(const char *s) {
     return s;
 }
 
+/** 是否为行内结束符（空白或行尾），用于 CRLF 下 #endif 等指令识别 */
+static int is_ws_or_eol(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\0';
+}
+
 /**
  * 解析一行是否以 # 开头并是指令；若是则解析指令类型与符号（仅 #if 需要）。
  * 参数：line 当前行（可含结尾 \n）；out_kind 输出 1=#if, 2=#else, 3=#endif, 4=#elseif, 0=非指令；out_sym 仅 #if/#elseif 时输出符号（写入 buf，最多 buf_size 字节）。
@@ -43,11 +48,11 @@ static int parse_directive(const char *line, int *out_kind, char *out_sym, size_
     if (*p != '#') return 0;
     p++;
     p = skip_ws(p);
-    if (!*p || *p == '\n') return 0;
-    if (strncmp(p, "if", 2) == 0 && (p[2] == ' ' || p[2] == '\t' || p[2] == '\n' || p[2] == '\0')) {
+    if (!*p || *p == '\n' || *p == '\r') return 0;
+    if (strncmp(p, "if", 2) == 0 && is_ws_or_eol(p[2])) {
         p += 2;
         p = skip_ws(p);
-        if (!*p || *p == '\n') return 0;
+        if (!*p || *p == '\n' || *p == '\r') return 0;
         size_t i = 0;
         while (*p && (isalnum((unsigned char)*p) || *p == '_') && i + 1 < buf_size) {
             out_sym[i++] = *p++;
@@ -58,10 +63,10 @@ static int parse_directive(const char *line, int *out_kind, char *out_sym, size_
         return 1;
     }
     /* 先匹配 elseif 再 else，避免 "else" 吃掉 "elseif" */
-    if (strncmp(p, "elseif", 6) == 0 && (p[6] == ' ' || p[6] == '\t' || p[6] == '\n' || p[6] == '\0')) {
+    if (strncmp(p, "elseif", 6) == 0 && is_ws_or_eol(p[6])) {
         p += 6;
         p = skip_ws(p);
-        if (!*p || *p == '\n') return 0;
+        if (!*p || *p == '\n' || *p == '\r') return 0;
         size_t i = 0;
         while (*p && (isalnum((unsigned char)*p) || *p == '_') && i + 1 < buf_size) {
             out_sym[i++] = *p++;
@@ -71,11 +76,11 @@ static int parse_directive(const char *line, int *out_kind, char *out_sym, size_
         *out_kind = 4;
         return 1;
     }
-    if (strncmp(p, "else", 4) == 0 && (p[4] == ' ' || p[4] == '\t' || p[4] == '\n' || p[4] == '\0')) {
+    if (strncmp(p, "else", 4) == 0 && is_ws_or_eol(p[4])) {
         *out_kind = 2;
         return 1;
     }
-    if (strncmp(p, "endif", 5) == 0 && (p[5] == ' ' || p[5] == '\t' || p[5] == '\n' || p[5] == '\0')) {
+    if (strncmp(p, "endif", 5) == 0 && is_ws_or_eol(p[5])) {
         *out_kind = 3;
         return 1;
     }
