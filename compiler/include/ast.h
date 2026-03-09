@@ -103,6 +103,8 @@ typedef struct ASTMatchArm {
 typedef struct ASTExpr {
     ASTExprKind kind;
     const struct ASTType *resolved_type; /**< 由 typeck 填写：表达式类型，用于向量运算等 codegen；不归 ast_expr_free 释放 */
+    int line; /**< 源码行号，从 1 开始；0 表示未知（用于面包屑错误 at line:col） */
+    int col;  /**< 源码列号，从 1 开始；0 表示未知 */
     union {
         int int_val;    /**< AST_EXPR_LIT 时的值 */
         double float_val; /**< AST_EXPR_FLOAT_LIT 时的值 */
