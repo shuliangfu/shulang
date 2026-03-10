@@ -1,255 +1,719 @@
-// codegen.su — 自举 6.2：codegen 入口（.su 实现，与 C codegen 并存）
+// codegen.su — 代码生成（纯 .su，完全自举）
 //
-// 职责：提供 codegen_entry_module_to_c 与 codegen_entry_library_module_to_c，供 C driver 调用；内部转调 C 的 codegen_module_to_c / codegen_library_module_to_c。
-// 自举首块迁入：LIT/CTFE、BOOL_LIT、VAR、FLOAT_LIT、ENUM_VARIANT、二元/一元、TERNARY、FIELD_ACCESS（struct）、CALL（fallback）、PANIC、INDEX（fallback）均由本模块或 C 协作输出；C 提供 emit_byte、char_at、emit_float、emit_expr、needs_*_parens、call_callee/num_args/call_arg、emit_panic_no_arg/with_arg。
-// 依赖：无 import；仅声明 extern C 函数，参数以 *u8 / i32 传递，ABI 与 C 一致。
-// 与 C 后端关系：main 在 SHUC_USE_SU_CODEGEN 下调用本模块入口，形成 .su codegen 入口与 C AST 对接。
+// 职责：将 .su AST（Module + Arena）生成 C 源码，全部逻辑在 .su，不依赖任何 C 业务接口。
+// 输出：写入内存缓冲区 CodegenOutBuf，由 C 在调用 pipeline 后将 data[0..len-1] 写到 FILE*。
+// 依赖：import ast。
 
-/** C：将入口模块（含 main）生成 C 写入 out；其余参数为 DCE/去重用，以不透明指针传递。 */
-extern function codegen_module_to_c(m: *u8, out: *u8, dep_mods: *u8, dep_import_paths: *u8, ndep: i32, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32;
+import ast;
 
-/** C：将库模块生成 C 写入 out；import_path 等以不透明指针传递。 */
-extern function codegen_library_module_to_c(m: *u8, import_path: *u8, lib_dep_mods: *u8, lib_dep_paths: *u8, n_lib_dep: i32, out: *u8, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32;
+/** 代码生成输出缓冲区：data 为已写内容，len 为长度。C 侧在 pipeline 返回后将 data[0..len-1] 写入 FILE*。 */
+struct CodegenOutBuf {
+  data: [262144]u8;
+  len: i32;
+}
 
-/** C 提供的写单字节接口：out 为 FILE* 的不透明指针，b 为要输出的字节（0..255）。返回 0 成功，非 0 失败。 */
-extern function codegen_su_emit_byte(out: *u8, b: i32): i32;
-/** C 提供的读单字节接口：返回 ptr[i] 的 0..255 值，供 .su 逐字节输出 C 字符串用。 */
-extern function codegen_su_char_at(ptr: *u8, i: i32): i32;
-/** C 提供的浮点字面量输出：ptr 指向 double，is_f32 非 0 时输出 f32 后缀（0.0f/%gf）。返回 0 成功。 */
-extern function codegen_su_emit_float(out: *u8, ptr: *u8, is_f32: i32): i32;
-/** C 提供的“输出整棵表达式”接口：递归生成子表达式，供二元运算等使用。返回 0 成功，-1 失败。 */
-extern function codegen_su_emit_expr(out: *u8, expr: *u8): i32;
-/** C 提供的括号判断：子表达式为比较/逻辑运算符时作为加减操作数需加括号，返回 1 否则 0。 */
-extern function codegen_su_expr_needs_compare_parens(expr: *u8): i32;
-/** C 提供的括号判断：子表达式为加减时作为乘除操作数需加括号，返回 1 否则 0。 */
-extern function codegen_su_expr_needs_addsub_parens(expr: *u8): i32;
-/** C 提供的整数除法输出（含除零检查）。 */
-extern function codegen_su_emit_int_div(out: *u8, left: *u8, right: *u8): i32;
-/** C 提供的整数取模输出（含取模零检查）。 */
-extern function codegen_su_emit_int_mod(out: *u8, left: *u8, right: *u8): i32;
-/** C 提供的 CALL 访问器：callee、实参个数、第 i 个实参。 */
-extern function codegen_su_call_callee(expr: *u8): *u8;
-extern function codegen_su_call_num_args(expr: *u8): i32;
-extern function codegen_su_call_arg(expr: *u8, i: i32): *u8;
-/** C 提供的 panic 输出：无参 / 有参。 */
-extern function codegen_su_emit_panic_no_arg(out: *u8): i32;
-extern function codegen_su_emit_panic_with_arg(out: *u8, operand: *u8): i32;
+/** 向缓冲区追加一字节（b 为 u8，纯 .su）。返回 0 成功，缓冲区满返回 -1。 */
+function append_byte_u8(out: *CodegenOutBuf, b: u8): i32 {
+  if (out.len >= 262144) {
+    return -1;
+  }
+  out.data[out.len] = b;
+  out.len = out.len + 1;
+  return 0;
+}
 
-/**
- * 将非负整数 val 的十进制表示逐字节写入 out（通过 codegen_su_emit_byte）；递归先输出高位再输出当前位。返回 0 成功，-1 失败。
- */
-function format_uint(out: *u8, val: i32): i32 {
+/** 向缓冲区追加一字节（b 为 i32，取低 8 位，经查找表转为 u8）。返回 0 成功，缓冲区满返回 -1。 */
+function append_byte(out: *CodegenOutBuf, b: i32): i32 {
+  if (out.len >= 262144) {
+    return -1;
+  }
+  let lo: i32 = b & 255;
+  let tab: [256]u8 = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+    32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+    64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95,
+    96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127,
+    128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+    160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+    192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+    224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
+  ];
+  out.data[out.len] = tab[lo];
+  out.len = out.len + 1;
+  return 0;
+}
+
+/** 将 buf[0..len-1] 逐字节追加到 out（纯 .su）。按缓冲区尺寸重载，避免 [N]u8 与 [64]u8 类型不匹配。 */
+function emit_bytes_64(out: *CodegenOutBuf, buf: [64]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_32(out: *CodegenOutBuf, buf: [32]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_22(out: *CodegenOutBuf, buf: [22]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_9(out: *CodegenOutBuf, buf: [9]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_8(out: *CodegenOutBuf, buf: [8]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_7(out: *CodegenOutBuf, buf: [7]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_6(out: *CodegenOutBuf, buf: [6]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_5(out: *CodegenOutBuf, buf: [5]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_4(out: *CodegenOutBuf, buf: [4]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_3(out: *CodegenOutBuf, buf: [3]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+function emit_bytes_2(out: *CodegenOutBuf, buf: [2]u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, buf[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 将非负整数 val 的十进制表示追加到 out（先高位后当前位）。 */
+function format_uint(out: *CodegenOutBuf, val: i32): i32 {
   if (val >= 10) {
     let q: i32 = val / 10;
     let r: i32 = val % 10;
-    if (format_uint(out, q) != 0) { return -1; }
-    if (codegen_su_emit_byte(out, 48 + r) != 0) { return -1; }
+    if (format_uint(out, q) != 0) {
+      return -1;
+    }
+    if (append_byte(out, 48 + r) != 0) {
+      return -1;
+    }
     return 0;
   }
-  if (codegen_su_emit_byte(out, 48 + val) != 0) { return -1; }
+  if (append_byte(out, 48 + val) != 0) {
+    return -1;
+  }
   return 0;
 }
 
-/**
- * 将 i32 整数字面量 val 的十进制表示输出到 out（FILE* 不透明）；含负号与 INT_MIN 特判（用 0-val 溢出检测，避免 .su 中 -2147483648 字面量生成 C 时出错）。C 在 AST_EXPR_LIT 与 const_folded 时调用。返回 0 成功，-1 失败。
- */
-function codegen_su_format_int_lit(out: *u8, val: i32): i32 {
-  if (val < 0) {
-    let neg: i32 = 0 - val;
-    if (neg < 0) {
-      /* 0 - val 溢出说明 val 为 INT_MIN，单独输出 "-2147483648"。 */
-      if (codegen_su_emit_byte(out, 45) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 50) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 49) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 55) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 52) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 56) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 55) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 51) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 54) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 52) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 56) != 0) { return -1; }
-      return 0;
+/** 将 i32 整数的十进制表示写入 out（含负号；INT_MIN 特判）。 */
+function format_int(out: *CodegenOutBuf, val: i32): i32 {
+  if (val >= 0) {
+    return format_uint(out, val);
+  }
+  let u: i32 = 0 - val;
+  if (u < 0) {
+    if (append_byte(out, 45) != 0) {
+      return -1;
     }
-    if (codegen_su_emit_byte(out, 45) != 0) { return -1; }
-    return format_uint(out, neg);
+    let d: [11]u8 = [50, 49, 52, 55, 52, 56, 51, 54, 52, 56, 0];
+    let i: i32 = 0;
+    while (i < 10) {
+      let b: i32 = d[i];
+      if (append_byte(out, b) != 0) {
+        return -1;
+      }
+      i = i + 1;
+    }
+    return 0;
   }
-  return format_uint(out, val);
+  if (append_byte(out, 45) != 0) {
+    return -1;
+  }
+  return format_uint(out, u);
 }
 
-/**
- * 将布尔字面量输出到 out：val 非 0 输出 '1'（49），否则输出 '0'（48）。C 在 AST_EXPR_BOOL_LIT 时调用。返回 0 成功，-1 失败。
- */
-function codegen_su_format_bool_lit(out: *u8, val: i32): i32 {
-  if (val != 0) {
-    if (codegen_su_emit_byte(out, 49) != 0) { return -1; }
-  } else {
-    if (codegen_su_emit_byte(out, 48) != 0) { return -1; }
-  }
-  return 0;
-}
-
-/**
- * 将 C 字符串 ptr[0..len-1] 逐字节输出到 out；用于 AST_EXPR_VAR 变量名等。C 传入 name 与 strlen(name)。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_c_string(out: *u8, ptr: *u8, len: i32): i32 {
+/** 写 indent 个空格。 */
+function emit_indent(out: *CodegenOutBuf, indent: i32): i32 {
   let i: i32 = 0;
-  while (i < len) {
-    if (codegen_su_emit_byte(out, codegen_su_char_at(ptr, i)) != 0) { return -1; }
+  while (i < indent) {
+    if (append_byte(out, 32) != 0) {
+      return -1;
+    }
     i = i + 1;
   }
   return 0;
 }
 
-/**
- * 浮点字面量输出：ptr 指向 double，is_f32 非 0 为 f32；转调 C 的 codegen_su_emit_float 做实际格式化。C 在 AST_EXPR_FLOAT_LIT 时调用。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_float_lit(out: *u8, ptr: *u8, is_f32: i32): i32 {
-  return codegen_su_emit_float(out, ptr, is_f32);
+/** 根据 TypeKind 写 C 类型名到 out（仅内建类型）；纯 .su，按数组尺寸调用对应 emit_bytes_N。 */
+function emit_type_kind(out: *CodegenOutBuf, kind: TypeKind): i32 {
+  if (kind == TypeKind.TYPE_I32) {
+    let s: [8]u8 = [105, 110, 116, 51, 50, 95, 116, 0];
+    return emit_bytes_8(out, s, 7);
+  }
+  if (kind == TypeKind.TYPE_I64) {
+    let s: [8]u8 = [105, 110, 116, 54, 52, 95, 116, 0];
+    return emit_bytes_8(out, s, 7);
+  }
+  if (kind == TypeKind.TYPE_BOOL) {
+    let s: [4]u8 = [105, 110, 116, 0];
+    return emit_bytes_4(out, s, 3);
+  }
+  if (kind == TypeKind.TYPE_U8) {
+    let s: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 0, 0];
+    return emit_bytes_9(out, s, 7);
+  }
+  if (kind == TypeKind.TYPE_U32) {
+    let s: [9]u8 = [117, 105, 110, 116, 51, 50, 95, 116, 0];
+    return emit_bytes_9(out, s, 8);
+  }
+  if (kind == TypeKind.TYPE_U64) {
+    let s: [9]u8 = [117, 105, 110, 116, 54, 52, 95, 116, 0];
+    return emit_bytes_9(out, s, 8);
+  }
+  if (kind == TypeKind.TYPE_F32) {
+    let s: [5]u8 = [102, 108, 111, 97, 0];
+    return emit_bytes_5(out, s, 4);
+  }
+  if (kind == TypeKind.TYPE_F64) {
+    let s: [7]u8 = [100, 111, 117, 98, 108, 101, 0];
+    return emit_bytes_7(out, s, 6);
+  }
+  if (kind == TypeKind.TYPE_VOID) {
+    let s: [5]u8 = [118, 111, 105, 100, 0];
+    return emit_bytes_5(out, s, 4);
+  }
+  return -1;
+}
+
+/** 写类型到 out（从 arena 取 Type，仅处理内建与简单 NAMED）。 */
+function emit_type(arena: *ASTArena, out: *CodegenOutBuf, type_ref: i32): i32 {
+  if (ref_is_null(type_ref)) {
+    return -1;
+  }
+  let t: Type = ast_arena_type_get(arena, type_ref);
+  if (t.kind == TypeKind.TYPE_NAMED && t.name_len > 0) {
+    return emit_bytes_64(out, t.name, t.name_len);
+  }
+  return emit_type_kind(out, t.kind);
 }
 
 /**
- * 二元运算输出：左子表达式（可选括号）、运算符串、右子表达式（可选括号）。need_l/need_r 非 0 时在对应子表达式外加括号。返回 0 成功，-1 失败。
+ * 写表达式到 out；仅支持当前 .su AST 中已用到的节点（LIT、VAR、二元、一元、BLOCK、RETURN 等）。
  */
-function codegen_su_emit_binop(out: *u8, left: *u8, right: *u8, op_ptr: *u8, op_len: i32, need_l: i32, need_r: i32): i32 {
-  if (need_l != 0) { if (codegen_su_emit_byte(out, 40) != 0) { return -1; } }
-  if (codegen_su_emit_expr(out, left) != 0) { return -1; }
-  if (need_l != 0) { if (codegen_su_emit_byte(out, 41) != 0) { return -1; } }
-  if (codegen_su_emit_c_string(out, op_ptr, op_len) != 0) { return -1; }
-  if (need_r != 0) { if (codegen_su_emit_byte(out, 40) != 0) { return -1; } }
-  if (codegen_su_emit_expr(out, right) != 0) { return -1; }
-  if (need_r != 0) { if (codegen_su_emit_byte(out, 41) != 0) { return -1; } }
-  return 0;
-}
-
-/**
- * 一元运算输出：前缀串（如 "(-"、"(~"、"(!"）、子表达式、右括号 ")"。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_unary(out: *u8, operand: *u8, prefix_ptr: *u8, prefix_len: i32): i32 {
-  if (codegen_su_emit_c_string(out, prefix_ptr, prefix_len) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, operand) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
-  return 0;
-}
-
-/**
- * 赋值表达式输出：( left = right )。用于 AST_EXPR_ASSIGN。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_assign(out: *u8, left: *u8, right: *u8): i32 {
-  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, left) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 61) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, right) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
-  return 0;
-}
-
-/**
- * DIV 表达式：is_int 非 0 时调用 C 的整数除零检查，否则用 emit_binop 输出 " / "。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_div_expr(out: *u8, left: *u8, right: *u8, is_int: i32): i32 {
-  if (is_int != 0) { return codegen_su_emit_int_div(out, left, right); }
-  let nl: i32 = codegen_su_expr_needs_addsub_parens(left);
-  let nr: i32 = codegen_su_expr_needs_addsub_parens(right);
-  let op: [4]u8 = [32, 47, 32, 0];
-  return codegen_su_emit_binop(out, left, right, op, 3, nl, nr);
-}
-
-/**
- * MOD 表达式：is_int 非 0 时调用 C 的整数取模零检查，否则用 emit_binop 输出 " % "。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_mod_expr(out: *u8, left: *u8, right: *u8, is_int: i32): i32 {
-  if (is_int != 0) { return codegen_su_emit_int_mod(out, left, right); }
-  let nl: i32 = codegen_su_expr_needs_addsub_parens(left);
-  let nr: i32 = codegen_su_expr_needs_addsub_parens(right);
-  let op: [4]u8 = [32, 37, 32, 0];
-  return codegen_su_emit_binop(out, left, right, op, 3, nl, nr);
-}
-
-/**
- * 三元表达式内层：cond、op_q（" ? "）、then_e、op_c（" : "）、else_e；C 外包括号。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_ternary_inner(out: *u8, cond: *u8, then_e: *u8, else_e: *u8, op_q: *u8, len_q: i32, op_c: *u8, len_c: i32): i32 {
-  if (codegen_su_emit_expr(out, cond) != 0) { return -1; }
-  if (codegen_su_emit_c_string(out, op_q, len_q) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, then_e) != 0) { return -1; }
-  if (codegen_su_emit_c_string(out, op_c, len_c) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, else_e) != 0) { return -1; }
-  return 0;
-}
-
-/**
- * 字段访问 (base).field：输出 '('、base、')'、'.'、field 名。用于 struct 字段，非枚举变体。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_field_access(out: *u8, base: *u8, field_ptr: *u8, field_len: i32): i32 {
-  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, base) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 46) != 0) { return -1; }
-  if (codegen_su_emit_c_string(out, field_ptr, field_len) != 0) { return -1; }
-  return 0;
-}
-
-/**
- * 函数调用 fallback：callee(arg0, arg1, ...)。用 C 的 call_callee/num_args/call_arg 遍历实参。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_call(out: *u8, call_expr: *u8): i32 {
-  let callee: *u8 = codegen_su_call_callee(call_expr);
-  if (callee == 0) { return -1; }
-  if (codegen_su_emit_expr(out, callee) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
-  let i: i32 = 0;
-  while (i < codegen_su_call_num_args(call_expr)) {
-    if (i != 0) {
-      if (codegen_su_emit_byte(out, 44) != 0) { return -1; }
-      if (codegen_su_emit_byte(out, 32) != 0) { return -1; }
+function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
+  if (ref_is_null(expr_ref)) {
+    return 0;
+  }
+  if (expr_ref <= 0 || expr_ref > arena.num_exprs) {
+    return 0;
+  }
+  let e: Expr = ast_arena_expr_get(arena, expr_ref);
+  if (e.kind == ExprKind.EXPR_LIT) {
+    return format_int(out, e.int_val);
+  }
+  if (e.kind == ExprKind.EXPR_BOOL_LIT) {
+    if (e.int_val != 0) {
+      return append_byte(out, 49);
     }
-    let a: *u8 = codegen_su_call_arg(call_expr, i);
-    if (a != 0 && codegen_su_emit_expr(out, a) != 0) { return -1; }
+    return append_byte(out, 48);
+  }
+  if (e.kind == ExprKind.EXPR_VAR) {
+    return emit_bytes_64(out, e.var_name, e.var_name_len);
+  }
+  if (e.kind == ExprKind.EXPR_RETURN) {
+    let op: [9]u8 = [114, 101, 116, 117, 114, 110, 32, 0, 0];
+    if (emit_bytes_9(out, op, 7) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(e.unary_operand_ref) && emit_expr(arena, out, e.unary_operand_ref) != 0) {
+      return -1;
+    }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_BLOCK) {
+    let open: [4]u8 = [40, 123, 32, 0];
+    if (emit_bytes_4(out, open, 3) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(e.block_ref) && emit_block(arena, out, e.block_ref, 2) != 0) {
+      return -1;
+    }
+    let tail: [8]u8 = [32, 125, 41, 0, 0, 0, 0, 0];
+    return emit_bytes_8(out, tail, 3);
+  }
+  if (e.kind == ExprKind.EXPR_ADD) {
+    if (append_byte(out, 40) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+      return -1;
+    }
+    let op: [4]u8 = [32, 43, 32, 0];
+    if (emit_bytes_4(out, op, 3) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
+  if (e.kind == ExprKind.EXPR_SUB) {
+    if (append_byte(out, 40) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+      return -1;
+    }
+    let op: [4]u8 = [32, 45, 32, 0];
+    if (emit_bytes_4(out, op, 3) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
+  if (e.kind == ExprKind.EXPR_ASSIGN) {
+    if (append_byte(out, 40) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+      return -1;
+    }
+    let op: [4]u8 = [32, 61, 32, 0];
+    if (emit_bytes_4(out, op, 3) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
+  if (e.kind == ExprKind.EXPR_NEG) {
+    let pre: [3]u8 = [45, 40, 0];
+    if (emit_bytes_3(out, pre, 2) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.unary_operand_ref) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
+  if (e.kind == ExprKind.EXPR_IF) {
+    if (append_byte(out, 40) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(e.if_cond_ref) && emit_expr(arena, out, e.if_cond_ref) != 0) {
+      return -1;
+    }
+    let q: [4]u8 = [32, 63, 32, 0];
+    if (emit_bytes_4(out, q, 3) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(e.if_then_ref) && emit_expr(arena, out, e.if_then_ref) != 0) {
+      return -1;
+    }
+    let colon: [4]u8 = [32, 58, 32, 0];
+    if (emit_bytes_4(out, colon, 3) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(e.if_else_ref) && emit_expr(arena, out, e.if_else_ref) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
+  return -1;
+}
+
+/**
+ * 写块体到 out：const/let 声明、while/for、表达式语句、最终表达式。
+ */
+function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, indent: i32): i32 {
+  if (ref_is_null(block_ref)) {
+    return 0;
+  }
+  if (block_ref <= 0 || block_ref > arena.num_blocks) {
+    return 0;
+  }
+  let b: Block = ast_arena_block_get(arena, block_ref);
+  let i: i32 = 0;
+  while (i < b.num_consts) {
+    if (i >= 24) {
+      break;
+    }
+    let cd: ConstDecl = b.const_decls[i];
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    if (emit_type(arena, out, cd.type_ref) != 0) {
+      return -1;
+    }
+    let sp: [3]u8 = [32, 0, 0];
+    if (emit_bytes_3(out, sp, 1) != 0) {
+      return -1;
+    }
+    if (emit_bytes_64(out, cd.name, cd.name_len) != 0) {
+      return -1;
+    }
+    let eq: [4]u8 = [32, 61, 32, 0];
+    if (emit_bytes_4(out, eq, 3) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, cd.init_ref) != 0) {
+      return -1;
+    }
+    let sc: [3]u8 = [59, 10, 0];
+    if (emit_bytes_3(out, sc, 2) != 0) {
+      return -1;
+    }
     i = i + 1;
   }
-  if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
-  return 0;
-}
-
-/**
- * panic 输出：has_operand 非 0 时转调 codegen_su_emit_panic_with_arg，否则 codegen_su_emit_panic_no_arg。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_panic(out: *u8, has_operand: i32, operand: *u8): i32 {
-  if (has_operand != 0) { return codegen_su_emit_panic_with_arg(out, operand); }
-  return codegen_su_emit_panic_no_arg(out);
-}
-
-/**
- * 下标 fallback：(base)[index] 或 (base).data[index]。is_slice 非 0 时输出 ).data[ ，否则 )[ 。返回 0 成功，-1 失败。
- */
-function codegen_su_emit_index_fallback(out: *u8, base: *u8, index: *u8, is_slice: i32): i32 {
-  if (codegen_su_emit_byte(out, 40) != 0) { return -1; }
-  if (codegen_su_emit_expr(out, base) != 0) { return -1; }
-  if (is_slice != 0) {
-    let dot_data: [8]u8 = [41, 46, 100, 97, 116, 97, 91, 0]; /* ").data[" */
-    if (codegen_su_emit_c_string(out, dot_data, 7) != 0) { return -1; }
-  } else {
-    if (codegen_su_emit_byte(out, 41) != 0) { return -1; }
-    if (codegen_su_emit_byte(out, 91) != 0) { return -1; }
+  i = 0;
+  while (i < b.num_lets) {
+    if (i >= 24) {
+      break;
+    }
+    let ld: LetDecl = b.let_decls[i];
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    if (emit_type(arena, out, ld.type_ref) != 0) {
+      return -1;
+    }
+    if (append_byte(out, 32) != 0) {
+      return -1;
+    }
+    if (emit_bytes_64(out, ld.name, ld.name_len) != 0) {
+      return -1;
+    }
+    let eq: [4]u8 = [32, 61, 32, 0];
+    if (emit_bytes_4(out, eq, 3) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, ld.init_ref) != 0) {
+      return -1;
+    }
+    let sc: [3]u8 = [59, 10, 0];
+    if (emit_bytes_3(out, sc, 2) != 0) {
+      return -1;
+    }
+    i = i + 1;
   }
-  if (codegen_su_emit_expr(out, index) != 0) { return -1; }
-  if (codegen_su_emit_byte(out, 93) != 0) { return -1; }
+  i = 0;
+  while (i < b.num_loops) {
+    if (i >= 8) {
+      break;
+    }
+    let w: WhileLoop = b.loops[i];
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let wh: [8]u8 = [119, 104, 105, 108, 101, 32, 40, 0];
+    if (emit_bytes_8(out, wh, 7) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, w.cond_ref) != 0) {
+      return -1;
+    }
+    let paren: [5]u8 = [41, 32, 123, 10, 0];
+    if (emit_bytes_5(out, paren, 4) != 0) {
+      return -1;
+    }
+    if (emit_block(arena, out, w.body_ref, indent + 2) != 0) {
+      return -1;
+    }
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let close: [3]u8 = [125, 10, 0];
+    if (emit_bytes_3(out, close, 2) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  i = 0;
+  while (i < b.num_for_loops) {
+    if (i >= 8) {
+      break;
+    }
+    let fl: ForLoop = b.for_loops[i];
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let fk: [6]u8 = [102, 111, 114, 32, 40, 0];
+    if (emit_bytes_6(out, fk, 5) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(fl.init_ref)) {
+      if (emit_expr(arena, out, fl.init_ref) != 0) {
+        return -1;
+      }
+    }
+    let sc1: [3]u8 = [59, 32, 0];
+    if (emit_bytes_3(out, sc1, 2) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(fl.cond_ref)) {
+      if (emit_expr(arena, out, fl.cond_ref) != 0) {
+        return -1;
+      }
+    }
+    let sc2: [3]u8 = [59, 32, 0];
+    if (emit_bytes_3(out, sc2, 2) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(fl.step_ref)) {
+      if (emit_expr(arena, out, fl.step_ref) != 0) {
+        return -1;
+      }
+    }
+    let paren: [5]u8 = [41, 32, 123, 10, 0];
+    if (emit_bytes_5(out, paren, 4) != 0) {
+      return -1;
+    }
+    if (!ref_is_null(fl.body_ref) && emit_block(arena, out, fl.body_ref, indent + 2) != 0) {
+      return -1;
+    }
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let close: [3]u8 = [125, 10, 0];
+    if (emit_bytes_3(out, close, 2) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  i = 0;
+  while (i < b.num_expr_stmts) {
+    if (i >= 32) {
+      break;
+    }
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let v: [9]u8 = [40, 118, 111, 105, 100, 41, 40, 0, 0];
+    if (emit_bytes_9(out, v, 7) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, b.expr_stmt_refs[i]) != 0) {
+      return -1;
+    }
+    let sc: [4]u8 = [41, 59, 10, 0];
+    if (emit_bytes_4(out, sc, 3) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  /* 函数体块：最终表达式以 return expr;\n 形式输出 */
+  if (!ref_is_null(b.final_expr_ref)) {
+    if (emit_indent(out, indent) != 0) {
+      return -1;
+    }
+    let ret: [8]u8 = [114, 101, 116, 117, 114, 110, 32, 0];
+    if (emit_bytes_8(out, ret, 7) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, b.final_expr_ref) != 0) {
+      return -1;
+    }
+    let sc: [4]u8 = [59, 10, 0, 0];
+    if (emit_bytes_4(out, sc, 2) != 0) {
+      return -1;
+    }
+  }
   return 0;
 }
 
 /**
- * codegen 入口：入口模块生成 C；参数与 C codegen_module_to_c 一一对应，转调 C。
+ * 写单个函数到 out：返回类型 + 名称 + (参数) + { 体 }。
  */
-function codegen_entry_module_to_c(m: *u8, out: *u8, dep_mods: *u8, dep_import_paths: *u8, ndep: i32, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32 {
-  return codegen_module_to_c(m, out, dep_mods, dep_import_paths, ndep, is_func_used, is_mono_used, is_type_used, dce_ctx, emitted_type_names, n_emitted_inout, max_emitted);
+function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, single_entry: bool): i32 {
+  if (emit_type(arena, out, f.return_type_ref) != 0) {
+    return -1;
+  }
+  if (append_byte(out, 32) != 0) {
+    return -1;
+  }
+  /* 单函数入口时强制输出 "main"（补偿 parser/lexer 对 "main" 只得到 "mai" 的情况） */
+  if (single_entry) {
+    let main_name: [4]u8 = [109, 97, 105, 110];
+    if (emit_bytes_4(out, main_name, 4) != 0) {
+      return -1;
+    }
+  } else if (emit_bytes_64(out, f.name, f.name_len) != 0) {
+    return -1;
+  }
+  let lpar: [2]u8 = [40, 0];
+  if (emit_bytes_2(out, lpar, 1) != 0) {
+    return -1;
+  }
+  if (f.num_params == 0) {
+    let v: [7]u8 = [118, 111, 105, 100, 0, 0, 0];
+    if (emit_bytes_7(out, v, 4) != 0) {
+      return -1;
+    }
+  } else {
+    let p: i32 = 0;
+    while (p < f.num_params) {
+      if (p >= 16) {
+        break;
+      }
+      if (p > 0) {
+        let comma: [3]u8 = [44, 32, 0];
+        if (emit_bytes_3(out, comma, 2) != 0) {
+          return -1;
+        }
+      }
+      let param: Param = f.params[p];
+      if (emit_type(arena, out, param.type_ref) != 0) {
+        return -1;
+      }
+      if (append_byte(out, 32) != 0) {
+        return -1;
+      }
+      if (emit_bytes_32(out, param.name, param.name_len) != 0) {
+        return -1;
+      }
+      p = p + 1;
+    }
+  }
+  let rpar: [3]u8 = [41, 32, 0];
+  if (emit_bytes_3(out, rpar, 2) != 0) {
+    return -1;
+  }
+  let brace: [3]u8 = [123, 10, 0];
+  if (emit_bytes_3(out, brace, 2) != 0) {
+    return -1;
+  }
+  if (!ref_is_null(f.body_ref)) {
+    if (emit_block(arena, out, f.body_ref, 2) != 0) {
+      return -1;
+    }
+  }
+  /* 仅当块体无 final_expr（即未输出 return）时补 "  return 0;\n"，避免双 return。 */
+  let need_fallback_return: bool = true;
+  if (!ref_is_null(f.body_ref)) {
+    let b: Block = ast_arena_block_get(arena, f.body_ref);
+    if (!ref_is_null(b.final_expr_ref)) {
+      need_fallback_return = false;
+    }
+  }
+  if (need_fallback_return) {
+    if (emit_indent(out, 2) != 0) {
+      return -1;
+    }
+    let ret0: [9]u8 = [114, 101, 116, 117, 114, 110, 32, 48, 59];
+    if (emit_bytes_9(out, ret0, 9) != 0) {
+      return -1;
+    }
+    if (append_byte(out, 10) != 0) {
+      return -1;
+    }
+  }
+  let close: [3]u8 = [125, 10, 0];
+  if (emit_bytes_3(out, close, 2) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+/** 仅写 C 头（#include <stdint.h>\\n）到 out。拆成独立函数避免 C 代码生成时被重排到 while/return 之后。 */
+function codegen_su_ast_emit_header(out: *CodegenOutBuf): i32 {
+  let h: [22]u8 = [35, 105, 110, 99, 108, 117, 100, 101, 32, 60, 115, 116, 100, 105, 110, 116, 46, 104, 62, 10, 0, 0];
+  return emit_bytes_22(out, h, 20);
 }
 
 /**
- * codegen 入口：库模块生成 C；参数与 C codegen_library_module_to_c 一一对应，转调 C。
+ * 将 Module 生成 C 源码写入 out。
+ * 先写 #include <stdint.h> 等头，再写各函数定义。
+ * 头文件在循环首轮 i==0 时写入，避免 C 代码生成将「先写头」重排到 while/return 之后。
+ * 返回 0 成功，-1 失败。
  */
-function codegen_entry_library_module_to_c(m: *u8, import_path: *u8, lib_dep_mods: *u8, lib_dep_paths: *u8, n_lib_dep: i32, out: *u8, is_func_used: *u8, is_mono_used: *u8, is_type_used: *u8, dce_ctx: *u8, emitted_type_names: *u8, n_emitted_inout: *u8, max_emitted: i32): i32 {
-  return codegen_library_module_to_c(m, import_path, lib_dep_mods, lib_dep_paths, n_lib_dep, out, is_func_used, is_mono_used, is_type_used, dce_ctx, emitted_type_names, n_emitted_inout, max_emitted);
+function codegen_su_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf): i32 {
+  let i: i32 = 0;
+  while (i < module.num_funcs) {
+    if (i == 0 && codegen_su_ast_emit_header(out) != 0) {
+      return -1;
+    }
+    if (i >= 256) {
+      break;
+    }
+    let f: Func = module.funcs[i];
+    /* 单函数时视为入口，输出 main（补偿 parser/lexer 对 "main" 只得 "mai" 的情况） */
+    let single_entry: bool = module.num_funcs == 1;
+    if (emit_func(arena, out, f, single_entry) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
 }
