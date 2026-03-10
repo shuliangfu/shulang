@@ -13,7 +13,44 @@
 #include "typeck/typeck.h"
 #include "codegen/codegen.h"
 #include "ast.h"
+#ifdef SHUC_USE_SU_CODEGEN
+/* 6.2：.su codegen 入口；由 codegen.su 提供（库模块形式，符号带 codegen_ 前缀），转调 C codegen */
+extern int codegen_codegen_entry_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep,
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted);
+extern int codegen_codegen_entry_library_module_to_c(struct ASTModule *m, const char *import_path,
+    struct ASTModule **lib_dep_mods, const char **lib_dep_paths, int n_lib_dep, FILE *out,
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted);
+#endif
 #include <ctype.h>
+#ifdef SHUC_USE_SU_TYPECK
+/* 6.1：.su typeck 入口；由 typeck.su 提供（库模块形式生成，符号为 typeck_typeck_entry），转调 C typeck_module */
+extern int typeck_typeck_entry(struct ASTModule *mod, struct ASTModule **deps, int ndep);
+#endif
+#ifdef SHUC_USE_SU_PIPELINE
+#include <stdint.h>
+#include <stddef.h>
+/* 9.1：纯 .su 流水线；由 pipeline_gen.c 提供（方案 A 全量展开后符号为 pipeline_run_su_pipeline），arena/module/out_buf 由 C 分配 */
+struct shulang_slice_uint8_t { uint8_t *data; size_t length; };
+extern int pipeline_run_su_pipeline(void *arena, void *module, struct shulang_slice_uint8_t source, void *out_buf);
+extern size_t pipeline_sizeof_arena(void);
+extern size_t pipeline_sizeof_module(void);
+/* 与生成代码中 codegen_CodegenOutBuf 布局一致；C 在调用后将 data[0..len-1] 写到 FILE* */
+#define SU_CODEGEN_OUTBUF_CAP 262144
+struct codegen_CodegenOutBuf {
+    unsigned char data[SU_CODEGEN_OUTBUF_CAP];
+    int32_t len;
+};
+/* 诊断 -su 失败阶段：pipeline_gen.c 中 parser 符号 */
+struct parser_ParseIntoResult { int32_t ok; int32_t main_idx; };
+extern struct parser_ParseIntoResult parser_parse_into(void *arena, void *module, struct shulang_slice_uint8_t source);
+extern void parser_parse_into_set_main_index(void *module, int32_t main_idx);
+extern int32_t parser_first_token_kind(struct shulang_slice_uint8_t source);
+extern int32_t parser_diag_fail_at_token_kind(struct shulang_slice_uint8_t source);
+extern int32_t pipeline_parse_one_function_ok(struct shulang_slice_uint8_t source);
+extern int32_t pipeline_typeck_after_parse_ok(void *arena, void *module, struct shulang_slice_uint8_t source);
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,25 +111,27 @@ static void get_entry_dir(const char *input_path, char *entry_dir, size_t size) 
 }
 
 /**
- * 解析 import 路径到实际 .su 文件路径：先试 lib_root 下单文件（如 core/result.su），若无则试目录模块 path/mod.su（便于后续按目录拆分代码）；若仍无且为单段路径则试 entry_dir（多文件 7.3）。
- * 参数：lib_root 库根；entry_dir 入口所在目录（可为 NULL 或 ""）；import_path 如 "foo" 或 "core.types"；path 输出；path_size 缓冲区大小。
+ * 解析 import 路径到实际 .su 文件路径：依次在 lib_roots[0..n_lib_roots-1] 下查找；先试单文件再试 mod.su；若均无且为单段路径则试 entry_dir（多文件 7.3）。支持多 -L（9.1 联调 std+lexer）。
+ * 参数：lib_roots 库根数组；n_lib_roots 个数；entry_dir 入口所在目录（可为 NULL 或 ""）；import_path 如 "foo" 或 "core.types"；path 输出；path_size 缓冲区大小。
  */
-static void resolve_import_file_path(const char *lib_root, const char *entry_dir, const char *import_path, char *path, size_t path_size) {
-    import_path_to_file_path(lib_root, import_path, path, path_size);
-    if (access(path, R_OK) != 0 && strchr(import_path, '.') != NULL && path_size >= 16) {
-        const char *r = lib_root && lib_root[0] ? lib_root : ".";
-        size_t off = (size_t)snprintf(path, path_size, "%s/", r);
-        for (const char *s = import_path; *s && off + 1 < path_size; s++)
-            path[off++] = (char)(*s == '.' ? '/' : *s);
-        if (off + 9 <= path_size)
-            (void)snprintf(path + off, path_size - off, "/mod.su");
-        if (access(path, R_OK) != 0)
+static void resolve_import_file_path_multi(const char **lib_roots, int n_lib_roots, const char *entry_dir, const char *import_path, char *path, size_t path_size) {
+    for (int r = 0; r < n_lib_roots; r++) {
+        const char *lib_root = lib_roots[r] && lib_roots[r][0] ? lib_roots[r] : ".";
+        import_path_to_file_path(lib_root, import_path, path, path_size);
+        if (access(path, R_OK) == 0) return;
+        if (strchr(import_path, '.') != NULL && path_size >= 16) {
+            size_t off = (size_t)snprintf(path, path_size, "%s/", lib_root);
+            for (const char *s = import_path; *s && off + 1 < path_size; s++)
+                path[off++] = (char)(*s == '.' ? '/' : *s);
+            if (off + 9 <= path_size)
+                (void)snprintf(path + off, path_size - off, "/mod.su");
+            if (access(path, R_OK) == 0) return;
             import_path_to_file_path(lib_root, import_path, path, path_size);
+            if (access(path, R_OK) == 0) return;
+        }
     }
     if (entry_dir && entry_dir[0] && strchr(import_path, '.') == NULL) {
-        if (access(path, R_OK) != 0) {
-            (void)snprintf(path, path_size, "%s/%.255s.su", entry_dir, import_path);
-        }
+        (void)snprintf(path, path_size, "%s/%.255s.su", entry_dir, import_path);
     }
 }
 
@@ -111,11 +150,28 @@ static int find_loaded_index(const char *import_path, char **all_paths, int n_al
 }
 
 /**
+ * 从入口文件路径推导 -E 时库模块的 C 前缀（用于 codegen_library_module_to_c）。
+ * 例如 src/pipeline/pipeline.su -> "pipeline"，src/typeck/typeck.su -> "typeck"。
+ * 供 -E 单文件展开时入口为无 main 的库模块使用。
+ */
+static const char *entry_lib_name_from_path(const char *input_path) {
+    if (!input_path) return "typeck";
+    if (strstr(input_path, "pipeline") != NULL) return "pipeline";
+    if (strstr(input_path, "driver") != NULL) return "driver";
+    if (strstr(input_path, "codegen") != NULL) return "codegen";
+    if (strstr(input_path, "typeck") != NULL) return "typeck";
+    if (strstr(input_path, "parser") != NULL) return "parser";
+    if (strstr(input_path, "lexer") != NULL) return "lexer";
+    if (strstr(input_path, "ast") != NULL) return "ast";
+    return "typeck";
+}
+
+/**
  * 递归加载单条 import：若已存在于 all_dep_mods/all_dep_paths 则直接返回；否则解析→递归加载其 import→typeck(其 deps)→加入列表。
  * 参数：import_path 如 "std.io.driver"；lib_root、entry_dir、defines/ndefines 同 resolve_import_file_path；all_dep_mods/all_dep_paths 输出列表；n_all 当前个数（会递增）；max_all 上限。
  * 返回值：成功返回对应 ASTModule*；失败返回 NULL（调用方须释放已写入的 all_dep_*）。
  */
-static ASTModule *load_one_import(const char *import_path, const char *lib_root, const char *entry_dir,
+static ASTModule *load_one_import(const char *import_path, const char **lib_roots, int n_lib_roots, const char *entry_dir,
     const char **defines, int ndefines,
     ASTModule **all_dep_mods, char **all_dep_paths, int *n_all, int max_all) {
     int idx = find_loaded_index(import_path, all_dep_paths, *n_all);
@@ -126,7 +182,7 @@ static ASTModule *load_one_import(const char *import_path, const char *lib_root,
         return NULL;
     }
     char path[512];
-    resolve_import_file_path(lib_root, entry_dir, import_path, path, sizeof(path));
+    resolve_import_file_path_multi(lib_roots, n_lib_roots, entry_dir, import_path, path, sizeof(path));
     char *raw = read_file(path);
     if (!raw) {
         fprintf(stderr, "shuc: cannot open import '%s' (tried %s)\n", import_path, path);
@@ -149,7 +205,7 @@ static ASTModule *load_one_import(const char *import_path, const char *lib_root,
     }
     /* 先递归加载该模块的 import，保证 typeck 时其 deps 已在 all_dep_mods 中 */
     for (int i = 0; i < dep->num_imports; i++) {
-        ASTModule *sub = load_one_import(dep->import_paths[i], lib_root, entry_dir, defines, ndefines,
+        ASTModule *sub = load_one_import(dep->import_paths[i], lib_roots, n_lib_roots, entry_dir, defines, ndefines,
             all_dep_mods, all_dep_paths, n_all, max_all);
         if (!sub) {
             ast_module_free(dep);
@@ -164,7 +220,7 @@ static ASTModule *load_one_import(const char *import_path, const char *lib_root,
         if (idx >= 0)
             deps[ndeps++] = all_dep_mods[idx];
     }
-    if (typeck_module(dep, deps, ndeps) != 0) {
+    if (typeck_module(dep, deps, ndeps, NULL, 0) != 0) {
         fprintf(stderr, "shuc: typeck failed for import '%s'\n", import_path);
         ast_module_free(dep);
         return NULL;
@@ -184,13 +240,13 @@ static ASTModule *load_one_import(const char *import_path, const char *lib_root,
  * 参数：mod 入口模块；lib_root、entry_dir 同 resolve_import_file_path；defines/ndefines 条件编译符号；dep_mods/ndep_out 仅直接依赖；all_dep_mods、all_dep_paths、n_all_out 为全部传递依赖（all_dep_paths 由本函数 strdup，调用方须 free）；max_deps 为 direct 与 all 共用上限。
  * 返回值：0 成功；-1 失败且已释放已写入的 all_dep_*。
  */
-static int resolve_and_load_imports(ASTModule *mod, const char *lib_root, const char *entry_dir,
+static int resolve_and_load_imports(ASTModule *mod, const char **lib_roots, int n_lib_roots, const char *entry_dir,
     const char **defines, int ndefines,
     ASTModule **dep_mods, int *ndep_out,
     ASTModule **all_dep_mods, char **all_dep_paths, int *n_all_out, int max_deps) {
     int n_all = 0;
     for (int i = 0; i < mod->num_imports && i < max_deps; i++) {
-        ASTModule *m = load_one_import(mod->import_paths[i], lib_root, entry_dir, defines, ndefines,
+        ASTModule *m = load_one_import(mod->import_paths[i], lib_roots, n_lib_roots, entry_dir, defines, ndefines,
             all_dep_mods, all_dep_paths, &n_all, max_deps);
         if (!m) {
             while (n_all--) {
@@ -434,18 +490,27 @@ static int dce_is_type_used(void *ctx, const ASTModule *mod, const char *type_na
  * 副作用与约定：可能创建/删除 /tmp 下临时文件；依赖 getenv("SHULANG_LIB")；多文件时可能多次解析同一 import 的 .su。
  */
 #define MAX_DEFINES 64
-int main(int argc, char **argv) {
+#define MAX_LIB_ROOTS 8
+/**
+ * 编译器 pipeline 实现（原 main 逻辑）；供 C main 直接调用，或由 .su driver 入口转调（6.3）。
+ * 当 SHUC_USE_SU_DRIVER 时由 driver.su 的 driver_driver_main 调用，故不取 static。
+ */
+int run_compiler_c(int argc, char **argv) {
     const char *input_path = NULL;
     const char *out_path = NULL;
-    const char *lib_root = NULL;
+    const char *lib_roots_arr[MAX_LIB_ROOTS];
+    int n_lib_roots = 0;
     const char *target = NULL;
     const char *opt_level = NULL;  /* -O 优化级别：0/2/s，默认 2（阶段 8） */
     int emit_c_only = 0;  /* -E：仅生成 C 到 stdout，不调用 cc */
+    int use_su_pipeline = 0;  /* -su：使用纯 .su 流水线（需 SHUC_USE_SU_PIPELINE 且链接 pipeline_gen.o） */
     const char *defines[MAX_DEFINES];
     int ndefines = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-E") == 0) {
+        if (strcmp(argv[i], "-su") == 0) {
+            use_su_pipeline = 1;
+        } else if (strcmp(argv[i], "-E") == 0) {
             emit_c_only = 1;
         } else if (strcmp(argv[i], "-D") == 0) {
             if (i + 1 >= argc) {
@@ -488,7 +553,8 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "Usage: %s [ -L <lib> ] [ -target <triple> ] [ -D <sym> ] [ -O 0|2|s ] <file.su> [ -o <out> ]\n", argv[0] ? argv[0] : "shuc");
                 return 1;
             }
-            lib_root = argv[i + 1];
+            if (n_lib_roots < MAX_LIB_ROOTS)
+                lib_roots_arr[n_lib_roots++] = argv[i + 1];
             i++;
         } else if (strcmp(argv[i], "-target") == 0) {
             if (i + 1 >= argc) {
@@ -524,8 +590,11 @@ int main(int argc, char **argv) {
             defines[ndefines++] = shu_arch_def;
         }
     }
-    if (!lib_root) lib_root = getenv("SHULANG_LIB");
-    if (!lib_root) lib_root = ".";
+    if (n_lib_roots == 0) {
+        lib_roots_arr[0] = getenv("SHULANG_LIB");
+        if (!lib_roots_arr[0]) lib_roots_arr[0] = ".";
+        n_lib_roots = 1;
+    }
     if (!opt_level) opt_level = getenv("SHULANG_OPT");
     if (!opt_level || !*opt_level) opt_level = "2";
 
@@ -546,6 +615,59 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+#ifdef SHUC_USE_SU_PIPELINE
+    if (use_su_pipeline) {
+        size_t arena_sz = pipeline_sizeof_arena();
+        size_t module_sz = pipeline_sizeof_module();
+        void *arena = malloc(arena_sz);
+        void *module = malloc(module_sz);
+        if (!arena || !module) {
+            fprintf(stderr, "shuc: -su pipeline: malloc failed\n");
+            if (arena) free(arena);
+            if (module) free(module);
+            free(src);
+            return 1;
+        }
+        memset(arena, 0, arena_sz);
+        memset(module, 0, module_sz);
+        /* 当前仅支持 -su -E：.su 流水线写入 out_buf，C 再将 data[0..len-1] 写到 stdout */
+        struct codegen_CodegenOutBuf out_buf;
+        memset(&out_buf, 0, sizeof(out_buf));
+        struct shulang_slice_uint8_t src_slice = { (uint8_t *)src, (size_t)strlen(src) };
+        int ec = pipeline_run_su_pipeline(arena, module, src_slice, (void *)&out_buf);
+        if (ec == 0 && out_buf.len > 0)
+            fwrite(out_buf.data, 1, (size_t)out_buf.len, stdout);
+        else if (ec != 0) {
+            fprintf(stderr, "shuc: -su pipeline failed (parse_into / typeck_su_ast / codegen_su_ast)\n");
+            /* 诊断：单独试 parse_into 以区分失败阶段 */
+            {
+                void *diag_arena = malloc(arena_sz);
+                void *diag_module = malloc(module_sz);
+                if (diag_arena && diag_module) {
+                    memset(diag_arena, 0, arena_sz);
+                    memset(diag_module, 0, module_sz);
+                    struct parser_ParseIntoResult pr = parser_parse_into(diag_arena, diag_module, src_slice);
+                    if (pr.ok == 0) {
+                        int32_t tck = pipeline_typeck_after_parse_ok(diag_arena, diag_module, src_slice);
+                        fprintf(stderr, "shuc: (diagnostic) parse_into OK, typeck_after_parse=%d (0=ok -2=parse_fail -10=main_idx<0 -11=main_idx>=num_funcs -1=impl)\n", (int)tck);
+                    } else {
+                        int32_t fail_tok = parser_diag_fail_at_token_kind(src_slice);
+                        int32_t one_ok = pipeline_parse_one_function_ok(src_slice);
+                        fprintf(stderr, "shuc: (diagnostic) parse_into failed (len=%zu, diag_fail=%d, parse_one_func_ok=%d)\n",
+                                (size_t)src_slice.length, (int)fail_tok, (int)one_ok);
+                    }
+                    free(diag_arena);
+                    free(diag_module);
+                }
+            }
+        }
+        free(arena);
+        free(module);
+        free(src);
+        return (ec != 0) ? 1 : 0;
+    }
+#endif
+
     Lexer *lex = lexer_new(src);
     ASTModule *mod = NULL;
     int pr = parse(lex, &mod);
@@ -564,29 +686,104 @@ int main(int argc, char **argv) {
     ASTModule *all_dep_mods[MAX_ALL_DEPS];
     char *all_dep_paths[MAX_ALL_DEPS];
     int ndep = 0, n_all = 0;
-    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_root, entry_dir, ndefines > 0 ? defines : NULL, ndefines,
+    if (mod->num_imports > 0 && resolve_and_load_imports(mod, lib_roots_arr, n_lib_roots, entry_dir, ndefines > 0 ? defines : NULL, ndefines,
             dep_mods, &ndep, all_dep_mods, all_dep_paths, &n_all, 32) != 0) {
         ast_module_free(mod);
         free(src);
         return 1;
     }
-    if (typeck_module(mod, ndep > 0 ? dep_mods : NULL, ndep) != 0) {
+#ifdef SHUC_USE_SU_TYPECK
+    if (typeck_typeck_entry(mod, ndep > 0 ? dep_mods : NULL, ndep) != 0) {
+#else
+    /* 传入全部传递依赖供布局阶段解析跨模块类型（如 parser 的 OneFuncResult.next_lex: Lexer）；直接依赖仍为 dep_mods/ndep */
+    if (typeck_module(mod, ndep > 0 ? dep_mods : NULL, ndep, n_all > 0 ? all_dep_mods : NULL, n_all) != 0) {
+#endif
         while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
         free(src);
         return 1;
     }
 
-    /* -E：仅将入口模块生成 C 到 stdout 后退出（便于调试） */
+    /* -E：生成 C 到 stdout 后退出。方案 A：有 import 时先按拓扑序输出全部依赖再输出入口，使单文件自洽可编译（为自举 pipeline_gen.c 铺路）。 */
     if (emit_c_only) {
-        if (!mod->main_func || !mod->main_func->body) {
-            fprintf(stderr, "shuc: no main function (cannot emit C)\n");
-            while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
-            ast_module_free(mod);
-            free(src);
-            return 1;
+        int ec = 0;
+        char emitted_type_buf[128][CODEGEN_EMITTED_TYPE_NAME_MAX];
+        int n_emitted = 0;
+        const int max_emitted = (int)(sizeof(emitted_type_buf) / sizeof(emitted_type_buf[0]));
+
+        if (n_all > 0) {
+            /* 有依赖时与 -o 单文件一致：先统一输出 include 与 panic，再按拓扑序写各库，最后写入口，类型名去重避免重定义 */
+            fprintf(stdout, "/* generated (single-file with deps) */\n");
+            fprintf(stdout, "#include <stdint.h>\n");
+            fprintf(stdout, "#include <stddef.h>\n");
+            fprintf(stdout, "#include <stdlib.h>\n");
+            fprintf(stdout, "#include <stdio.h>\n");
+            fprintf(stdout, "#include <string.h>\n");
+            fprintf(stdout, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+            fprintf(stdout, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+            fprintf(stdout, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
+            fprintf(stdout, "  abort();\n");
+            fprintf(stdout, "}\n");
+            for (int i = 0; i < n_all; i++) {
+                ASTModule *lib_deps[32];
+                const char *lib_dep_paths[32];
+                int n_lib = 0;
+                for (int j = 0; j < all_dep_mods[i]->num_imports && n_lib < 32; j++) {
+                    int idx = find_loaded_index(all_dep_mods[i]->import_paths[j], all_dep_paths, n_all);
+                    if (idx >= 0) {
+                        lib_deps[n_lib] = all_dep_mods[idx];
+                        lib_dep_paths[n_lib] = all_dep_paths[idx];
+                        n_lib++;
+                    }
+                }
+#ifdef SHUC_USE_SU_CODEGEN
+                if (codegen_codegen_entry_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, stdout, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted) != 0) {
+#else
+                if (codegen_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, stdout, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted) != 0) {
+#endif
+                    ec = -1;
+                    break;
+                }
+            }
+            if (ec == 0) {
+                if (mod->main_func && mod->main_func->body) {
+#ifdef SHUC_USE_SU_CODEGEN
+                    ec = codegen_codegen_entry_module_to_c(mod, stdout, dep_mods, (const char **)mod->import_paths, ndep, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted);
+#else
+                    ec = codegen_module_to_c(mod, stdout, dep_mods, (const char **)mod->import_paths, ndep, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted);
+#endif
+                } else if (mod->num_funcs > 0) {
+                    const char *lib_name = entry_lib_name_from_path(input_path);
+#ifdef SHUC_USE_SU_CODEGEN
+                    ec = codegen_codegen_entry_library_module_to_c(mod, lib_name, dep_mods, (const char **)mod->import_paths, ndep, stdout, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted);
+#else
+                    ec = codegen_library_module_to_c(mod, lib_name, dep_mods, (const char **)mod->import_paths, ndep, stdout, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted);
+#endif
+                } else {
+                    fprintf(stderr, "shuc: no main function (cannot emit C)\n");
+                    ec = -1;
+                }
+            }
+        } else {
+            /* 无依赖：仅输出入口模块（保持原有行为） */
+            if (mod->main_func && mod->main_func->body) {
+#ifdef SHUC_USE_SU_CODEGEN
+                ec = codegen_codegen_entry_module_to_c(mod, stdout, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, 0);
+#else
+                ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, 0);
+#endif
+            } else if (mod->num_funcs > 0) {
+                const char *lib_name = entry_lib_name_from_path(input_path);
+#ifdef SHUC_USE_SU_CODEGEN
+                ec = codegen_codegen_entry_library_module_to_c(mod, lib_name, NULL, NULL, 0, stdout, NULL, NULL, NULL, NULL, NULL, NULL, 0);
+#else
+                ec = codegen_library_module_to_c(mod, lib_name, NULL, NULL, 0, stdout, NULL, NULL, NULL, NULL, NULL, NULL, 0);
+#endif
+            } else {
+                fprintf(stderr, "shuc: no main function (cannot emit C)\n");
+                ec = -1;
+            }
         }
-        int ec = codegen_module_to_c(mod, stdout, NULL, NULL, 0, NULL, NULL, NULL, NULL);
         while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
         free(src);
@@ -622,10 +819,8 @@ int main(int argc, char **argv) {
         const char *c_paths[MAX_C_FILES];
         int n_c = 0;
         char tmp_c[256];
-        char dep_c_paths[32][256];
-        int ndep_c = 0;
 
-        /* 入口模块 → 临时 .c */
+        /* 入口模块 → 临时 .c（有依赖时同一文件内先写依赖再写入口） */
         char tmp[] = "/tmp/shuc_XXXXXX";
         int fd = mkstemp(tmp);
         if (fd < 0) {
@@ -644,7 +839,55 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
-        if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
+        /* 有依赖时单文件输出：先按拓扑序写依赖再写入口，并传已输出类型名去重，避免 incomplete type 与重定义（见自举实现分析 7.3） */
+        char emitted_type_buf[128][CODEGEN_EMITTED_TYPE_NAME_MAX];
+        int n_emitted = 0;
+        const int max_emitted = (int)(sizeof(emitted_type_buf) / sizeof(emitted_type_buf[0]));
+
+        if (n_all > 0) {
+            /* 单文件时在写任何库前统一输出 include 与 panic，避免首库无类型导致 n_emitted 仍为 0、次库再次输出 panic 而重定义（见 run-stdlib-import） */
+            fprintf(cf, "/* generated (single-file with deps) */\n");
+            fprintf(cf, "#include <stdint.h>\n");
+            fprintf(cf, "#include <stddef.h>\n");
+            fprintf(cf, "#include <stdlib.h>\n");
+            fprintf(cf, "#include <stdio.h>\n");
+            fprintf(cf, "#include <string.h>\n"); /* memcpy for array copy (bootstrap parser.su) */
+            fprintf(cf, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+            fprintf(cf, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+            fprintf(cf, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
+            fprintf(cf, "  abort();\n");
+            fprintf(cf, "}\n");
+            for (int i = 0; i < n_all; i++) {
+                ASTModule *lib_deps[32];
+                const char *lib_dep_paths[32];
+                int n_lib = 0;
+                for (int j = 0; j < all_dep_mods[i]->num_imports && n_lib < 32; j++) {
+                    int idx = find_loaded_index(all_dep_mods[i]->import_paths[j], all_dep_paths, n_all);
+                    if (idx >= 0) {
+                        lib_deps[n_lib] = all_dep_mods[idx];
+                        lib_dep_paths[n_lib] = all_dep_paths[idx];
+                        n_lib++;
+                    }
+                }
+#ifdef SHUC_USE_SU_CODEGEN
+                if (codegen_codegen_entry_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, cf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg, emitted_type_buf, &n_emitted, max_emitted) != 0) {
+#else
+                if (codegen_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, cf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg, emitted_type_buf, &n_emitted, max_emitted) != 0) {
+#endif
+                    fclose(cf);
+                    unlink(tmp);
+                    while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
+                    ast_module_free(mod);
+                    free(src);
+                    return 1;
+                }
+            }
+        }
+#ifdef SHUC_USE_SU_CODEGEN
+        if (codegen_codegen_entry_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg, n_all > 0 ? emitted_type_buf : NULL, n_all > 0 ? &n_emitted : NULL, n_all > 0 ? max_emitted : 0) != 0) {
+#else
+        if (codegen_module_to_c(mod, cf, dep_mods, (const char **)mod->import_paths, ndep, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg, n_all > 0 ? emitted_type_buf : NULL, n_all > 0 ? &n_emitted : NULL, n_all > 0 ? max_emitted : 0) != 0) {
+#endif
             fclose(cf);
             unlink(tmp);
             while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
@@ -662,7 +905,6 @@ int main(int argc, char **argv) {
             free(src);
             return 1;
         }
-        /* 调试：SHUC_DEBUG_C=1 时保留生成 C 到 /tmp/shuc_debug.c 便于排查 codegen 问题 */
         if (getenv("SHUC_DEBUG_C")) {
             FILE *dc = fopen(tmp_c, "r");
             if (dc) {
@@ -677,58 +919,7 @@ int main(int argc, char **argv) {
         }
         c_paths[n_c++] = tmp_c;
 
-        /* 每个已加载的传递依赖生成 .c，参与链接（all_dep_* 为拓扑序）；库模块需传入其 import 依赖供跨模块调用前缀 */
-        for (int i = 0; i < n_all && ndep_c < 32; i++) {
-            ASTModule *lib_deps[32];
-            const char *lib_dep_paths[32];
-            int n_lib = 0;
-            for (int j = 0; j < all_dep_mods[i]->num_imports && n_lib < 32; j++) {
-                int idx = find_loaded_index(all_dep_mods[i]->import_paths[j], all_dep_paths, n_all);
-                if (idx >= 0) {
-                    lib_deps[n_lib] = all_dep_mods[idx];
-                    lib_dep_paths[n_lib] = all_dep_paths[idx];
-                    n_lib++;
-                }
-            }
-            char tmpd[] = "/tmp/shuc_XXXXXX";
-            int fdd = mkstemp(tmpd);
-            if (fdd < 0) {
-                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
-                unlink(tmp_c);
-                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
-                ast_module_free(mod);
-                free(src);
-                return 1;
-            }
-            FILE *dcf = fdopen(fdd, "w");
-            if (!dcf || codegen_library_module_to_c(all_dep_mods[i], all_dep_paths[i], lib_deps, lib_dep_paths, n_lib, dcf, dce_is_func_used, dce_is_mono_used, dce_is_type_used, dce_ctx_arg) != 0) {
-                if (dcf) fclose(dcf);
-                else close(fdd);
-                unlink(tmpd);
-                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
-                unlink(tmp_c);
-                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
-                ast_module_free(mod);
-                free(src);
-                return 1;
-            }
-            fclose(dcf);
-            snprintf(dep_c_paths[ndep_c], sizeof(dep_c_paths[0]), "%s.c", tmpd);
-            if (rename(tmpd, dep_c_paths[ndep_c]) != 0) {
-                unlink(tmpd);
-                while (ndep_c--) unlink(dep_c_paths[ndep_c]);
-                unlink(tmp_c);
-                while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
-                ast_module_free(mod);
-                free(src);
-                return 1;
-            }
-            c_paths[n_c++] = dep_c_paths[ndep_c];
-            ndep_c++;
-        }
-
         int cc_ok = invoke_cc(c_paths, n_c, out_path, target, opt_level);
-        while (ndep_c--) unlink(dep_c_paths[ndep_c]);
         unlink(tmp_c);
         while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
@@ -778,4 +969,16 @@ int main(int argc, char **argv) {
     ast_module_free(mod);
     free(src);
     return 0;
+}
+
+#ifdef SHUC_USE_SU_DRIVER
+/* 6.3：.su driver 入口；由 driver.su 提供 driver_driver_main，转调 run_compiler_c */
+extern int driver_driver_main(int argc, char **argv);
+#endif
+int main(int argc, char **argv) {
+#ifdef SHUC_USE_SU_DRIVER
+    return driver_driver_main(argc, argv);
+#else
+    return run_compiler_c(argc, argv);
+#endif
 }
