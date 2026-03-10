@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # 自举相关回归套件：一键运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）。
 # 在仓库根目录执行：./tests/run-all.sh
+# 可选：SHUC=/path/to/shuc 时使用该二进制代替 compiler/shuc（用于 7.2 两代 shuc 对比）。
 
 set -e
 cd "$(dirname "$0")/.."
-make -C compiler -q 2>/dev/null || make -C compiler
+if [ -n "$SHUC" ]; then
+    [ -f compiler/shuc ] && mv compiler/shuc compiler/shuc.bak
+    cp "$SHUC" compiler/shuc
+    trap '[ -f compiler/shuc.bak ] && mv compiler/shuc.bak compiler/shuc' EXIT
+else
+    make -C compiler -q 2>/dev/null || make -C compiler
+fi
 
 run() {
     local script="$1"
@@ -55,6 +62,7 @@ run run-panic.sh
 run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
+run run-su-pipeline.sh
 run run-vector.sh
 # core/std 与标准库
 run run-fmt.sh
