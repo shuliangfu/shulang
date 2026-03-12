@@ -71,6 +71,12 @@ run run-su-pipeline.sh
 run run-su-multi-file.sh
 run run-asm.sh
 run run-without-c.sh
+# run-without-c 可能执行 make bootstrap-driver 并把 compiler/shuc 覆盖为 .su 驱动版（run_compiler_c 桩返回 1），
+# 后续 run-vector / run-core-types 等需用能真正编译 -o 的 C 版 shuc；用 shuc-c 恢复
+if [ -z "${SHUC:-}" ]; then
+    make -C compiler shuc-c 2>/dev/null || true
+    [ -f compiler/shuc-c ] && cp compiler/shuc-c compiler/shuc
+fi
 run run-vector.sh
 # core/std 与标准库
 run run-fmt.sh
