@@ -22,6 +22,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Show job env (debug)
+        run: |
+          echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
+          uname -a
+          pwd && ls -la
+          which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         env:
@@ -39,6 +45,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Show job env (debug)
+        run: |
+          echo "Runner OS: $RUNNER_OS | Linux ARM64"
+          uname -a && pwd && which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         env:
@@ -60,6 +70,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Show job env (debug)
+        run: |
+          echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
+          uname -a && pwd && which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         env:
@@ -74,6 +88,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Show job env (debug)
+        run: |
+          echo "Runner OS: $env:RUNNER_OS | Job: Windows"
+          Get-Location
+        shell: pwsh
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -104,6 +123,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Show job env (debug)
+        run: |
+          echo "Job: Docker ${{ matrix.image }}"
+          uname -a
+          pwd
       - name: Build and test in ${{ matrix.image }}
         timeout-minutes: 25
         run: |
