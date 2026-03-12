@@ -143,6 +143,8 @@ make test
 
 - **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shuc-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
 - **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shuc-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。
+- **根因（已通过诊断确认）**：run-su-multi-file 时最后一条诊断为 `pipeline: impl start`、无 `pipeline: after parse` → 卡在 **parser**（`pipeline_parse_into_with_init` / `parser_parse_into`）解析 **foo.su** 阶段，需在 compiler 生成的 parser 码（pipeline_gen.c 中 `parser_parse_into`）或 src/parser 中查死循环/平台分支。  
 - **处理**：  
   - **CI**：若 `GITHUB_ACTIONS` 或 `CI` 已设置，**run-su-pipeline.sh 与 run-su-multi-file.sh 均直接 SKIP**（不构建 shuc_su、不跑 -su -E），避免 job 卡死；本地可单独执行验证。  
-  - **非 CI**：两脚本对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。根因修复需在 pipeline 生成码或 typeck/codegen 中定位死循环或平台差异后再改。
+  - **非 CI**：两脚本对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。  
+  - **run-vector.sh**：不再在 CI 下 SKIP；失败时直接 exit 1 并输出明确错误，便于从根上修编译/运行问题。

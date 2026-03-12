@@ -34,6 +34,29 @@ def main():
             count=1,
         )
 
+    # 2.5 parser 死循环根因：parse_into/parse_into_buf 的 while 循环必须在每次成功解析一个函数后用 res.next_lex 更新 lex，
+    # 否则下一轮仍用旧 lex，词法位置不前进导致死循环。若 codegen 漏掉或重排了该行，在此强制补上。
+    _num_funcs_inc = "(void)(((module)->num_funcs = (module)->num_funcs + 1));"
+    _lex_next = "(void)((lex = (res).next_lex));"
+    if _num_funcs_inc in content:
+        idx = 0
+        while True:
+            pos = content.find(_num_funcs_inc, idx)
+            if pos == -1:
+                break
+            after = pos + len(_num_funcs_inc)
+            rest = content[after:]
+            stripped = rest.lstrip()
+            if stripped.startswith("(void)((lex = (res).next_lex)"):
+                idx = after + 1
+                continue
+            line_end = content.find("\n", after)
+            if line_end == -1:
+                break
+            insert_at = line_end + 1
+            content = content[:insert_at] + "    " + _lex_next + "\n" + content[insert_at:]
+            idx = insert_at + len(_lex_next) + 2
+
     # 3. platform_elf_elf_resolve_patches: 重排 while(p) 体为 [声明+while(l)+赋值] + [原 BLOCK1 + p++]
     fn = "platform_elf_elf_resolve_patches"
     start = content.find(f"int32_t {fn}(struct platform_elf_ElfCodegenCtx * ctx)")
