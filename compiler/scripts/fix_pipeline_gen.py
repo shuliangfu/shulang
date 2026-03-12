@@ -85,6 +85,31 @@ def main():
             "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  fprintf(stderr, \"lexer_next: pos=%zu len=%zu\\n\", (size_t)(lex).pos, (size_t)(data)->length); fflush(stderr);\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);",
             1,
         )
+    # 2.9 根因：codegen 将 skip_whitespace 中「//」与「#」分支的 continue 提到 while 前，导致 l 未更新即回到循环 → 死循环。把 continue 移到 while 体后。
+    # 行注释：") == 47) {   continue;\n  while" → ") == 47) {\n  while" 且 "  }\n } else" → "  }\n  continue;\n } else"
+    content = content.replace(
+        ") == 47) {   continue;\n  while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {\n    (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));\n  }\n } else (__tmp = 0) ; __tmp; }));",
+        ") == 47) {\n  while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {\n    (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));\n  }\n  continue;\n } else (__tmp = 0) ; __tmp; }));",
+        1,
+    )
+    # 预处理器 #（skip_whitespace_and_comments）：先 while 再 continue
+    content = content.replace(
+        " (void)(({ int32_t __tmp = 0; if (c == 35) {   continue;\n  while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {\n    (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));\n  }\n } else (__tmp = 0) ; __tmp; }));\n    return l;",
+        " (void)(({ int32_t __tmp = 0; if (c == 35) {\n  while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {\n    (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));\n  }\n  continue;\n } else (__tmp = 0) ; __tmp; }));\n    return l;",
+        1,
+    )
+    # skip_whitespace_and_comments_buf：// 分支，先 while 再 continue
+    content = content.replace(
+        "(c == 47 && (l).pos + 1 < len_u && (data)[(l).pos + 1] == 47) {   continue;\n  while ((l).pos < len_u && (data)[(l).pos] != 10) {\n    (void)((l = lexer_advance_one(l, (data)[(l).pos])));\n  }\n } else (__tmp = 0) ; __tmp; }));",
+        "(c == 47 && (l).pos + 1 < len_u && (data)[(l).pos + 1] == 47) {\n  while ((l).pos < len_u && (data)[(l).pos] != 10) {\n    (void)((l = lexer_advance_one(l, (data)[(l).pos])));\n  }\n  continue;\n } else (__tmp = 0) ; __tmp; }));",
+        1,
+    )
+    # skip_whitespace_and_comments_buf：# 分支，先 while 再 continue
+    content = content.replace(
+        "(void)(({ int32_t __tmp = 0; if (c == 35) {   continue;\n  while ((l).pos < len_u && (data)[(l).pos] != 10) {\n    (void)((l = lexer_advance_one(l, (data)[(l).pos])));\n  }\n } else (__tmp = 0) ; __tmp; }));\n    return l;",
+        "(void)(({ int32_t __tmp = 0; if (c == 35) {\n  while ((l).pos < len_u && (data)[(l).pos] != 10) {\n    (void)((l = lexer_advance_one(l, (data)[(l).pos])));\n  }\n  continue;\n } else (__tmp = 0) ; __tmp; }));\n    return l;",
+        1,
+    )
 
     # 3. platform_elf_elf_resolve_patches: 重排 while(p) 体为 [声明+while(l)+赋值] + [原 BLOCK1 + p++]
     fn = "platform_elf_elf_resolve_patches"

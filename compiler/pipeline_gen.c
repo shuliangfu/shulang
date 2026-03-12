@@ -382,10 +382,11 @@ struct lexer_Lexer lexer_skip_whitespace_and_comments(struct lexer_Lexer lex, st
     (void)(({ int32_t __tmp = 0; if (c == 32 || c == 9 || c == 10 || c == 13) {   (void)((l = lexer_advance_one(l, c)));
   continue;
  } else (__tmp = 0) ; __tmp; }));
-    (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < (data)->length && ((l).pos + 1 < 0 || (size_t)((l).pos + 1) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos + 1]) == 47) {   continue;
+    (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < (data)->length && ((l).pos + 1 < 0 || (size_t)((l).pos + 1) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos + 1]) == 47) {
   while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {
     (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));
   }
+  continue;
  } else (__tmp = 0) ; __tmp; }));
     (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < (data)->length && ((l).pos + 1 < 0 || (size_t)((l).pos + 1) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos + 1]) == 42) {   (void)((l = lexer_advance_one(l, 47)));
   (void)((l = lexer_advance_one(l, 42)));
@@ -398,10 +399,11 @@ struct lexer_Lexer lexer_skip_whitespace_and_comments(struct lexer_Lexer lex, st
   }
   continue;
  } else (__tmp = 0) ; __tmp; }));
-    (void)(({ int32_t __tmp = 0; if (c == 35) {   continue;
+    (void)(({ int32_t __tmp = 0; if (c == 35) {
   while ((l).pos < (data)->length && ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]) != 10) {
     (void)((l = lexer_advance_one(l, ((l).pos < 0 || (size_t)((l).pos) >= (data)->length ? (shulang_panic_(1, 0), (data)->data[0]) : (data)->data[(l).pos]))));
   }
+  continue;
  } else (__tmp = 0) ; __tmp; }));
     return l;
   }
@@ -415,10 +417,11 @@ struct lexer_Lexer lexer_skip_whitespace_and_comments_buf(struct lexer_Lexer lex
     (void)(({ int32_t __tmp = 0; if (c == 32 || c == 9 || c == 10 || c == 13) {   (void)((l = lexer_advance_one(l, c)));
   continue;
  } else (__tmp = 0) ; __tmp; }));
-    (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < len_u && (data)[(l).pos + 1] == 47) {   continue;
+    (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < len_u && (data)[(l).pos + 1] == 47) {
   while ((l).pos < len_u && (data)[(l).pos] != 10) {
     (void)((l = lexer_advance_one(l, (data)[(l).pos])));
   }
+  continue;
  } else (__tmp = 0) ; __tmp; }));
     (void)(({ int32_t __tmp = 0; if (c == 47 && (l).pos + 1 < len_u && (data)[(l).pos + 1] == 42) {   (void)((l = lexer_advance_one(l, 47)));
   (void)((l = lexer_advance_one(l, 42)));
@@ -431,10 +434,11 @@ struct lexer_Lexer lexer_skip_whitespace_and_comments_buf(struct lexer_Lexer lex
   }
   continue;
  } else (__tmp = 0) ; __tmp; }));
-    (void)(({ int32_t __tmp = 0; if (c == 35) {   continue;
+    (void)(({ int32_t __tmp = 0; if (c == 35) {
   while ((l).pos < len_u && (data)[(l).pos] != 10) {
     (void)((l = lexer_advance_one(l, (data)[(l).pos])));
   }
+  continue;
  } else (__tmp = 0) ; __tmp; }));
     return l;
   }
@@ -2610,7 +2614,6 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
     (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
-    (void)((lex = (res).next_lex));
   }
   (void)(({ int32_t __tmp = 0; if ((module)->num_funcs == 0) {   return (struct parser_ParseIntoResult){ .ok = (-1), .main_idx = (-1) };
  } else (__tmp = 0) ; __tmp; }));
@@ -2843,7 +2846,6 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * restri
     (void)(ast_ast_arena_func_set(arena, func_ref, f));
     (void)((((module)->num_funcs < 0 || ((module)->num_funcs) >= 256 ? (shulang_panic_(1, 0), 0) : (((module)->func_refs)[(module)->num_funcs] = func_ref, 0))));
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
-    (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
   }
