@@ -31,7 +31,7 @@ void ast_expr_free(ASTExpr *e) {
             ast_expr_free(e->value.binop.left);
             ast_expr_free(e->value.binop.right);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF:
             ast_expr_free(e->value.unary.operand);
             break;
         case AST_EXPR_IF:
@@ -116,6 +116,10 @@ void ast_expr_free(ASTExpr *e) {
                     ast_expr_free(e->value.method_call.args[i]);
                 free(e->value.method_call.args);
             }
+            break;
+        case AST_EXPR_AS:
+            ast_expr_free(e->value.as_type.operand);
+            ast_type_free(e->value.as_type.type);
             break;
         case AST_EXPR_ENUM_VARIANT:
             if (e->value.enum_variant.enum_name) free((void *)e->value.enum_variant.enum_name);
