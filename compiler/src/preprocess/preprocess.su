@@ -1,0 +1,299 @@
+// preprocess.su — 条件编译预处理（#if / #else / #elseif / #endif）纯 .su 实现
+//
+// 职责：按行扫描源码，识别 #if SYMBOL、#else、#elseif、#endif，根据 defines 保留或跳过块；被跳过行输出换行以保持行号。
+// 约定：与 preprocess.c 一致；栈深度上限 32，行缓冲 512；无 defines 时所有 #if SYMBOL 视为未定义。
+// 与 C 关系：无。全部逻辑在 .su，入参为 slice，读 source[i]、写 out_buf[i] 均在 .su 内完成。
+
+/** 解析指令结果：kind 0=非指令 1=#if 2=#else 3=#endif 4=#elseif；sym_len 仅 #if/#elseif 时有效。 */
+struct ParseDirectiveResult {
+  kind: i32;
+  sym_len: i32;
+}
+
+/** 解析一行是否为指令；line_buf 为行内容，line_len 为长度；sym 仅 #if/#elseif 时写入符号。 */
+function parse_directive(line_buf: [512]u8, line_len: i32, sym: [64]u8): ParseDirectiveResult {
+  let zero: ParseDirectiveResult = ParseDirectiveResult { kind: 0, sym_len: 0 }
+  let pos: i32 = 0;
+  while (pos < line_len && (line_buf[pos] == 32 || line_buf[pos] == 9)) {
+    pos = pos + 1;
+  }
+  if (pos >= line_len || line_buf[pos] != 35) {
+    return zero;
+  }
+  pos = pos + 1;
+  while (pos < line_len && (line_buf[pos] == 32 || line_buf[pos] == 9)) {
+    pos = pos + 1;
+  }
+  if (pos >= line_len) {
+    return zero;
+  }
+  if (pos + 2 <= line_len && line_buf[pos] == 105 && line_buf[pos + 1] == 102) {
+    pos = pos + 2;
+    if (pos < line_len && line_buf[pos] != 32 && line_buf[pos] != 9 && line_buf[pos] != 10 && line_buf[pos] != 13 && line_buf[pos] != 0) {
+      return zero;
+    }
+    while (pos < line_len && (line_buf[pos] == 32 || line_buf[pos] == 9)) {
+      pos = pos + 1;
+    }
+    if (pos >= line_len) {
+      return zero;
+    }
+    let s: i32 = 0;
+    while (pos < line_len && s < 63) {
+      let ch: u8 = line_buf[pos];
+      if ((ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95) {
+        sym[s] = ch;
+        s = s + 1;
+        pos = pos + 1;
+      } else {
+        break;
+      }
+    }
+    if (s == 0) {
+      return zero;
+    }
+    return ParseDirectiveResult { kind: 1, sym_len: s }
+  }
+  if (pos + 6 <= line_len && line_buf[pos] == 101 && line_buf[pos + 1] == 108 && line_buf[pos + 2] == 115 && line_buf[pos + 3] == 101 && line_buf[pos + 4] == 105 && line_buf[pos + 5] == 102) {
+    pos = pos + 6;
+    if (pos < line_len && line_buf[pos] != 32 && line_buf[pos] != 9 && line_buf[pos] != 10 && line_buf[pos] != 13 && line_buf[pos] != 0) {
+      return zero;
+    }
+    while (pos < line_len && (line_buf[pos] == 32 || line_buf[pos] == 9)) {
+      pos = pos + 1;
+    }
+    if (pos >= line_len) {
+      return zero;
+    }
+    let s: i32 = 0;
+    while (pos < line_len && s < 63) {
+      let ch: u8 = line_buf[pos];
+      if ((ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122) || ch == 95) {
+        sym[s] = ch;
+        s = s + 1;
+        pos = pos + 1;
+      } else {
+        break;
+      }
+    }
+    if (s == 0) {
+      return zero;
+    }
+    return ParseDirectiveResult { kind: 4, sym_len: s }
+  }
+  if (pos + 4 <= line_len && line_buf[pos] == 101 && line_buf[pos + 1] == 108 && line_buf[pos + 2] == 115 && line_buf[pos + 3] == 101) {
+    pos = pos + 4;
+    if (pos >= line_len || line_buf[pos] == 32 || line_buf[pos] == 9 || line_buf[pos] == 10 || line_buf[pos] == 13 || line_buf[pos] == 0) {
+      return ParseDirectiveResult { kind: 2, sym_len: 0 }
+    }
+    return zero;
+  }
+  if (pos + 5 <= line_len && line_buf[pos] == 101 && line_buf[pos + 1] == 110 && line_buf[pos + 2] == 100 && line_buf[pos + 3] == 105 && line_buf[pos + 4] == 102) {
+    pos = pos + 5;
+    if (pos >= line_len || line_buf[pos] == 32 || line_buf[pos] == 9 || line_buf[pos] == 10 || line_buf[pos] == 13 || line_buf[pos] == 0) {
+      return ParseDirectiveResult { kind: 3, sym_len: 0 }
+    }
+    return zero;
+  }
+  return zero;
+}
+
+/** 主入口：对 source 做条件编译，结果写入 out_buf，返回输出长度，失败返回 -1。全部读写用 slice 在 .su 内完成，无 C 调用。暂不支持 defines（所有 #if SYMBOL 视为假）。 */
+function preprocess_su(source: []u8, out_buf: []u8): i32 {
+  if (out_buf.length <= 0) {
+    return -1;
+  }
+  let stack: [32]i32 = [];
+  let depth: i32 = 0;
+  let out_len: i32 = 0;
+  let line_len: i32 = 0;
+  let line_buf: [512]u8 = [];
+  let pos: i32 = 0;
+  while (pos < source.length) {
+    let ch: u8 = source[pos];
+    if (ch == 10) {
+      if (line_len > 0 || true) {
+        let sym: [64]u8 = [];
+        let res: ParseDirectiveResult = parse_directive(line_buf, line_len, sym);
+        let kind: i32 = res.kind;
+        if (kind != 0) {
+          if (kind == 1) {
+            if (depth >= 32) {
+              return -1;
+            }
+            if (depth > 0 && stack[depth - 1] == 0) {
+              stack[depth] = 0;
+              depth = depth + 1;
+            } else {
+              stack[depth] = 0;
+              depth = depth + 1;
+            }
+          } else if (kind == 2) {
+            if (depth == 0) {
+              return -1;
+            }
+            if (stack[depth - 1] == 1) {
+              stack[depth - 1] = 0;
+            } else if (stack[depth - 1] == 0) {
+              stack[depth - 1] = 2;
+            }
+          } else if (kind == 4) {
+            if (depth == 0) {
+              return -1;
+            }
+            if (stack[depth - 1] == 2) {
+              return -1;
+            }
+            if (stack[depth - 1] == 1) {
+              stack[depth - 1] = 3;
+            } else if (stack[depth - 1] == 0) {
+              stack[depth - 1] = 0;
+            } else {
+              stack[depth - 1] = 3;
+            }
+          } else {
+            if (depth == 0) {
+              return -1;
+            }
+            depth = depth - 1;
+          }
+          if (out_len >= out_buf.length) {
+            return -1;
+          }
+          out_buf[out_len] = 10;
+          out_len = out_len + 1;
+        } else {
+          let keeping: bool = (depth == 0) || (depth > 0 && (stack[depth - 1] == 1 || stack[depth - 1] == 2));
+          if (keeping) {
+            let i: i32 = 0;
+            while (i < line_len) {
+              if (out_len >= out_buf.length) {
+                return -1;
+              }
+              out_buf[out_len] = line_buf[i];
+              out_len = out_len + 1;
+              i = i + 1;
+            }
+          }
+          if (out_len >= out_buf.length) {
+            return -1;
+          }
+          out_buf[out_len] = 10;
+          out_len = out_len + 1;
+        }
+      }
+      line_len = 0;
+      pos = pos + 1;
+      continue;
+    }
+    if (line_len < 511) {
+      line_buf[line_len] = ch;
+      line_len = line_len + 1;
+    }
+    pos = pos + 1;
+  }
+  if (depth != 0) {
+    return -1;
+  }
+  return out_len;
+}
+
+/** 6.1 完全自举：用固定数组+长度调用预处理逻辑，不依赖 slice 构造；供 pipeline.su 在 read_file_su 后调用。 */
+function preprocess_su_buf(source_buf: [262144]u8, source_len: isize, out_buf: [262144]u8, out_cap: i32): i32 {
+  if (out_cap <= 0) {
+    return -1;
+  }
+  let stack: [32]i32 = [];
+  let depth: i32 = 0;
+  let out_len: i32 = 0;
+  let line_len: i32 = 0;
+  let line_buf: [512]u8 = [];
+  let pos: i32 = 0;
+  while (pos < source_len && pos < 262144) {
+    let ch: u8 = source_buf[pos];
+    if (ch == 10) {
+      if (line_len > 0 || true) {
+        let sym: [64]u8 = [];
+        let res: ParseDirectiveResult = parse_directive(line_buf, line_len, sym);
+        let kind: i32 = res.kind;
+        if (kind != 0) {
+          if (kind == 1) {
+            if (depth >= 32) {
+              return -1;
+            }
+            if (depth > 0 && stack[depth - 1] == 0) {
+              stack[depth] = 0;
+              depth = depth + 1;
+            } else {
+              stack[depth] = 0;
+              depth = depth + 1;
+            }
+          } else if (kind == 2) {
+            if (depth == 0) {
+              return -1;
+            }
+            if (stack[depth - 1] == 1) {
+              stack[depth - 1] = 0;
+            } else if (stack[depth - 1] == 0) {
+              stack[depth - 1] = 2;
+            }
+          } else if (kind == 4) {
+            if (depth == 0) {
+              return -1;
+            }
+            if (stack[depth - 1] == 2) {
+              return -1;
+            }
+            if (stack[depth - 1] == 1) {
+              stack[depth - 1] = 3;
+            } else if (stack[depth - 1] == 0) {
+              stack[depth - 1] = 0;
+            } else {
+              stack[depth - 1] = 3;
+            }
+          } else {
+            if (depth == 0) {
+              return -1;
+            }
+            depth = depth - 1;
+          }
+          if (out_len >= out_cap) {
+            return -1;
+          }
+          out_buf[out_len] = 10;
+          out_len = out_len + 1;
+        } else {
+          let keeping: bool = (depth == 0) || (depth > 0 && (stack[depth - 1] == 1 || stack[depth - 1] == 2));
+          if (keeping) {
+            let i: i32 = 0;
+            while (i < line_len) {
+              if (out_len >= out_cap) {
+                return -1;
+              }
+              out_buf[out_len] = line_buf[i];
+              out_len = out_len + 1;
+              i = i + 1;
+            }
+          }
+          if (out_len >= out_cap) {
+            return -1;
+          }
+          out_buf[out_len] = 10;
+          out_len = out_len + 1;
+        }
+      }
+      line_len = 0;
+      pos = pos + 1;
+      continue;
+    }
+    if (line_len < 511) {
+      line_buf[line_len] = ch;
+      line_len = line_len + 1;
+    }
+    pos = pos + 1;
+  }
+  if (depth != 0) {
+    return -1;
+  }
+  return out_len;
+}
