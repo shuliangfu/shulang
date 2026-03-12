@@ -26,7 +26,7 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: Build shuc_su (for -su -E tests: run-su-multi-file, run-su-pipeline)
+      - name: "Build shuc_su (for -su -E tests: run-su-multi-file, run-su-pipeline)"
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
