@@ -10605,7 +10605,9 @@ int32_t pipeline_typeck_after_parse_ok(struct ast_ASTArena * arena, struct ast_M
   return typeck_typeck_su_ast(module, arena, ctx);
 }
 int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {
+  fprintf(stderr, "pipeline: impl start\n"); fflush(stderr);
   struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);
+  fprintf(stderr, "pipeline: after parse\n"); fflush(stderr);
   int32_t n_imports = parser_get_module_num_imports(module);
   int32_t j = 0;
   while (j < (ctx)->ndep) {
@@ -10613,7 +10615,7 @@ int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Mo
  } else (__tmp = 0) ; __tmp; }));
     (void)(({ int32_t __tmp = 0; if ((ctx)->use_asm_backend != 0) {   __tmp = ({ int32_t __tmp = 0; if (asm_asm_codegen_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]), (j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_arenas)[0]) : ((ctx)->dep_arenas)[j]), out_buf, ctx) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; });
- } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]), (j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_arenas)[0]) : ((ctx)->dep_arenas)[j]), out_buf) != 0) {   return (-1);
+ } else {   fprintf(stderr, "pipeline: before codegen\n"); fflush(stderr);   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]), (j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_arenas)[0]) : ((ctx)->dep_arenas)[j]), out_buf) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; });
  } ; __tmp; }));
     (void)((j = j + 1));
@@ -10648,12 +10650,13 @@ int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Mo
     (void)((i = i + 1));
   }
  } else (__tmp = 0) ; __tmp; }));
+  fprintf(stderr, "pipeline: before typeck\n"); fflush(stderr);
   (void)(({ int32_t __tmp = 0; if (typeck_typeck_su_ast(module, arena, ctx) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   (void)(((out_buf)->len = 0));
   (void)(({ int32_t __tmp = 0; if ((ctx)->use_asm_backend != 0) {   __tmp = ({ int32_t __tmp = 0; if (asm_asm_codegen_ast(module, arena, out_buf, ctx) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; });
- } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);
+ } else {   fprintf(stderr, "pipeline: before codegen\n"); fflush(stderr);   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; });
  } ; __tmp; }));
   return 0;
