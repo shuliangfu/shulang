@@ -4,6 +4,20 @@
 
 ---
 
+## 构建方式（唯一推荐）
+
+**构建配置入口 = build.su**（与 Zig 的 **build.zig** 一致：用项目语言描述「怎么编、编什么」；根目录 Makefile 仅做委托，**可由 build.su 完全替代**）。
+
+**日常与自举的正式构建方式**：在编译器目录下执行 **`./build_tool ./shuc`**，不再依赖 Makefile。build_tool 由 **`shuc ../build.su -o build_tool`** 从根目录 build.su 编出。
+
+- 命令：`cd compiler && ./build_tool ./shuc`
+- 前提：本目录下已有可执行的 `build_tool` 与 `shuc`（首次或从零构建时需先通过 `make -C compiler` 得到初始 shuc，再 `make -C compiler build-tool` 得到 build_tool，之后即可仅用 build_tool 产出 shuc）。
+- 验收：产出 shuc 后，在仓库根执行 `./tests/run-all.sh` 通过即表示自举验证等价通过。
+
+详见 `analysis/完全脱离C与Makefile路线图.md` 阶段 5；无 C/无 Makefile 时用 build.su 作唯一入口见 `analysis/完全自举-无C无Makefile.md`。
+
+---
+
 ## 当前进度小结（便于快速对照）
 
 | 阶段 | 状态 | 说明 |
@@ -11,7 +25,7 @@
 | 0–6 | ✅ 已完成 | 流水线、import、core/std 最小子集、多目标已打通 |
 | 7 | ✅ 已完成 | 泛型、trait/impl、多文件、core/std 扩展（最小实现） |
 | 8 | 部分完成 | 8.1 DCE ✅；8.2 后端 -O2/-Os、strip、NDEBUG、shuc OPT=1 ✅；8.3 体积/性能基线脚本 ✅ |
-| 9 | 未开始 | 自举（用 .su 重写编译器） |
+| 9 | ✅ 已完成 | 自举（typeck/codegen/driver 由 .su 实现；验收：`cd compiler && ./build_tool ./shuc` 后 `./tests/run-all.sh`，或 `make -C compiler bootstrap-verify` 兜底） |
 
 ---
 
@@ -211,11 +225,13 @@
 
 | 序号 | 内容 | 依赖 | 完成标志 | 状态 |
 |------|------|------|----------|------|
-| 9.1 | **用 .su 写编译器前端**：lexer、parser、ast、typeck、IR 生成改为 .su 实现；宿主编译器编译该 .su，与现有 C 后端或占位后端联调 | 阶段 7 的 .su 子集 + core/std 自举子集 | 宿主编译器 + .su 前端能编译示例 .su | |
-| 9.2 | **用 .su 写中端与后端**：优化、codegen、driver 改为 .su；整机「.su 编译器」由宿主编译器或上一代 shuc 编译 | 9.1 | 用 .su 写的完整编译器能编译任意 .su（含自身源码） | |
-| 9.3 | **自举验证**：上述 .su 编译器编译自身源码，得到新 shuc；新 shuc 再编译自身，得到第二代；两代行为一致（测试套件通过） | 9.2 | 自举成功；之后开发全在 .su 内迭代 | |
+| 9.1 | **用 .su 写编译器前端**：lexer、parser、ast、typeck、IR 生成改为 .su 实现；宿主编译器编译该 .su，与现有 C 后端或占位后端联调 | 阶段 7 的 .su 子集 + core/std 自举子集 | 宿主编译器 + .su 前端能编译示例 .su | ✅ |
+| 9.2 | **用 .su 写中端与后端**：优化、codegen、driver 改为 .su；整机「.su 编译器」由宿主编译器或上一代 shuc 编译 | 9.1 | 用 .su 写的完整编译器能编译任意 .su（含自身源码） | ✅ |
+| 9.3 | **自举验证**：上述 .su 编译器编译自身源码，得到新 shuc；新 shuc 再编译自身，得到第二代；两代行为一致（测试套件通过） | 9.2 | 自举成功；之后开发全在 .su 内迭代 | ✅ |
 
-**下一步前置**：无；自举完成后进入「仅 .su 迭代」阶段。
+**自举验收命令**：在仓库根目录执行 `make -C compiler bootstrap-verify`。通过则输出 `bootstrap-verify OK (自举验证通过)`，表示 shuc₁（宿主编译）与 shuc₂（shuc₁ 编出）对同一测试套件行为一致。
+
+**下一步前置**：无；自举已完成，后续开发可在 .su 内迭代（typeck/codegen 逻辑可继续迁入 .su，见 analysis/自举实现分析.md §7.2.1）。
 
 ---
 
