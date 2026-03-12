@@ -1,8 +1,7 @@
-# driver/ — 编译器驱动
+# driver/ — 编译器驱动（文档与预留）
 
-**命令行入口**与**编译流程编排**。
+**入口已与 C 一一对应**：程序入口与驱动编排在 **src/main.su**（对应 main.c），不再使用 driver/driver.su。C 侧仅保留极简 main() 调 main_entry()；全部驱动与 I/O 在 **src/runtime.c**。
 
-- **职责**：解析命令行（输入文件、-o、-target 等）；按顺序调用 lexer → parser → typeck → ir → codegen；多文件时协调各模块；调用系统链接器生成最终可执行文件。
-- **不负责**：具体词法/语法/类型/IR/机器码实现，只负责「串起来」和与外界（文件、链接器）交互。
-
-流水线位置：最外层，用户执行 shuc 时进入 driver，由 driver 调用各阶段。
+- **职责**：解析命令行、调 lexer→parser→typeck→codegen、多文件协调、调系统链接器。
+- **.su 实现**：见 src/main.su（entry 生成 main_entry，与 main.c 的 main()→main_entry() 对应）。
+- **构建**：默认 `make` 得到 shuc（main.o + runtime.o）；`make bootstrap-driver` 编 main.su + pipeline 得到 driver_su.o + pipeline_su.o，与 main.o + runtime_driver.o 链接为 shuc。
