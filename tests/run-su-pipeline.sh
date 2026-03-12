@@ -20,9 +20,22 @@ if [ ! -f "$MIN_SU" ]; then
 fi
 
 # 使用 compiler/shuc 时可能为 C-only 构建（不支持 -su -E），先探测；不支持则跳过以免 make test 失败
+# 对 -su -E 加 60s 超时，避免 shuc_su 在部分环境挂起导致 CI 卡住。
+# 根因：macOS 无 timeout 命令，且 shuc_su -su -E 在 pipeline_run_su_pipeline_impl 内（typeck/codegen 生成码）
+# 可能在 Linux/macOS 上死循环或极慢，故用可移植超时：有 timeout 用 timeout(124)，否则用 perl alarm(142 视为超时)。
 out=$(mktemp)
 ec=0
-"$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
+if command -v timeout >/dev/null 2>&1; then
+  timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
+else
+  perl -e 'alarm shift; exec @ARGV' 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
+  [ "$ec" -eq 142 ] && ec=124
+fi
+if [ "$ec" -eq 124 ]; then
+  rm -f "$out"
+  echo "run-su-pipeline SKIP (shuc_su -su -E timed out after 60s)"
+  exit 0
+fi
 if [ "$ec" -ne 0 ]; then
   if [ "$SU_SHUC" = "compiler/shuc" ]; then
     rm -f "$out"

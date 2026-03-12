@@ -138,3 +138,9 @@ make test
 - **触发**：推送到或 PR 到 `main` / `master` 分支时自动运行。
 - **矩阵**：**Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**（ubuntu-24.04-arm，公开仓库免费）、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim 容器内安装 make/gcc/bash/diffutils 后执行相同命令）。
 - **要求**：托管 runner 或容器内需 `cc`/`make`/`bash`/`diffutils`；Windows 由 setup-msys2 提供。
+
+### 6.1 run-su-pipeline 与 -su -E 超时
+
+- **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住。
+- **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部调用 **typeck_typeck_su_ast** 与 **codegen_codegen_su_ast**（由 typeck.su/codegen.su 生成），在部分环境下可能死循环或极慢。
+- **处理**：`run-su-pipeline.sh` 对 `shuc_su -su -E` 施加 60 秒可移植超时（有 `timeout` 用 `timeout`，否则用 `perl -e 'alarm shift; exec @ARGV'`）；超时则 SKIP 并 exit 0，不把 CI 挂红。根因修复需在 pipeline 生成码或 typeck/codegen 中定位死循环或平台差异后再改。

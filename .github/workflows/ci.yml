@@ -28,6 +28,7 @@ jobs:
           CC: cc
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
+        timeout-minutes: 20
 
   linux-arm64:
     name: Linux (ARM64)
@@ -41,6 +42,7 @@ jobs:
           CC: cc
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
+        timeout-minutes: 20
 
   mac:
     name: macOS (${{ matrix.os }})
@@ -58,6 +60,7 @@ jobs:
           CC: cc
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
+        timeout-minutes: 20
 
   windows:
     name: Windows (MSYS2)
@@ -79,6 +82,7 @@ jobs:
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         shell: msys2 {0}
+        timeout-minutes: 20
 
   docker-distro:
     name: Docker (${{ matrix.image }})
@@ -91,6 +95,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Build and test in ${{ matrix.image }}
+        timeout-minutes: 25
         run: |
           docker run --rm \
             -v "${{ github.workspace }}:/src" -w /src \
