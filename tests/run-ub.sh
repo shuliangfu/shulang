@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 SHUC="./compiler/shuc"
 run_panic() {
     $SHUC "$1" -o /tmp/ub_test 2>/dev/null || exit 1
-    set +e; /tmp/ub_test 2>/dev/null; r=$?; set -e
+    set +e; { ( /tmp/ub_test 2>/dev/null ) 2>/dev/null; r=$?; } 2>/dev/null; set -e
     if [ "$r" -eq 134 ] || [ "$r" -ne 0 ]; then
         echo "  $1: panic/abort (expected)"
     else
