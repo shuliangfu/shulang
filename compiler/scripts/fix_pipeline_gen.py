@@ -69,6 +69,22 @@ def main():
             " } else (__tmp = 0) ; __tmp; }));\n    fprintf(stderr, \"parse_into: before parse_one_function\\n\"); fflush(stderr);\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);",
             1,
         )
+    # 2.7 诊断 collect_imports/lexer：卡在首 token 时打印 source 长度，便于判断是否 slice 异常
+    _collect_imports_start = "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  uint8_t path_buf[64] = { 0 };"
+    if _collect_imports_start in content and "collect_imports: source_len" not in content:
+        content = content.replace(
+            "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  uint8_t path_buf[64] = { 0 };",
+            "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  fprintf(stderr, \"collect_imports: source_len=%zu\\n\", (size_t)(source)->length); fflush(stderr);\n  uint8_t path_buf[64] = { 0 };",
+            1,
+        )
+    # 2.8 诊断 lexer 入口：首调时打印 pos/length，确认是否在 skip_whitespace 死循环
+    _lexer_next_entrance = "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);"
+    if _lexer_next_entrance in content and "lexer_next: pos=" not in content:
+        content = content.replace(
+            "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);",
+            "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  fprintf(stderr, \"lexer_next: pos=%zu len=%zu\\n\", (size_t)(lex).pos, (size_t)(data)->length); fflush(stderr);\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);",
+            1,
+        )
 
     # 3. platform_elf_elf_resolve_patches: 重排 while(p) 体为 [声明+while(l)+赋值] + [原 BLOCK1 + p++]
     fn = "platform_elf_elf_resolve_patches"

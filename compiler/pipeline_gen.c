@@ -441,6 +441,7 @@ struct lexer_Lexer lexer_skip_whitespace_and_comments_buf(struct lexer_Lexer lex
   return l;
 }
 struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {
+  fprintf(stderr, "lexer_next: pos=%zu len=%zu\n", (size_t)(lex).pos, (size_t)(data)->length); fflush(stderr);
   struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);
   (void)(({ int32_t __tmp = 0; if ((l).pos >= (data)->length) {   struct token_Token t = (struct token_Token){ .kind = token_TokenKind_TOKEN_EOF, .line = (l).line, .col = (l).col, .int_val = 0, .float_val = 0.0, .ident = 0, .ident_len = 0 };
   return (struct lexer_LexerResult){ .next_lex = l, .tok = t };
@@ -1630,6 +1631,7 @@ struct lexer_Lexer parser_skip_imports(struct lexer_Lexer lex, struct shulang_sl
   return lex;
 }
 void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {
+  fprintf(stderr, "collect_imports: source_len=%zu\n", (size_t)(source)->length); fflush(stderr);
   uint8_t path_buf[64] = { 0 };
   int32_t path_len = 0;
   while (1) {
@@ -2608,6 +2610,7 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
     (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
+    (void)((lex = (res).next_lex));
   }
   (void)(({ int32_t __tmp = 0; if ((module)->num_funcs == 0) {   return (struct parser_ParseIntoResult){ .ok = (-1), .main_idx = (-1) };
  } else (__tmp = 0) ; __tmp; }));
@@ -2840,6 +2843,7 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * restri
     (void)(ast_ast_arena_func_set(arena, func_ref, f));
     (void)((((module)->num_funcs < 0 || ((module)->num_funcs) >= 256 ? (shulang_panic_(1, 0), 0) : (((module)->func_refs)[(module)->num_funcs] = func_ref, 0))));
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
+    (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
   }

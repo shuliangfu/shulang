@@ -22,7 +22,11 @@ _run_vector() {
 }
 
 if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-  if ! _run_vector; then
+  set +e
+  _run_vector
+  ret=$?
+  set -e
+  if [ "$ret" -ne 0 ]; then
     echo "run-vector SKIP in CI (vector test failed above; run locally to verify or fix compiler/runner)"
     exit 0
   fi
