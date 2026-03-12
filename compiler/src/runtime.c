@@ -89,9 +89,9 @@ extern size_t pipeline_sizeof_arena(void);
 extern size_t pipeline_sizeof_module(void);
 /** 7.4：ELF .o 路径；由 Makefile 追加到 pipeline_gen.c，用于分配 ElfCodegenCtx */
 extern size_t pipeline_sizeof_elf_ctx(void);
-/** 7.4：直接生成 ELF64 .o 到 out_buf（仅 x86_64）；由 asm.su 提供，pipeline_su.o 链接；ElfCodegenCtx 在 platform/elf.su，C 侧为 platform_elf_ElfCodegenCtx */
+/** 7.4：直接生成 ELF64 .o 到 out_buf（仅 x86_64）；由 asm.su 提供，pipeline_su.o 链接；ElfCodegenCtx 在 platform/elf.su，C 侧为 platform_elf_ElfCodegenCtx。out_buf 用 void* 避免不同 GCC 下「形参内 struct 声明不可见」导致 -Wincompatible-pointer-types。 */
 struct platform_elf_ElfCodegenCtx;
-extern int32_t asm_asm_codegen_elf_o(void *module, void *arena, void *ctx, struct platform_elf_ElfCodegenCtx *elf_ctx, struct codegen_CodegenOutBuf *out_buf);
+extern int32_t asm_asm_codegen_elf_o(void *module, void *arena, void *ctx, struct platform_elf_ElfCodegenCtx *elf_ctx, void *out_buf);
 /** 判断 -o 路径是否写出对象文件（.o / .obj 则写 ELF/Mach-O/COFF 而非 .s） */
 static int output_is_elf_o(const char *path) {
     if (!path) return 0;
@@ -1254,7 +1254,7 @@ int RUN_CC_FUNC(int argc, char **argv) {
         int ec = pipeline_run_su_pipeline(arena, module, src_slice.data, (size_t)src_slice.length, (void *)&out_buf, (void *)&pctx);
         if (ec == 0 && (out_buf.len > 0 || emit_elf_o)) {
             if (emit_elf_o && elf_ctx_ptr) {
-                int32_t elf_ec = asm_asm_codegen_elf_o(module, arena, (void *)&pctx, (struct platform_elf_ElfCodegenCtx *)elf_ctx_ptr, &out_buf);
+                int32_t elf_ec = asm_asm_codegen_elf_o(module, arena, (void *)&pctx, (struct platform_elf_ElfCodegenCtx *)elf_ctx_ptr, (void *)&out_buf);
                 if (elf_ec != 0 || out_buf.len <= 0) {
                     fprintf(stderr, "shuc: asm_codegen_elf_o failed\n");
                     if (asm_out) fclose(asm_out);
