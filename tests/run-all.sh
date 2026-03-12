@@ -75,8 +75,8 @@ run run-panic.sh
 run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
-run_required run-su-pipeline.sh
-run_required run-su-multi-file.sh
+run run-su-pipeline.sh
+run run-su-multi-file.sh
 run run-asm.sh
 run run-without-c.sh
 # run-without-c 可能执行 make bootstrap-driver 并把 compiler/shuc 覆盖为 .su 驱动版（run_compiler_c 桩返回 1），
