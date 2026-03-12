@@ -26,6 +26,14 @@ run() {
     fi
 }
 
+# 在 CI 下也必须通过的脚本（失败则 run-all 失败，不 SKIP）
+run_required() {
+    local script="$1"
+    if [ ! -f "tests/$script" ]; then return 0; fi
+    chmod +x "tests/$script"
+    ./tests/$script
+}
+
 # 词法 / 类型检查 / 最小可运行
 run run-lexer.sh
 run run-typeck.sh
@@ -67,8 +75,8 @@ run run-panic.sh
 run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
-run run-su-pipeline.sh
-run run-su-multi-file.sh
+run_required run-su-pipeline.sh
+run_required run-su-multi-file.sh
 run run-asm.sh
 run run-without-c.sh
 # run-without-c 可能执行 make bootstrap-driver 并把 compiler/shuc 覆盖为 .su 驱动版（run_compiler_c 桩返回 1），

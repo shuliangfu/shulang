@@ -1901,6 +1901,31 @@ static const char *driver_su_emit_c_path;
 #define SU_EMIT_MAX_LIB_ROOTS 16
 static const char *driver_su_emit_lib_roots[SU_EMIT_MAX_LIB_ROOTS];
 static int driver_su_emit_n_lib_roots;
+/* 供 main.su 在 -su -E 时把 path/lib_roots 灌入 C 侧，再调 driver_run_su_emit_c，以走完整多文件（deps+main）路径。 */
+static char driver_su_emit_path_buf[512];
+static char driver_su_emit_lib_bufs[SU_EMIT_MAX_LIB_ROOTS][256];
+
+int driver_run_su_emit_c_set_path(const uint8_t *path, int path_len) {
+    driver_su_emit_c_path = NULL;
+    if (!path || path_len <= 0 || path_len >= (int)sizeof(driver_su_emit_path_buf)) return 0;
+    memcpy(driver_su_emit_path_buf, path, (size_t)path_len);
+    driver_su_emit_path_buf[path_len] = '\0';
+    driver_su_emit_c_path = driver_su_emit_path_buf;
+    return 0;
+}
+
+int driver_run_su_emit_c_set_lib(int i, const uint8_t *buf, int len) {
+    if (i < 0 || i >= SU_EMIT_MAX_LIB_ROOTS || !buf || len < 0 || len >= 256) return 0;
+    memcpy(driver_su_emit_lib_bufs[i], buf, (size_t)len);
+    driver_su_emit_lib_bufs[i][len] = '\0';
+    driver_su_emit_lib_roots[i] = driver_su_emit_lib_bufs[i];
+    return 0;
+}
+
+int driver_run_su_emit_c_set_n_lib_roots(int n) {
+    driver_su_emit_n_lib_roots = (n >= 0 && n <= SU_EMIT_MAX_LIB_ROOTS) ? n : 0;
+    return 0;
+}
 
 /** 6.2 极薄原语：将 argv[i] 复制到 buf，最多 max-1 字节并加 NUL，返回长度（不含 NUL）；i 越界或失败返回 -1。供 main.su 自实现 argv 解析。 */
 int driver_get_argv_i(int argc, char **argv, int i, char *buf, int max) {

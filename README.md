@@ -26,6 +26,7 @@
 | 7 | ✅ 已完成 | 泛型、trait/impl、多文件、core/std 扩展（最小实现） |
 | 8 | 部分完成 | 8.1 DCE ✅；8.2 后端 -O2/-Os、strip、NDEBUG、shuc OPT=1 ✅；8.3 体积/性能基线脚本 ✅ |
 | 9 | ✅ 已完成 | 自举（typeck/codegen/driver 由 .su 实现；验收：`cd compiler && ./build_tool ./shuc` 后 `./tests/run-all.sh`，或 `make -C compiler bootstrap-verify` 兜底） |
+| 10 | 规划中 | 见 **`analysis/下一步开发分析.md`**：修 -su -E 多文件、pipeline 在 CI 可跑、asm 策略、脱离 C/Makefile。 |
 
 ---
 

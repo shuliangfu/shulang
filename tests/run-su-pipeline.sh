@@ -6,12 +6,7 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# CI 下不构建/不跑 shuc_su，避免 make 或 -su -E 挂起导致 job 卡死（见 README 6.1）
-if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-  echo "run-su-pipeline SKIP (CI: skip -su -E to avoid hang; run locally to verify)"
-  exit 0
-fi
-
+# 阶段 10.2：CI 下也跑本测试；用 run_timeout 限时，超时则失败（exit 1）避免假绿。
 make -C compiler -q 2>/dev/null || make -C compiler
 
 # 可移植超时：执行一条命令，超时秒数 $1，命令为 "${@:2}"；超时返回 124
@@ -29,8 +24,8 @@ run_timeout() {
 make_ret=0
 run_timeout 120 bash -c 'make -C compiler bootstrap-pipeline 2>/dev/null || true; make -C compiler shuc-su-pipeline 2>/dev/null || true' || make_ret=$?
 if [ "$make_ret" -eq 124 ]; then
-  echo "run-su-pipeline SKIP (make bootstrap-pipeline / shuc-su-pipeline timed out after 120s)"
-  exit 0
+  echo "run-su-pipeline FAIL (make bootstrap-pipeline / shuc-su-pipeline timed out after 120s)"
+  exit 1
 fi
 
 if [ -x compiler/shuc_su ]; then SU_SHUC=compiler/shuc_su; else SU_SHUC=compiler/shuc; fi
@@ -50,8 +45,8 @@ run_timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
 [ "$ec" -eq 142 ] && ec=124
 if [ "$ec" -eq 124 ]; then
   rm -f "$out"
-  echo "run-su-pipeline SKIP (shuc_su -su -E timed out after 60s)"
-  exit 0
+  echo "run-su-pipeline FAIL (shuc_su -su -E timed out after 60s)"
+  exit 1
 fi
 if [ "$ec" -ne 0 ]; then
   if [ "$SU_SHUC" = "compiler/shuc" ]; then

@@ -1862,6 +1862,8 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
   struct lexer_Lexer lex = lexer_lexer_init();
   int32_t main_idx = (-1);
   struct parser_CollectImportsResult import_res = (struct parser_CollectImportsResult){ .lex = lex };
+  (void)(parser_collect_imports(lex, source, module, (&(import_res))));
+  (void)((lex = (import_res).lex));
   int32_t out_idx = main_idx;
   int32_t out_idx_storage[1] = { 0 };
   while (1) {
@@ -2609,8 +2611,6 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
     (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
   }
-  (void)(parser_collect_imports(lex, source, module, (&(import_res))));
-  (void)((lex = (import_res).lex));
   (void)(({ int32_t __tmp = 0; if ((module)->num_funcs == 0) {   return (struct parser_ParseIntoResult){ .ok = (-1), .main_idx = (-1) };
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (out_idx < 0) {   (void)((out_idx = 0));
@@ -2622,6 +2622,8 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * restri
   struct lexer_Lexer lex = lexer_lexer_init();
   int32_t main_idx = (-1);
   struct parser_CollectImportsResult import_res = (struct parser_CollectImportsResult){ .lex = lex };
+  (void)(parser_collect_imports_buf(lex, data, len, module, (&(import_res))));
+  (void)((lex = (import_res).lex));
   int32_t out_idx = main_idx;
   int32_t out_idx_storage[1] = { 0 };
   while (1) {
@@ -4584,21 +4586,21 @@ int32_t preprocess_preprocess_su(struct shulang_slice_uint8_t * source, struct s
  } ; __tmp; })) ; __tmp; })) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (out_len >= (out_buf)->length) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
-  (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf).length ? (shulang_panic_(1, 0), 0) : ((out_buf).data[out_len] = 10, 0))));
+  (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf)->length ? (shulang_panic_(1, 0), 0) : ((out_buf)->data[out_len] = 10, 0))));
   (void)((out_len = out_len + 1));
  } else {   int keeping = depth == 0 || depth > 0 && (depth - 1 < 0 || (depth - 1) >= 32 ? (shulang_panic_(1, 0), (stack)[0]) : (stack)[depth - 1]) == 1 || (depth - 1 < 0 || (depth - 1) >= 32 ? (shulang_panic_(1, 0), (stack)[0]) : (stack)[depth - 1]) == 2;
   (void)(({ int32_t __tmp = 0; if (keeping) {   int32_t i = 0;
   while (i < line_len) {
     (void)(({ int32_t __tmp = 0; if (out_len >= (out_buf)->length) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
-    (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf).length ? (shulang_panic_(1, 0), 0) : ((out_buf).data[out_len] = (i < 0 || (i) >= 512 ? (shulang_panic_(1, 0), (line_buf)[0]) : (line_buf)[i]), 0))));
+    (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf)->length ? (shulang_panic_(1, 0), 0) : ((out_buf)->data[out_len] = (i < 0 || (i) >= 512 ? (shulang_panic_(1, 0), (line_buf)[0]) : (line_buf)[i]), 0))));
     (void)((out_len = out_len + 1));
     (void)((i = i + 1));
   }
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (out_len >= (out_buf)->length) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
-  (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf).length ? (shulang_panic_(1, 0), 0) : ((out_buf).data[out_len] = 10, 0))));
+  (void)(((out_len < 0 || (size_t)(out_len) >= (out_buf)->length ? (shulang_panic_(1, 0), 0) : ((out_buf)->data[out_len] = 10, 0))));
   (void)((out_len = out_len + 1));
  } ; __tmp; });
  } else (__tmp = 0) ; __tmp; }));
@@ -6531,8 +6533,8 @@ int32_t platform_elf_write_elf_o_to_buf(struct platform_elf_ElfCodegenCtx * ctx,
  } else (__tmp = 0) ; __tmp; }));
   return (out)->len;
 }
-extern int32_t platform_elf_elf_add_label(struct platform_elf_ElfCodegenCtx *, uint8_t, int32_t);
-extern int32_t platform_elf_elf_add_sym(struct platform_elf_ElfCodegenCtx *, uint8_t, int32_t, int32_t);
+extern int32_t platform_elf_elf_add_label(struct platform_elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len);
+extern int32_t platform_elf_elf_add_sym(struct platform_elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len, int32_t offset);
 int32_t arch_x86_64_enc_enc_u8(struct platform_elf_ElfCodegenCtx * ctx, int32_t b);
 int32_t arch_x86_64_enc_enc_u32_le(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm);
 int32_t arch_x86_64_enc_enc_prologue(struct platform_elf_ElfCodegenCtx * ctx, int32_t frame_size);
@@ -6864,51 +6866,51 @@ int32_t arch_x86_64_enc_enc_label(struct platform_elf_ElfCodegenCtx * ctx, uint8
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t arch_arm64_enc_enc_u32_le(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t val);
-int32_t arch_arm64_enc_enc_prologue(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t frame_size);
-int32_t arch_arm64_enc_enc_epilogue(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_ret_imm32(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm32);
-int32_t arch_arm64_enc_enc_mov_imm32_to_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm32);
-int32_t arch_arm64_enc_enc_mov_imm64_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t lo, int32_t hi);
-int32_t arch_arm64_enc_enc_push_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_pop_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_pop_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_add_rax_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_sub_rbx_rax_then_mov(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_imul_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_mov_rax_to_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_not_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_and_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_or_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_xor_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_mov_rbx_to_ecx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_shl_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_shr_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_sar_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_cltd(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_idiv_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_mov_edx_to_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_neg_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_test_eax_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_setz_movzbl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_cmp_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_cmp_setcc_movzbl(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t cc);
-int32_t arch_arm64_enc_enc_store_rax_to_rbp(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset);
-int32_t arch_arm64_enc_enc_load_rbp_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset);
-int32_t arch_arm64_enc_enc_lea_rbp_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset);
-int32_t arch_arm64_enc_enc_rax_plus_rbx_scale4(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_load_32_from_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_add_imm_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm);
-int32_t arch_arm64_enc_enc_load_64_from_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_store_rax_to_rbx_offset(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset, int32_t store_size);
-int32_t arch_arm64_enc_enc_mov_rbx_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx);
-int32_t arch_arm64_enc_enc_jz(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
-int32_t arch_arm64_enc_enc_jnz(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
-int32_t arch_arm64_enc_enc_jmp(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
-int32_t arch_arm64_enc_enc_mov_rax_to_arg_reg(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t k);
-int32_t arch_arm64_enc_enc_call(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len);
-int32_t arch_arm64_enc_enc_label(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len, int32_t is_func);
-int32_t arch_arm64_enc_enc_u32_le(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t val) {
+int32_t arch_arm64_enc_enc_u32_le(struct platform_elf_ElfCodegenCtx * ctx, int32_t val);
+int32_t arch_arm64_enc_enc_prologue(struct platform_elf_ElfCodegenCtx * ctx, int32_t frame_size);
+int32_t arch_arm64_enc_enc_epilogue(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_ret_imm32(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm32);
+int32_t arch_arm64_enc_enc_mov_imm32_to_rbx(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm32);
+int32_t arch_arm64_enc_enc_mov_imm64_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t lo, int32_t hi);
+int32_t arch_arm64_enc_enc_push_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_pop_rbx(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_pop_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_add_rax_rbx(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_sub_rbx_rax_then_mov(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_imul_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_mov_rax_to_rbx(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_not_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_and_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_or_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_xor_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_mov_rbx_to_ecx(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_shl_cl_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_shr_cl_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_sar_cl_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_cltd(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_idiv_rbx(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_mov_edx_to_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_neg_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_test_eax_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_setz_movzbl_eax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_cmp_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_cmp_setcc_movzbl(struct platform_elf_ElfCodegenCtx * ctx, int32_t cc);
+int32_t arch_arm64_enc_enc_store_rax_to_rbp(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset);
+int32_t arch_arm64_enc_enc_load_rbp_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset);
+int32_t arch_arm64_enc_enc_lea_rbp_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset);
+int32_t arch_arm64_enc_enc_rax_plus_rbx_scale4(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_load_32_from_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_add_imm_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm);
+int32_t arch_arm64_enc_enc_load_64_from_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_store_rax_to_rbx_offset(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset, int32_t store_size);
+int32_t arch_arm64_enc_enc_mov_rbx_to_rax(struct platform_elf_ElfCodegenCtx * ctx);
+int32_t arch_arm64_enc_enc_jz(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
+int32_t arch_arm64_enc_enc_jnz(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
+int32_t arch_arm64_enc_enc_jmp(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len);
+int32_t arch_arm64_enc_enc_mov_rax_to_arg_reg(struct platform_elf_ElfCodegenCtx * ctx, int32_t k);
+int32_t arch_arm64_enc_enc_call(struct platform_elf_ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len);
+int32_t arch_arm64_enc_enc_label(struct platform_elf_ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len, int32_t is_func);
+int32_t arch_arm64_enc_enc_u32_le(struct platform_elf_ElfCodegenCtx * ctx, int32_t val) {
   uint8_t buf[4] = { 0 };
   (void)(((buf)[0] = platform_elf_elf_to_u8(val)));
   (void)(((1 < 0 || (1) >= 4 ? (shulang_panic_(1, 0), 0) : ((buf)[1] = platform_elf_elf_to_u8(val >> 8), 0))));
@@ -6916,7 +6918,7 @@ int32_t arch_arm64_enc_enc_u32_le(arch_arm64_enc_platform.elf.ElfCodegenCtx * ct
   (void)(((3 < 0 || (3) >= 4 ? (shulang_panic_(1, 0), 0) : ((buf)[3] = platform_elf_elf_to_u8(val >> 24), 0))));
   return platform_elf_append_elf_bytes(ctx, buf, 4);
 }
-int32_t arch_arm64_enc_enc_prologue(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t frame_size) {
+int32_t arch_arm64_enc_enc_prologue(struct platform_elf_ElfCodegenCtx * ctx, int32_t frame_size) {
   int32_t imm12 = frame_size;
   (void)(((ctx)->current_frame_size = frame_size));
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, -2088963) != 0) {   return (-1);
@@ -6927,7 +6929,7 @@ int32_t arch_arm64_enc_enc_prologue(arch_arm64_enc_platform.elf.ElfCodegenCtx * 
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -788529153 | imm12 << 10);
 }
-int32_t arch_arm64_enc_enc_epilogue(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_epilogue(struct platform_elf_ElfCodegenCtx * ctx) {
   int32_t imm12 = (ctx)->current_frame_size;
   (void)(({ int32_t __tmp = 0; if (imm12 > 4095) {   (void)((imm12 = 4095));
  } else (__tmp = 0) ; __tmp; }));
@@ -6937,7 +6939,7 @@ int32_t arch_arm64_enc_enc_epilogue(arch_arm64_enc_platform.elf.ElfCodegenCtx * 
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -696254464);
 }
-int32_t arch_arm64_enc_enc_ret_imm32(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm32) {
+int32_t arch_arm64_enc_enc_ret_imm32(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm32) {
   int32_t lo = imm32 & 65535;
   int32_t hi = imm32 >> 16 & 65535;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 1384120320 | lo << 5) != 0) {   return (-1);
@@ -6947,7 +6949,7 @@ int32_t arch_arm64_enc_enc_ret_imm32(arch_arm64_enc_platform.elf.ElfCodegenCtx *
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t arch_arm64_enc_enc_mov_imm32_to_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm32) {
+int32_t arch_arm64_enc_enc_mov_imm32_to_rbx(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm32) {
   int32_t lo = imm32 & 65535;
   int32_t hi = imm32 >> 16 & 65535;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 1384120352 | lo << 5) != 0) {   return (-1);
@@ -6957,7 +6959,7 @@ int32_t arch_arm64_enc_enc_mov_imm32_to_rbx(arch_arm64_enc_platform.elf.ElfCodeg
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t arch_arm64_enc_enc_mov_imm64_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t lo, int32_t hi) {
+int32_t arch_arm64_enc_enc_mov_imm64_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t lo, int32_t hi) {
   int32_t lo0 = lo & 65535;
   int32_t lo1 = lo >> 16 & 65535;
   int32_t hi0 = hi & 65535;
@@ -6970,83 +6972,83 @@ int32_t arch_arm64_enc_enc_mov_imm64_to_rax(arch_arm64_enc_platform.elf.ElfCodeg
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -234881024 | hi1 << 5 | 6291456);
 }
-int32_t arch_arm64_enc_enc_push_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_push_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, -788527105) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -117439520);
 }
-int32_t arch_arm64_enc_enc_pop_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_pop_rbx(struct platform_elf_ElfCodegenCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, -263116832) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -1862270944);
 }
-int32_t arch_arm64_enc_enc_pop_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_pop_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, -263116832) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -1862270944);
 }
-int32_t arch_arm64_enc_enc_add_rax_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_add_rax_rbx(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 185597952);
 }
-int32_t arch_arm64_enc_enc_sub_rbx_rax_then_mov(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_sub_rbx_rax_then_mov(struct platform_elf_ElfCodegenCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 185598240) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, 553648224);
 }
-int32_t arch_arm64_enc_enc_imul_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_imul_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 447392288);
 }
-int32_t arch_arm64_enc_enc_mov_rax_to_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_mov_rax_to_rbx(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 553648224);
 }
-int32_t arch_arm64_enc_enc_not_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_not_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 707796960);
 }
-int32_t arch_arm64_enc_enc_and_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_and_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 138412064);
 }
-int32_t arch_arm64_enc_enc_or_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_or_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 185597984);
 }
-int32_t arch_arm64_enc_enc_xor_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_xor_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 232783904);
 }
-int32_t arch_arm64_enc_enc_mov_rbx_to_ecx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_mov_rbx_to_ecx(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 553648256);
 }
-int32_t arch_arm64_enc_enc_shl_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_shl_cl_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 448792640);
 }
-int32_t arch_arm64_enc_enc_shr_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_shr_cl_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 448793664);
 }
-int32_t arch_arm64_enc_enc_sar_cl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_sar_cl_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 448794688);
 }
-int32_t arch_arm64_enc_enc_cltd(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_cltd(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, -721216993);
 }
-int32_t arch_arm64_enc_enc_idiv_rbx(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_idiv_rbx(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 448792608);
 }
-int32_t arch_arm64_enc_enc_mov_edx_to_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_mov_edx_to_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 448792672) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, 447392288);
 }
-int32_t arch_arm64_enc_enc_neg_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_neg_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 185598432);
 }
-int32_t arch_arm64_enc_enc_test_eax_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_test_eax_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 1895825439);
 }
-int32_t arch_arm64_enc_enc_setz_movzbl_eax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_setz_movzbl_eax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 1522532352);
 }
-int32_t arch_arm64_enc_enc_cmp_rbx_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_cmp_rbx_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 185598239);
 }
-int32_t arch_arm64_enc_enc_cmp_setcc_movzbl(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t cc) {
+int32_t arch_arm64_enc_enc_cmp_setcc_movzbl(struct platform_elf_ElfCodegenCtx * ctx, int32_t cc) {
   int32_t c = cc;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 185598239) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -7056,33 +7058,33 @@ int32_t arch_arm64_enc_enc_cmp_setcc_movzbl(arch_arm64_enc_platform.elf.ElfCodeg
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, 1522532352 | c << 12);
 }
-int32_t arch_arm64_enc_enc_store_rax_to_rbp(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset) {
+int32_t arch_arm64_enc_enc_store_rax_to_rbp(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset) {
   int32_t simm9 = 0 - offset;
   int32_t u9 = simm9 & 511;
   (void)(({ int32_t __tmp = 0; if (simm9 < (-256)) {   (void)((simm9 = (-256)));
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -1201668096 | u9 << 12 | 29 << 5 | 0);
 }
-int32_t arch_arm64_enc_enc_load_rbp_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset) {
+int32_t arch_arm64_enc_enc_load_rbp_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset) {
   int32_t simm9 = 0 - offset;
   int32_t u9 = simm9 & 511;
   (void)(({ int32_t __tmp = 0; if (simm9 < (-256)) {   (void)((simm9 = (-256)));
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -1201668096 | u9 << 12 | 29 << 5 | 0);
 }
-int32_t arch_arm64_enc_enc_lea_rbp_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset) {
+int32_t arch_arm64_enc_enc_lea_rbp_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset) {
   int32_t imm12 = offset;
   (void)(({ int32_t __tmp = 0; if (imm12 > 4095) {   (void)((imm12 = 4095));
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -788529152 | imm12 << 10 | 29 << 5 | 0);
 }
-int32_t arch_arm64_enc_enc_rax_plus_rbx_scale4(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_rax_plus_rbx_scale4(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, -1962934272);
 }
-int32_t arch_arm64_enc_enc_load_32_from_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_load_32_from_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, -1191182336);
 }
-int32_t arch_arm64_enc_enc_add_imm_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t imm) {
+int32_t arch_arm64_enc_enc_add_imm_to_rax(struct platform_elf_ElfCodegenCtx * ctx, int32_t imm) {
   int32_t imm12 = imm;
   (void)(({ int32_t __tmp = 0; if (imm == 0) {   return 0;
  } else (__tmp = 0) ; __tmp; }));
@@ -7090,10 +7092,10 @@ int32_t arch_arm64_enc_enc_add_imm_to_rax(arch_arm64_enc_platform.elf.ElfCodegen
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -1862270976 | imm12 << 10 | 0 << 5 | 0);
 }
-int32_t arch_arm64_enc_enc_load_64_from_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_load_64_from_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, -263116800);
 }
-int32_t arch_arm64_enc_enc_store_rax_to_rbx_offset(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t offset, int32_t store_size) {
+int32_t arch_arm64_enc_enc_store_rax_to_rbx_offset(struct platform_elf_ElfCodegenCtx * ctx, int32_t offset, int32_t store_size) {
   int32_t imm12 = (8 == 0 ? (shulang_panic_(1, 0), offset) : (offset / 8));
   (void)(({ int32_t __tmp = 0; if (store_size == 4) {   int32_t imm12 = (4 == 0 ? (shulang_panic_(1, 0), offset) : (offset / 4));
   (void)(({ int32_t __tmp = 0; if (imm12 > 4095) {   (void)((imm12 = 4095));
@@ -7104,28 +7106,28 @@ int32_t arch_arm64_enc_enc_store_rax_to_rbx_offset(arch_arm64_enc_platform.elf.E
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, -263116800 | imm12 << 10 | 1 << 5 | 0);
 }
-int32_t arch_arm64_enc_enc_mov_rbx_to_rax(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx) {
+int32_t arch_arm64_enc_enc_mov_rbx_to_rax(struct platform_elf_ElfCodegenCtx * ctx) {
   return arch_arm64_enc_enc_u32_le(ctx, 553648224);
 }
-int32_t arch_arm64_enc_enc_jz(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
+int32_t arch_arm64_enc_enc_jz(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
   int32_t at = ((ctx)->code).len - 4;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 872415232) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return platform_elf_elf_add_patch_with_bits(ctx, at, label, label_len, 19);
 }
-int32_t arch_arm64_enc_enc_jnz(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
+int32_t arch_arm64_enc_enc_jnz(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
   int32_t at = ((ctx)->code).len - 4;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 872415488) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return platform_elf_elf_add_patch_with_bits(ctx, at, label, label_len, 19);
 }
-int32_t arch_arm64_enc_enc_jmp(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
+int32_t arch_arm64_enc_enc_jmp(struct platform_elf_ElfCodegenCtx * ctx, uint8_t label[64], int32_t label_len) {
   int32_t at = ((ctx)->code).len - 4;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, 1342177280) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   return platform_elf_elf_add_patch_with_bits(ctx, at, label, label_len, 26);
 }
-int32_t arch_arm64_enc_enc_mov_rax_to_arg_reg(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, int32_t k) {
+int32_t arch_arm64_enc_enc_mov_rax_to_arg_reg(struct platform_elf_ElfCodegenCtx * ctx, int32_t k) {
   int32_t rd = k;
   (void)(({ int32_t __tmp = 0; if (rd < 0) {   (void)((rd = 0));
  } else (__tmp = 0) ; __tmp; }));
@@ -7133,7 +7135,7 @@ int32_t arch_arm64_enc_enc_mov_rax_to_arg_reg(arch_arm64_enc_platform.elf.ElfCod
  } else (__tmp = 0) ; __tmp; }));
   return arch_arm64_enc_enc_u32_le(ctx, 553648224 | rd << 5);
 }
-int32_t arch_arm64_enc_enc_call(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len) {
+int32_t arch_arm64_enc_enc_call(struct platform_elf_ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len) {
   int32_t at = ((ctx)->code).len - 4;
   (void)(({ int32_t __tmp = 0; if (arch_arm64_enc_enc_u32_le(ctx, -1610612736) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -7141,7 +7143,7 @@ int32_t arch_arm64_enc_enc_call(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx,
  } else (__tmp = 0) ; __tmp; }));
   return platform_elf_elf_add_reloc(ctx, at, name, name_len);
 }
-int32_t arch_arm64_enc_enc_label(arch_arm64_enc_platform.elf.ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len, int32_t is_func) {
+int32_t arch_arm64_enc_enc_label(struct platform_elf_ElfCodegenCtx * ctx, uint8_t name[64], int32_t name_len, int32_t is_func) {
   (void)(({ int32_t __tmp = 0; if (platform_elf_elf_add_label(ctx, name, name_len) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (is_func != 0) {   return platform_elf_elf_add_sym(ctx, name, name_len, ((ctx)->code).len);
@@ -7483,49 +7485,49 @@ extern struct ast_Type ast_ast_arena_type_get(struct ast_ASTArena *, int32_t);
 extern int32_t types_format_i32_to_buf(uint8_t *, int32_t, int32_t, int32_t);
 struct backend_LocalSlot { uint8_t name[64]; int32_t name_len; int32_t offset; };
 struct backend_AsmFuncCtx { int32_t frame_size; int32_t next_offset; struct backend_LocalSlot locals[24]; int32_t num_locals; int32_t label_counter; uint8_t break_label[64]; int32_t break_len; uint8_t continue_label[64]; int32_t continue_len; };
-int32_t backend_enc_label_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t is_func, int32_t ta);
-int32_t backend_enc_prologue_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t frame_sz, int32_t ta);
-int32_t backend_enc_epilogue_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_ret_imm32_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta);
-int32_t backend_enc_mov_imm32_to_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta);
-int32_t backend_enc_mov_imm64_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t lo, int32_t hi, int32_t ta);
-int32_t backend_enc_push_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_pop_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_pop_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_add_rax_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_sub_rbx_rax_then_mov_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_imul_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_mov_rax_to_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_not_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_and_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_or_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_xor_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_mov_rbx_to_ecx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_shl_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_shr_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_sar_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_cltd_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_idiv_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_mov_edx_to_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_neg_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_test_eax_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_setz_movzbl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_cmp_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_cmp_setcc_movzbl_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t cc, int32_t ta);
-int32_t backend_enc_store_rax_to_rbp_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
-int32_t backend_enc_load_rbp_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
-int32_t backend_enc_lea_rbp_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
-int32_t backend_enc_rax_plus_rbx_scale4_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_load_32_from_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_add_imm_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm, int32_t ta);
-int32_t backend_enc_load_64_from_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_store_rax_to_rbx_offset_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t store_size, int32_t ta);
-int32_t backend_enc_mov_rbx_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta);
-int32_t backend_enc_jz_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
-int32_t backend_enc_jnz_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
-int32_t backend_enc_jmp_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
-int32_t backend_enc_mov_rax_to_arg_reg_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t k, int32_t ta);
-int32_t backend_enc_call_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t ta);
+int32_t backend_enc_label_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t is_func, int32_t ta);
+int32_t backend_enc_prologue_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t frame_sz, int32_t ta);
+int32_t backend_enc_epilogue_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_ret_imm32_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta);
+int32_t backend_enc_mov_imm32_to_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta);
+int32_t backend_enc_mov_imm64_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t lo, int32_t hi, int32_t ta);
+int32_t backend_enc_push_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_pop_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_pop_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_add_rax_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_sub_rbx_rax_then_mov_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_imul_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_mov_rax_to_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_not_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_and_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_or_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_xor_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_mov_rbx_to_ecx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_shl_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_shr_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_sar_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_cltd_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_idiv_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_mov_edx_to_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_neg_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_test_eax_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_setz_movzbl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_cmp_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_cmp_setcc_movzbl_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t cc, int32_t ta);
+int32_t backend_enc_store_rax_to_rbp_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
+int32_t backend_enc_load_rbp_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
+int32_t backend_enc_lea_rbp_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta);
+int32_t backend_enc_rax_plus_rbx_scale4_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_load_32_from_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_add_imm_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm, int32_t ta);
+int32_t backend_enc_load_64_from_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_store_rax_to_rbx_offset_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t store_size, int32_t ta);
+int32_t backend_enc_mov_rbx_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta);
+int32_t backend_enc_jz_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
+int32_t backend_enc_jnz_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
+int32_t backend_enc_jmp_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta);
+int32_t backend_enc_mov_rax_to_arg_reg_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t k, int32_t ta);
+int32_t backend_enc_call_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t ta);
 void backend_ctx_reset(struct backend_AsmFuncCtx * ctx);
 int32_t backend_compute_frame_size(struct ast_Block * block);
 void backend_fill_local_slots(struct backend_AsmFuncCtx * ctx, struct ast_Block * block);
@@ -7560,8 +7562,8 @@ int32_t backend_arch_emit_ldr_sp_offset_to_wi(struct codegen_CodegenOutBuf * out
 int32_t backend_arch_emit_add_sp_imm(struct codegen_CodegenOutBuf * out, int32_t n, int32_t ta);
 int32_t backend_emit_expr_call(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
 int32_t backend_emit_expr_method_call(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
-int32_t backend_emit_expr_elf_method_call(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta);
-int32_t backend_emit_expr_elf_call(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_expr_elf_method_call(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_expr_elf_call(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta);
 int32_t backend_arch_emit_call(struct codegen_CodegenOutBuf * out, uint8_t name[64], int32_t name_len, int32_t ta);
 int32_t backend_arch_emit_jz(struct codegen_CodegenOutBuf * out, uint8_t label[64], int32_t label_len, int32_t ta);
 int32_t backend_arch_emit_jmp(struct codegen_CodegenOutBuf * out, uint8_t label[64], int32_t label_len, int32_t ta);
@@ -7581,11 +7583,11 @@ int32_t backend_arch_emit_prologue(struct codegen_CodegenOutBuf * out, int32_t f
 int32_t backend_arch_emit_epilogue(struct codegen_CodegenOutBuf * out, int32_t frame_sz, int32_t ta);
 int32_t backend_get_return_expr_ref(struct ast_ASTArena * arena, struct ast_Func * f);
 int32_t backend_emit_expr(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, int32_t expr_ref, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
-int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t expr_ref, struct backend_AsmFuncCtx * ctx, int32_t ta);
-int32_t backend_emit_block_inits_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta);
-int32_t backend_emit_while_loop_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_WhileLoop * wloop, struct backend_AsmFuncCtx * ctx, int32_t ta);
-int32_t backend_emit_for_loop_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_ForLoop * floop, struct backend_AsmFuncCtx * ctx, int32_t ta);
-int32_t backend_emit_block_body_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t expr_ref, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_block_inits_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_while_loop_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_WhileLoop * wloop, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_for_loop_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_ForLoop * floop, struct backend_AsmFuncCtx * ctx, int32_t ta);
+int32_t backend_emit_block_body_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta);
 int32_t backend_emit_block_inits(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
 int32_t backend_emit_next_label(struct backend_AsmFuncCtx * ctx, uint8_t * buf, int32_t buf_size);
 int32_t backend_format_label_id(uint8_t * buf, int32_t buf_size, int32_t id);
@@ -7595,302 +7597,302 @@ int32_t backend_emit_while_loop(struct ast_ASTArena * arena, struct codegen_Code
 int32_t backend_emit_for_loop(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_ForLoop * floop, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
 int32_t backend_emit_block_body(struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t target_arch);
 int32_t backend_asm_codegen_ast(struct ast_Module * module, struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_PipelineDepCtx * pipeline_ctx);
-int32_t backend_asm_codegen_ast_to_elf(struct ast_Module * module, struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_PipelineDepCtx * pipeline_ctx);
-int32_t backend_enc_label_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t is_func, int32_t ta) {
+int32_t backend_asm_codegen_ast_to_elf(struct ast_Module * module, struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_PipelineDepCtx * pipeline_ctx);
+int32_t backend_enc_label_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t is_func, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_label(elf_ctx, name, name_len, is_func);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_label(elf_ctx, name, name_len, is_func);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_label(elf_ctx, name, name_len, is_func);
 }
-int32_t backend_enc_prologue_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t frame_sz, int32_t ta) {
+int32_t backend_enc_prologue_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t frame_sz, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_prologue(elf_ctx, frame_sz);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_prologue(elf_ctx, frame_sz);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_prologue(elf_ctx, frame_sz);
 }
-int32_t backend_enc_epilogue_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_epilogue_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_epilogue(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_epilogue(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_epilogue(elf_ctx);
 }
-int32_t backend_enc_ret_imm32_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta) {
+int32_t backend_enc_ret_imm32_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_ret_imm32(elf_ctx, imm32);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_ret_imm32(elf_ctx, imm32);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_ret_imm32(elf_ctx, imm32);
 }
-int32_t backend_enc_mov_imm32_to_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta) {
+int32_t backend_enc_mov_imm32_to_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm32, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_imm32_to_rbx(elf_ctx, imm32);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_imm32_to_rbx(elf_ctx, imm32);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_imm32_to_rbx(elf_ctx, imm32);
 }
-int32_t backend_enc_mov_imm64_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t lo, int32_t hi, int32_t ta) {
+int32_t backend_enc_mov_imm64_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t lo, int32_t hi, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_imm64_to_rax(elf_ctx, lo, hi);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_imm64_to_rax(elf_ctx, lo, hi);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_imm64_to_rax(elf_ctx, lo, hi);
 }
-int32_t backend_enc_push_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_push_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_push_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_push_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_push_rax(elf_ctx);
 }
-int32_t backend_enc_pop_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_pop_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_pop_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_pop_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_pop_rax(elf_ctx);
 }
-int32_t backend_enc_pop_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_pop_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_pop_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_pop_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_pop_rbx(elf_ctx);
 }
-int32_t backend_enc_add_rax_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_add_rax_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_add_rax_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_add_rax_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_add_rax_rbx(elf_ctx);
 }
-int32_t backend_enc_sub_rbx_rax_then_mov_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_sub_rbx_rax_then_mov_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_sub_rbx_rax_then_mov(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_sub_rbx_rax_then_mov(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_sub_rbx_rax_then_mov(elf_ctx);
 }
-int32_t backend_enc_imul_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_imul_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_imul_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_imul_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_imul_rbx_rax(elf_ctx);
 }
-int32_t backend_enc_mov_rax_to_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_mov_rax_to_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_rax_to_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_rax_to_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_rax_to_rbx(elf_ctx);
 }
-int32_t backend_enc_not_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_not_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_not_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_not_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_not_eax(elf_ctx);
 }
-int32_t backend_enc_and_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_and_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_and_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_and_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_and_rbx_rax(elf_ctx);
 }
-int32_t backend_enc_or_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_or_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_or_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_or_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_or_rbx_rax(elf_ctx);
 }
-int32_t backend_enc_xor_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_xor_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_xor_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_xor_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_xor_rbx_rax(elf_ctx);
 }
-int32_t backend_enc_mov_rbx_to_ecx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_mov_rbx_to_ecx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_rbx_to_ecx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_rbx_to_ecx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_rbx_to_ecx(elf_ctx);
 }
-int32_t backend_enc_shl_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_shl_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_shl_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_shl_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_shl_cl_eax(elf_ctx);
 }
-int32_t backend_enc_shr_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_shr_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_shr_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_shr_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_shr_cl_eax(elf_ctx);
 }
-int32_t backend_enc_sar_cl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_sar_cl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_sar_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_sar_cl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_sar_cl_eax(elf_ctx);
 }
-int32_t backend_enc_cltd_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_cltd_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_cltd(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_cltd(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_cltd(elf_ctx);
 }
-int32_t backend_enc_idiv_rbx_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_idiv_rbx_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_idiv_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_idiv_rbx(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_idiv_rbx(elf_ctx);
 }
-int32_t backend_enc_mov_edx_to_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_mov_edx_to_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_edx_to_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_edx_to_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_edx_to_eax(elf_ctx);
 }
-int32_t backend_enc_neg_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_neg_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_neg_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_neg_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_neg_eax(elf_ctx);
 }
-int32_t backend_enc_test_eax_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_test_eax_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_test_eax_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_test_eax_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_test_eax_eax(elf_ctx);
 }
-int32_t backend_enc_setz_movzbl_eax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_setz_movzbl_eax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_setz_movzbl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_setz_movzbl_eax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_setz_movzbl_eax(elf_ctx);
 }
-int32_t backend_enc_cmp_rbx_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_cmp_rbx_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_cmp_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_cmp_rbx_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_cmp_rbx_rax(elf_ctx);
 }
-int32_t backend_enc_cmp_setcc_movzbl_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t cc, int32_t ta) {
+int32_t backend_enc_cmp_setcc_movzbl_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t cc, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_cmp_setcc_movzbl(elf_ctx, cc);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_cmp_setcc_movzbl(elf_ctx, cc);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_cmp_setcc_movzbl(elf_ctx, cc);
 }
-int32_t backend_enc_store_rax_to_rbp_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
+int32_t backend_enc_store_rax_to_rbp_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_store_rax_to_rbp(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_store_rax_to_rbp(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_store_rax_to_rbp(elf_ctx, offset);
 }
-int32_t backend_enc_load_rbp_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
+int32_t backend_enc_load_rbp_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_load_rbp_to_rax(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_load_rbp_to_rax(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_load_rbp_to_rax(elf_ctx, offset);
 }
-int32_t backend_enc_lea_rbp_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
+int32_t backend_enc_lea_rbp_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_lea_rbp_to_rax(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_lea_rbp_to_rax(elf_ctx, offset);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_lea_rbp_to_rax(elf_ctx, offset);
 }
-int32_t backend_enc_rax_plus_rbx_scale4_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_rax_plus_rbx_scale4_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_rax_plus_rbx_scale4(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_rax_plus_rbx_scale4(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_rax_plus_rbx_scale4(elf_ctx);
 }
-int32_t backend_enc_load_32_from_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_load_32_from_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_load_32_from_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_load_32_from_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_load_32_from_rax(elf_ctx);
 }
-int32_t backend_enc_add_imm_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t imm, int32_t ta) {
+int32_t backend_enc_add_imm_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t imm, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_add_imm_to_rax(elf_ctx, imm);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_add_imm_to_rax(elf_ctx, imm);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_add_imm_to_rax(elf_ctx, imm);
 }
-int32_t backend_enc_load_64_from_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_load_64_from_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_load_64_from_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_load_64_from_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_load_64_from_rax(elf_ctx);
 }
-int32_t backend_enc_store_rax_to_rbx_offset_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t offset, int32_t store_size, int32_t ta) {
+int32_t backend_enc_store_rax_to_rbx_offset_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t offset, int32_t store_size, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size);
 }
-int32_t backend_enc_mov_rbx_to_rax_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t ta) {
+int32_t backend_enc_mov_rbx_to_rax_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_rbx_to_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_rbx_to_rax(elf_ctx);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_rbx_to_rax(elf_ctx);
 }
-int32_t backend_enc_jz_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
+int32_t backend_enc_jz_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_jz(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_jz(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_jz(elf_ctx, label, label_len);
 }
-int32_t backend_enc_jnz_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
+int32_t backend_enc_jnz_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_jnz(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_jnz(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_jnz(elf_ctx, label, label_len);
 }
-int32_t backend_enc_jmp_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
+int32_t backend_enc_jmp_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t label[64], int32_t label_len, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_jmp(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_jmp(elf_ctx, label, label_len);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_jmp(elf_ctx, label, label_len);
 }
-int32_t backend_enc_mov_rax_to_arg_reg_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t k, int32_t ta) {
+int32_t backend_enc_mov_rax_to_arg_reg_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t k, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_mov_rax_to_arg_reg(elf_ctx, k);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_mov_rax_to_arg_reg(elf_ctx, k);
  } else (__tmp = 0) ; __tmp; }));
   return arch_x86_64_enc_enc_mov_rax_to_arg_reg(elf_ctx, k);
 }
-int32_t backend_enc_call_arch(backend_platform.elf.ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t ta) {
+int32_t backend_enc_call_arch(struct platform_elf_ElfCodegenCtx * elf_ctx, uint8_t name[64], int32_t name_len, int32_t ta) {
   (void)(({ int32_t __tmp = 0; if (ta == 1) {   return arch_arm64_enc_enc_call(elf_ctx, name, name_len);
  } else (__tmp = 0) ; __tmp; }));
   (void)(({ int32_t __tmp = 0; if (ta == 2) {   return arch_riscv64_enc_enc_call(elf_ctx, name, name_len);
@@ -8265,7 +8267,7 @@ int32_t backend_emit_expr_method_call(struct ast_ASTArena * arena, struct codege
  } else (__tmp = 0) ; __tmp; }));
   return backend_arch_emit_call(out, (e).method_call_name, (e).method_call_name_len, target_arch);
 }
-int32_t backend_emit_expr_elf_method_call(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_expr_elf_method_call(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   int32_t nargs = (e).method_call_num_args;
   int32_t i = 0;
   while (i < nargs && i < 6) {
@@ -8296,7 +8298,7 @@ int32_t backend_emit_expr_elf_method_call(struct ast_ASTArena * arena, backend_p
  } else (__tmp = 0) ; __tmp; }));
   return backend_enc_call_arch(elf_ctx, (e).method_call_name, (e).method_call_name_len, ta);
 }
-int32_t backend_emit_expr_elf_call(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_expr_elf_call(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Expr e, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   struct ast_Expr callee = ast_ast_arena_expr_get(arena, (e).call_callee_ref);
   int32_t nargs = (e).call_num_args;
   (void)(({ int32_t __tmp = 0; if ((callee).kind != ast_ExprKind_EXPR_VAR) {   return (-1);
@@ -8752,7 +8754,7 @@ int32_t backend_emit_expr(struct ast_ASTArena * arena, struct codegen_CodegenOut
  } else (__tmp = 0) ; __tmp; }));
   return 0;
  } else (__tmp = 0) ; __tmp; }));
-  (void)(({ int32_t __tmp = 0; if ((e).kind == ast_ExprKind_EXPR_INDEX && (e).index_base_ref != 0 && (e).index_index_ref != 0) {   struct ast_Expr base = ast_ast_arena_expr_get(arena, (e).index_base_ref);
+  (void)(({ struct ast_Type __tmp = (struct ast_Type){0}; if ((e).kind == ast_ExprKind_EXPR_INDEX && (e).index_base_ref != 0 && (e).index_index_ref != 0) {   struct ast_Expr base = ast_ast_arena_expr_get(arena, (e).index_base_ref);
   (void)(({ int32_t __tmp = 0; if ((base).kind == ast_ExprKind_EXPR_VAR) {   int32_t off = backend_local_offset(ctx, (base).var_name, (base).var_name_len);
   (void)(({ int32_t __tmp = 0; if (off < 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -9009,7 +9011,7 @@ int32_t backend_emit_expr(struct ast_ASTArena * arena, struct codegen_CodegenOut
  } else (__tmp = 0) ; __tmp; }));
   return (-1);
 }
-int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, int32_t expr_ref, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, int32_t expr_ref, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   struct ast_Expr e = ast_ast_arena_expr_get(arena, expr_ref);
   (void)(({ int32_t __tmp = 0; if (expr_ref == 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -9372,7 +9374,7 @@ int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, backend_platform.elf.
  } else (__tmp = 0) ; __tmp; }));
   return backend_enc_store_rax_to_rbp_arch(elf_ctx, off, ta);
  } else (__tmp = 0) ; __tmp; }));
-  (void)(({ int32_t __tmp = 0; if ((e).kind == ast_ExprKind_EXPR_INDEX && (e).index_base_ref != 0 && (e).index_index_ref != 0) {   struct ast_Expr base = ast_ast_arena_expr_get(arena, (e).index_base_ref);
+  (void)(({ struct ast_Type __tmp = (struct ast_Type){0}; if ((e).kind == ast_ExprKind_EXPR_INDEX && (e).index_base_ref != 0 && (e).index_index_ref != 0) {   struct ast_Expr base = ast_ast_arena_expr_get(arena, (e).index_base_ref);
   (void)(({ int32_t __tmp = 0; if ((base).kind == ast_ExprKind_EXPR_VAR) {   int32_t off = backend_local_offset(ctx, (base).var_name, (base).var_name_len);
   (void)(({ int32_t __tmp = 0; if (off < 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -9569,7 +9571,7 @@ int32_t backend_emit_expr_elf(struct ast_ASTArena * arena, backend_platform.elf.
  } else (__tmp = 0) ; __tmp; }));
   return (-1);
 }
-int32_t backend_emit_block_inits_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_block_inits_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   int32_t idx = 0;
   int32_t i = 0;
   while (i < (block)->num_consts && idx < (ctx)->num_locals) {
@@ -9595,7 +9597,7 @@ int32_t backend_emit_block_inits_elf(struct ast_ASTArena * arena, backend_platfo
   (void)((i = 0));
   return 0;
 }
-int32_t backend_emit_while_loop_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_WhileLoop * wloop, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_while_loop_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_WhileLoop * wloop, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   uint8_t loop_buf[64] = { 0 };
   uint8_t exit_buf[64] = { 0 };
   int32_t loop_len = backend_emit_next_label(ctx, loop_buf, 20);
@@ -9616,7 +9618,7 @@ int32_t backend_emit_while_loop_elf(struct ast_ASTArena * arena, backend_platfor
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t backend_emit_for_loop_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_ForLoop * floop, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_for_loop_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_ForLoop * floop, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   uint8_t loop_buf[64] = { 0 };
   uint8_t exit_buf[64] = { 0 };
   int32_t loop_len = backend_emit_next_label(ctx, loop_buf, 20);
@@ -9644,7 +9646,7 @@ int32_t backend_emit_for_loop_elf(struct ast_ASTArena * arena, backend_platform.
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t backend_emit_block_body_elf(struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta) {
+int32_t backend_emit_block_body_elf(struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_Block * block, struct backend_AsmFuncCtx * ctx, int32_t ta) {
   int32_t i = 0;
   while (i < (block)->num_stmt_order && i < 96) {
     struct ast_StmtOrderItem item = (i < 0 || (i) >= 96 ? (shulang_panic_(1, 0), ((block)->stmt_order)[0]) : ((block)->stmt_order)[i]);
@@ -9907,7 +9909,7 @@ int32_t backend_asm_codegen_ast(struct ast_Module * module, struct ast_ASTArena 
   }
   return 0;
 }
-int32_t backend_asm_codegen_ast_to_elf(struct ast_Module * module, struct ast_ASTArena * arena, backend_platform.elf.ElfCodegenCtx * elf_ctx, struct ast_PipelineDepCtx * pipeline_ctx) {
+int32_t backend_asm_codegen_ast_to_elf(struct ast_Module * module, struct ast_ASTArena * arena, struct platform_elf_ElfCodegenCtx * elf_ctx, struct ast_PipelineDepCtx * pipeline_ctx) {
   int32_t ta = (pipeline_ctx)->target_arch;
   struct backend_LocalSlot z = ({ struct backend_LocalSlot _t = { 0 }; _t.name[0] = 0; _t.name[1] = 0; _t.name[2] = 0; _t.name[3] = 0; _t.name[4] = 0; _t.name[5] = 0; _t.name[6] = 0; _t.name[7] = 0; _t.name[8] = 0; _t.name[9] = 0; _t.name[10] = 0; _t.name[11] = 0; _t.name[12] = 0; _t.name[13] = 0; _t.name[14] = 0; _t.name[15] = 0; _t.name[16] = 0; _t.name[17] = 0; _t.name[18] = 0; _t.name[19] = 0; _t.name[20] = 0; _t.name[21] = 0; _t.name[22] = 0; _t.name[23] = 0; _t.name[24] = 0; _t.name[25] = 0; _t.name[26] = 0; _t.name[27] = 0; _t.name[28] = 0; _t.name[29] = 0; _t.name[30] = 0; _t.name[31] = 0; _t.name[32] = 0; _t.name[33] = 0; _t.name[34] = 0; _t.name[35] = 0; _t.name[36] = 0; _t.name[37] = 0; _t.name[38] = 0; _t.name[39] = 0; _t.name[40] = 0; _t.name[41] = 0; _t.name[42] = 0; _t.name[43] = 0; _t.name[44] = 0; _t.name[45] = 0; _t.name[46] = 0; _t.name[47] = 0; _t.name[48] = 0; _t.name[49] = 0; _t.name[50] = 0; _t.name[51] = 0; _t.name[52] = 0; _t.name[53] = 0; _t.name[54] = 0; _t.name[55] = 0; _t.name[56] = 0; _t.name[57] = 0; _t.name[58] = 0; _t.name[59] = 0; _t.name[60] = 0; _t.name[61] = 0; _t.name[62] = 0; _t.name[63] = 0; _t.name_len = 0; _t.offset = 0; _t; });
   uint8_t lbl[64] = { 0 };
@@ -10089,7 +10091,7 @@ int32_t platform_macho_write_macho_o_to_buf(struct platform_elf_ElfCodegenCtx * 
     (void)((strtab_size = strtab_size + ((s < 0 || (s) >= 16 ? (shulang_panic_(1, 0), ((ctx)->syms)[0]) : ((ctx)->syms)[s])).name_len + 1));
     (void)((s = s + 1));
   }
-  while (z < pad) {
+  int32_t pad = off_sym - (off_text + code_len); while (z < pad) {
     (void)(({ int32_t __tmp = 0; if (platform_macho_macho_append(out, zero, 1) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
     (void)((z = z + 1));
@@ -10256,7 +10258,7 @@ int32_t platform_macho_write_macho_o_to_buf(struct platform_elf_ElfCodegenCtx * 
   return (out)->len;
 }
 int32_t platform_coff_coff_append(struct codegen_CodegenOutBuf * out, uint8_t * ptr, int32_t n);
-int32_t platform_coff_write_coff_o_to_buf(platform_coff_platform.elf.ElfCodegenCtx * ctx, struct codegen_CodegenOutBuf * out);
+int32_t platform_coff_write_coff_o_to_buf(struct platform_elf_ElfCodegenCtx * ctx, struct codegen_CodegenOutBuf * out);
 int32_t platform_coff_coff_append(struct codegen_CodegenOutBuf * out, uint8_t * ptr, int32_t n) {
   int32_t i = 0;
   while (i < n && (out)->len < 262144) {
@@ -10268,7 +10270,7 @@ int32_t platform_coff_coff_append(struct codegen_CodegenOutBuf * out, uint8_t * 
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t platform_coff_write_coff_o_to_buf(platform_coff_platform.elf.ElfCodegenCtx * ctx, struct codegen_CodegenOutBuf * out) {
+int32_t platform_coff_write_coff_o_to_buf(struct platform_elf_ElfCodegenCtx * ctx, struct codegen_CodegenOutBuf * out) {
   int32_t code_len = ((ctx)->code).len;
   int32_t align4 = code_len + 3 & -4;
   int32_t num_relocs = (ctx)->num_relocs;
@@ -10451,7 +10453,7 @@ int32_t platform_coff_write_coff_o_to_buf(platform_coff_platform.elf.ElfCodegenC
   return (out)->len;
 }
 int32_t asm_asm_codegen_ast(struct ast_Module * module, struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_PipelineDepCtx * ctx);
-int32_t asm_asm_codegen_elf_o(struct ast_Module * module, struct ast_ASTArena * arena, struct ast_PipelineDepCtx * ctx, asm_platform.elf.ElfCodegenCtx * elf_ctx, struct codegen_CodegenOutBuf * out);
+int32_t asm_asm_codegen_elf_o(struct ast_Module * module, struct ast_ASTArena * arena, struct ast_PipelineDepCtx * ctx, struct platform_elf_ElfCodegenCtx * elf_ctx, struct codegen_CodegenOutBuf * out);
 int32_t asm_asm_codegen_ast(struct ast_Module * module, struct ast_ASTArena * arena, struct codegen_CodegenOutBuf * out, struct ast_PipelineDepCtx * ctx) {
   (void)(({ int32_t __tmp = 0; if (backend_asm_codegen_ast(module, arena, out, ctx) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -10459,7 +10461,7 @@ int32_t asm_asm_codegen_ast(struct ast_Module * module, struct ast_ASTArena * ar
  } else (__tmp = 0) ; __tmp; }));
   return 0;
 }
-int32_t asm_asm_codegen_elf_o(struct ast_Module * module, struct ast_ASTArena * arena, struct ast_PipelineDepCtx * ctx, asm_platform.elf.ElfCodegenCtx * elf_ctx, struct codegen_CodegenOutBuf * out) {
+int32_t asm_asm_codegen_elf_o(struct ast_Module * module, struct ast_ASTArena * arena, struct ast_PipelineDepCtx * ctx, struct platform_elf_ElfCodegenCtx * elf_ctx, struct codegen_CodegenOutBuf * out) {
   (void)(platform_elf_elf_ctx_reset(elf_ctx));
   (void)(({ int32_t __tmp = 0; if (backend_asm_codegen_ast_to_elf(module, arena, elf_ctx, ctx) != 0) {   return (-1);
  } else (__tmp = 0) ; __tmp; }));
@@ -10483,8 +10485,8 @@ extern void parser_parse_into_init(struct ast_ASTArena *, struct ast_Module *);
 extern void parser_parse_into_set_main_index(struct ast_Module *, int32_t);
 extern int32_t parser_get_module_num_imports(struct ast_Module *);
 extern int32_t codegen_codegen_su_ast(struct ast_Module *, struct ast_ASTArena *, struct codegen_CodegenOutBuf *);
-extern int32_t preprocess_preprocess_su_buf(uint8_t, ptrdiff_t, uint8_t, int32_t);
-extern void parser_get_module_import_path(struct ast_Module *, int32_t, uint8_t);
+extern int32_t preprocess_preprocess_su_buf(uint8_t *source_buf, ptrdiff_t source_len, uint8_t *out_buf, int32_t out_cap);
+extern void parser_get_module_import_path(struct ast_Module *, int32_t, uint8_t *);
 extern int32_t typeck_typeck_su_ast(struct ast_Module *, struct ast_ASTArena *, struct ast_PipelineDepCtx *);
 int32_t pipeline_pipeline_parse_into_buf(struct ast_ASTArena * arena, struct ast_Module * module, uint8_t buf[262144], int32_t buf_len);
 int32_t pipeline_path_append_from_buf_256(struct ast_PipelineDepCtx * ctx, int32_t off, uint8_t buf[256], int32_t len);
@@ -10495,7 +10497,7 @@ int32_t pipeline_read_file_su(struct ast_PipelineDepCtx * ctx);
 int32_t pipeline_parse_one_function_ok(struct shulang_slice_uint8_t * source);
 struct parser_ParseIntoResult pipeline_parse_into_with_init(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source);
 int32_t pipeline_typeck_after_parse_ok(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct ast_PipelineDepCtx * ctx);
-int32_t pipeline_run_su_pipeline(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx);
+int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx);
 int32_t pipeline_pipeline_parse_into_buf(struct ast_ASTArena * arena, struct ast_Module * module, uint8_t buf[262144], int32_t buf_len) {
   struct parser_ParseIntoResult res = parser_parse_into_buf(arena, module, (&((buf)[0])), buf_len);
   (void)(parser_parse_into_init(arena, module));
@@ -10608,7 +10610,7 @@ int32_t pipeline_typeck_after_parse_ok(struct ast_ASTArena * arena, struct ast_M
   (void)(parser_parse_into_set_main_index(module, (r).main_idx));
   return typeck_typeck_su_ast(module, arena, ctx);
 }
-int32_t pipeline_run_su_pipeline(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {
+int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {
   struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);
   int32_t n_imports = parser_get_module_num_imports(module);
   int32_t j = 0;
@@ -10661,4 +10663,37 @@ int32_t pipeline_run_su_pipeline(struct ast_ASTArena * arena, struct ast_Module 
  } else (__tmp = 0) ; __tmp; });
  } ; __tmp; }));
   return 0;
+}
+
+/* 包装需 int32_t/uint8_t/size_t 与 shulang_slice_uint8_t；-E 已有则只补 include */
+#include <stdint.h>
+#include <stddef.h>
+/* C 包装：main 传 (data, len, ctx)，6.1 dep 通过 ctx 传入；struct ast_PipelineDepCtx 已由 -E 展开 ast 提供 */
+int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *module, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {
+  struct shulang_slice_uint8_t source;
+  source.data = (uint8_t *)source_data;
+  source.length = source_len;
+  return pipeline_run_su_pipeline_impl(arena, module, &source, out_buf, ctx);
+}
+
+#include <stddef.h>
+#include "ast.h"
+size_t pipeline_sizeof_arena(void) { return sizeof(struct ast_ASTArena); }
+size_t pipeline_sizeof_module(void) { return sizeof(struct ast_Module); }
+
+/* sizeof_elf_ctx 需 size_t 与 platform_elf 结构；无前置 include 时补上 */
+#include <stddef.h>
+size_t pipeline_sizeof_elf_ctx(void) { return sizeof(struct platform_elf_ElfCodegenCtx); }
+
+/* 由 Makefile 追加到 pipeline_gen.c 末尾：调试用，打印 module 中每个函数的 name_len 与 name */
+#include <stdio.h>
+#include "ast.h"
+void pipeline_debug_module_funcs(void *m) {
+  struct ast_Module *mod = (struct ast_Module *)m;
+  int i, n = (int)mod->num_funcs;
+  if (n > 256) n = 256;
+  for (i = 0; i < n; i++) {
+    int len = (int)mod->funcs[i].name_len;
+    fprintf(stderr, "[DEBUG] module func[%d] name_len=%d name=%.*s\n", i, len, len > 0 && len <= 64 ? len : 0, mod->funcs[i].name);
+  }
 }

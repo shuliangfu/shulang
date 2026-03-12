@@ -28,6 +28,9 @@ su
 # 构建时生成的 C 源文件（由 -E 等生成，不提交）
 std_fs_gen.c
 
+# sed -i.bak 等产生的备份，不提交
+*.bak
+
 # --- 构建系统 ---
 # CMake 生成文件
 CMakeCache.txt

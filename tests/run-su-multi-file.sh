@@ -78,10 +78,6 @@ _check_bar() {
 }
 if ! _check_bar; then
   rm -f "$out"
-  if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-    echo "run-su-multi-file SKIP in CI (-su -E multi-file output incomplete; run locally or fix pipeline/codegen dep+main ordering)"
-    exit 0
-  fi
   exit 1
 fi
 # 编译并运行，期望退出码 42
@@ -91,10 +87,6 @@ run_ec=0
 rm -f "$out"
 if [ "$run_ec" -ne 42 ]; then
   echo "run-su-multi-file: expected exit 42, got $run_ec"
-  if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-    echo "run-su-multi-file SKIP in CI (run failed; run locally to verify)"
-    exit 0
-  fi
   exit 1
 fi
 echo "run-su-multi-file OK (-su multi-file, exit 42)"

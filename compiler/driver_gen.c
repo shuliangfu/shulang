@@ -36,6 +36,10 @@ extern ptrdiff_t std_fs_fs_write(int32_t, uint8_t *, size_t);
 struct main_DriverSuEmitState { uint8_t path_buf[512]; int32_t path_len; int32_t n_lib_roots; uint8_t lib_root_bufs[8][256]; int32_t lib_root_lens[8]; int32_t use_asm_backend; int32_t target_arch; };
 struct main_PipelineSourceSlice { uint8_t * data; size_t length; };
 extern int32_t driver_get_argv_i(int32_t argc, uint8_t * argv, int32_t i, uint8_t * buf, int32_t max);
+extern int32_t driver_run_su_emit_c_set_path(uint8_t * path, int32_t path_len);
+extern int32_t driver_run_su_emit_c_set_lib(int32_t i, uint8_t * buf, int32_t len);
+extern int32_t driver_run_su_emit_c_set_n_lib_roots(int32_t n);
+extern int32_t driver_run_su_emit_c();
 extern int32_t pipeline_run_su_pipeline_impl(uint8_t * arena, uint8_t * module, struct main_PipelineSourceSlice * source, void * out_buf, void * ctx);
 int32_t main_run_compiler_su_path(int32_t argc, uint8_t * argv);
 int32_t main_run_compiler_c_impl(int32_t argc, uint8_t * argv);
@@ -329,7 +333,14 @@ int32_t main_run_compiler_su_path_impl(int32_t argc, uint8_t * argv) {
 }
 int32_t main_entry(int32_t argc, uint8_t * argv) {
   struct main_DriverSuEmitState state = ({ struct main_DriverSuEmitState _t = { 0 }; _t.path_len = 0; _t.n_lib_roots = 0; _t.use_asm_backend = 0; _t.target_arch = 0; _t; });
-  (void)(({ int32_t __tmp = 0; if (main_driver_argv_parse_su(argc, argv, (&(state))) != 0) {   return main_driver_run_su_emit_su((&(state)));
+  (void)(({ int32_t __tmp = 0; if (main_driver_argv_parse_su(argc, argv, (&(state))) != 0) {   (void)(driver_run_su_emit_c_set_path((state).path_buf, (state).path_len));
+  int32_t k = 0;
+  while (k < (state).n_lib_roots && k < 8) {
+    (void)(driver_run_su_emit_c_set_lib(k, (k < 0 || (k) >= 8 ? (shulang_panic_(1, 0), ((state).lib_root_bufs)[0]) : ((state).lib_root_bufs)[k]), (k < 0 || (k) >= 8 ? (shulang_panic_(1, 0), ((state).lib_root_lens)[0]) : ((state).lib_root_lens)[k])));
+    (void)((k = k + 1));
+  }
+  (void)(driver_run_su_emit_c_set_n_lib_roots((state).n_lib_roots));
+  return driver_run_su_emit_c();
  } else (__tmp = 0) ; __tmp; }));
   return main_run_compiler_su_path_impl(argc, argv);
 }

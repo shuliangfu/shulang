@@ -35,6 +35,12 @@ struct PipelineSourceSlice {
 /** C 极薄原语：将 argv[i] 复制到 buf[0..max-1]，NUL 结尾，返回长度；越界或失败 -1。必须 C：.su 无 char** 与 argv 索引能力。 */
 extern function driver_get_argv_i(argc: i32, argv: *u8, i: i32, buf: *u8, max: i32): i32;
 
+/** -su -E 多文件：将 path 与 -L 库根灌入 C 侧，再调 driver_run_su_emit_c 走完整 deps+main 路径（.su 的 driver_run_su_emit_su 仅单文件无 import）。 */
+extern function driver_run_su_emit_c_set_path(path: *u8, path_len: i32): i32;
+extern function driver_run_su_emit_c_set_lib(i: i32, buf: *u8, len: i32): i32;
+extern function driver_run_su_emit_c_set_n_lib_roots(n: i32): i32;
+extern function driver_run_su_emit_c(): i32;
+
 /** 全 .su 前端入口（非 -su -E 时由 entry 经 run_compiler_su_path_impl 调用）；.su 内实现为转调 run_compiler_su_path_impl，不再依赖 C。 */
 function run_compiler_su_path(argc: i32, argv: *u8): i32 {
   return run_compiler_su_path_impl(argc, argv);
@@ -440,7 +446,15 @@ function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
 function entry(argc: i32, argv: *u8): i32 {
   let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0 };
   if (driver_argv_parse_su(argc, argv, &state) != 0) {
-    return driver_run_su_emit_su(&state);
+    /* -su -E：走 C 的 driver_run_su_emit_c，支持多文件（deps+main）；.su 的 driver_run_su_emit_su 仅单文件无 import。 */
+    driver_run_su_emit_c_set_path(state.path_buf, state.path_len);
+    let k: i32 = 0;
+    while (k < state.n_lib_roots && k < 8) {
+      driver_run_su_emit_c_set_lib(k, state.lib_root_bufs[k], state.lib_root_lens[k]);
+      k = k + 1;
+    }
+    driver_run_su_emit_c_set_n_lib_roots(state.n_lib_roots);
+    return driver_run_su_emit_c();
   }
   return run_compiler_su_path_impl(argc, argv);
 }
