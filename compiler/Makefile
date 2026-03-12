@@ -6,7 +6,8 @@
 CC      ?= cc
 CFLAGS  ?= -Wall -Wextra -I. -Iinclude -Isrc
 # 仅编译 pipeline_gen.c 时加：生成代码难以逐处改，静默已知警告类别，使 bootstrap-driver 整次 0 警告
-PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-unused-but-set-variable
+# -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
+PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
 # 阶段 8：make OPT=1 时为 shuc 启用 -O2，便于开发时快速运行测试
 ifeq ($(OPT),1)
   CFLAGS += -O2
@@ -267,7 +268,7 @@ bootstrap-self: bootstrap-driver
 	sed -e 's/int32_t __tmp;/int32_t __tmp = 0;/g' driver_gen.c > driver_gen.c.tmp && mv driver_gen.c.tmp driver_gen.c && \
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o && \
 	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o && \
-	./$(TARGET)_stage2 ../tests/return-value/main.su -o /tmp/out_self 2>/dev/null && /tmp/out_self; [ $$? -eq 42 ] && echo "bootstrap-self OK (shuc₁ -> shuc₂)"
+	./$(TARGET)_stage2 ../tests/return-value/main.su -o /tmp/out_self && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shuc₁ -> shuc₂)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
 # 阶段 8.3：两代 shuc 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shuc_su
 check-7.2: bootstrap-self

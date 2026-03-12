@@ -4678,14 +4678,16 @@ int codegen_emit_dep_types_only(struct ASTModule **mods, const char **import_pat
     if (!mods || !import_paths || n < 0 || !out) return -1;
     codegen_emitted_type_names = NULL;
     codegen_slice_emitted_n = 0;
+    static char lib_prefix_buf[256];
     for (int i = 0; i < n; i++) {
         const struct ASTModule *d = mods[i];
         if (!d) continue;
         char pre[256];
         import_path_to_c_prefix(import_paths[i] ? import_paths[i] : "", pre, sizeof(pre));
+        (void)snprintf(lib_prefix_buf, sizeof(lib_prefix_buf), "%s", pre);
         /* 设置库前缀与当前模块，使 c_type_str/emit_struct_field_c_type 输出带前缀的类型名（如 ast_Block）。
          * 前面已输出的模块作为当前模块的 dep，便于字段类型跨模块时用正确前缀（如 parser 的 struct 引用 ast_Module）。 */
-        codegen_library_prefix = pre;
+        codegen_library_prefix = lib_prefix_buf;
         codegen_library_module = (struct ASTModule *)d;
         codegen_dep_mods = i > 0 ? (struct ASTModule **)(mods) : NULL;
         codegen_dep_paths = i > 0 ? (const char **)(import_paths) : NULL;

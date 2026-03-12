@@ -992,7 +992,8 @@ int RUN_CC_FUNC(int argc, char **argv) {
     /* §3.4 条件编译与平台选择：无 -target 时用 uname 注入 SHU_OS_<SYSNAME>、SHU_ARCH_<MACHINE>（全大写）供 .su #if 使用 */
     if (ndefines + 2 <= MAX_DEFINES) {
         struct utsname u;
-        static char shu_os_def[64], shu_arch_def[64];
+        /* utsname.sysname/machine can be up to 65 bytes; "SHU_OS_"=7, "SHU_ARCH_"=9, so 80 suffices */
+        static char shu_os_def[80], shu_arch_def[80];
         if (uname(&u) == 0) {
             (void)snprintf(shu_os_def, sizeof(shu_os_def), "SHU_OS_%s", u.sysname);
             (void)snprintf(shu_arch_def, sizeof(shu_arch_def), "SHU_ARCH_%s", u.machine);
