@@ -1,5 +1,7 @@
 # Shulang CI：多端构建与全量测试
 # Linux（多版本）、Linux ARM64、macOS（多版本）、Windows、Docker 多发行版（Alpine/Debian）。
+# 常规 test job：make -C compiler OPT=1 产出 C 版 shuc（all 目标），run-all.sh 未设 SHUC 时用该二进制，全量测试通过即视为 CI 通过。
+# 自举验证：bootstrap-verify 跑两代 bootstrap 版 shuc（main.su 驱动）全量测试并记录二进制哈希；失败时见步骤「Dump bootstrap test logs」。
 
 name: CI
 
@@ -10,6 +12,31 @@ on:
     branches: [ main ]
 
 jobs:
+  bootstrap-verify:
+    name: Bootstrap verify (shuc₁ → shuc₂)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Bootstrap verify (两代 shuc 全量测试一致)
+        run: ./tests/run-bootstrap-verify.sh
+      - name: Record shuc hashes (自举验证通过，记录二进制哈希)
+        run: |
+          echo "## Bootstrap verify OK" >> $GITHUB_STEP_SUMMARY
+          if [ -f compiler/shuc_stage1 ]; then
+            echo "- \`shuc_stage1\` (shuc₁): \`$(sha256sum compiler/shuc_stage1 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f compiler/shuc_stage2 ]; then
+            echo "- \`shuc_stage2\` (shuc₂): \`$(sha256sum compiler/shuc_stage2 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
+          fi
+      - name: Dump bootstrap test logs (仅失败时：check-7.2 将 run-all 输出到 /tmp/run_shuc1.log、run_shuc2.log)
+        if: failure()
+        run: |
+          echo "=== run_shuc1.log (last 120 lines) ==="
+          tail -120 /tmp/run_shuc1.log 2>/dev/null || true
+          echo "=== run_shuc2.log (last 120 lines) ==="
+          tail -120 /tmp/run_shuc2.log 2>/dev/null || true
+
   linux:
     name: Linux (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
