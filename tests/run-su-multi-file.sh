@@ -24,9 +24,9 @@ if [ "$make_ret" -eq 124 ]; then
   exit 0
 fi
 
-# 优先用 C 驱动（shuc）：多文件时对每个 dep 单独 pipeline 并 fwrite，再 pipeline(main) 并 fwrite，产出 [foo C][main C]；
-# shuc_su（.su 驱动）单次 pipeline(main) 若 ctx 或 codegen 异常会只产出片段（如 "42   ()"），故本测试优先 shuc。
-if [ -x compiler/shuc ]; then SU_SHUC=compiler/shuc; elif [ -x compiler/shuc_su ]; then SU_SHUC=compiler/shuc_su; else echo "compiler/shuc or compiler/shuc_su not found"; exit 1; fi
+# 必须用支持 -su -E 的二进制：CI 下先 make 产出的 shuc 不带 -su，bootstrap-driver 在 run-without-c 才把 shuc 换成带 -su 的；
+# 本脚本开头已 build 出 shuc_su，故优先用 shuc_su；若无则用 shuc（可能不支持 -su 则后面会 SKIP）。
+if [ -x compiler/shuc_su ]; then SU_SHUC=compiler/shuc_su; elif [ -x compiler/shuc ]; then SU_SHUC=compiler/shuc; else echo "compiler/shuc_su or compiler/shuc not found"; exit 1; fi
 # 自举两代对比（SHUC=shuc_stage1/2）时 -su -E 多文件路径尚有 bug(139)，暂跳过以免阻塞 check-7.2
 if [ -n "${SHUC:-}" ]; then echo "run-su-multi-file SKIP (SHUC set, -su -E multi-file known issue)"; exit 0; fi
 
