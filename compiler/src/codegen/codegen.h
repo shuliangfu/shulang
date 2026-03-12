@@ -21,21 +21,28 @@ typedef int (*codegen_is_mono_used_fn)(void *ctx, const struct ASTModule *mod, i
 /** 阶段 8.1 DCE 扩展：若提供则仅生成被引用的结构体/枚举定义；NULL 表示全部输出。 */
 typedef int (*codegen_is_type_used_fn)(void *ctx, const struct ASTModule *mod, const char *type_name);
 
+/** 单文件多模块时避免 enum/struct 重定义：调用方提供 emitted_type_names[][64] 与 *n_emitted_inout；codegen 输出前检查、输出后追加 C 类型名。NULL 表示不启用。 */
+#define CODEGEN_EMITTED_TYPE_NAME_MAX 64
+
 /**
  * 将入口模块（含 main）生成 C 源码写入 out。
  * 若 is_func_used/is_mono_used 非 NULL，仅生成被引用函数与单态化实例；若 is_type_used 非 NULL 则仅生成被引用 struct/enum（阶段 8.1 DCE）。
+ * emitted_type_names/n_emitted_inout/max_emitted 非 NULL 时用于单文件去重：已出现的 C 类型名不再输出。
  */
 int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_mods, const char **dep_import_paths, int ndep,
-    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx);
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted);
 
 /**
  * 将库模块（无 main 或仅 import）生成 C 写入 out；若 is_*_used 非 NULL 则仅生成被引用部分（阶段 8.1 DCE）。
  * lib_dep_mods / lib_dep_paths / n_lib_dep 为该库模块的 import 依赖，用于生成跨模块调用时的 C 前缀（传递依赖）。
+ * emitted_type_names/n_emitted_inout/max_emitted 非 NULL 时用于单文件去重。
  */
 int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
     struct ASTModule **lib_dep_mods, const char **lib_dep_paths, int n_lib_dep,
     FILE *out,
-    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx);
+    codegen_is_func_used_fn is_func_used, codegen_is_mono_used_fn is_mono_used, codegen_is_type_used_fn is_type_used, void *dce_ctx,
+    char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted);
 
 /**
  * 阶段 8.1 DCE：从 main 起算可达性，填充 used_funcs 与 used_mono。used_funcs 与 used_mono 由调用方分配。
@@ -50,5 +57,11 @@ void codegen_compute_used(struct ASTModule *entry, struct ASTModule **dep_mods, 
  */
 void codegen_compute_used_types(struct ASTModule *entry, struct ASTModule **dep_mods, int ndep,
     struct ASTFunc **used_funcs, int n_used, const char **used_type_names_out, int *n_out, int max_types);
+
+/**
+ * 阶段 3.1（完全脱离 C 路线图）：仅输出依赖模块的类型定义（enum/struct，带 import 前缀），不输出函数体。
+ * 供 -E-extern 生成「瘦」pipeline_gen.c 时先输出 ast/parser/typeck/codegen 等类型，再输出入口模块（extern + 本体）。
+ */
+int codegen_emit_dep_types_only(struct ASTModule **mods, const char **import_paths, int n, FILE *out);
 
 #endif /* SHUC_CODEGEN_H */
