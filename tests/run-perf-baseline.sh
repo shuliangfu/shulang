@@ -19,4 +19,4 @@ echo "运行 $RUNS 次，取 real 时间："
 for i in $(seq 1 "$RUNS"); do
   ( time "$OUT" ) 2>&1 | grep -E '^real' || true
 done
-echo "=== 性能基线 OK ==="
+echo "=== perf baseline OK ==="

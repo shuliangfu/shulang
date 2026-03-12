@@ -23,4 +23,4 @@ echo "=== -O 0 / -O 2 / -O s 对比（hello.su）==="
 [ -f /tmp/shuc_baseline_hello_o2 ] && ls -l /tmp/shuc_baseline_hello_o2 | awk '{print "hello.su -O 2 -> " $5 " bytes"}'
 [ -f /tmp/shuc_baseline_hello_os ] && ls -l /tmp/shuc_baseline_hello_os | awk '{print "hello.su -O s -> " $5 " bytes"}'
 
-echo "=== 体积基线 OK ==="
+echo "=== size baseline OK ==="

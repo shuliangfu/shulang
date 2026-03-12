@@ -1,7 +1,7 @@
-# Shulang CI：多端构建与全量测试
-# Linux（多版本）、Linux ARM64、macOS（多版本）、Windows、Docker 多发行版（Alpine/Debian）。
-# 常规 test job：make -C compiler OPT=1 产出 C 版 shuc（all 目标），run-all.sh 未设 SHUC 时用该二进制，全量测试通过即视为 CI 通过。
-# 自举验证：bootstrap-verify 跑两代 bootstrap 版 shuc（main.su 驱动）全量测试并记录二进制哈希；失败时见步骤「Dump bootstrap test logs」。
+# Shulang CI: multi-platform build and full test suite
+# Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
+# Regular test jobs: make -C compiler OPT=1 produces C-only shuc (default target); run-all.sh uses it when SHUC is unset; full test pass means CI pass.
+# Bootstrap verify: runs two-stage bootstrap shuc (main.su driver) full test and records binary hashes; on failure see step "Dump bootstrap test logs".
 
 name: CI
 
@@ -13,23 +13,23 @@ on:
 
 jobs:
   bootstrap-verify:
-    name: Bootstrap verify (shuc₁ → shuc₂)
+    name: Bootstrap verify (shuc1 -> shuc2)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Bootstrap verify (两代 shuc 全量测试一致)
+      - name: Bootstrap verify (two-stage shuc full test)
         run: ./tests/run-bootstrap-verify.sh
-      - name: Record shuc hashes (自举验证通过，记录二进制哈希)
+      - name: Record shuc hashes (bootstrap verify passed, record binary hashes)
         run: |
           echo "## Bootstrap verify OK" >> $GITHUB_STEP_SUMMARY
           if [ -f compiler/shuc_stage1 ]; then
-            echo "- \`shuc_stage1\` (shuc₁): \`$(sha256sum compiler/shuc_stage1 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`shuc_stage1\` (shuc1): \`$(sha256sum compiler/shuc_stage1 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
           fi
           if [ -f compiler/shuc_stage2 ]; then
-            echo "- \`shuc_stage2\` (shuc₂): \`$(sha256sum compiler/shuc_stage2 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`shuc_stage2\` (shuc2): \`$(sha256sum compiler/shuc_stage2 | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
           fi
-      - name: Dump bootstrap test logs (仅失败时：check-7.2 将 run-all 输出到 /tmp/run_shuc1.log、run_shuc2.log)
+      - name: Dump bootstrap test logs (on failure; check-7.2 writes run-all output to /tmp/run_shuc1.log, run_shuc2.log)
         if: failure()
         run: |
           echo "=== run_shuc1.log (last 120 lines) ==="
@@ -126,6 +126,7 @@ jobs:
               else
                 apt-get update -qq && apt-get install -y -qq build-essential bash diffutils
               fi &&
+              make -C compiler clean &&
               make -C compiler OPT=1 &&
               ./tests/run-all.sh
             '

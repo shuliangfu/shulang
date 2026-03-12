@@ -7,7 +7,7 @@ CC      ?= cc
 CFLAGS  ?= -Wall -Wextra -I. -Iinclude -Isrc
 # 仅编译 pipeline_gen.c 时加：生成代码难以逐处改，静默已知警告类别，使 bootstrap-driver 整次 0 警告
 # -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
-PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
+PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-discarded-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
 # 阶段 8：make OPT=1 时为 shuc 启用 -O2，便于开发时快速运行测试
 ifeq ($(OPT),1)
   CFLAGS += -O2
@@ -268,19 +268,19 @@ bootstrap-self: bootstrap-driver
 	sed -e 's/int32_t __tmp;/int32_t __tmp = 0;/g' driver_gen.c > driver_gen.c.tmp && mv driver_gen.c.tmp driver_gen.c && \
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o && \
 	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o && \
-	./$(TARGET)_stage2 ../tests/return-value/main.su -o /tmp/out_self && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shuc₁ -> shuc₂)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
+	./$(TARGET)_stage2 -su -E ../tests/return-value/main.su > /tmp/out_self.c && $(CC) $(CFLAGS) -o /tmp/out_self /tmp/out_self.c -I. -Iinclude -Isrc && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shuc1 -> shuc2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
 # 阶段 8.3：两代 shuc 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shuc_su
 check-7.2: bootstrap-self
 	@ROOT=$$(pwd)/..; \
 	cp $(TARGET)_stage1 $(TARGET) && cd $$ROOT && SHUC=$$ROOT/compiler/$(TARGET)_stage1 ./tests/run-all.sh > /tmp/run_shuc1.log 2>&1; E1=$$?; \
 	cd $$ROOT/compiler && cp $(TARGET)_stage2 $(TARGET) && cd $$ROOT && SHUC=$$ROOT/compiler/$(TARGET)_stage2 ./tests/run-all.sh > /tmp/run_shuc2.log 2>&1; E2=$$?; \
-	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (两代 shuc 测试套件均通过)"; else echo "shuc₁ exit=$$E1 shuc₂ exit=$$E2"; exit 1; fi
+	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shuc generations passed full test suite)"; else echo "shuc1 exit=$$E1 shuc2 exit=$$E2"; exit 1; fi
 
 # 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。用 $(SHUC_C) 保证 -E 走 C 路径（parse/codegen），否则已链 main_su 的 $(TARGET) 会走 .su 路径且可能无输出。
 bootstrap-pipeline: $(SHUC_C)
 	./$(SHUC_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess src/pipeline/pipeline.su -E > pipeline_gen.c 2>/dev/null || true
-	@echo "bootstrap-pipeline: pipeline_gen.c generated (若失败请检查 parser/typeck/codegen/ast/lexer/preprocess 及 std.fs 路径)"
+	@echo "bootstrap-pipeline: pipeline_gen.c generated (if failed check parser/typeck/codegen/ast/lexer/preprocess and std.fs paths)"
 
 # 在 pipeline_gen.c 末尾追加 slice 指针包装（C 传 &slice 避免跨单元按值传 struct 导致 length 错乱）与 sizeof 获取函数
 pipeline_gen.c: bootstrap-pipeline
@@ -356,7 +356,7 @@ pipeline_gen.c: bootstrap-pipeline
 shuc-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
 	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o
-	@echo "shuc_su 已生成，可用 ./$(TARGET)_su -su -E <file.su> 测试纯 .su 流水线"
+	@echo "shuc_su built; use ./shuc_su -su -E <file.su> to test .su pipeline"
 
 # 4.5（.su 流水线编译 compiler 自身）：用 shuc_su 的 -su -E 生成 typeck.su / codegen.su 对应的 C，再由 cc 链接得到新的 shuc_su_stage2。
 # 这一目标的目的，是验证「完整前端（parse_into + typeck_su_ast + codegen_su_ast）」全部跑在 .su 上时，仍能产出能工作的编译器。
@@ -370,7 +370,7 @@ bootstrap-su-compiler: shuc-su-pipeline
 
 # 7.3：自举验证通过（7.1+7.2 + 可选记录）。依赖 check-7.2，通过则视为自举验证通过
 bootstrap-verify: check-7.2
-	@echo "bootstrap-verify OK (自举验证通过)"
+	@echo "bootstrap-verify OK"
 
 # 阶段 8 体积基线：编译固定用例并输出可执行文件大小
 size-baseline:

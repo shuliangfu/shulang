@@ -2109,8 +2109,11 @@ int driver_run_su_emit_c(void) {
 #endif
 
 #ifndef SHUC_USE_SU_DRIVER
-/** 6.3：无 .su 入口时由 runtime 提供 main_entry 桩，仅转调 run_compiler_c；链接 main_su.o 时由 main.su 的 main_entry 覆盖。 */
+/** 6.3：无 .su 入口时由 runtime 提供 main_entry 桩，仅转调 run_compiler_c；链接 main_su.o 时由 main.su 的 main_entry 覆盖。
+ * Cygwin/MinGW 上 weak 符号可能不被链接器解析，故仅在非 Windows 环境使用 weak。 */
+#if !defined(__CYGWIN__) && !defined(__MINGW32__) && !defined(_WIN32)
 __attribute__((weak))
+#endif
 int main_entry(int argc, char **argv) {
     return run_compiler_c(argc, argv);
 }

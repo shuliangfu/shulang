@@ -29,6 +29,11 @@ if [ "$ec" -ne 0 ]; then
     echo "run-su-pipeline SKIP (shuc does not support -su -E; run make bootstrap-driver or use build_tool for full shuc)"
     exit 0
   fi
+  if [ "$ec" -eq 126 ]; then
+    rm -f "$out"
+    echo "run-su-pipeline SKIP (shuc_su not runnable in this env, e.g. wrong libc in container; run make -C compiler clean first)"
+    exit 0
+  fi
   echo "run-su-pipeline: $SU_SHUC -su -E $MIN_SU failed (exit $ec)"
   cat "$out" 2>/dev/null || true
   rm -f "$out"
