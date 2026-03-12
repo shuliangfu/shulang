@@ -12,7 +12,7 @@ function string_empty(): i32 { return 0; }
 
 function string_new(): String {
   return String {
-    data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    data: [],
     len: 0
   }
 }
