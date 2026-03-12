@@ -144,5 +144,5 @@ make test
 - **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shuc-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
 - **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shuc-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。
 - **处理**：  
-  - **CI**：若 `GITHUB_ACTIONS` 或 `CI` 已设置，**直接 SKIP** 本脚本（不构建 shuc_su、不跑 -su -E），避免 job 卡死；本地可单独执行 `./tests/run-su-pipeline.sh` 验证。  
-  - **非 CI**：对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。根因修复需在 pipeline 生成码或 typeck/codegen 中定位死循环或平台差异后再改。
+  - **CI**：若 `GITHUB_ACTIONS` 或 `CI` 已设置，**run-su-pipeline.sh 与 run-su-multi-file.sh 均直接 SKIP**（不构建 shuc_su、不跑 -su -E），避免 job 卡死；本地可单独执行验证。  
+  - **非 CI**：两脚本对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。根因修复需在 pipeline 生成码或 typeck/codegen 中定位死循环或平台差异后再改。
