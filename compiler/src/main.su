@@ -1,0 +1,446 @@
+// main.su — 与 main.c 一一对应：程序入口与驱动编排（6.2 逻辑全在 .su）
+//
+// 职责：提供 main(argc, argv)；-su -E 的 argv 解析与执行（读文件、预处理、pipeline、写 stdout）全部在 .su 实现。
+//
+// 为何仍保留少量 C 原语（见下方 extern）：
+// - driver_get_argv_i：argv 在 C 里是 char**，.su 只有 *u8，无法在 .su 里安全地「从 argv 取第 i 个指针」再读字符串，故必须由 C 提供。
+// - run_compiler_c：已迁 .su（本文件内桩实现 return 1）；C 在 SHUC_USE_SU_DRIVER 下不定义，由 driver_gen.c 的 run_compiler_c 包装转调 main_run_compiler_c。
+// - run_compiler_su_path：简化路径（单文件、无 -o）已在 .su 实现（run_compiler_su_path_impl + driver_argv_parse_su_path）；复杂路径（-o/import）仍 extern C。
+// - pipeline_run_su_pipeline_impl：实现位于 pipeline.su→pipeline_gen.c，main.su 仅 extern 调用，无法迁入 .su。
+
+import ast;
+import codegen;
+import preprocess;
+import std.fs;
+
+/** -su -E 解析结果：路径与 -L 库根、是否用 asm 后端、目标架构，由 driver_argv_parse_su / driver_argv_parse_su_path 填充。 */
+struct DriverSuEmitState {
+  path_buf: [512]u8;
+  path_len: i32;
+  n_lib_roots: i32;
+  lib_root_bufs: [8][256]u8;
+  lib_root_lens: [8]i32;
+  /** 非 0 表示使用 asm 后端（-backend asm）；0 表示 codegen 出 C。 */
+  use_asm_backend: i32;
+  /** 目标架构：0=x86_64，1=arm64，2=riscv64；按 -target aarch64/arm64/riscv64 设置。 */
+  target_arch: i32;
+}
+
+/** 与 C 的 struct shulang_slice_uint8_t 布局一致，供直接调 pipeline_run_su_pipeline_impl。 */
+struct PipelineSourceSlice {
+  data: *u8;
+  length: usize;
+}
+
+/** C 极薄原语：将 argv[i] 复制到 buf[0..max-1]，NUL 结尾，返回长度；越界或失败 -1。必须 C：.su 无 char** 与 argv 索引能力。 */
+extern function driver_get_argv_i(argc: i32, argv: *u8, i: i32, buf: *u8, max: i32): i32;
+
+/** 全 .su 前端入口（非 -su -E 时由 entry 经 run_compiler_su_path_impl 调用）；.su 内实现为转调 run_compiler_su_path_impl，不再依赖 C。 */
+function run_compiler_su_path(argc: i32, argv: *u8): i32 {
+  return run_compiler_su_path_impl(argc, argv);
+}
+
+/** pipeline 实现入口（.su 内自构 slice 后调用，不再用 C 薄包装）。 */
+extern function pipeline_run_su_pipeline_impl(arena: *u8, module: *u8, source: *PipelineSourceSlice, out_buf: *u8, ctx: *u8): i32;
+
+/** 原 C 侧完整编译实现（-o/import 等复杂路径）；完全自举时桩掉：.su 内实现为直接返回 1，不再调用 C。 */
+function run_compiler_c_impl(argc: i32, argv: *u8): i32 {
+  return 1;
+}
+/** 原 run_compiler_c：转调 run_compiler_c_impl（现为 .su 桩），供 r==1/r==2 时走复杂路径；桩下恒返回 1。 */
+function run_compiler_c(argc: i32, argv: *u8): i32 {
+  return run_compiler_c_impl(argc, argv);
+}
+
+/** 比较 buf 与 "-L"（2 字节），相等返回 1 否则 0。 */
+function eq_minus_L(buf: *u8, len: i32): i32 {
+  if (len < 2) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 76) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "-su"（3 字节）。 */
+function eq_minus_su(buf: *u8, len: i32): i32 {
+  if (len < 3) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 115 && buf[2] == 117) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "-E"（2 字节）。 */
+function eq_minus_E(buf: *u8, len: i32): i32 {
+  if (len < 2) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 69) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "-backend"（8 字节）。 */
+function eq_minus_backend(buf: *u8, len: i32): i32 {
+  if (len < 8) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 98 && buf[2] == 97 && buf[3] == 99 && buf[4] == 107 && buf[5] == 101 && buf[6] == 110 && buf[7] == 100) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "asm"（3 字节）。 */
+function eq_asm(buf: *u8, len: i32): i32 {
+  if (len < 3) {
+    return 0;
+  }
+  if (buf[0] == 97 && buf[1] == 115 && buf[2] == 109) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "-target"（7 字节）。 */
+function eq_minus_target(buf: *u8, len: i32): i32 {
+  if (len < 7) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 116 && buf[2] == 97 && buf[3] == 114 && buf[4] == 103 && buf[5] == 101 && buf[6] == 116) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 若 buf[0..len-1] 中含子串 "aarch64" 或 "arm64" 返回 1，否则 0（用于 -target 选 arm64）。 */
+function target_contains_arm(buf: *u8, len: i32): i32 {
+  let start: i32 = 0;
+  while (start + 7 <= len) {
+    if (buf[start] == 97 && buf[start + 1] == 97 && buf[start + 2] == 114 && buf[start + 3] == 99 && buf[start + 4] == 104 && buf[start + 5] == 54 && buf[start + 6] == 52) {
+      return 1;
+    }
+    start = start + 1;
+  }
+  start = 0;
+  while (start + 5 <= len) {
+    if (buf[start] == 97 && buf[start + 1] == 114 && buf[start + 2] == 109 && buf[start + 3] == 54 && buf[start + 4] == 52) {
+      return 1;
+    }
+    start = start + 1;
+  }
+  return 0;
+}
+
+/** 若 buf[0..len-1] 中含子串 "riscv64" 返回 1，否则 0（用于 -target 选 riscv64）。 */
+function target_contains_riscv(buf: *u8, len: i32): i32 {
+  let start: i32 = 0;
+  while (start + 7 <= len) {
+    if (buf[start] == 114 && buf[start + 1] == 105 && buf[start + 2] == 115 && buf[start + 3] == 99 && buf[start + 4] == 118 && buf[start + 5] == 54 && buf[start + 6] == 52) {
+      return 1;
+    }
+    start = start + 1;
+  }
+  return 0;
+}
+
+/**
+ * 解析 argv 为「非 -su -E」的编译请求：填 state.path_buf/path_len 与 lib_root_*；若出现 -o 返回 1（需走 C）；无输入路径返回 2。
+ * 返回 0 表示已填 state，可调 driver_run_su_emit_su。
+ */
+function driver_argv_parse_su_path(argc: i32, argv: *u8, state: *DriverSuEmitState): i32 {
+  state.path_len = 0;
+  state.n_lib_roots = 0;
+  state.use_asm_backend = 0;
+  state.target_arch = 0;
+  if (argc < 2) {
+    return 2;
+  }
+  let arg_buf: [512]u8 = [];
+  let i: i32 = 1;
+  let has_o: i32 = 0;
+  while (i < argc) {
+    let len: i32 = driver_get_argv_i(argc, argv, i, arg_buf, 512);
+    if (len < 0) {
+      i = i + 1;
+      continue;
+    }
+    if (eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {
+      let tlen: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+      if (tlen >= 0 && target_contains_arm(arg_buf, tlen) != 0) {
+        state.target_arch = 1;
+      }
+      if (tlen >= 0 && target_contains_riscv(arg_buf, tlen) != 0) {
+        state.target_arch = 2;
+      }
+      i = i + 2;
+      continue;
+    }
+    if (eq_minus_L(arg_buf, len) != 0) {
+      if (i + 1 >= argc) {
+        return 2;
+      }
+      if (state.n_lib_roots < 8) {
+        let llen: i32 = driver_get_argv_i(argc, argv, i + 1, state.lib_root_bufs[state.n_lib_roots], 256);
+        if (llen >= 0) {
+          state.lib_root_lens[state.n_lib_roots] = llen;
+          state.n_lib_roots = state.n_lib_roots + 1;
+        }
+      }
+      i = i + 2;
+      continue;
+    }
+    if (eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {
+      let vlen: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+      if (vlen >= 0 && eq_asm(arg_buf, vlen) != 0) {
+        state.use_asm_backend = 1;
+      }
+      i = i + 2;
+      continue;
+    }
+    if (len == 2 && arg_buf[0] == 45 && arg_buf[1] == 111) {
+      has_o = 1;
+      i = i + 1;
+      if (i < argc) {
+        i = i + 1;
+      }
+      continue;
+    }
+    if (len == 2 && arg_buf[0] == 45 && arg_buf[1] == 79) {
+      i = i + 1;
+      if (i < argc) {
+        i = i + 1;
+      }
+      continue;
+    }
+    if (eq_minus_su(arg_buf, len) != 0) {
+      i = i + 1;
+      continue;
+    }
+    if (state.path_len == 0 && len > 0) {
+      let k: i32 = 0;
+      while (k < len && k < 512) {
+        state.path_buf[k] = arg_buf[k];
+        k = k + 1;
+      }
+      state.path_len = len;
+    }
+    i = i + 1;
+  }
+  if (has_o != 0) {
+    return 1;
+  }
+  if (state.path_len == 0) {
+    return 2;
+  }
+  /* 与 C 一致：无 -L 时默认库根为 "." */
+  if (state.n_lib_roots == 0) {
+    state.lib_root_bufs[0][0] = 46;
+    state.lib_root_lens[0] = 1;
+    state.n_lib_roots = 1;
+  }
+  return 0;
+}
+
+/**
+ * 在 .su 内解析 argv：若存在 -su -E <path> 则填充 state（path + 此前 -L 的库根），返回 1；否则返回 0。
+ */
+function driver_argv_parse_su(argc: i32, argv: *u8, state: *DriverSuEmitState): i32 {
+  state.path_len = 0;
+  state.n_lib_roots = 0;
+  state.use_asm_backend = 0;
+  state.target_arch = 0;
+  if (argc < 4) {
+    return 0;
+  }
+  let arg_buf: [512]u8 = [];
+  let i: i32 = 1;
+  while (i < argc) {
+    let len: i32 = driver_get_argv_i(argc, argv, i, arg_buf, 512);
+    if (len < 0) {
+      i = i + 1;
+      continue;
+    }
+    if (eq_minus_L(arg_buf, len) != 0 && i + 1 < argc && state.n_lib_roots < 8) {
+      let llen: i32 = driver_get_argv_i(argc, argv, i + 1, state.lib_root_bufs[state.n_lib_roots], 256);
+      if (llen >= 0) {
+        state.lib_root_lens[state.n_lib_roots] = llen;
+        state.n_lib_roots = state.n_lib_roots + 1;
+      }
+      i = i + 2;
+      continue;
+    }
+    if (eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {
+      let vlen: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+      if (vlen >= 0 && eq_asm(arg_buf, vlen) != 0) {
+        state.use_asm_backend = 1;
+      }
+      i = i + 2;
+      continue;
+    }
+    if (eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {
+      let tlen: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+      if (tlen >= 0 && target_contains_arm(arg_buf, tlen) != 0) {
+        state.target_arch = 1;
+      }
+      if (tlen >= 0 && target_contains_riscv(arg_buf, tlen) != 0) {
+        state.target_arch = 2;
+      }
+      i = i + 2;
+      continue;
+    }
+    if (eq_minus_su(arg_buf, len) != 0 && i + 2 < argc) {
+      let elen: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+      if (eq_minus_E(arg_buf, elen) != 0) {
+        let plen: i32 = driver_get_argv_i(argc, argv, i + 2, state.path_buf, 512);
+        if (plen >= 0) {
+          state.path_len = plen;
+          return 1;
+        }
+      }
+      i = i + 1;
+      continue;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 在 .su 内执行 -su -E：读 state.path_buf 文件、预处理、跑 pipeline、写 stdout。
+ * 使用固定缓冲与 ctx；仅无 import 单文件时正确（deps 为 0）。
+ */
+function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
+  let path_buf: [512]u8 = [];
+  let k: i32 = 0;
+  while (k < state.path_len && k < 512) {
+    path_buf[k] = state.path_buf[k];
+    k = k + 1;
+  }
+  if (k < 512) {
+    path_buf[k] = 0;
+  }
+  let fd: i32 = fs_open_read(path_buf);
+  if (fd < 0) {
+    return 1;
+  }
+  let loaded_buf: [262144]u8 = [];
+  let cap: usize = 262144;
+  let n: isize = fs_read(fd, loaded_buf, cap);
+  fs_close(fd);
+  if (n < 0) {
+    return 1;
+  }
+  let preprocess_buf: [262144]u8 = [];
+  let out_len: i32 = preprocess_su_buf(loaded_buf, n, preprocess_buf, 262144);
+  if (out_len < 0) {
+    return 1;
+  }
+  let arena_buf: [2097152]u8 = [];
+  let module_buf: [524288]u8 = [];
+  let ctx: PipelineDepCtx = PipelineDepCtx {
+    dep_modules: [],
+    dep_arenas: [],
+    ndep: 0,
+    entry_dir_buf: [],
+    entry_dir_len: 0,
+    num_lib_roots: 0,
+    lib_root_bufs: [],
+    lib_root_lens: [],
+    path_buf: [],
+    loaded_buf: [],
+    loaded_len: 0,
+    preprocess_buf: [],
+    preprocess_len: 0,
+    use_asm_backend: state.use_asm_backend,
+    target_arch: state.target_arch,
+    use_macho_o: 0,
+    use_coff_o: 0,
+    current_block_ref: 0
+  };
+  let last_slash: i32 = -1;
+  k = 0;
+  while (k < state.path_len && k < 512) {
+    if (state.path_buf[k] == 47) {
+      last_slash = k;
+    }
+    k = k + 1;
+  }
+  if (last_slash >= 0) {
+    k = 0;
+    while (k < last_slash && k < 511) {
+      ctx.entry_dir_buf[k] = state.path_buf[k];
+      k = k + 1;
+    }
+    ctx.entry_dir_buf[k] = 0;
+    ctx.entry_dir_len = k;
+  } else {
+    ctx.entry_dir_buf[0] = 46;
+    ctx.entry_dir_buf[1] = 0;
+    ctx.entry_dir_len = 1;
+  }
+  ctx.num_lib_roots = state.n_lib_roots;
+  k = 0;
+  while (k < state.n_lib_roots && k < 8) {
+    let r: i32 = 0;
+    while (r < state.lib_root_lens[k] && r < 256) {
+      ctx.lib_root_bufs[k][r] = state.lib_root_bufs[k][r];
+      r = r + 1;
+    }
+    ctx.lib_root_lens[k] = state.lib_root_lens[k];
+    k = k + 1;
+  }
+  let out: CodegenOutBuf = CodegenOutBuf { data: [], len: 0 };
+  let source_len: usize = out_len;
+  let source_slice: PipelineSourceSlice = PipelineSourceSlice { data: preprocess_buf, length: source_len };
+  let rc: i32 = pipeline_run_su_pipeline_impl(arena_buf, module_buf, &source_slice, &out, &ctx);
+  if (rc != 0) {
+    return 1;
+  }
+  let len: usize = out.len;
+  if (len > 262144) {
+    let written: isize = fs_write(1, out.data, 262144);
+    if (written != 262144) {
+      return 1;
+    }
+  } else {
+    let written: isize = fs_write(1, out.data, len);
+    if (written != len) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 非 -su -E 时的编译入口：优先走 .su 简化路径（单文件、无 -o → 读文件、pipeline、stdout），否则转 C。
+ * 返回 0 成功，1 错误，或 C 的返回值。
+ */
+function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
+  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0 };
+  let r: i32 = driver_argv_parse_su_path(argc, argv, &state);
+  if (r == 1) {
+    return run_compiler_c_impl(argc, argv);
+  }
+  if (r == 2) {
+    return run_compiler_c_impl(argc, argv);
+  }
+  return driver_run_su_emit_su(&state);
+}
+
+/**
+ * 程序入口：与 main.c 的 main() 对应；C 的 main() 仅做 return main_entry(argc, argv)。
+ * 6.2：-su -E 的解析与执行全部在 .su；非 -su -E 时由 run_compiler_su_path_impl 优先走 .su 简化路径。
+ */
+function entry(argc: i32, argv: *u8): i32 {
+  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0 };
+  if (driver_argv_parse_su(argc, argv, &state) != 0) {
+    return driver_run_su_emit_su(&state);
+  }
+  return run_compiler_su_path_impl(argc, argv);
+}
