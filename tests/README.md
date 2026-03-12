@@ -55,6 +55,11 @@
 | `run-panic.sh` | panic() / panic(expr)，编译通过且运行非 0 退出 | 正例 |
 | `run-defer.sh` | defer 块与块尾返回值 | 正例 |
 | `run-goto.sh` | label 与 goto、return | 正例 |
+| `run-preprocess.sh` | 条件编译（#if/#else/#endif 等） | 正例 |
+| `run-su-pipeline.sh` | .su 流水线（-su -E 生成 C）；无 pipeline 时 SKIP | 正例 / SKIP |
+| `run-su-multi-file.sh` | 多文件 .su 流水线；无 pipeline 时 SKIP | 正例 / SKIP |
+| `run-asm.sh` | -backend asm 出汇编、.text/main/ret、可选 as+ld；无 asm 时 SKIP | 正例 / SKIP |
+| `run-without-c.sh` | 用 asm 路径构建 shuc_asm 再跑全量测试（无 C 运行时）；无 asm 时 SKIP | 正例 / SKIP |
 | `run-vector.sh` | 向量 i32x4/u32x4/i32x16、0 与字面量初始化、逐分量加 | 正例 |
 | `run-fmt.sh` | core.fmt 格式化 | 正例 |
 | `run-debug.sh` | 调试/打印相关 | 正例 |
@@ -74,7 +79,7 @@
 | `run-ub.sh` | 未定义行为收窄：除零、越界等应 panic | 正例 + 负例 |
 | `run-abi-layout.sh` | ABI/布局断言（layout_abi.c），与 analysis/ABI与布局.md 一致 | 正例 |
 
-**说明**：`make test`（在 `compiler/` 下执行）或 `./tests/run-all.sh` 会依次执行上表全部脚本，与自举回归套件一致。
+**说明**：`make test`（在 `compiler/` 下执行）或 `./tests/run-all.sh` 会依次执行上表全部脚本，与自举回归套件一致。`run-asm.sh`、`run-without-c.sh` 需支持 `-backend asm` 的 shuc（`make -C compiler bootstrap-driver`）；若当前构建无 asm 则 SKIP 且不视为失败。
 
 ## 三、边界与负向测试
 
