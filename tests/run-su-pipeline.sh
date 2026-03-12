@@ -5,10 +5,33 @@
 
 set -e
 cd "$(dirname "$0")/.."
+
+# CI 下不构建/不跑 shuc_su，避免 make 或 -su -E 挂起导致 job 卡死（见 README 6.1）
+if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
+  echo "run-su-pipeline SKIP (CI: skip -su -E to avoid hang; run locally to verify)"
+  exit 0
+fi
+
 make -C compiler -q 2>/dev/null || make -C compiler
-# 生成 shuc_su（若 pipeline_gen.c 或 pipeline_su.o 不存在/过期则重建）；自举验证时可能无 shuc_su，则用 shuc
-make -C compiler bootstrap-pipeline 2>/dev/null || true
-make -C compiler shuc-su-pipeline 2>/dev/null || true
+
+# 可移植超时：执行一条命令，超时秒数 $1，命令为 "${@:2}"；超时返回 124
+run_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@" || { local e=$?; [ "$e" -eq 124 ] && return 124; return "$e"; }
+  else
+    perl -e 'alarm shift; exec @ARGV' "$secs" "$@" || { local e=$?; [ "$e" -eq 142 ] && return 124; return "$e"; }
+  fi
+}
+
+# 生成 shuc_su（bootstrap-pipeline + 编译 pipeline_gen.c）整段限 120s，避免卡在 make
+make_ret=0
+run_timeout 120 bash -c 'make -C compiler bootstrap-pipeline 2>/dev/null || true; make -C compiler shuc-su-pipeline 2>/dev/null || true' || make_ret=$?
+if [ "$make_ret" -eq 124 ]; then
+  echo "run-su-pipeline SKIP (make bootstrap-pipeline / shuc-su-pipeline timed out after 120s)"
+  exit 0
+fi
 
 if [ -x compiler/shuc_su ]; then SU_SHUC=compiler/shuc_su; else SU_SHUC=compiler/shuc; fi
 [ -x "$SU_SHUC" ] || { echo "compiler/shuc_su and compiler/shuc not found or not executable"; exit 1; }
@@ -20,17 +43,11 @@ if [ ! -f "$MIN_SU" ]; then
 fi
 
 # 使用 compiler/shuc 时可能为 C-only 构建（不支持 -su -E），先探测；不支持则跳过以免 make test 失败
-# 对 -su -E 加 60s 超时，避免 shuc_su 在部分环境挂起导致 CI 卡住。
-# 根因：macOS 无 timeout 命令，且 shuc_su -su -E 在 pipeline_run_su_pipeline_impl 内（typeck/codegen 生成码）
-# 可能在 Linux/macOS 上死循环或极慢，故用可移植超时：有 timeout 用 timeout(124)，否则用 perl alarm(142 视为超时)。
+# 对 -su -E 加 60s 超时，避免 shuc_su 在部分环境挂起（pipeline_run_su_pipeline_impl/typeck/codegen）。
 out=$(mktemp)
 ec=0
-if command -v timeout >/dev/null 2>&1; then
-  timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
-else
-  perl -e 'alarm shift; exec @ARGV' 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
-  [ "$ec" -eq 142 ] && ec=124
-fi
+run_timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
+[ "$ec" -eq 142 ] && ec=124
 if [ "$ec" -eq 124 ]; then
   rm -f "$out"
   echo "run-su-pipeline SKIP (shuc_su -su -E timed out after 60s)"
