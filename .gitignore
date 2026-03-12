@@ -2,8 +2,10 @@
 analysis/
 
 # --- 构建产物 ---
-# 可执行文件（编译器 shuc 等）
+# 可执行文件（编译器 shuc / shuc_su / shuc-c 等）
 shuc
+shuc_su
+shuc-c
 su
 *.exe
 *.out
@@ -22,6 +24,9 @@ su
 *.bc
 *.s
 *.asm
+
+# 构建时生成的 C 源文件（由 -E 等生成，不提交）
+std_fs_gen.c
 
 # --- 构建系统 ---
 # CMake 生成文件
