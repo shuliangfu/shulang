@@ -108,6 +108,14 @@ static void lex_ident_or_keyword(Lexer *l, Token *out) {
         out->ident_len = 0;
         return;
     }
+    if (len == 2 && memcmp(start, "as", 2) == 0) {
+        out->kind = TOKEN_AS;
+        out->line = line0;
+        out->col = col0;
+        out->value.ident = NULL;
+        out->ident_len = 0;
+        return;
+    }
     if (len == 4 && memcmp(start, "else", 4) == 0) {
         out->kind = TOKEN_ELSE;
         out->line = line0;
