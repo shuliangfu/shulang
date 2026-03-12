@@ -104,10 +104,6 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
-      - name: Build shuc_su (for -su -E tests)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
-        shell: msys2 {0}
-        timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         shell: msys2 {0}
@@ -142,6 +138,5 @@ jobs:
               fi &&
               make -C compiler clean &&
               make -C compiler OPT=1 &&
-              make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline &&
               ./tests/run-all.sh
             '
