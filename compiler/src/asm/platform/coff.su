@@ -1,0 +1,205 @@
+// coff.su — PE/COFF 可重定位 .obj 写出（Windows 目标文件）
+//
+// 职责：将 backend 已填充且 elf_resolve_patches 后的 ElfCodegenCtx 写出为 PE/COFF .obj，
+//      供 -target *-windows-* 且 -backend asm -o xxx.obj 使用。仅支持 x86_64 (e_machine 62)。
+// 依赖：codegen（CodegenOutBuf）、platform.elf（ElfCodegenCtx、elf_to_u8、elf_name_eq）。
+//
+
+import codegen;
+import platform.elf;
+
+/** 向 out 追加 ptr[0..n-1]，返回 0 成功，-1 缓冲区满。 */
+function coff_append(out: *CodegenOutBuf, ptr: *u8, n: i32): i32 {
+  let i: i32 = 0;
+  while (i < n && out.len < 262144) {
+    out.data[out.len] = ptr[i];
+    out.len = out.len + 1;
+    i = i + 1;
+  }
+  if (i < n) { return -1; }
+  return 0;
+}
+
+/** 将 PE/COFF x86_64 可重定位 .obj 写入 out；调用前需已执行 elf_resolve_patches。仅支持 ctx.e_machine == 62。返回写入字节数，失败 -1。 */
+function write_coff_o_to_buf(ctx: *platform.elf.ElfCodegenCtx, out: *CodegenOutBuf): i32 {
+  if (ctx.e_machine != 62) {
+    return -1;
+  }
+  let code_len: i32 = ctx.code.len;
+  let align4: i32 = (code_len + 3) & 4294967292;
+  let num_relocs: i32 = ctx.num_relocs;
+  let num_syms: i32 = ctx.num_syms;
+  let reloc_size: i32 = num_relocs * 10;
+  let num_coff_syms: i32 = 2 + num_syms;
+  let symtab_size: i32 = num_coff_syms * 18;
+  let strtab_used: i32 = 4;
+  let s: i32 = 0;
+  while (s < num_syms) {
+    strtab_used = strtab_used + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+  let ptr_raw: i32 = 60;
+  let ptr_reloc: i32 = ptr_raw + align4;
+  let ptr_sym: i32 = ptr_reloc + reloc_size;
+  let ptr_str: i32 = ptr_sym + symtab_size;
+
+  out.len = 0;
+
+  let fh: [20]u8 = [];
+  fh[0] = platform.elf.elf_to_u8(100);
+  fh[1] = platform.elf.elf_to_u8(134);
+  fh[2] = platform.elf.elf_to_u8(1);
+  fh[3] = platform.elf.elf_to_u8(0);
+  fh[4] = platform.elf.elf_to_u8(0);
+  fh[5] = platform.elf.elf_to_u8(0);
+  fh[6] = platform.elf.elf_to_u8(0);
+  fh[7] = platform.elf.elf_to_u8(0);
+  fh[8] = platform.elf.elf_to_u8(ptr_sym);
+  fh[9] = platform.elf.elf_to_u8(ptr_sym >> 8);
+  fh[10] = platform.elf.elf_to_u8(ptr_sym >> 16);
+  fh[11] = platform.elf.elf_to_u8(ptr_sym >> 24);
+  fh[12] = platform.elf.elf_to_u8(num_coff_syms);
+  fh[13] = platform.elf.elf_to_u8(num_coff_syms >> 8);
+  fh[14] = platform.elf.elf_to_u8(num_coff_syms >> 16);
+  fh[15] = platform.elf.elf_to_u8(num_coff_syms >> 24);
+  fh[16] = 0;
+  fh[17] = 0;
+  fh[18] = 0;
+  fh[19] = 0;
+  if (coff_append(out, fh, 20) != 0) { return -1; }
+
+  let sh: [40]u8 = [];
+  sh[0] = 46;
+  sh[1] = 116;
+  sh[2] = 101;
+  sh[3] = 120;
+  sh[4] = 116;
+  sh[5] = 0;
+  sh[6] = 0;
+  sh[7] = 0;
+  sh[8] = 0;
+  sh[9] = 0;
+  sh[10] = 0;
+  sh[11] = 0;
+  sh[12] = 0;
+  sh[13] = 0;
+  sh[14] = 0;
+  sh[15] = 0;
+  sh[16] = platform.elf.elf_to_u8(align4);
+  sh[17] = platform.elf.elf_to_u8(align4 >> 8);
+  sh[18] = platform.elf.elf_to_u8(align4 >> 16);
+  sh[19] = platform.elf.elf_to_u8(align4 >> 24);
+  sh[20] = platform.elf.elf_to_u8(ptr_raw);
+  sh[21] = platform.elf.elf_to_u8(ptr_raw >> 8);
+  sh[22] = platform.elf.elf_to_u8(ptr_raw >> 16);
+  sh[23] = platform.elf.elf_to_u8(ptr_raw >> 24);
+  sh[24] = platform.elf.elf_to_u8(ptr_reloc);
+  sh[25] = platform.elf.elf_to_u8(ptr_reloc >> 8);
+  sh[26] = platform.elf.elf_to_u8(ptr_reloc >> 16);
+  sh[27] = platform.elf.elf_to_u8(ptr_reloc >> 24);
+  sh[28] = 0;
+  sh[29] = 0;
+  sh[30] = 0;
+  sh[31] = 0;
+  sh[32] = platform.elf.elf_to_u8(num_relocs);
+  sh[33] = platform.elf.elf_to_u8(num_relocs >> 8);
+  sh[34] = 0;
+  sh[35] = 0;
+  sh[36] = 32;
+  sh[37] = 0;
+  sh[38] = 80;
+  sh[39] = 96;
+  if (coff_append(out, sh, 40) != 0) { return -1; }
+
+  if (coff_append(out, ctx.code.data, code_len) != 0) { return -1; }
+  let zero: [1]u8 = [];
+  s = 0;
+  while (s < align4 - code_len) {
+    if (coff_append(out, zero, 1) != 0) { return -1; }
+    s = s + 1;
+  }
+
+  let r: i32 = 0;
+  while (r < num_relocs) {
+    let sym_idx: i32 = 0;
+    let m: i32 = 0;
+    while (m < num_syms) {
+      if (platform.elf.elf_name_eq(ctx.relocs[r].name, ctx.relocs[r].name_len, ctx.syms[m].name, ctx.syms[m].name_len) != 0) {
+        sym_idx = 2 + m;
+        break;
+      }
+      m = m + 1;
+    }
+    let rel: [10]u8 = [];
+    rel[0] = platform.elf.elf_to_u8(ctx.relocs[r].offset);
+    rel[1] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 8);
+    rel[2] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 16);
+    rel[3] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 24);
+    rel[4] = platform.elf.elf_to_u8(sym_idx);
+    rel[5] = platform.elf.elf_to_u8(sym_idx >> 8);
+    rel[6] = platform.elf.elf_to_u8(sym_idx >> 16);
+    rel[7] = platform.elf.elf_to_u8(sym_idx >> 24);
+    rel[8] = 4;
+    rel[9] = 0;
+    if (coff_append(out, rel, 10) != 0) { return -1; }
+    r = r + 1;
+  }
+
+  let sym_sec: [18]u8 = [];
+  sym_sec[16] = 1;
+  sym_sec[17] = 0;
+  sym_sec[14] = 3;
+  sym_sec[15] = 1;
+  if (coff_append(out, sym_sec, 18) != 0) { return -1; }
+  let aux: [18]u8 = [];
+  aux[0] = platform.elf.elf_to_u8(align4);
+  aux[1] = platform.elf.elf_to_u8(align4 >> 8);
+  aux[2] = platform.elf.elf_to_u8(align4 >> 16);
+  aux[3] = platform.elf.elf_to_u8(align4 >> 24);
+  aux[4] = platform.elf.elf_to_u8(num_relocs);
+  aux[5] = platform.elf.elf_to_u8(num_relocs >> 8);
+  aux[14] = 1;
+  aux[15] = 0;
+  if (coff_append(out, aux, 18) != 0) { return -1; }
+
+  let str_off: i32 = 4;
+  s = 0;
+  while (s < num_syms) {
+    let ent: [18]u8 = [];
+    ent[0] = 0;
+    ent[1] = 0;
+    ent[2] = 0;
+    ent[3] = 0;
+    ent[4] = platform.elf.elf_to_u8(str_off);
+    ent[5] = platform.elf.elf_to_u8(str_off >> 8);
+    ent[6] = platform.elf.elf_to_u8(str_off >> 16);
+    ent[7] = platform.elf.elf_to_u8(str_off >> 24);
+    ent[8] = platform.elf.elf_to_u8(ctx.syms[s].offset);
+    ent[9] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 8);
+    ent[10] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 16);
+    ent[11] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 24);
+    ent[12] = 1;
+    ent[13] = 0;
+    ent[14] = 32;
+    ent[15] = 0;
+    ent[16] = 2;
+    ent[17] = 0;
+    if (coff_append(out, ent, 18) != 0) { return -1; }
+    str_off = str_off + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+
+  let str_size: [4]u8 = [];
+  str_size[0] = platform.elf.elf_to_u8(strtab_used);
+  str_size[1] = platform.elf.elf_to_u8(strtab_used >> 8);
+  str_size[2] = platform.elf.elf_to_u8(strtab_used >> 16);
+  str_size[3] = platform.elf.elf_to_u8(strtab_used >> 24);
+  if (coff_append(out, str_size, 4) != 0) { return -1; }
+  s = 0;
+  while (s < num_syms) {
+    if (coff_append(out, ctx.syms[s].name, ctx.syms[s].name_len) != 0) { return -1; }
+    if (coff_append(out, zero, 1) != 0) { return -1; }
+    s = s + 1;
+  }
+  return out.len;
+}

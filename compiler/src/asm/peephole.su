@@ -1,0 +1,113 @@
+// peephole.su — 汇编窥孔优化（可选）
+//
+// 职责：对 backend 产出的汇编文本做一次或多次窥孔扫描，合并/删除冗余指令或空行，减少输出体积。
+// 依赖：codegen（CodegenOutBuf）、types。
+// 当前：去除连续空行；消除连续 push rax + pop rax（x86/arm64，与 7.3 寄存器分配相关）。
+
+import codegen;
+import types;
+
+/** 比较 out.data[pos..pos+len] 与 ptr 指向的 len 字节是否相等。相等返回 1，否则 0。 */
+function slice_eq(out: *CodegenOutBuf, pos: i32, ptr: *u8, len: i32): i32 {
+  if (pos + len > out.len) { return 0; }
+  let i: i32 = 0;
+  while (i < len) {
+    if (out.data[pos + i] != ptr[i]) { return 0; }
+    i = i + 1;
+  }
+  return 1;
+}
+
+/** 窥孔：消除连续的「push rax」行与「pop rax」行（两行紧邻且无其他指令时冗余，可删）。x86: pushq %rax + popq %rax；arm64: str w0,[sp,#-16]! + ldr w0,[sp],#16。写回 out.data，更新 out.len。 */
+function peephole_remove_redundant_push_pop(out: *CodegenOutBuf): i32 {
+  /* x86: "pushq %rax\n" 11 字节；"popq %rax\n" 10 字节。arm64: "str w0, [sp, #-16]!\n" 20 字节；"ldr w0, [sp], #16\n" 18 字节。 */
+  let x86_push: [11]u8 = [112, 117, 115, 104, 113, 32, 37, 114, 97, 120, 10];
+  let x86_pop: [10]u8 = [112, 111, 112, 113, 32, 37, 114, 97, 120, 10];
+  let arm_push: [20]u8 = [115, 116, 114, 32, 119, 48, 44, 32, 91, 115, 112, 44, 32, 35, 45, 49, 54, 93, 33, 10];
+  let arm_pop: [18]u8 = [108, 100, 114, 32, 119, 48, 44, 32, 91, 115, 112, 93, 44, 32, 35, 49, 54, 10];
+  let i: i32 = 0;
+  while (i < out.len) {
+    let line_end: i32 = i;
+    while (line_end < out.len && out.data[line_end] != 10) { line_end = line_end + 1; }
+    if (line_end >= out.len) { break; }
+    let line_len: i32 = line_end - i;
+    let next_start: i32 = line_end + 1;
+    let remove_len: i32 = 0;
+    if (line_len == 10 && next_start + 10 <= out.len && slice_eq(out, i, x86_push, 11) != 0 && slice_eq(out, next_start, x86_pop, 10) != 0) {
+      remove_len = 11 + 10;
+    } else if (line_len == 19 && next_start + 18 <= out.len && slice_eq(out, i, arm_push, 20) != 0 && slice_eq(out, next_start, arm_pop, 18) != 0) {
+      remove_len = 20 + 18;
+    }
+    if (remove_len > 0) {
+      let j: i32 = i;
+      while (j < out.len - remove_len) {
+        out.data[j] = out.data[j + remove_len];
+        j = j + 1;
+      }
+      out.len = out.len - remove_len;
+      continue;
+    }
+    i = next_start;
+  }
+  return 0;
+}
+
+/** 窥孔：消除 x86 无操作「movq %rax, %rax」（单行，16 字节含换行）。 */
+function peephole_remove_noop_mov_rax_rax(out: *CodegenOutBuf): i32 {
+  let x86_noop: [16]u8 = [109, 111, 118, 113, 32, 37, 114, 97, 120, 44, 32, 37, 114, 97, 120, 10];
+  let i: i32 = 0;
+  while (i < out.len) {
+    if (i + 16 <= out.len && slice_eq(out, i, x86_noop, 16) != 0) {
+      let j: i32 = i;
+      while (j < out.len - 16) {
+        out.data[j] = out.data[j + 16];
+        j = j + 1;
+      }
+      out.len = out.len - 16;
+      continue;
+    }
+    let line_end: i32 = i;
+    while (line_end < out.len && out.data[line_end] != 10) { line_end = line_end + 1; }
+    if (line_end >= out.len) { break; }
+    i = line_end + 1;
+  }
+  return 0;
+}
+
+/** 窥孔：去除连续空行（将多行 \n 压成单行）。写回 out.data，更新 out.len。返回 0 成功，-1 失败。 */
+function peephole_remove_empty_lines(out: *CodegenOutBuf): i32 {
+  let src: i32 = 0;
+  let dst: i32 = 0;
+  let prev_was_nl: i32 = 0;
+  while (src < out.len && dst < 262144) {
+    let ch: u8 = out.data[src];
+    if (ch == 10) {
+      if (prev_was_nl != 0) {
+        src = src + 1;
+        continue;
+      }
+      prev_was_nl = 1;
+    } else {
+      prev_was_nl = 0;
+    }
+    out.data[dst] = ch;
+    dst = dst + 1;
+    src = src + 1;
+  }
+  out.len = dst;
+  return 0;
+}
+
+/** 对 out 执行当前所有窥孔模式；供 pipeline 在 asm_codegen_ast 之后可选调用。 */
+function peephole_run(out: *CodegenOutBuf): i32 {
+  if (peephole_remove_redundant_push_pop(out) != 0) {
+    return -1;
+  }
+  if (peephole_remove_noop_mov_rax_rax(out) != 0) {
+    return -1;
+  }
+  if (peephole_remove_empty_lines(out) != 0) {
+    return -1;
+  }
+  return 0;
+}

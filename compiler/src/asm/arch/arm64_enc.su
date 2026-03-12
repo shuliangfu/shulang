@@ -1,0 +1,303 @@
+// arm64_enc.su — ARM64 (AArch64) 机器码编码（供 ELF .o 直接写出）
+//
+// 职责：与 x86_64_enc 对等的 enc_* 接口，将指令编码为 32 位小端写入 ElfCodegenCtx.code；
+//       jz/jmp 写占位并记 patch（19/26 位），call 记 reloc。
+// 依赖：elf（ElfCodegenCtx、append_elf_bytes、elf_add_label、elf_add_patch_with_bits、elf_add_reloc、elf_add_sym）。
+
+import platform.elf;
+
+/** 向 ctx 追加 4 字节（小端 u32），用于一条 AArch64 指令。 */
+function enc_u32_le(ctx: *platform.elf.ElfCodegenCtx, val: i32): i32 {
+  let buf: [4]u8 = [];
+  buf[0] = platform.elf.elf_to_u8(val);
+  buf[1] = platform.elf.elf_to_u8(val >> 8);
+  buf[2] = platform.elf.elf_to_u8(val >> 16);
+  buf[3] = platform.elf.elf_to_u8(val >> 24);
+  return platform.elf.append_elf_bytes(ctx, buf, 4);
+}
+
+/** 函数入口：stp x29, x30, [sp, #-16]!; mov x29, sp; sub sp, sp, #frame_size（frame_size 需 16 的倍数，且 ≤4095）。 */
+function enc_prologue(ctx: *platform.elf.ElfCodegenCtx, frame_size: i32): i32 {
+  ctx.current_frame_size = frame_size;
+  if (enc_u32_le(ctx, 4292878333) != 0) { return -1; }
+  if (enc_u32_le(ctx, 2432696320) != 0) { return -1; }
+  let imm12: i32 = frame_size;
+  if (imm12 > 4095) { imm12 = 4095; }
+  return enc_u32_le(ctx, 3506438143 | (imm12 << 10));
+}
+
+/** 函数出口：add sp, sp, #current_frame_size; ldp x29, x30, [sp], #16; ret。 */
+function enc_epilogue(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  let imm12: i32 = ctx.current_frame_size;
+  if (imm12 > 4095) { imm12 = 4095; }
+  if (enc_u32_le(ctx, 2432696320 | (imm12 << 10)) != 0) { return -1; }
+  if (enc_u32_le(ctx, 2831884287) != 0) { return -1; }
+  return enc_u32_le(ctx, 3598712832);
+}
+
+/** mov w0, #imm32（仅低 16 位非零时单条 MOVZ；否则 MOVZ + MOVK）。 */
+function enc_ret_imm32(ctx: *platform.elf.ElfCodegenCtx, imm32: i32): i32 {
+  let lo: i32 = imm32 & 65535;
+  let hi: i32 = (imm32 >> 16) & 65535;
+  if (enc_u32_le(ctx, 1384120320 | (lo << 5)) != 0) { return -1; }
+  if (hi != 0) {
+    if (enc_u32_le(ctx, 1946157056 | (hi << 5) | 16) != 0) { return -1; }
+  }
+  return 0;
+}
+
+/** mov w1, #imm32（rbx 对应 w1）。 */
+function enc_mov_imm32_to_rbx(ctx: *platform.elf.ElfCodegenCtx, imm32: i32): i32 {
+  let lo: i32 = imm32 & 65535;
+  let hi: i32 = (imm32 >> 16) & 65535;
+  if (enc_u32_le(ctx, 1384120352 | (lo << 5)) != 0) { return -1; }
+  if (hi != 0) {
+    if (enc_u32_le(ctx, 1946157088 | (hi << 5) | 16) != 0) { return -1; }
+  }
+  return 0;
+}
+
+/** 将 64 位立即数（lo 低 32 位、hi 高 32 位）装入 x0。用于 EXPR_FLOAT_LIT 发射 double 位模式。MOVZ X0 + 3×MOVK X0。 */
+function enc_mov_imm64_to_rax(ctx: *platform.elf.ElfCodegenCtx, lo: i32, hi: i32): i32 {
+  let lo0: i32 = lo & 65535;
+  let lo1: i32 = (lo >> 16) & 65535;
+  let hi0: i32 = hi & 65535;
+  let hi1: i32 = (hi >> 16) & 65535;
+  if (enc_u32_le(ctx, 3539992576 | (lo0 << 5)) != 0) { return -1; }
+  if (enc_u32_le(ctx, 4060086272 | (lo1 << 5) | 2097152) != 0) { return -1; }
+  if (enc_u32_le(ctx, 4060086272 | (hi0 << 5) | 4194304) != 0) { return -1; }
+  return enc_u32_le(ctx, 4060086272 | (hi1 << 5) | 6291456);
+}
+
+/** 等价 push rax：sub sp, sp, #16; str x0, [sp]。 */
+function enc_push_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 3506440191) != 0) { return -1; }
+  return enc_u32_le(ctx, 4177527776);
+}
+
+/** 等价 pop rbx：ldr x1, [sp]; add sp, sp, #16。 */
+function enc_pop_rbx(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 4031850464) != 0) { return -1; }
+  return enc_u32_le(ctx, 2432696352);
+}
+
+/** 等价 pop rax：ldr x0, [sp]; add sp, sp, #16。 */
+function enc_pop_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 4031850464) != 0) { return -1; }
+  return enc_u32_le(ctx, 2432696352);
+}
+
+/** add w0, w0, w1。 */
+function enc_add_rax_rbx(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 185597952);
+}
+
+/** sub w1, w1, w0; mov w0, w1。 */
+function enc_sub_rbx_rax_then_mov(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 185598240) != 0) { return -1; }
+  return enc_u32_le(ctx, 553648224);
+}
+
+/** mul w0, w0, w1。 */
+function enc_imul_rbx_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 447392288);
+}
+
+/** mov w1, w0。 */
+function enc_mov_rax_to_rbx(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 553648224);
+}
+
+/** mvn w0, w0。 */
+function enc_not_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 707796960);
+}
+
+/** and w0, w0, w1。 */
+function enc_and_rbx_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 138412064);
+}
+
+/** orr w0, w0, w1。 */
+function enc_or_rbx_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 185597984);
+}
+
+/** eor w0, w0, w1。 */
+function enc_xor_rbx_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 232783904);
+}
+
+/** mov w2, w1（移位计数，arm64 用 w2 作 shift amount）。 */
+function enc_mov_rbx_to_ecx(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 553648256);
+}
+
+/** lslv w0, w0, w2。 */
+function enc_shl_cl_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 448792640);
+}
+
+/** lsrv w0, w0, w2。 */
+function enc_shr_cl_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 448793664);
+}
+
+/** asrv w0, w0, w2。 */
+function enc_sar_cl_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 448794688);
+}
+
+/** 占位（x86 cltd 扩展；arm64 用 sdiv 直接 32 位）。 */
+function enc_cltd(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 3573750303);
+}
+
+/** sdiv w0, w0, w1。 */
+function enc_idiv_rbx(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 448792608);
+}
+
+/** 余数：sdiv w2, w0, w1; msub w0, w2, w1, w0。 */
+function enc_mov_edx_to_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 448792672) != 0) { return -1; }
+  return enc_u32_le(ctx, 447392288);
+}
+
+/** neg w0, w0。 */
+function enc_neg_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 185598432);
+}
+
+/** cmp w0, #0。 */
+function enc_test_eax_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 1895825439);
+}
+
+/** cset w0, eq。 */
+function enc_setz_movzbl_eax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 1522532352);
+}
+
+/** cmp w1, w0。 */
+function enc_cmp_rbx_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 185598239);
+}
+
+/** cmp w1, w0; cset w0, cond。cond: 0=eq, 1=ne, 2=lt, 3=le, 4=gt, 5=ge。 */
+function enc_cmp_setcc_movzbl(ctx: *platform.elf.ElfCodegenCtx, cc: i32): i32 {
+  if (enc_u32_le(ctx, 185598239) != 0) { return -1; }
+  let c: i32 = cc;
+  if (c < 0) { c = 0; }
+  if (c > 5) { c = 5; }
+  return enc_u32_le(ctx, 1522532352 | (c << 12));
+}
+
+/** str w0, [x29, #-offset]（STUR；offset 正数，≤256）。 */
+function enc_store_rax_to_rbp(ctx: *platform.elf.ElfCodegenCtx, offset: i32): i32 {
+  let simm9: i32 = 0 - offset;
+  if (simm9 < -256) { simm9 = -256; }
+  let u9: i32 = simm9 & 511;
+  return enc_u32_le(ctx, 3093299200 | (u9 << 12) | (29 << 5) | 0);
+}
+
+/** ldr w0, [x29, #-offset]（LDUR）。 */
+function enc_load_rbp_to_rax(ctx: *platform.elf.ElfCodegenCtx, offset: i32): i32 {
+  let simm9: i32 = 0 - offset;
+  if (simm9 < -256) { simm9 = -256; }
+  let u9: i32 = simm9 & 511;
+  return enc_u32_le(ctx, 3093299200 | (u9 << 12) | (29 << 5) | 0);
+}
+
+/** sub x0, x29, #offset（lea 等价）。 */
+function enc_lea_rbp_to_rax(ctx: *platform.elf.ElfCodegenCtx, offset: i32): i32 {
+  let imm12: i32 = offset;
+  if (imm12 > 4095) { imm12 = 4095; }
+  return enc_u32_le(ctx, 3506438144 | (imm12 << 10) | (29 << 5) | 0);
+}
+
+/** add x0, x0, w1, uxtw #2（rax + rbx*4）。 */
+function enc_rax_plus_rbx_scale4(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 2332033024);
+}
+
+/** ldr w0, [x0]。 */
+function enc_load_32_from_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 3103784960);
+}
+
+/** add x0, x0, #imm（imm 需 12 位；0 时跳过）。 */
+function enc_add_imm_to_rax(ctx: *platform.elf.ElfCodegenCtx, imm: i32): i32 {
+  if (imm == 0) { return 0; }
+  let imm12: i32 = imm;
+  if (imm12 > 4095) { imm12 = 4095; }
+  return enc_u32_le(ctx, 2432696320 | (imm12 << 10) | (0 << 5) | 0);
+}
+
+/** ldr x0, [x0]。 */
+function enc_load_64_from_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 4031850496);
+}
+
+/** str w0/x0 到 [x1+#offset]；store_size 4 或 8。 */
+function enc_store_rax_to_rbx_offset(ctx: *platform.elf.ElfCodegenCtx, offset: i32, store_size: i32): i32 {
+  if (store_size == 4) {
+    let imm12: i32 = offset / 4;
+    if (imm12 > 4095) { imm12 = 4095; }
+    return enc_u32_le(ctx, 3093299200 | (imm12 << 10) | (1 << 5) | 0);
+  }
+  let imm12: i32 = offset / 8;
+  if (imm12 > 4095) { imm12 = 4095; }
+  return enc_u32_le(ctx, 4031850496 | (imm12 << 10) | (1 << 5) | 0);
+}
+
+/** mov w0, w1。 */
+function enc_mov_rbx_to_rax(ctx: *platform.elf.ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 553648224);
+}
+
+/** cbz w0, label；发 0x34000000，记 19 位 patch。 */
+function enc_jz(ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 872415232) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 19);
+}
+
+/** cbnz w0, label；19 位 patch。 */
+function enc_jnz(ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 872415488) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 19);
+}
+
+/** b label；26 位 patch。 */
+function enc_jmp(ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 1342177280) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 26);
+}
+
+/** mov w(k), w0（k=0..5 对应 w0..w5 参数寄存器）。 */
+function enc_mov_rax_to_arg_reg(ctx: *platform.elf.ElfCodegenCtx, k: i32): i32 {
+  let rd: i32 = k;
+  if (rd < 0) { rd = 0; }
+  if (rd > 5) { rd = 5; }
+  return enc_u32_le(ctx, 553648224 | (rd << 5));
+}
+
+/** bl 符号；发 0x94000000，记 26 位 patch 并记 reloc。 */
+function enc_call(ctx: *platform.elf.ElfCodegenCtx, name: [64]u8, name_len: i32): i32 {
+  if (enc_u32_le(ctx, 2684354560) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  if (platform.elf.elf_add_patch_with_bits(ctx, at, name, name_len, 26) != 0) { return -1; }
+  return platform.elf.elf_add_reloc(ctx, at, name, name_len);
+}
+
+/** 标签：不发射字节，只记录；is_func 非 0 时记入 sym。 */
+function enc_label(ctx: *platform.elf.ElfCodegenCtx, name: [64]u8, name_len: i32, is_func: i32): i32 {
+  if (platform.elf.elf_add_label(ctx, name, name_len) != 0) { return -1; }
+  if (is_func != 0) {
+    return platform.elf.elf_add_sym(ctx, name, name_len, ctx.code.len);
+  }
+  return 0;
+}

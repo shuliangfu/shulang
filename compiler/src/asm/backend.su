@@ -1,0 +1,2139 @@
+// backend.su — 汇编后端：AST 遍历、lowering 分派、架构分派
+//
+// 职责：CodegenOutBuf 与 AsmFuncCtx 的使用、按 AST 结点类型分派到架构相关 emit（x86_64/arm64）；对外入口 asm_codegen_ast。
+// 依赖：ast（Module/ASTArena/Func、PipelineDepCtx）、codegen（CodegenOutBuf）、types、x86_64、arm64、elf、arch.x86_64_enc（.o 路径）。
+// 后续优化（7.3）：简单寄存器分配，减少固定 rax/rbx 带来的 push/pop；窥孔可合并相邻 mov/算术。
+
+import ast;
+import codegen;
+import types;
+import arch.x86_64;
+import arch.arm64;
+import arch.riscv64;
+import platform.elf;
+import arch.x86_64_enc;
+import arch.arm64_enc;
+import arch.riscv64_enc;
+
+/** ELF enc 按 target_arch 分派：ta 0=x86_64，1=arm64，2=riscv64。 */
+function enc_label_arch(elf_ctx: *platform.elf.ElfCodegenCtx, name: [64]u8, name_len: i32, is_func: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_label(elf_ctx, name, name_len, is_func); }
+  if (ta == 2) { return arch.riscv64_enc.enc_label(elf_ctx, name, name_len, is_func); }
+  return arch.x86_64_enc.enc_label(elf_ctx, name, name_len, is_func);
+}
+function enc_prologue_arch(elf_ctx: *platform.elf.ElfCodegenCtx, frame_sz: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_prologue(elf_ctx, frame_sz); }
+  if (ta == 2) { return arch.riscv64_enc.enc_prologue(elf_ctx, frame_sz); }
+  return arch.x86_64_enc.enc_prologue(elf_ctx, frame_sz);
+}
+function enc_epilogue_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_epilogue(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_epilogue(elf_ctx); }
+  return arch.x86_64_enc.enc_epilogue(elf_ctx);
+}
+function enc_ret_imm32_arch(elf_ctx: *platform.elf.ElfCodegenCtx, imm32: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_ret_imm32(elf_ctx, imm32); }
+  if (ta == 2) { return arch.riscv64_enc.enc_ret_imm32(elf_ctx, imm32); }
+  return arch.x86_64_enc.enc_ret_imm32(elf_ctx, imm32);
+}
+function enc_mov_imm32_to_rbx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, imm32: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_imm32_to_rbx(elf_ctx, imm32); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_imm32_to_rbx(elf_ctx, imm32); }
+  return arch.x86_64_enc.enc_mov_imm32_to_rbx(elf_ctx, imm32);
+}
+/** 将 64 位立即数装入 rax/x0，用于 EXPR_FLOAT_LIT（double 位模式）。 */
+function enc_mov_imm64_to_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, lo: i32, hi: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_imm64_to_rax(elf_ctx, lo, hi); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_imm64_to_rax(elf_ctx, lo, hi); }
+  return arch.x86_64_enc.enc_mov_imm64_to_rax(elf_ctx, lo, hi);
+}
+function enc_push_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_push_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_push_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_push_rax(elf_ctx);
+}
+function enc_pop_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_pop_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_pop_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_pop_rax(elf_ctx);
+}
+function enc_pop_rbx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_pop_rbx(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_pop_rbx(elf_ctx); }
+  return arch.x86_64_enc.enc_pop_rbx(elf_ctx);
+}
+function enc_add_rax_rbx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_add_rax_rbx(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_add_rax_rbx(elf_ctx); }
+  return arch.x86_64_enc.enc_add_rax_rbx(elf_ctx);
+}
+function enc_sub_rbx_rax_then_mov_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_sub_rbx_rax_then_mov(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_sub_rbx_rax_then_mov(elf_ctx); }
+  return arch.x86_64_enc.enc_sub_rbx_rax_then_mov(elf_ctx);
+}
+function enc_imul_rbx_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_imul_rbx_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_imul_rbx_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_imul_rbx_rax(elf_ctx);
+}
+function enc_mov_rax_to_rbx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_rax_to_rbx(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_rax_to_rbx(elf_ctx); }
+  return arch.x86_64_enc.enc_mov_rax_to_rbx(elf_ctx);
+}
+function enc_not_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_not_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_not_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_not_eax(elf_ctx);
+}
+function enc_and_rbx_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_and_rbx_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_and_rbx_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_and_rbx_rax(elf_ctx);
+}
+function enc_or_rbx_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_or_rbx_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_or_rbx_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_or_rbx_rax(elf_ctx);
+}
+function enc_xor_rbx_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_xor_rbx_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_xor_rbx_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_xor_rbx_rax(elf_ctx);
+}
+function enc_mov_rbx_to_ecx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_rbx_to_ecx(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_rbx_to_ecx(elf_ctx); }
+  return arch.x86_64_enc.enc_mov_rbx_to_ecx(elf_ctx);
+}
+function enc_shl_cl_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_shl_cl_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_shl_cl_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_shl_cl_eax(elf_ctx);
+}
+function enc_shr_cl_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_shr_cl_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_shr_cl_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_shr_cl_eax(elf_ctx);
+}
+function enc_sar_cl_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_sar_cl_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_sar_cl_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_sar_cl_eax(elf_ctx);
+}
+function enc_cltd_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_cltd(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_cltd(elf_ctx); }
+  return arch.x86_64_enc.enc_cltd(elf_ctx);
+}
+function enc_idiv_rbx_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_idiv_rbx(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_idiv_rbx(elf_ctx); }
+  return arch.x86_64_enc.enc_idiv_rbx(elf_ctx);
+}
+function enc_mov_edx_to_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_edx_to_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_edx_to_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_mov_edx_to_eax(elf_ctx);
+}
+function enc_neg_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_neg_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_neg_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_neg_eax(elf_ctx);
+}
+function enc_test_eax_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_test_eax_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_test_eax_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_test_eax_eax(elf_ctx);
+}
+function enc_setz_movzbl_eax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_setz_movzbl_eax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_setz_movzbl_eax(elf_ctx); }
+  return arch.x86_64_enc.enc_setz_movzbl_eax(elf_ctx);
+}
+function enc_cmp_rbx_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_cmp_rbx_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_cmp_rbx_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_cmp_rbx_rax(elf_ctx);
+}
+function enc_cmp_setcc_movzbl_arch(elf_ctx: *platform.elf.ElfCodegenCtx, cc: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_cmp_setcc_movzbl(elf_ctx, cc); }
+  if (ta == 2) { return arch.riscv64_enc.enc_cmp_setcc_movzbl(elf_ctx, cc); }
+  return arch.x86_64_enc.enc_cmp_setcc_movzbl(elf_ctx, cc);
+}
+function enc_store_rax_to_rbp_arch(elf_ctx: *platform.elf.ElfCodegenCtx, offset: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_store_rax_to_rbp(elf_ctx, offset); }
+  if (ta == 2) { return arch.riscv64_enc.enc_store_rax_to_rbp(elf_ctx, offset); }
+  return arch.x86_64_enc.enc_store_rax_to_rbp(elf_ctx, offset);
+}
+function enc_load_rbp_to_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, offset: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_load_rbp_to_rax(elf_ctx, offset); }
+  if (ta == 2) { return arch.riscv64_enc.enc_load_rbp_to_rax(elf_ctx, offset); }
+  return arch.x86_64_enc.enc_load_rbp_to_rax(elf_ctx, offset);
+}
+function enc_lea_rbp_to_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, offset: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_lea_rbp_to_rax(elf_ctx, offset); }
+  if (ta == 2) { return arch.riscv64_enc.enc_lea_rbp_to_rax(elf_ctx, offset); }
+  return arch.x86_64_enc.enc_lea_rbp_to_rax(elf_ctx, offset);
+}
+function enc_rax_plus_rbx_scale4_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_rax_plus_rbx_scale4(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_rax_plus_rbx_scale4(elf_ctx); }
+  return arch.x86_64_enc.enc_rax_plus_rbx_scale4(elf_ctx);
+}
+function enc_load_32_from_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_load_32_from_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_load_32_from_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_load_32_from_rax(elf_ctx);
+}
+function enc_add_imm_to_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, imm: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_add_imm_to_rax(elf_ctx, imm); }
+  if (ta == 2) { return arch.riscv64_enc.enc_add_imm_to_rax(elf_ctx, imm); }
+  return arch.x86_64_enc.enc_add_imm_to_rax(elf_ctx, imm);
+}
+function enc_load_64_from_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_load_64_from_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_load_64_from_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_load_64_from_rax(elf_ctx);
+}
+function enc_store_rax_to_rbx_offset_arch(elf_ctx: *platform.elf.ElfCodegenCtx, offset: i32, store_size: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size); }
+  if (ta == 2) { return arch.riscv64_enc.enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size); }
+  return arch.x86_64_enc.enc_store_rax_to_rbx_offset(elf_ctx, offset, store_size);
+}
+function enc_mov_rbx_to_rax_arch(elf_ctx: *platform.elf.ElfCodegenCtx, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_rbx_to_rax(elf_ctx); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_rbx_to_rax(elf_ctx); }
+  return arch.x86_64_enc.enc_mov_rbx_to_rax(elf_ctx);
+}
+function enc_jz_arch(elf_ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_jz(elf_ctx, label, label_len); }
+  if (ta == 2) { return arch.riscv64_enc.enc_jz(elf_ctx, label, label_len); }
+  return arch.x86_64_enc.enc_jz(elf_ctx, label, label_len);
+}
+function enc_jnz_arch(elf_ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_jnz(elf_ctx, label, label_len); }
+  if (ta == 2) { return arch.riscv64_enc.enc_jnz(elf_ctx, label, label_len); }
+  return arch.x86_64_enc.enc_jnz(elf_ctx, label, label_len);
+}
+function enc_jmp_arch(elf_ctx: *platform.elf.ElfCodegenCtx, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_jmp(elf_ctx, label, label_len); }
+  if (ta == 2) { return arch.riscv64_enc.enc_jmp(elf_ctx, label, label_len); }
+  return arch.x86_64_enc.enc_jmp(elf_ctx, label, label_len);
+}
+function enc_mov_rax_to_arg_reg_arch(elf_ctx: *platform.elf.ElfCodegenCtx, k: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_mov_rax_to_arg_reg(elf_ctx, k); }
+  if (ta == 2) { return arch.riscv64_enc.enc_mov_rax_to_arg_reg(elf_ctx, k); }
+  return arch.x86_64_enc.enc_mov_rax_to_arg_reg(elf_ctx, k);
+}
+function enc_call_arch(elf_ctx: *platform.elf.ElfCodegenCtx, name: [64]u8, name_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64_enc.enc_call(elf_ctx, name, name_len); }
+  if (ta == 2) { return arch.riscv64_enc.enc_call(elf_ctx, name, name_len); }
+  return arch.x86_64_enc.enc_call(elf_ctx, name, name_len);
+}
+
+/** 单条局部变量：名字 + 在栈帧中的偏移（从 rbp 向下，8 的倍数）。 */
+struct LocalSlot {
+  name: [64]u8;
+  name_len: i32;
+  offset: i32;
+}
+
+/** 当前函数上下文：栈帧大小、局部变量表、标签计数器；循环时填入 break/continue 目标标签。 */
+struct AsmFuncCtx {
+  frame_size: i32;
+  next_offset: i32;
+  locals: [24]LocalSlot;
+  num_locals: i32;
+  label_counter: i32;
+  /** 当前循环的 break 目标标签（break_len==0 表示不在循环内）。 */
+  break_label: [64]u8;
+  break_len: i32;
+  /** 当前循环的 continue 目标标签。 */
+  continue_label: [64]u8;
+  continue_len: i32;
+}
+
+/** 重置函数上下文，用于新函数开始。 */
+function ctx_reset(ctx: *AsmFuncCtx): void {
+  ctx.frame_size = 0;
+  ctx.next_offset = 0;
+  ctx.num_locals = 0;
+  ctx.label_counter = 0;
+  ctx.break_len = 0;
+  ctx.continue_len = 0;
+}
+
+/** 按块中 const + let 数量计算栈帧大小（每槽 8 字节，向上取整到 16），并预留 64 字节 temp 区供 STRUCT_LIT/ARRAY_LIT。
+ * temp 区限制：STRUCT_LIT 最多 8 字段（8×8=64），ARRAY_LIT 最多 16 元素（16×4=64），超出由调用方保证不出现。 */
+function compute_frame_size(block: *Block): i32 {
+  let n: i32 = block.num_consts + block.num_lets;
+  let size: i32 = 0;
+  if (n > 0) {
+    size = n * 8;
+    if (size % 16 != 0) {
+      size = size + (16 - (size % 16));
+    }
+  }
+  size = size + 64;
+  return size;
+}
+
+/** 将块的 const_decls 与 let_decls 填入 ctx 的局部表，分配偏移 8, 16, 24, ... */
+function fill_local_slots(ctx: *AsmFuncCtx, block: *Block): void {
+  let off: i32 = 8;
+  let i: i32 = 0;
+  while (i < block.num_consts && ctx.num_locals < 24) {
+    let d: ConstDecl = block.const_decls[i];
+    let idx: i32 = ctx.num_locals;
+    let k: i32 = 0;
+    while (k < d.name_len && k < 64) {
+      let ch: u8 = d.name[k];
+      ctx.locals[idx].name[k] = ch;
+      k = k + 1;
+    }
+    ctx.locals[idx].name_len = d.name_len;
+    ctx.locals[idx].offset = off;
+    ctx.num_locals = ctx.num_locals + 1;
+    off = off + 8;
+    i = i + 1;
+  }
+  i = 0;
+  while (i < block.num_lets && ctx.num_locals < 24) {
+    let d: LetDecl = block.let_decls[i];
+    let idx: i32 = ctx.num_locals;
+    let k: i32 = 0;
+    while (k < d.name_len && k < 64) {
+      let ch: u8 = d.name[k];
+      ctx.locals[idx].name[k] = ch;
+      k = k + 1;
+    }
+    ctx.locals[idx].name_len = d.name_len;
+    ctx.locals[idx].offset = off;
+    ctx.num_locals = ctx.num_locals + 1;
+    off = off + 8;
+    i = i + 1;
+  }
+  ctx.next_offset = off;
+}
+
+/** 在 ctx 的局部表中查找名字，返回偏移；未找到返回 -1。 */
+function local_offset(ctx: *AsmFuncCtx, name: *u8, name_len: i32): i32 {
+  let i: i32 = 0;
+  while (i < ctx.num_locals) {
+    if (ctx.locals[i].name_len == name_len) {
+      let eq: i32 = 1;
+      let k: i32 = 0;
+      while (k < name_len && eq != 0) {
+        if (name[k] != ctx.locals[i].name[k]) {
+          eq = 0;
+        }
+        k = k + 1;
+      }
+      if (eq != 0) {
+        return ctx.locals[i].offset;
+      }
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+/** 按 target_arch 分派：0=x86_64，1=arm64，2=riscv64。以下 arch_* 辅助函数统一分派，便于扩展第三架构。 */
+function arch_emit_ret_imm32(out: *CodegenOutBuf, imm: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_ret_imm32(out, imm); }
+  if (ta == 2) { return arch.riscv64.emit_ret_imm32(out, imm); }
+  return arch.x86_64.emit_ret_imm32(out, imm);
+}
+/** 将 64 位立即数（lo/hi 为低/高 32 位）装入 rax/x0。用于 EXPR_FLOAT_LIT 发射 double 位模式。 */
+function arch_emit_mov_imm64_to_rax(out: *CodegenOutBuf, lo: i32, hi: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_mov_imm64_to_rax(out, lo, hi); }
+  if (ta == 2) { return arch.riscv64.emit_mov_imm64_to_rax(out, lo, hi); }
+  return arch.x86_64.emit_mov_imm64_to_rax(out, lo, hi);
+}
+/** 7.3：立即数入 rbx/w1，ADD 左操作数为字面量时免 push/pop。 */
+function arch_emit_mov_imm32_to_rbx(out: *CodegenOutBuf, imm: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_mov_imm32_to_rbx(out, imm); }
+  if (ta == 2) { return arch.riscv64.emit_mov_imm32_to_rbx(out, imm); }
+  return arch.x86_64.emit_mov_imm32_to_rbx(out, imm);
+}
+function arch_emit_neg_eax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_neg_eax(out); }
+  if (ta == 2) { return arch.riscv64.emit_neg_eax(out); }
+  return arch.x86_64.emit_neg_eax(out);
+}
+function arch_emit_test_setz(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) {
+    if (arch.arm64.emit_test_eax_eax(out) != 0) { return -1; }
+    return arch.arm64.emit_setz_movzbl_eax(out);
+  }
+  if (ta == 2) {
+    if (arch.riscv64.emit_test_eax_eax(out) != 0) { return -1; }
+    return arch.riscv64.emit_setz_movzbl_eax(out);
+  }
+  if (arch.x86_64.emit_test_eax_eax(out) != 0) { return -1; }
+  return arch.x86_64.emit_setz_movzbl_eax(out);
+}
+
+/** 仅比较 rbx 与 rax（置标志/结果供 jz）。match 分支相等比较用。 */
+function arch_emit_cmp_rbx_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_cmp_rbx_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_cmp_rbx_rax(out); }
+  return arch.x86_64.emit_cmp_rbx_rax(out);
+}
+
+/** 比较运算：left 已在 rbx，right 在 rax；根据 cc 置结果为 0/1。cc: 0=eq, 1=ne, 2=lt, 3=le, 4=gt, 5=ge。 */
+function arch_emit_cmp_setcc(out: *CodegenOutBuf, cc: i32, ta: i32): i32 {
+  if (ta == 1) {
+    return arch.arm64.emit_cmp_setcc(out, cc);
+  }
+  if (ta == 2) { return arch.riscv64.emit_cmp_setcc(out, cc); }
+  return arch.x86_64.emit_cmp_setcc(out, cc);
+}
+
+function arch_emit_push_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_push_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_push_rax(out); }
+  return arch.x86_64.emit_push_rax(out);
+}
+function arch_emit_pop_rbx(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_pop_rbx(out); }
+  if (ta == 2) { return arch.riscv64.emit_pop_rbx(out); }
+  return arch.x86_64.emit_pop_rbx(out);
+}
+function arch_emit_pop_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_pop_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_pop_rax(out); }
+  return arch.x86_64.emit_pop_rax(out);
+}
+function arch_emit_add_rax_rbx(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_add_rax_rbx(out); }
+  if (ta == 2) { return arch.riscv64.emit_add_rax_rbx(out); }
+  return arch.x86_64.emit_add_rax_rbx(out);
+}
+function arch_emit_sub_rbx_rax_then_mov(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_sub_rbx_rax_then_mov(out); }
+  if (ta == 2) { return arch.riscv64.emit_sub_rbx_rax_then_mov(out); }
+  return arch.x86_64.emit_sub_rbx_rax_then_mov(out);
+}
+function arch_emit_imul_rbx_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_imul_rbx_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_imul_rbx_rax(out); }
+  return arch.x86_64.emit_imul_rbx_rax(out);
+}
+function arch_emit_mov_rax_to_rbx(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_mov_rax_to_rbx(out); }
+  if (ta == 2) { return arch.riscv64.emit_mov_rax_to_rbx(out); }
+  return arch.x86_64.emit_mov_rax_to_rbx(out);
+}
+function arch_emit_idiv_rbx(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_idiv_rbx(out); }
+  if (ta == 2) { return arch.riscv64.emit_idiv_rbx(out); }
+  if (arch.x86_64.emit_cltd(out) != 0) { return -1; }
+  return arch.x86_64.emit_idiv_rbx(out);
+}
+function arch_emit_rem_mod(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_rem_w0_w1(out); }
+  if (ta == 2) { return arch.riscv64.emit_rem_w0_w1(out); }
+  if (arch.x86_64.emit_cltd(out) != 0) { return -1; }
+  if (arch.x86_64.emit_idiv_rbx(out) != 0) { return -1; }
+  return arch.x86_64.emit_mov_edx_to_eax(out);
+}
+function arch_emit_load_rbp_to_rax(out: *CodegenOutBuf, off: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_load_rbp_to_rax(out, off); }
+  if (ta == 2) { return arch.riscv64.emit_load_rbp_to_rax(out, off); }
+  return arch.x86_64.emit_load_rbp_to_rax(out, off);
+}
+function arch_emit_store_rax_to_rbp(out: *CodegenOutBuf, off: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_store_rax_to_rbp(out, off); }
+  if (ta == 2) { return arch.riscv64.emit_store_rax_to_rbp(out, off); }
+  return arch.x86_64.emit_store_rax_to_rbp(out, off);
+}
+/** LEA 局部变量地址到 rax（x86/arm64）。用于 EXPR_INDEX base 为 VAR、STRUCT_LIT/ARRAY_LIT temp 区。 */
+function arch_emit_lea_rbp_to_rax(out: *CodegenOutBuf, off: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_lea_rbp_to_rax(out, off); }
+  if (ta == 2) { return arch.riscv64.emit_lea_rbp_to_rax(out, off); }
+  return arch.x86_64.emit_lea_rbp_to_rax(out, off);
+}
+/** rax/x0 = rax/x0 + rbx/x1*4。用于 EXPR_INDEX 下标乘元素大小 4。 */
+function arch_emit_rax_plus_rbx_scale4(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_rax_plus_rbx_scale4(out); }
+  if (ta == 2) { return arch.riscv64.emit_rax_plus_rbx_scale4(out); }
+  return arch.x86_64.emit_rax_plus_rbx_scale4(out);
+}
+/** 从 [rax]/[x0] 加载 4 字节到 rax/w0。用于 EXPR_INDEX 读元素。 */
+function arch_emit_load_32_from_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_load_32_from_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_load_32_from_rax(out); }
+  return arch.x86_64.emit_load_32_from_rax(out);
+}
+/** rax/x0 += 立即数。用于 EXPR_FIELD_ACCESS 字段偏移。 */
+function arch_emit_add_imm_to_rax(out: *CodegenOutBuf, imm: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_add_imm_to_rax(out, imm); }
+  if (ta == 2) { return arch.riscv64.emit_add_imm_to_rax(out, imm); }
+  return arch.x86_64.emit_add_imm_to_rax(out, imm);
+}
+/** 从 [rax]/[x0] 加载 8 字节到 rax/x0。用于 EXPR_FIELD_ACCESS。 */
+function arch_emit_load_64_from_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_load_64_from_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_load_64_from_rax(out); }
+  return arch.x86_64.emit_load_64_from_rax(out);
+}
+/** 将 rax 存到 [rbx+offset]。store_size 4=ARRAY_LIT 元素，8=STRUCT_LIT 字段。用于 STRUCT_LIT/ARRAY_LIT temp 区。 */
+function arch_emit_store_rax_to_rbx_offset(out: *CodegenOutBuf, offset: i32, store_size: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_store_rax_to_rbx_offset(out, offset, store_size); }
+  if (ta == 2) { return arch.riscv64.emit_store_rax_to_rbx_offset(out, offset, store_size); }
+  return arch.x86_64.emit_store_rax_to_rbx_offset(out, offset, store_size);
+}
+/** 将 rbx 拷到 rax（基址/值）。用于 STRUCT_LIT/ARRAY_LIT 返回 temp 区基址。 */
+function arch_emit_mov_rbx_to_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_mov_rbx_to_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_mov_rbx_to_rax(out); }
+  return arch.x86_64.emit_mov_rbx_to_rax(out);
+}
+/** 将当前 rax 拷到第 k 个参数寄存器（System V：0=rdi..5=r9）。arm64 多参通过栈槽 + 下文 load 实现，此处 x86 才 mov。 */
+function arch_emit_mov_rax_to_arg_reg(out: *CodegenOutBuf, k: i32, ta: i32): i32 {
+  if (ta == 1) { return 0; }
+  if (ta == 2) { return arch.riscv64.emit_mov_rax_to_arg_reg(out, k); }
+  return arch.x86_64.emit_mov_rax_to_arg_reg(out, k);
+}
+
+/** arm64：从 [sp + i*16] 装入 wi，用于多参 call 前。x86 不调用。 */
+function arch_emit_ldr_sp_offset_to_wi(out: *CodegenOutBuf, i: i32, ta: i32): i32 {
+  if (ta != 1) { return 0; }
+  return arch.arm64.emit_ldr_sp_offset_to_wi(out, i);
+}
+
+/** arm64：add sp, sp, #n，多参 call 后回收栈。x86 不调用。 */
+function arch_emit_add_sp_imm(out: *CodegenOutBuf, n: i32, ta: i32): i32 {
+  if (ta != 1) { return 0; }
+  return arch.arm64.emit_add_sp_imm(out, n);
+}
+
+/** 单独处理 EXPR_CALL，避免 codegen 在块内生成 Expr 型导致 C 侧赋值类型错误。返回 0 成功 -1 失败。x86：实参入 rdi..r9；arm64：实参入栈再装入 w0..w5。 */
+function emit_expr_call(arena: *ASTArena, out: *CodegenOutBuf, e: Expr, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let callee: Expr = ast_arena_expr_get(arena, e.call_callee_ref);
+  if (callee.kind != ExprKind.EXPR_VAR) { return -1; }
+  let nargs: i32 = e.call_num_args;
+  if (nargs > 6) { return -1; }
+  if (nargs > 0) {
+    let i: i32 = 0;
+    while (i < nargs) {
+      let arg_ref: i32 = 0;
+      if (i == 0) { arg_ref = e.call_arg_refs[0]; }
+      if (i == 1) { arg_ref = e.call_arg_refs[1]; }
+      if (i == 2) { arg_ref = e.call_arg_refs[2]; }
+      if (i == 3) { arg_ref = e.call_arg_refs[3]; }
+      if (i == 4) { arg_ref = e.call_arg_refs[4]; }
+      if (i == 5) { arg_ref = e.call_arg_refs[5]; }
+      if (arg_ref != 0) {
+        if (emit_expr(arena, out, arg_ref, ctx, target_arch) != 0) { return -1; }
+        if (target_arch == 0 || target_arch == 2) {
+          if (arch_emit_mov_rax_to_arg_reg(out, i, target_arch) != 0) { return -1; }
+        } else {
+          if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+        }
+      }
+      i = i + 1;
+    }
+    if (target_arch == 1) {
+      let j: i32 = 0;
+      while (j < nargs) {
+        if (arch_emit_ldr_sp_offset_to_wi(out, j, target_arch) != 0) { return -1; }
+        j = j + 1;
+      }
+      if (arch_emit_add_sp_imm(out, nargs * 16, target_arch) != 0) { return -1; }
+    }
+  }
+  if (arch_emit_call(out, callee.var_name, callee.var_name_len, target_arch) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+/** EXPR_METHOD_CALL：receiver 作为第一参（arg0），再传 method_call_arg_refs（arg1..argN），最后 call method_call_name。 */
+function emit_expr_method_call(arena: *ASTArena, out: *CodegenOutBuf, e: Expr, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let nargs: i32 = e.method_call_num_args;
+  if (nargs > 5) { return -1; }
+  if (e.method_call_base_ref != 0) {
+    if (emit_expr(arena, out, e.method_call_base_ref, ctx, target_arch) != 0) { return -1; }
+    if (target_arch == 0 || target_arch == 2) {
+      if (arch_emit_mov_rax_to_arg_reg(out, 0, target_arch) != 0) { return -1; }
+    } else {
+      if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    }
+  }
+  let i: i32 = 0;
+  while (i < nargs && i < 6) {
+    let arg_ref: i32 = 0;
+    if (i == 0) { arg_ref = e.method_call_arg_refs[0]; }
+    if (i == 1) { arg_ref = e.method_call_arg_refs[1]; }
+    if (i == 2) { arg_ref = e.method_call_arg_refs[2]; }
+    if (i == 3) { arg_ref = e.method_call_arg_refs[3]; }
+    if (i == 4) { arg_ref = e.method_call_arg_refs[4]; }
+    if (arg_ref != 0) {
+      if (emit_expr(arena, out, arg_ref, ctx, target_arch) != 0) { return -1; }
+      if (target_arch == 0 || target_arch == 2) {
+        if (arch_emit_mov_rax_to_arg_reg(out, i + 1, target_arch) != 0) { return -1; }
+      } else {
+        if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+      }
+    }
+    i = i + 1;
+  }
+  if (target_arch == 1) {
+    let total: i32 = 1 + nargs;
+    let j: i32 = 0;
+    while (j < total) {
+      if (arch_emit_ldr_sp_offset_to_wi(out, j, target_arch) != 0) { return -1; }
+      j = j + 1;
+    }
+    if (arch_emit_add_sp_imm(out, total * 16, target_arch) != 0) { return -1; }
+  }
+  return arch_emit_call(out, e.method_call_name, e.method_call_name_len, target_arch);
+}
+
+/** ELF 路径的 EXPR_METHOD_CALL：receiver 作 arg0，再 arg1..argN，enc_call(method_name)。 */
+function emit_expr_elf_method_call(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, e: Expr, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let nargs: i32 = e.method_call_num_args;
+  if (nargs > 5) { return -1; }
+  if (e.method_call_base_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, e.method_call_base_ref, ctx, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_arg_reg_arch(elf_ctx, 0, ta) != 0) { return -1; }
+  }
+  let i: i32 = 0;
+  while (i < nargs && i < 6) {
+    let arg_ref: i32 = 0;
+    if (i == 0) { arg_ref = e.method_call_arg_refs[0]; }
+    if (i == 1) { arg_ref = e.method_call_arg_refs[1]; }
+    if (i == 2) { arg_ref = e.method_call_arg_refs[2]; }
+    if (i == 3) { arg_ref = e.method_call_arg_refs[3]; }
+    if (i == 4) { arg_ref = e.method_call_arg_refs[4]; }
+    if (arg_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, arg_ref, ctx, ta) != 0) { return -1; }
+      if (enc_mov_rax_to_arg_reg_arch(elf_ctx, i + 1, ta) != 0) { return -1; }
+    }
+    i = i + 1;
+  }
+  return enc_call_arch(elf_ctx, e.method_call_name, e.method_call_name_len, ta);
+}
+
+/** ELF 路径的 EXPR_CALL 处理，单独函数避免 codegen 生成 Expr 赋值错误。 */
+function emit_expr_elf_call(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, e: Expr, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let callee: Expr = ast_arena_expr_get(arena, e.call_callee_ref);
+  if (callee.kind != ExprKind.EXPR_VAR) { return -1; }
+  let nargs: i32 = e.call_num_args;
+  if (nargs > 6) { return -1; }
+  if (nargs > 0) {
+    let i: i32 = 0;
+    while (i < nargs) {
+      let arg_ref: i32 = 0;
+      if (i == 0) { arg_ref = e.call_arg_refs[0]; }
+      if (i == 1) { arg_ref = e.call_arg_refs[1]; }
+      if (i == 2) { arg_ref = e.call_arg_refs[2]; }
+      if (i == 3) { arg_ref = e.call_arg_refs[3]; }
+      if (i == 4) { arg_ref = e.call_arg_refs[4]; }
+      if (i == 5) { arg_ref = e.call_arg_refs[5]; }
+      if (arg_ref != 0) {
+        if (emit_expr_elf(arena, elf_ctx, arg_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_rax_to_arg_reg_arch(elf_ctx, i, ta) != 0) { return -1; }
+      }
+      i = i + 1;
+    }
+  }
+  return enc_call_arch(elf_ctx, callee.var_name, callee.var_name_len, ta);
+}
+
+function arch_emit_call(out: *CodegenOutBuf, name: [64]u8, name_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_call(out, name, name_len); }
+  if (ta == 2) { return arch.riscv64.emit_call(out, name, name_len); }
+  return arch.x86_64.emit_call(out, name, name_len);
+}
+function arch_emit_jz(out: *CodegenOutBuf, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_jz(out, label, label_len); }
+  if (ta == 2) { return arch.riscv64.emit_jz(out, label, label_len); }
+  return arch.x86_64.emit_jz(out, label, label_len);
+}
+function arch_emit_jmp(out: *CodegenOutBuf, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_jmp(out, label, label_len); }
+  if (ta == 2) { return arch.riscv64.emit_jmp(out, label, label_len); }
+  return arch.x86_64.emit_jmp(out, label, label_len);
+}
+
+/** 条件跳转：rax 非 0 则跳（用于 LOGOR 短路）。 */
+function arch_emit_jnz(out: *CodegenOutBuf, label: [64]u8, label_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_jnz(out, label, label_len); }
+  if (ta == 2) { return arch.riscv64.emit_jnz(out, label, label_len); }
+  return arch.x86_64.emit_jnz(out, label, label_len);
+}
+
+/** 位取反：not/mvn 单操作数在 rax。 */
+function arch_emit_not_eax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_not_eax(out); }
+  if (ta == 2) { return arch.riscv64.emit_not_eax(out); }
+  return arch.x86_64.emit_not_eax(out);
+}
+
+/** 位与/或/异或：left 在 rbx，right 在 rax，结果在 rax。 */
+function arch_emit_and_rbx_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_and_rbx_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_and_rbx_rax(out); }
+  return arch.x86_64.emit_and_rbx_rax(out);
+}
+function arch_emit_or_rbx_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_or_rbx_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_or_rbx_rax(out); }
+  return arch.x86_64.emit_or_rbx_rax(out);
+}
+function arch_emit_xor_rbx_rax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_xor_rbx_rax(out); }
+  if (ta == 2) { return arch.riscv64.emit_xor_rbx_rax(out); }
+  return arch.x86_64.emit_xor_rbx_rax(out);
+}
+
+/** 将 rbx 拷到 ecx（x86 移位计数）；arm64 无需此步。 */
+function arch_emit_mov_rbx_to_ecx(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return 0; }
+  if (ta == 2) { return arch.riscv64.emit_mov_rbx_to_ecx(out); }
+  return arch.x86_64.emit_mov_rbx_to_ecx(out);
+}
+
+/** 左移/逻辑右移/算术右移：值在 rax，计数已在 rbx（x86 会先 mov rbx→ecx）。 */
+function arch_emit_shl_cl_eax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_shl_cl_eax(out); }
+  if (ta == 2) { return arch.riscv64.emit_shl_cl_eax(out); }
+  return arch.x86_64.emit_shl_cl_eax(out);
+}
+function arch_emit_shr_cl_eax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_shr_cl_eax(out); }
+  if (ta == 2) { return arch.riscv64.emit_shr_cl_eax(out); }
+  return arch.x86_64.emit_shr_cl_eax(out);
+}
+function arch_emit_sar_cl_eax(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_sar_cl_eax(out); }
+  if (ta == 2) { return arch.riscv64.emit_sar_cl_eax(out); }
+  return arch.x86_64.emit_sar_cl_eax(out);
+}
+
+function arch_emit_label(out: *CodegenOutBuf, name: [64]u8, name_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_label(out, name, name_len); }
+  if (ta == 2) { return arch.riscv64.emit_label(out, name, name_len); }
+  return arch.x86_64.emit_label(out, name, name_len);
+}
+function arch_emit_section_text(out: *CodegenOutBuf, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_section_text(out); }
+  if (ta == 2) { return arch.riscv64.emit_section_text(out); }
+  return arch.x86_64.emit_section_text(out);
+}
+function arch_emit_globl(out: *CodegenOutBuf, name: [64]u8, name_len: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_globl(out, name, name_len); }
+  if (ta == 2) { return arch.riscv64.emit_globl(out, name, name_len); }
+  return arch.x86_64.emit_globl(out, name, name_len);
+}
+function arch_emit_prologue(out: *CodegenOutBuf, frame_sz: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_prologue(out, frame_sz); }
+  if (ta == 2) { return arch.riscv64.emit_prologue(out, frame_sz); }
+  return arch.x86_64.emit_prologue(out, frame_sz);
+}
+function arch_emit_epilogue(out: *CodegenOutBuf, frame_sz: i32, ta: i32): i32 {
+  if (ta == 1) { return arch.arm64.emit_epilogue(out, frame_sz); }
+  if (ta == 2) { return arch.riscv64.emit_epilogue(out, frame_sz); }
+  return arch.x86_64.emit_epilogue(out);
+}
+
+/**
+ * 从函数体块中取得「返回值表达式」的池下标（0 表示无）。
+ * 优先取 labeled_stmts 中第一个 return 的表达式；否则取 final_expr：
+ * - 若为 EXPR_RETURN 则取其 unary_operand_ref（C 解析器形态）；
+ * - 否则直接返回 final_expr_ref（.su 解析器将 return 值存为 final_expr，如 EXPR_LIT/EXPR_ADD）。
+ */
+function get_return_expr_ref(arena: *ASTArena, f: *Func): i32 {
+  if (f.body_ref == 0) {
+    return 0;
+  }
+  let block: Block = ast_arena_block_get(arena, f.body_ref);
+  let j: i32 = 0;
+  while (j < block.num_labeled_stmts && j < 8) {
+    let stmt: LabeledStmt = block.labeled_stmts[j];
+    if (stmt.is_goto == 0 && stmt.return_expr_ref != 0) {
+      return stmt.return_expr_ref;
+    }
+    j = j + 1;
+  }
+  if (block.final_expr_ref != 0) {
+    let e: Expr = ast_arena_expr_get(arena, block.final_expr_ref);
+    if (e.kind == ExprKind.EXPR_RETURN && e.unary_operand_ref != 0) {
+      return e.unary_operand_ref;
+    }
+    return block.final_expr_ref;
+  }
+  return 0;
+}
+
+/**
+ * 将表达式编译为汇编，结果留在 %rax（x86）或 w0（arm64）。
+ * target_arch：0=x86_64，1=arm64；据此分派 arch.x86_64 / arch.arm64。
+ * 返回 0 成功，-1 失败。
+ */
+function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  if (expr_ref == 0) {
+    return -1;
+  }
+  let e: Expr = ast_arena_expr_get(arena, expr_ref);
+  if (e.kind == ExprKind.EXPR_LIT) {
+    return arch_emit_ret_imm32(out, e.int_val, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_BOOL_LIT) {
+    return arch_emit_ret_imm32(out, e.int_val, target_arch);
+  }
+  /* EXPR_FLOAT_LIT：用 float_bits_lo/float_bits_hi 发射 64 位立即数到 rax/x0；未设时均为 0（即 0.0）。 */
+  if (e.kind == ExprKind.EXPR_FLOAT_LIT) {
+    return arch_emit_mov_imm64_to_rax(out, e.float_bits_lo, e.float_bits_hi, target_arch);
+  }
+  /* EXPR_RETURN：作为（最终）表达式时，发射返回值子表达式到 rax。 */
+  if (e.kind == ExprKind.EXPR_RETURN && e.unary_operand_ref != 0) {
+    return emit_expr(arena, out, e.unary_operand_ref, ctx, target_arch);
+  }
+  /* EXPR_PANIC：call shulang_panic_（自实现符号，freestanding 时由 runtime_panic.o 提供 syscall exit，否则可链 libc 桩调 abort）。 */
+  if (e.kind == ExprKind.EXPR_PANIC) {
+    let panic_name: [64]u8 = [115, 104, 117, 108, 97, 110, 103, 95, 112, 97, 110, 105, 99, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return arch_emit_call(out, panic_name, 15, target_arch);
+  }
+  /* EXPR_BREAK：跳转到当前循环的 exit 标签（仅当 ctx.break_len > 0 时有效）。 */
+  if (e.kind == ExprKind.EXPR_BREAK && ctx.break_len > 0) {
+    return arch_emit_jmp(out, ctx.break_label, ctx.break_len, target_arch);
+  }
+  /* EXPR_CONTINUE：跳转到当前循环的 head 标签。 */
+  if (e.kind == ExprKind.EXPR_CONTINUE && ctx.continue_len > 0) {
+    return arch_emit_jmp(out, ctx.continue_label, ctx.continue_len, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_NEG && e.unary_operand_ref != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx, target_arch) != 0) { return -1; }
+    return arch_emit_neg_eax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_LOGNOT && e.unary_operand_ref != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx, target_arch) != 0) { return -1; }
+    return arch_emit_test_setz(out, target_arch);
+  }
+  /* 7.3 寄存器分配：右操作数为 EXPR_LIT 时可直接 mov 立即数到 rbx，避免 push rax + pop rbx。 */
+  if (e.kind == ExprKind.EXPR_ADD) {
+    if (e.binop_left_ref != 0) {
+      let le: Expr = ast_arena_expr_get(arena, e.binop_left_ref);
+      if (le.kind == ExprKind.EXPR_LIT) {
+        if (arch_emit_mov_imm32_to_rbx(out, le.int_val, target_arch) != 0) { return -1; }
+        if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+        return arch_emit_add_rax_rbx(out, target_arch);
+      }
+    }
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_add_rax_rbx(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_add_rax_rbx(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_SUB) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_sub_rbx_rax_then_mov(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_sub_rbx_rax_then_mov(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_MUL) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_imul_rbx_rax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_imul_rbx_rax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_DIV) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_idiv_rbx(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rax_to_rbx(out, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rax(out, target_arch) != 0) { return -1; }
+    return arch_emit_idiv_rbx(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_MOD) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_rem_mod(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rax_to_rbx(out, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rax(out, target_arch) != 0) { return -1; }
+    return arch_emit_rem_mod(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_EQ || e.kind == ExprKind.EXPR_NE || e.kind == ExprKind.EXPR_LT || e.kind == ExprKind.EXPR_LE || e.kind == ExprKind.EXPR_GT || e.kind == ExprKind.EXPR_GE) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        let cc: i32 = 0;
+        if (e.kind == ExprKind.EXPR_EQ) { cc = 0; }
+        if (e.kind == ExprKind.EXPR_NE) { cc = 1; }
+        if (e.kind == ExprKind.EXPR_LT) { cc = 2; }
+        if (e.kind == ExprKind.EXPR_LE) { cc = 3; }
+        if (e.kind == ExprKind.EXPR_GT) { cc = 4; }
+        if (e.kind == ExprKind.EXPR_GE) { cc = 5; }
+        return arch_emit_cmp_setcc(out, cc, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    let cc: i32 = 0;
+    if (e.kind == ExprKind.EXPR_EQ) { cc = 0; }
+    if (e.kind == ExprKind.EXPR_NE) { cc = 1; }
+    if (e.kind == ExprKind.EXPR_LT) { cc = 2; }
+    if (e.kind == ExprKind.EXPR_LE) { cc = 3; }
+    if (e.kind == ExprKind.EXPR_GT) { cc = 4; }
+    if (e.kind == ExprKind.EXPR_GE) { cc = 5; }
+    return arch_emit_cmp_setcc(out, cc, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_BITNOT && e.unary_operand_ref != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx, target_arch) != 0) { return -1; }
+    return arch_emit_not_eax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_BITAND && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_and_rbx_rax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_and_rbx_rax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_BITOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_or_rbx_rax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_or_rbx_rax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_BITXOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        return arch_emit_xor_rbx_rax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    return arch_emit_xor_rbx_rax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_SHL && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_rbx_to_ecx(out, target_arch) != 0) { return -1; }
+        return arch_emit_shl_cl_eax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rbx_to_ecx(out, target_arch) != 0) { return -1; }
+    return arch_emit_shl_cl_eax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_SHR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, re.int_val, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_rbx_to_ecx(out, target_arch) != 0) { return -1; }
+        return arch_emit_shr_cl_eax(out, target_arch);
+      }
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rbx(out, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rbx_to_ecx(out, target_arch) != 0) { return -1; }
+    return arch_emit_shr_cl_eax(out, target_arch);
+  }
+  /* 赋值：左值仅支持 VAR（局部），右值求值后 store 到该槽；结果保留在 rax（赋值表达式的值）。 */
+  if (e.kind == ExprKind.EXPR_ASSIGN && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let left: Expr = ast_arena_expr_get(arena, e.binop_left_ref);
+    if (left.kind != ExprKind.EXPR_VAR) { return -1; }
+    let off: i32 = local_offset(ctx, left.var_name, left.var_name_len);
+    if (off < 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_store_rax_to_rbp(out, off, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  /* 下标访问 base[i]：base 可为局部 VAR、任意产生地址的表达式或 slice（ptr+len 布局，取 ptr 再下标）；元素大小暂为 4（i32）。 */
+  if (e.kind == ExprKind.EXPR_INDEX && e.index_base_ref != 0 && e.index_index_ref != 0) {
+    let base: Expr = ast_arena_expr_get(arena, e.index_base_ref);
+    if (base.kind == ExprKind.EXPR_VAR) {
+      let off: i32 = local_offset(ctx, base.var_name, base.var_name_len);
+      if (off < 0) { return -1; }
+      if (arch_emit_lea_rbp_to_rax(out, off, target_arch) != 0) { return -1; }
+    } else {
+      if (emit_expr(arena, out, e.index_base_ref, ctx, target_arch) != 0) { return -1; }
+    }
+    /* base 类型为 slice 时：rax 为 (ptr,len) 的地址，从 [rax] 取 ptr 到 rax。 */
+    if (base.resolved_type_ref != 0) {
+      let bt: Type = ast_arena_type_get(arena, base.resolved_type_ref);
+      if (bt.kind == TypeKind.TYPE_SLICE) {
+        if (arch_emit_load_64_from_rax(out, target_arch) != 0) { return -1; }
+      }
+    }
+    if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.index_index_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rax_to_rbx(out, target_arch) != 0) { return -1; }
+    if (arch_emit_pop_rax(out, target_arch) != 0) { return -1; }
+    if (arch_emit_rax_plus_rbx_scale4(out, target_arch) != 0) { return -1; }
+    return arch_emit_load_32_from_rax(out, target_arch);
+  }
+  /* 字段访问 base.field：base 可为局部 VAR 或任意产生地址的表达式；使用 typeck 填写的 field_access_offset（未设时为 0）。 */
+  if (e.kind == ExprKind.EXPR_FIELD_ACCESS && e.field_access_base_ref != 0) {
+    let base: Expr = ast_arena_expr_get(arena, e.field_access_base_ref);
+    if (base.kind == ExprKind.EXPR_VAR) {
+      let off: i32 = local_offset(ctx, base.var_name, base.var_name_len);
+      if (off < 0) { return -1; }
+      if (arch_emit_lea_rbp_to_rax(out, off, target_arch) != 0) { return -1; }
+    } else {
+      if (emit_expr(arena, out, e.field_access_base_ref, ctx, target_arch) != 0) { return -1; }
+    }
+    if (arch_emit_add_imm_to_rax(out, e.field_access_offset, target_arch) != 0) { return -1; }
+    return arch_emit_load_64_from_rax(out, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_VAR) {
+    let off: i32 = local_offset(ctx, e.var_name, e.var_name_len);
+    if (off < 0) { return -1; }
+    return arch_emit_load_rbp_to_rax(out, off, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_CALL) {
+    return emit_expr_call(arena, out, e, ctx, target_arch);
+  }
+  if (e.kind == ExprKind.EXPR_METHOD_CALL && e.method_call_name_len > 0) {
+    return emit_expr_method_call(arena, out, e, ctx, target_arch);
+  }
+  /* LOGAND：左→test→jz 假；右→test→jz 假；mov 1；jmp end；假: mov 0；end: */
+  if (e.kind == ExprKind.EXPR_LOGAND && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let false_buf: [64]u8 = [46, 76, 95, 97, 110, 100, 95, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 97, 110, 100, 95, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(false_buf, 9, 8, nc);
+    let false_len: i32 = 9 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 9, 8, nl);
+    let end_len: i32 = 9 + (n2 > 0 ? n2 : 1);
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jz(out, false_buf, false_len, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jz(out, false_buf, false_len, target_arch) != 0) { return -1; }
+    if (arch_emit_ret_imm32(out, 1, target_arch) != 0) { return -1; }
+    if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, false_buf, false_len, target_arch) != 0) { return -1; }
+    if (arch_emit_ret_imm32(out, 0, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  /* LOGOR：左→test→jnz 真；右→test→jnz 真；mov 0；jmp end；真: mov 1；end: */
+  if (e.kind == ExprKind.EXPR_LOGOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let true_buf: [64]u8 = [46, 76, 95, 111, 114, 95, 116, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 111, 114, 95, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(true_buf, 9, 8, nc);
+    let true_len: i32 = 9 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 9, 8, nl);
+    let end_len: i32 = 9 + (n2 > 0 ? n2 : 1);
+    if (emit_expr(arena, out, e.binop_left_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jnz(out, true_buf, true_len, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jnz(out, true_buf, true_len, target_arch) != 0) { return -1; }
+    if (arch_emit_ret_imm32(out, 0, target_arch) != 0) { return -1; }
+    if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, true_buf, true_len, target_arch) != 0) { return -1; }
+    if (arch_emit_ret_imm32(out, 1, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_IF && e.if_cond_ref != 0 && e.if_then_ref != 0) {
+    let else_buf: [64]u8 = [46, 76, 95, 101, 108, 115, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 101, 110, 100, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(else_buf, 8, 8, nc);
+    let else_len: i32 = 8 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 7, 8, nl);
+    let end_len: i32 = 7 + (n2 > 0 ? n2 : 1);
+    if (emit_expr(arena, out, e.if_cond_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jz(out, else_buf, else_len, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.if_then_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, else_buf, else_len, target_arch) != 0) { return -1; }
+    if (e.if_else_ref != 0) {
+      if (emit_expr(arena, out, e.if_else_ref, ctx, target_arch) != 0) { return -1; }
+    }
+    if (arch_emit_label(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_TERNARY && e.if_cond_ref != 0 && e.if_then_ref != 0) {
+    let else_buf: [64]u8 = [46, 76, 95, 101, 108, 115, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 101, 110, 100, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(else_buf, 8, 8, nc);
+    let else_len: i32 = 8 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 7, 8, nl);
+    let end_len: i32 = 7 + (n2 > 0 ? n2 : 1);
+    if (emit_expr(arena, out, e.if_cond_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jz(out, else_buf, else_len, target_arch) != 0) { return -1; }
+    if (emit_expr(arena, out, e.if_then_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    if (arch_emit_label(out, else_buf, else_len, target_arch) != 0) { return -1; }
+    if (e.if_else_ref != 0) {
+      if (emit_expr(arena, out, e.if_else_ref, ctx, target_arch) != 0) { return -1; }
+    }
+    if (arch_emit_label(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_BLOCK && e.block_ref != 0) {
+    let inner: Block = ast_arena_block_get(arena, e.block_ref);
+    if (emit_block_inits(arena, out, &inner, ctx, target_arch) != 0) { return -1; }
+    if (inner.final_expr_ref != 0) {
+      return emit_expr(arena, out, inner.final_expr_ref, ctx, target_arch);
+    }
+    return 0;
+  }
+  /* EXPR_MATCH：发射待匹配值到 rax，再按每臂比较（字面量/枚举 variant_index）或通配符，多分支到对应 result。 */
+  if (e.kind == ExprKind.EXPR_MATCH && e.match_matched_ref != 0 && e.match_num_arms > 0) {
+    if (emit_expr(arena, out, e.match_matched_ref, ctx, target_arch) != 0) { return -1; }
+    let base: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + e.match_num_arms + 1;
+    let end_id: i32 = base + e.match_num_arms;
+    let res_buf: [64]u8 = [];
+    let end_buf: [64]u8 = [];
+    let i: i32 = 0;
+    while (i < e.match_num_arms && i < 16) {
+      if (e.match_arm_is_wildcard[i] != 0) {
+        let r_ref: i32 = e.match_arm_result_refs[i];
+        if (r_ref != 0 && emit_expr(arena, out, r_ref, ctx, target_arch) != 0) { return -1; }
+        let end_len: i32 = format_label_id(end_buf, 64, end_id);
+        if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+      } else {
+        let cmp_val: i32 = e.match_arm_is_enum_variant[i] != 0 ? e.match_arm_variant_index[i] : e.match_arm_lit_val[i];
+        if (arch_emit_push_rax(out, target_arch) != 0) { return -1; }
+        if (arch_emit_mov_imm32_to_rbx(out, cmp_val, target_arch) != 0) { return -1; }
+        if (arch_emit_pop_rax(out, target_arch) != 0) { return -1; }
+        if (arch_emit_cmp_rbx_rax(out, target_arch) != 0) { return -1; }
+        let res_len: i32 = format_label_id(res_buf, 64, base + i);
+        if (arch_emit_jz(out, res_buf, res_len, target_arch) != 0) { return -1; }
+      }
+      i = i + 1;
+    }
+    i = 0;
+    while (i < e.match_num_arms && i < 16) {
+      let res_len: i32 = format_label_id(res_buf, 64, base + i);
+      if (arch_emit_label(out, res_buf, res_len, target_arch) != 0) { return -1; }
+      let r_ref: i32 = e.match_arm_result_refs[i];
+      if (r_ref != 0 && emit_expr(arena, out, r_ref, ctx, target_arch) != 0) { return -1; }
+      let end_len: i32 = format_label_id(end_buf, 64, end_id);
+      if (arch_emit_jmp(out, end_buf, end_len, target_arch) != 0) { return -1; }
+      i = i + 1;
+    }
+    let end_len: i32 = format_label_id(end_buf, 64, end_id);
+    if (arch_emit_label(out, end_buf, end_len, target_arch) != 0) { return -1; }
+    return 0;
+  }
+  /* EXPR_STRUCT_LIT：在 temp 区（ctx.next_offset 起）依次存各字段，rax 返回该区首址。 */
+  if (e.kind == ExprKind.EXPR_STRUCT_LIT && e.struct_lit_num_fields > 0 && e.struct_lit_num_fields <= 8) {
+    let temp_base: i32 = ctx.next_offset;
+    if (arch_emit_lea_rbp_to_rax(out, temp_base, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rax_to_rbx(out, target_arch) != 0) { return -1; }
+    let fi: i32 = 0;
+    while (fi < e.struct_lit_num_fields && fi < 8) {
+      let init_ref: i32 = e.struct_lit_init_refs[fi];
+      if (init_ref != 0) {
+        if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_store_rax_to_rbx_offset(out, fi * 8, 8, target_arch) != 0) { return -1; }
+      }
+      fi = fi + 1;
+    }
+    return arch_emit_mov_rbx_to_rax(out, target_arch);
+  }
+  /* EXPR_ARRAY_LIT：在 temp 区依次存各元素（每元素 4 字节 i32），rax 返回首址。 */
+  if (e.kind == ExprKind.EXPR_ARRAY_LIT && e.array_lit_num_elems > 0 && e.array_lit_num_elems <= 16) {
+    let temp_base: i32 = ctx.next_offset;
+    if (arch_emit_lea_rbp_to_rax(out, temp_base, target_arch) != 0) { return -1; }
+    if (arch_emit_mov_rax_to_rbx(out, target_arch) != 0) { return -1; }
+    let ai: i32 = 0;
+    while (ai < e.array_lit_num_elems && ai < 16) {
+      let elem_ref: i32 = e.array_lit_elem_refs[ai];
+      if (elem_ref != 0) {
+        if (emit_expr(arena, out, elem_ref, ctx, target_arch) != 0) { return -1; }
+        if (arch_emit_store_rax_to_rbx_offset(out, ai * 4, 4, target_arch) != 0) { return -1; }
+      }
+      ai = ai + 1;
+    }
+    return arch_emit_mov_rbx_to_rax(out, target_arch);
+  }
+  /* EXPR_ENUM_VARIANT：返回变体 tag（由 typeck 填 enum_variant_tag）。 */
+  if (e.kind == ExprKind.EXPR_ENUM_VARIANT) {
+    return arch_emit_ret_imm32(out, e.enum_variant_tag, target_arch);
+  }
+  if (e.const_folded_valid != 0) {
+    return arch_emit_ret_imm32(out, e.const_folded_val, target_arch);
+  }
+  return -1;
+}
+
+/**
+ * 与 emit_expr 对等的 ELF 机器码路径：结果在 %rax/w0，使用 enc_* 写入 elf_ctx.code；ta 0=x86_64，1=arm64。
+ */
+function emit_expr_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, expr_ref: i32, ctx: *AsmFuncCtx, ta: i32): i32 {
+  if (expr_ref == 0) {
+    return -1;
+  }
+  let e: Expr = ast_arena_expr_get(arena, expr_ref);
+  if (e.kind == ExprKind.EXPR_LIT) {
+    return enc_ret_imm32_arch(elf_ctx, e.int_val, ta);
+  }
+  if (e.kind == ExprKind.EXPR_BOOL_LIT) {
+    return enc_ret_imm32_arch(elf_ctx, e.int_val, ta);
+  }
+  if (e.kind == ExprKind.EXPR_FLOAT_LIT) {
+    return enc_mov_imm64_to_rax_arch(elf_ctx, e.float_bits_lo, e.float_bits_hi, ta);
+  }
+  if (e.kind == ExprKind.EXPR_RETURN && e.unary_operand_ref != 0) {
+    return emit_expr_elf(arena, elf_ctx, e.unary_operand_ref, ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_PANIC) {
+    let panic_name: [64]u8 = [115, 104, 117, 108, 97, 110, 103, 95, 112, 97, 110, 105, 99, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    return enc_call_arch(elf_ctx, panic_name, 15, ta);
+  }
+  if (e.kind == ExprKind.EXPR_NEG && e.unary_operand_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, e.unary_operand_ref, ctx, ta) != 0) { return -1; }
+    return enc_neg_eax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_LOGNOT && e.unary_operand_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, e.unary_operand_ref, ctx, ta) != 0) { return -1; }
+    if (enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_setz_movzbl_eax_arch(elf_ctx, ta);
+  }
+  /* 7.3 寄存器分配：右操作数为 EXPR_LIT 时 enc_mov_imm32_to_rbx，避免 push/pop。 */
+  if (e.kind == ExprKind.EXPR_ADD) {
+    if (e.binop_left_ref != 0) {
+      let le: Expr = ast_arena_expr_get(arena, e.binop_left_ref);
+      if (le.kind == ExprKind.EXPR_LIT) {
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, le.int_val, ta) != 0) { return -1; }
+        if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+        return enc_add_rax_rbx_arch(elf_ctx, ta);
+      }
+    }
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_add_rax_rbx_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_add_rax_rbx_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_SUB) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_sub_rbx_rax_then_mov_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_sub_rbx_rax_then_mov_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_MUL) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_imul_rbx_rax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_imul_rbx_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_DIV) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_idiv_rbx_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_pop_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_idiv_rbx_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_MOD) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        if (enc_cltd_arch(elf_ctx, ta) != 0) { return -1; }
+        if (enc_idiv_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+        return enc_mov_edx_to_eax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_pop_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_cltd_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_idiv_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_mov_edx_to_eax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_EQ || e.kind == ExprKind.EXPR_NE || e.kind == ExprKind.EXPR_LT || e.kind == ExprKind.EXPR_LE || e.kind == ExprKind.EXPR_GT || e.kind == ExprKind.EXPR_GE) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        if (enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0) { return -1; }
+        let cc: i32 = 0;
+        if (e.kind == ExprKind.EXPR_EQ) { cc = 0; }
+        if (e.kind == ExprKind.EXPR_NE) { cc = 1; }
+        if (e.kind == ExprKind.EXPR_LT) { cc = 2; }
+        if (e.kind == ExprKind.EXPR_LE) { cc = 3; }
+        if (e.kind == ExprKind.EXPR_GT) { cc = 4; }
+        if (e.kind == ExprKind.EXPR_GE) { cc = 5; }
+        return enc_cmp_setcc_movzbl_arch(elf_ctx, cc, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    let cc: i32 = 0;
+    if (e.kind == ExprKind.EXPR_EQ) { cc = 0; }
+    if (e.kind == ExprKind.EXPR_NE) { cc = 1; }
+    if (e.kind == ExprKind.EXPR_LT) { cc = 2; }
+    if (e.kind == ExprKind.EXPR_LE) { cc = 3; }
+    if (e.kind == ExprKind.EXPR_GT) { cc = 4; }
+    if (e.kind == ExprKind.EXPR_GE) { cc = 5; }
+    return enc_cmp_setcc_movzbl_arch(elf_ctx, cc, ta);
+  }
+  if (e.kind == ExprKind.EXPR_BITNOT && e.unary_operand_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, e.unary_operand_ref, ctx, ta) != 0) { return -1; }
+    return enc_not_eax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_BITAND && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_and_rbx_rax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_and_rbx_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_BITOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_or_rbx_rax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_or_rbx_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_BITXOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        return enc_xor_rbx_rax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_xor_rbx_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_SHL && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        if (enc_mov_rbx_to_ecx_arch(elf_ctx, ta) != 0) { return -1; }
+        return enc_shl_cl_eax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_mov_rbx_to_ecx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_shl_cl_eax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_SHR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    if (e.binop_right_ref != 0) {
+      let re: Expr = ast_arena_expr_get(arena, e.binop_right_ref);
+      if (re.kind == ExprKind.EXPR_LIT) {
+        if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, re.int_val, ta) != 0) { return -1; }
+        if (enc_mov_rbx_to_ecx_arch(elf_ctx, ta) != 0) { return -1; }
+        return enc_shr_cl_eax_arch(elf_ctx, ta);
+      }
+    }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_pop_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_mov_rbx_to_ecx_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_shr_cl_eax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_LOGAND && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let false_buf: [64]u8 = [46, 76, 95, 97, 110, 100, 95, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 97, 110, 100, 95, 101, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(false_buf, 9, 8, nc);
+    let false_len: i32 = 9 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 9, 8, nl);
+    let end_len: i32 = 9 + (n2 > 0 ? n2 : 1);
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_jz_arch(elf_ctx, false_buf, false_len, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_jz_arch(elf_ctx, false_buf, false_len, ta) != 0) { return -1; }
+    if (enc_ret_imm32_arch(elf_ctx, 1, ta) != 0) { return -1; }
+    if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+    if (platform.elf.elf_add_label(elf_ctx, false_buf, false_len) != 0) { return -1; }
+    if (enc_ret_imm32_arch(elf_ctx, 0, ta) != 0) { return -1; }
+    if (platform.elf.elf_add_label(elf_ctx, end_buf, end_len) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_LOGOR && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let true_buf: [64]u8 = [46, 76, 95, 111, 114, 95, 116, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 111, 114, 95, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(true_buf, 9, 8, nc);
+    let true_len: i32 = 9 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 9, 8, nl);
+    let end_len: i32 = 9 + (n2 > 0 ? n2 : 1);
+    if (emit_expr_elf(arena, elf_ctx, e.binop_left_ref, ctx, ta) != 0) { return -1; }
+    if (enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_jnz_arch(elf_ctx, true_buf, true_len, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    if (enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_jnz_arch(elf_ctx, true_buf, true_len, ta) != 0) { return -1; }
+    if (enc_ret_imm32_arch(elf_ctx, 0, ta) != 0) { return -1; }
+    if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+    if (platform.elf.elf_add_label(elf_ctx, true_buf, true_len) != 0) { return -1; }
+    if (enc_ret_imm32_arch(elf_ctx, 1, ta) != 0) { return -1; }
+    if (platform.elf.elf_add_label(elf_ctx, end_buf, end_len) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_ASSIGN && e.binop_left_ref != 0 && e.binop_right_ref != 0) {
+    let left: Expr = ast_arena_expr_get(arena, e.binop_left_ref);
+    if (left.kind != ExprKind.EXPR_VAR) { return -1; }
+    let off: i32 = local_offset(ctx, left.var_name, left.var_name_len);
+    if (off < 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.binop_right_ref, ctx, ta) != 0) { return -1; }
+    return enc_store_rax_to_rbp_arch(elf_ctx, off, ta);
+  }
+  if (e.kind == ExprKind.EXPR_INDEX && e.index_base_ref != 0 && e.index_index_ref != 0) {
+    let base: Expr = ast_arena_expr_get(arena, e.index_base_ref);
+    if (base.kind == ExprKind.EXPR_VAR) {
+      let off: i32 = local_offset(ctx, base.var_name, base.var_name_len);
+      if (off < 0) { return -1; }
+      if (enc_lea_rbp_to_rax_arch(elf_ctx, off, ta) != 0) { return -1; }
+    } else {
+      if (emit_expr_elf(arena, elf_ctx, e.index_base_ref, ctx, ta) != 0) { return -1; }
+    }
+    /* base 类型为 slice 时：rax 为 (ptr,len) 的地址，从 [rax] 取 ptr 到 rax。 */
+    if (base.resolved_type_ref != 0) {
+      let bt: Type = ast_arena_type_get(arena, base.resolved_type_ref);
+      if (bt.kind == TypeKind.TYPE_SLICE) {
+        if (enc_load_64_from_rax_arch(elf_ctx, ta) != 0) { return -1; }
+      }
+    }
+    if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.index_index_ref, ctx, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_pop_rax_arch(elf_ctx, ta) != 0) { return -1; }
+    if (enc_rax_plus_rbx_scale4_arch(elf_ctx, ta) != 0) { return -1; }
+    return enc_load_32_from_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_FIELD_ACCESS && e.field_access_base_ref != 0) {
+    let base: Expr = ast_arena_expr_get(arena, e.field_access_base_ref);
+    if (base.kind == ExprKind.EXPR_VAR) {
+      let off: i32 = local_offset(ctx, base.var_name, base.var_name_len);
+      if (off < 0) { return -1; }
+      if (enc_lea_rbp_to_rax_arch(elf_ctx, off, ta) != 0) { return -1; }
+    } else {
+      if (emit_expr_elf(arena, elf_ctx, e.field_access_base_ref, ctx, ta) != 0) { return -1; }
+    }
+    if (enc_add_imm_to_rax_arch(elf_ctx, e.field_access_offset, ta) != 0) { return -1; }
+    return enc_load_64_from_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_VAR) {
+    let off: i32 = local_offset(ctx, e.var_name, e.var_name_len);
+    if (off < 0) { return -1; }
+    return enc_load_rbp_to_rax_arch(elf_ctx, off, ta);
+  }
+  if (e.kind == ExprKind.EXPR_CALL) {
+    return emit_expr_elf_call(arena, elf_ctx, e, ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_METHOD_CALL && e.method_call_name_len > 0) {
+    return emit_expr_elf_method_call(arena, elf_ctx, e, ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_IF && e.if_cond_ref != 0 && e.if_then_ref != 0) {
+    let else_buf: [64]u8 = [46, 76, 95, 101, 108, 115, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 101, 110, 100, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(else_buf, 8, 8, nc);
+    let else_len: i32 = 8 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 7, 8, nl);
+    let end_len: i32 = 7 + (n2 > 0 ? n2 : 1);
+    if (emit_expr_elf(arena, elf_ctx, e.if_cond_ref, ctx, ta) != 0) { return -1; }
+    if (enc_jz_arch(elf_ctx, else_buf, else_len, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.if_then_ref, ctx, ta) != 0) { return -1; }
+    if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+    if (enc_label_arch(elf_ctx, else_buf, else_len, 0, ta) != 0) { return -1; }
+    if (e.if_else_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, e.if_else_ref, ctx, ta) != 0) { return -1; }
+    }
+    if (enc_label_arch(elf_ctx, end_buf, end_len, 0, ta) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_TERNARY && e.if_cond_ref != 0 && e.if_then_ref != 0) {
+    let else_buf: [64]u8 = [46, 76, 95, 101, 108, 115, 101, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let end_buf: [64]u8 = [46, 76, 95, 101, 110, 100, 95, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let nc: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let nl: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + 1;
+    let n1: i32 = format_i32_to_buf(else_buf, 8, 8, nc);
+    let else_len: i32 = 8 + (n1 > 0 ? n1 : 1);
+    let n2: i32 = format_i32_to_buf(end_buf, 7, 8, nl);
+    let end_len: i32 = 7 + (n2 > 0 ? n2 : 1);
+    if (emit_expr_elf(arena, elf_ctx, e.if_cond_ref, ctx, ta) != 0) { return -1; }
+    if (enc_jz_arch(elf_ctx, else_buf, else_len, ta) != 0) { return -1; }
+    if (emit_expr_elf(arena, elf_ctx, e.if_then_ref, ctx, ta) != 0) { return -1; }
+    if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+    if (enc_label_arch(elf_ctx, else_buf, else_len, 0, ta) != 0) { return -1; }
+    if (e.if_else_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, e.if_else_ref, ctx, ta) != 0) { return -1; }
+    }
+    if (enc_label_arch(elf_ctx, end_buf, end_len, 0, ta) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_BLOCK && e.block_ref != 0) {
+    let inner: Block = ast_arena_block_get(arena, e.block_ref);
+    if (emit_block_inits_elf(arena, elf_ctx, &inner, ctx, ta) != 0) { return -1; }
+    if (inner.final_expr_ref != 0) {
+      return emit_expr_elf(arena, elf_ctx, inner.final_expr_ref, ctx, ta);
+    }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_MATCH && e.match_matched_ref != 0 && e.match_num_arms > 0) {
+    if (emit_expr_elf(arena, elf_ctx, e.match_matched_ref, ctx, ta) != 0) { return -1; }
+    let base: i32 = ctx.label_counter;
+    ctx.label_counter = ctx.label_counter + e.match_num_arms + 1;
+    let end_id: i32 = base + e.match_num_arms;
+    let res_buf: [64]u8 = [];
+    let end_buf: [64]u8 = [];
+    let i: i32 = 0;
+    while (i < e.match_num_arms && i < 16) {
+      if (e.match_arm_is_wildcard[i] != 0) {
+        let r_ref: i32 = e.match_arm_result_refs[i];
+        if (r_ref != 0 && emit_expr_elf(arena, elf_ctx, r_ref, ctx, ta) != 0) { return -1; }
+        let end_len: i32 = format_label_id(end_buf, 64, end_id);
+        if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+      } else {
+        let cmp_val: i32 = e.match_arm_is_enum_variant[i] != 0 ? e.match_arm_variant_index[i] : e.match_arm_lit_val[i];
+        if (enc_push_rax_arch(elf_ctx, ta) != 0) { return -1; }
+        if (enc_mov_imm32_to_rbx_arch(elf_ctx, cmp_val, ta) != 0) { return -1; }
+        if (enc_pop_rax_arch(elf_ctx, ta) != 0) { return -1; }
+        if (enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0) { return -1; }
+        let res_len: i32 = format_label_id(res_buf, 64, base + i);
+        if (enc_jz_arch(elf_ctx, res_buf, res_len, ta) != 0) { return -1; }
+      }
+      i = i + 1;
+    }
+    i = 0;
+    while (i < e.match_num_arms && i < 16) {
+      let res_len: i32 = format_label_id(res_buf, 64, base + i);
+      if (enc_label_arch(elf_ctx, res_buf, res_len, 0, ta) != 0) { return -1; }
+      let r_ref: i32 = e.match_arm_result_refs[i];
+      if (r_ref != 0 && emit_expr_elf(arena, elf_ctx, r_ref, ctx, ta) != 0) { return -1; }
+      let end_len: i32 = format_label_id(end_buf, 64, end_id);
+      if (enc_jmp_arch(elf_ctx, end_buf, end_len, ta) != 0) { return -1; }
+      i = i + 1;
+    }
+    let end_len: i32 = format_label_id(end_buf, 64, end_id);
+    if (enc_label_arch(elf_ctx, end_buf, end_len, 0, ta) != 0) { return -1; }
+    return 0;
+  }
+  if (e.kind == ExprKind.EXPR_STRUCT_LIT && e.struct_lit_num_fields > 0 && e.struct_lit_num_fields <= 8) {
+    let temp_base: i32 = ctx.next_offset;
+    if (enc_lea_rbp_to_rax_arch(elf_ctx, temp_base, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    let fi: i32 = 0;
+    while (fi < e.struct_lit_num_fields && fi < 8) {
+      let init_ref: i32 = e.struct_lit_init_refs[fi];
+      if (init_ref != 0) {
+        if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
+        if (enc_store_rax_to_rbx_offset_arch(elf_ctx, fi * 8, 8, ta) != 0) { return -1; }
+      }
+      fi = fi + 1;
+    }
+    return enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_ARRAY_LIT && e.array_lit_num_elems > 0 && e.array_lit_num_elems <= 16) {
+    let temp_base: i32 = ctx.next_offset;
+    if (enc_lea_rbp_to_rax_arch(elf_ctx, temp_base, ta) != 0) { return -1; }
+    if (enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0) { return -1; }
+    let ai: i32 = 0;
+    while (ai < e.array_lit_num_elems && ai < 16) {
+      let elem_ref: i32 = e.array_lit_elem_refs[ai];
+      if (elem_ref != 0) {
+        if (emit_expr_elf(arena, elf_ctx, elem_ref, ctx, ta) != 0) { return -1; }
+        if (enc_store_rax_to_rbx_offset_arch(elf_ctx, ai * 4, 4, ta) != 0) { return -1; }
+      }
+      ai = ai + 1;
+    }
+    return enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+  }
+  if (e.kind == ExprKind.EXPR_ENUM_VARIANT) {
+    return enc_ret_imm32_arch(elf_ctx, e.enum_variant_tag, ta);
+  }
+  if (e.const_folded_valid != 0) {
+    return enc_ret_imm32_arch(elf_ctx, e.const_folded_val, ta);
+  }
+  return -1;
+}
+
+/** ELF 路径：块的 const/let 初始化。ta 0=x86_64，1=arm64。 */
+function emit_block_inits_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, block: *Block, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let idx: i32 = 0;
+  let i: i32 = 0;
+  while (i < block.num_consts && idx < ctx.num_locals) {
+    let init_ref: i32 = block.const_decls[i].init_ref;
+    if (init_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
+      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+    }
+    idx = idx + 1;
+    i = i + 1;
+  }
+  i = 0;
+  while (i < block.num_lets && idx < ctx.num_locals) {
+    let init_ref: i32 = block.let_decls[i].init_ref;
+    if (init_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
+      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+    }
+    idx = idx + 1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** ELF 路径：while 循环。ta 0=x86_64，1=arm64。 */
+function emit_while_loop_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, wloop: *WhileLoop, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let loop_buf: [64]u8 = [];
+  let exit_buf: [64]u8 = [];
+  let loop_len: i32 = emit_next_label(ctx, loop_buf, 20);
+  let exit_len: i32 = emit_next_label(ctx, exit_buf, 20);
+  if (enc_label_arch(elf_ctx, loop_buf, loop_len, 0, ta) != 0) { return -1; }
+  if (emit_expr_elf(arena, elf_ctx, wloop.cond_ref, ctx, ta) != 0) { return -1; }
+  if (enc_jz_arch(elf_ctx, exit_buf, exit_len, ta) != 0) { return -1; }
+  let body_block: Block = ast_arena_block_get(arena, wloop.body_ref);
+  if (body_block.final_expr_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, body_block.final_expr_ref, ctx, ta) != 0) { return -1; }
+  }
+  if (enc_jmp_arch(elf_ctx, loop_buf, loop_len, ta) != 0) { return -1; }
+  if (enc_label_arch(elf_ctx, exit_buf, exit_len, 0, ta) != 0) { return -1; }
+  return 0;
+}
+
+/** ELF 路径：for 循环。ta 0=x86_64，1=arm64。 */
+function emit_for_loop_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, floop: *ForLoop, ctx: *AsmFuncCtx, ta: i32): i32 {
+  if (floop.init_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, floop.init_ref, ctx, ta) != 0) { return -1; }
+  }
+  let loop_buf: [64]u8 = [];
+  let exit_buf: [64]u8 = [];
+  let loop_len: i32 = emit_next_label(ctx, loop_buf, 20);
+  let exit_len: i32 = emit_next_label(ctx, exit_buf, 20);
+  if (enc_label_arch(elf_ctx, loop_buf, loop_len, 0, ta) != 0) { return -1; }
+  if (floop.cond_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, floop.cond_ref, ctx, ta) != 0) { return -1; }
+    if (enc_jz_arch(elf_ctx, exit_buf, exit_len, ta) != 0) { return -1; }
+  }
+  let body_block: Block = ast_arena_block_get(arena, floop.body_ref);
+  if (body_block.final_expr_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, body_block.final_expr_ref, ctx, ta) != 0) { return -1; }
+  }
+  if (floop.step_ref != 0) {
+    if (emit_expr_elf(arena, elf_ctx, floop.step_ref, ctx, ta) != 0) { return -1; }
+  }
+  if (enc_jmp_arch(elf_ctx, loop_buf, loop_len, ta) != 0) { return -1; }
+  if (enc_label_arch(elf_ctx, exit_buf, exit_len, 0, ta) != 0) { return -1; }
+  return 0;
+}
+
+/** ELF 路径：按 stmt_order 发射块体。ta 0=x86_64，1=arm64。 */
+function emit_block_body_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, block: *Block, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let i: i32 = 0;
+  while (i < block.num_stmt_order && i < 96) {
+    let item: StmtOrderItem = block.stmt_order[i];
+    if (item.kind == 0) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_consts && idx < ctx.num_locals) {
+        let init_ref: i32 = block.const_decls[idx].init_ref;
+        if (init_ref != 0) {
+          if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
+          if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+        }
+      }
+    } else if (item.kind == 1) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_lets) {
+        let slot: i32 = block.num_consts + idx;
+        if (slot < ctx.num_locals) {
+          let init_ref: i32 = block.let_decls[idx].init_ref;
+          if (init_ref != 0) {
+            if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
+            if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[slot].offset, ta) != 0) { return -1; }
+          }
+        }
+      }
+    } else if (item.kind == 2) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_expr_stmts) {
+        let expr_ref: i32 = block.expr_stmt_refs[idx];
+        if (expr_ref != 0) {
+          if (emit_expr_elf(arena, elf_ctx, expr_ref, ctx, ta) != 0) { return -1; }
+        }
+      }
+    } else if (item.kind == 3) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_loops) {
+        if (emit_while_loop_elf(arena, elf_ctx, &block.loops[idx], ctx, ta) != 0) { return -1; }
+      }
+    } else if (item.kind == 4) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_for_loops) {
+        if (emit_for_loop_elf(arena, elf_ctx, &block.for_loops[idx], ctx, ta) != 0) { return -1; }
+      }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 发射块的 const/let 初始化；target_arch 用于分派 emit_expr / emit_store。
+ */
+function emit_block_inits(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let idx: i32 = 0;
+  let i: i32 = 0;
+  while (i < block.num_consts && idx < ctx.num_locals) {
+    let init_ref: i32 = block.const_decls[i].init_ref;
+    if (init_ref != 0) {
+      if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
+      if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+    }
+    idx = idx + 1;
+    i = i + 1;
+  }
+  i = 0;
+  while (i < block.num_lets && idx < ctx.num_locals) {
+    let init_ref: i32 = block.let_decls[i].init_ref;
+    if (init_ref != 0) {
+      if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
+      if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+    }
+    idx = idx + 1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 生成唯一局部标签到 buf，返回长度。buf 格式为 ".L_" + 数字。 */
+function emit_next_label(ctx: *AsmFuncCtx, buf: *u8, buf_size: i32): i32 {
+  buf[0] = 46;
+  buf[1] = 76;
+  buf[2] = 95;
+  let n: i32 = format_i32_to_buf(buf, 3, buf_size - 3, ctx.label_counter);
+  ctx.label_counter = ctx.label_counter + 1;
+  if (n <= 0) {
+    n = 1;
+  }
+  return 3 + n;
+}
+
+/** 将 label 序号 id 格式化为 ".L_<id>" 写入 buf，返回长度（不推进 ctx.label_counter）。用于 match 多分支标签。 */
+function format_label_id(buf: *u8, buf_size: i32, id: i32): i32 {
+  buf[0] = 46;
+  buf[1] = 76;
+  buf[2] = 95;
+  let n: i32 = format_i32_to_buf(buf, 3, buf_size - 3, id);
+  if (n <= 0) { n = 1; }
+  return 3 + n;
+}
+
+/** 将 break/continue 标签写入 ctx，供 EXPR_BREAK/EXPR_CONTINUE 使用；返回前可恢复旧值以支持嵌套循环。 */
+function ctx_set_loop_labels(ctx: *AsmFuncCtx, exit_buf: *u8, exit_len: i32, loop_buf: *u8, loop_len: i32): void {
+  let k: i32 = 0;
+  while (k < exit_len && k < 64) {
+    ctx.break_label[k] = exit_buf[k];
+    k = k + 1;
+  }
+  ctx.break_len = exit_len;
+  k = 0;
+  while (k < loop_len && k < 64) {
+    ctx.continue_label[k] = loop_buf[k];
+    k = k + 1;
+  }
+  ctx.continue_len = loop_len;
+}
+
+/** 仅发射块内与循环体相关的部分：stmt_order 中 kind 2(expr)/3(while)/4(for) 及 final_expr；不发射 const/let 初始化（避免内层块槽与 ctx 错位）。 */
+function emit_loop_body_content(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let i: i32 = 0;
+  while (i < block.num_stmt_order && i < 96) {
+    let item: StmtOrderItem = block.stmt_order[i];
+    if (item.kind == 2) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_expr_stmts) {
+        let expr_ref: i32 = block.expr_stmt_refs[idx];
+        if (expr_ref != 0) {
+          if (emit_expr(arena, out, expr_ref, ctx, target_arch) != 0) { return -1; }
+        }
+      }
+    } else if (item.kind == 3) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_loops) {
+        if (emit_while_loop(arena, out, &block.loops[idx], ctx, target_arch) != 0) { return -1; }
+      }
+    } else if (item.kind == 4) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_for_loops) {
+        if (emit_for_loop(arena, out, &block.for_loops[idx], ctx, target_arch) != 0) { return -1; }
+      }
+    }
+    i = i + 1;
+  }
+  if (block.final_expr_ref != 0) {
+    if (emit_expr(arena, out, block.final_expr_ref, ctx, target_arch) != 0) { return -1; }
+  }
+  return 0;
+}
+
+/** 发射 while 循环；设置 break/continue 标签并发射循环体（含 break/continue 的语句）。 */
+function emit_while_loop(arena: *ASTArena, out: *CodegenOutBuf, wloop: *WhileLoop, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let loop_buf: [64]u8 = [];
+  let exit_buf: [64]u8 = [];
+  let loop_len: i32 = emit_next_label(ctx, loop_buf, 20);
+  let exit_len: i32 = emit_next_label(ctx, exit_buf, 20);
+  if (arch_emit_label(out, loop_buf, loop_len, target_arch) != 0) { return -1; }
+  if (emit_expr(arena, out, wloop.cond_ref, ctx, target_arch) != 0) { return -1; }
+  if (arch_emit_jz(out, exit_buf, exit_len, target_arch) != 0) { return -1; }
+  ctx_set_loop_labels(ctx, exit_buf, exit_len, loop_buf, loop_len);
+  let body_block: Block = ast_arena_block_get(arena, wloop.body_ref);
+  if (emit_loop_body_content(arena, out, &body_block, ctx, target_arch) != 0) { return -1; }
+  if (arch_emit_jmp(out, loop_buf, loop_len, target_arch) != 0) { return -1; }
+  if (arch_emit_label(out, exit_buf, exit_len, target_arch) != 0) { return -1; }
+  ctx.break_len = 0;
+  ctx.continue_len = 0;
+  return 0;
+}
+
+/** 发射 for 循环；设置 break/continue 并发射循环体。 */
+function emit_for_loop(arena: *ASTArena, out: *CodegenOutBuf, floop: *ForLoop, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  if (floop.init_ref != 0) {
+    if (emit_expr(arena, out, floop.init_ref, ctx, target_arch) != 0) { return -1; }
+  }
+  let loop_buf: [64]u8 = [];
+  let exit_buf: [64]u8 = [];
+  let loop_len: i32 = emit_next_label(ctx, loop_buf, 20);
+  let exit_len: i32 = emit_next_label(ctx, exit_buf, 20);
+  if (arch_emit_label(out, loop_buf, loop_len, target_arch) != 0) { return -1; }
+  if (floop.cond_ref != 0) {
+    if (emit_expr(arena, out, floop.cond_ref, ctx, target_arch) != 0) { return -1; }
+    if (arch_emit_jz(out, exit_buf, exit_len, target_arch) != 0) { return -1; }
+  }
+  ctx_set_loop_labels(ctx, exit_buf, exit_len, loop_buf, loop_len);
+  let body_block: Block = ast_arena_block_get(arena, floop.body_ref);
+  if (emit_loop_body_content(arena, out, &body_block, ctx, target_arch) != 0) { return -1; }
+  if (floop.step_ref != 0) {
+    if (emit_expr(arena, out, floop.step_ref, ctx, target_arch) != 0) { return -1; }
+  }
+  if (arch_emit_jmp(out, loop_buf, loop_len, target_arch) != 0) { return -1; }
+  if (arch_emit_label(out, exit_buf, exit_len, target_arch) != 0) { return -1; }
+  ctx.break_len = 0;
+  ctx.continue_len = 0;
+  return 0;
+}
+
+/**
+ * 按 stmt_order 发射块体；target_arch 用于分派 emit_expr / store / while / for。
+ */
+function emit_block_body(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  let i: i32 = 0;
+  while (i < block.num_stmt_order && i < 96) {
+    let item: StmtOrderItem = block.stmt_order[i];
+    if (item.kind == 0) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_consts && idx < ctx.num_locals) {
+        let init_ref: i32 = block.const_decls[idx].init_ref;
+        if (init_ref != 0) {
+          if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
+          if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+        }
+      }
+    } else if (item.kind == 1) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_lets) {
+        let slot: i32 = block.num_consts + idx;
+        if (slot < ctx.num_locals) {
+          let init_ref: i32 = block.let_decls[idx].init_ref;
+          if (init_ref != 0) {
+            if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
+            if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot].offset, target_arch) != 0) { return -1; }
+          }
+        }
+      }
+    } else if (item.kind == 2) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_expr_stmts) {
+        let expr_ref: i32 = block.expr_stmt_refs[idx];
+        if (expr_ref != 0) {
+          if (emit_expr(arena, out, expr_ref, ctx, target_arch) != 0) { return -1; }
+        }
+      }
+    } else if (item.kind == 3) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_loops) {
+        if (emit_while_loop(arena, out, &block.loops[idx], ctx, target_arch) != 0) { return -1; }
+      }
+    } else if (item.kind == 4) {
+      let idx: i32 = item.idx;
+      if (idx < block.num_for_loops) {
+        if (emit_for_loop(arena, out, &block.for_loops[idx], ctx, target_arch) != 0) { return -1; }
+      }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 汇编后端入口：将 Module 生成汇编文本写入 out；pipeline_ctx.target_arch 决定架构（0=x86_64，1=arm64）。
+ * x86_64 与 arm64 均走同一套完整循环（section/globl/label、prologue、block_body、emit_expr、epilogue），按 target_arch 分派各 emit_*。
+ */
+function asm_codegen_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf, pipeline_ctx: *PipelineDepCtx): i32 {
+  let ta: i32 = pipeline_ctx.target_arch;
+  let z: LocalSlot = LocalSlot { name: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], name_len: 0, offset: 0 };
+  let lbl: [64]u8 = [];
+  let ctx: AsmFuncCtx = AsmFuncCtx { frame_size: 0, next_offset: 0, locals: [z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z], num_locals: 0, label_counter: 0, break_label: lbl, break_len: 0, continue_label: lbl, continue_len: 0 };
+  let i: i32 = 0;
+  while (i < module.num_funcs && i < 256) {
+    if (i == 0) {
+      if (arch_emit_section_text(out, ta) != 0) { return -1; }
+    }
+    let f: Func = module.funcs[i];
+    if (f.is_extern != 0) {
+      i = i + 1;
+      continue;
+    }
+    ctx_reset(&ctx);
+    if (arch_emit_globl(out, f.name, f.name_len, ta) != 0) { return -1; }
+    if (arch_emit_label(out, f.name, f.name_len, ta) != 0) { return -1; }
+    let frame_sz: i32 = 0;
+    if (f.body_ref != 0) {
+      let blk: Block = ast_arena_block_get(arena, f.body_ref);
+      frame_sz = compute_frame_size(&blk);
+      fill_local_slots(&ctx, &blk);
+    }
+    if (arch_emit_prologue(out, frame_sz, ta) != 0) { return -1; }
+    if (f.body_ref != 0) {
+      let blk: Block = ast_arena_block_get(arena, f.body_ref);
+      if (blk.num_stmt_order > 0) {
+        if (emit_block_body(arena, out, &blk, &ctx, ta) != 0) { return -1; }
+      } else {
+        if (emit_block_inits(arena, out, &blk, &ctx, ta) != 0) { return -1; }
+      }
+    }
+    let result_ref: i32 = get_return_expr_ref(arena, &f);
+    if (result_ref != 0) {
+      if (emit_expr(arena, out, result_ref, &ctx, ta) != 0) { return -1; }
+    }
+    if (arch_emit_epilogue(out, frame_sz, ta) != 0) { return -1; }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 将 Module 生成机器码写入 elf_ctx；pipeline_ctx.target_arch 决定 x86_64(0) 或 arm64(1)。
+ * 调用方需在返回 0 后执行 elf_resolve_patches(elf_ctx)，再 write_elf_o_to_buf 写出 ELF。
+ */
+function asm_codegen_ast_to_elf(module: *Module, arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, pipeline_ctx: *PipelineDepCtx): i32 {
+  let ta: i32 = pipeline_ctx.target_arch;
+  if (ta == 1) {
+    elf_ctx.e_machine = 183;
+    elf_ctx.reloc_type_r_pc32 = 283;
+  } else if (ta == 2) {
+    elf_ctx.e_machine = 243;
+    elf_ctx.reloc_type_r_pc32 = 32;
+  } else {
+    elf_ctx.e_machine = 62;
+    elf_ctx.reloc_type_r_pc32 = 2;
+  }
+  let z: LocalSlot = LocalSlot { name: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], name_len: 0, offset: 0 };
+  let lbl: [64]u8 = [];
+  let ctx: AsmFuncCtx = AsmFuncCtx { frame_size: 0, next_offset: 0, locals: [z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z, z], num_locals: 0, label_counter: 0, break_label: lbl, break_len: 0, continue_label: lbl, continue_len: 0 };
+  let i: i32 = 0;
+  while (i < module.num_funcs && i < 256) {
+    let f: Func = module.funcs[i];
+    if (f.is_extern != 0) {
+      i = i + 1;
+      continue;
+    }
+    ctx_reset(&ctx);
+    if (enc_label_arch(elf_ctx, f.name, f.name_len, 1, ta) != 0) { return -1; }
+    let frame_sz: i32 = 0;
+    if (f.body_ref != 0) {
+      let blk: Block = ast_arena_block_get(arena, f.body_ref);
+      frame_sz = compute_frame_size(&blk);
+      fill_local_slots(&ctx, &blk);
+    }
+    if (enc_prologue_arch(elf_ctx, frame_sz, ta) != 0) { return -1; }
+    if (f.body_ref != 0) {
+      let blk: Block = ast_arena_block_get(arena, f.body_ref);
+      if (blk.num_stmt_order > 0) {
+        if (emit_block_body_elf(arena, elf_ctx, &blk, &ctx, ta) != 0) { return -1; }
+      } else {
+        if (emit_block_inits_elf(arena, elf_ctx, &blk, &ctx, ta) != 0) { return -1; }
+      }
+    }
+    let result_ref: i32 = get_return_expr_ref(arena, &f);
+    if (result_ref != 0) {
+      if (emit_expr_elf(arena, elf_ctx, result_ref, &ctx, ta) != 0) { return -1; }
+    }
+    if (enc_epilogue_arch(elf_ctx, ta) != 0) { return -1; }
+    i = i + 1;
+  }
+  return 0;
+}

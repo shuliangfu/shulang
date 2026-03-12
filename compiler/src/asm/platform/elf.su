@@ -1,0 +1,505 @@
+// elf.su — ELF64 可重定位 .o 写出（7.4 完整功能）
+//
+// 职责：将 backend 产出的机器码字节 + 符号/重定位信息写成 ELF64 ET_REL 文件；
+// 支持多函数、局部标签补丁（jz/jmp）、call 重定位（.rela.text）。
+// 依赖：codegen（CodegenOutBuf 作 ELF 输出缓冲）；由 backend 在「出 .o」路径下填充 ElfCodegenCtx。
+//
+
+import codegen;
+
+/** 机器码缓冲区：data[0..len-1] 为已编码指令；最大长度 32768 字节。 */
+struct ElfCodeBuf {
+  data: [32768]u8;
+  len: i32;
+}
+
+/** 局部标签：名称与在 .text 中的偏移（用于 jz/jmp 补丁）。 */
+struct ElfLabelEntry {
+  name: [64]u8;
+  name_len: i32;
+  offset: i32;
+}
+
+/** 待补丁的 rel32：写入位置与目标标签名（补丁时查 LabelEntry 得到目标 offset）。x86：32 位 rel32；arm64：patch_imm_bits 26=B/BL，19=B.cond/CBZ/CBNZ。 */
+struct ElfPatchEntry {
+  rel32_offset: i32;
+  name: [64]u8;
+  name_len: i32;
+  /** 0=x86 写 32 位 rel32；26=arm64 写指令低 26 位；19=arm64 写指令 imm19。 */
+  patch_imm_bits: i32;
+}
+
+/** 对外符号重定位：call 目标等，需写入 .rela.text。 */
+struct ElfRelocEntry {
+  offset: i32;
+  name: [64]u8;
+  name_len: i32;
+}
+
+/** 导出符号（函数）：名称与在 .text 中的偏移。 */
+struct ElfSymEntry {
+  name: [64]u8;
+  name_len: i32;
+  offset: i32;
+}
+
+/** ELF 代码生成上下文：编码阶段填充 code/labels/patches/relocs/syms，resolve 后写 ELF。e_machine 由 backend 在编码前设置（62=x86_64，183=arm64）。 */
+struct ElfCodegenCtx {
+  code: ElfCodeBuf;
+  labels: [64]ElfLabelEntry;
+  num_labels: i32;
+  patches: [128]ElfPatchEntry;
+  num_patches: i32;
+  relocs: [32]ElfRelocEntry;
+  num_relocs: i32;
+  syms: [16]ElfSymEntry;
+  num_syms: i32;
+  /** ELF e_machine：62=EM_X86_64，183=EM_AARCH64；write_elf_o_to_buf 写入 ehdr[18..19]。 */
+  e_machine: i32;
+  /** .rela.text 中 PC 相对重定位类型：2=R_X86_64_PC32，283=R_AARCH64_CALL26；由 backend 按架构设置。 */
+  reloc_type_r_pc32: i32;
+  /** arm64 用：enc_prologue 写入，enc_epilogue 读出以发射 add sp, sp, #current_frame_size。 */
+  current_frame_size: i32;
+}
+
+/** 将 i32 低 8 位转为 u8（typeck 要求赋值给 [N]u8 时为 u8）。 */
+function elf_to_u8(val: i32): u8 {
+  let tab: [256]u8 = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255];
+  let lo: i32 = val & 255;
+  return tab[lo];
+}
+
+/** 重置 elf_ctx，用于新一轮编码前。e_machine 不在此清零，由 backend 在编码前设置。 */
+function elf_ctx_reset(ctx: *ElfCodegenCtx): void {
+  ctx.code.len = 0;
+  ctx.num_labels = 0;
+  ctx.num_patches = 0;
+  ctx.num_relocs = 0;
+  ctx.num_syms = 0;
+}
+
+/** 向 ctx.code 追加 n 字节 ptr[0..n-1]。返回 0 成功，缓冲区满或 n 会导致越界时返回 -1。上界 32768 与 ElfCodeBuf 一致。 */
+function append_elf_bytes(ctx: *ElfCodegenCtx, ptr: *u8, n: i32): i32 {
+  if (n < 0 || ctx.code.len + n > 32768) {
+    return -1;
+  }
+  let i: i32 = 0;
+  while (i < n) {
+    ctx.code.data[ctx.code.len] = ptr[i];
+    ctx.code.len = ctx.code.len + 1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 记录标签：名称为 name[0..name_len-1]，当前 code.len 即其偏移。 */
+function elf_add_label(ctx: *ElfCodegenCtx, name: [64]u8, name_len: i32): i32 {
+  if (ctx.num_labels >= 64) {
+    return -1;
+  }
+  let k: i32 = 0;
+  while (k < name_len && k < 64) {
+    ctx.labels[ctx.num_labels].name[k] = name[k];
+    k = k + 1;
+  }
+  ctx.labels[ctx.num_labels].name_len = name_len;
+  ctx.labels[ctx.num_labels].offset = ctx.code.len;
+  ctx.num_labels = ctx.num_labels + 1;
+  return 0;
+}
+
+/** 记录待补丁：rel32 应写入的位置与目标标签名（x86 用，patch_imm_bits=0）。 */
+function elf_add_patch(ctx: *ElfCodegenCtx, rel32_offset: i32, name: [64]u8, name_len: i32): i32 {
+  return elf_add_patch_with_bits(ctx, rel32_offset, name, name_len, 0);
+}
+
+/** 记录待补丁（arm64 用）：imm_bits 26=B/BL，19=CBZ/CBNZ/B.cond。 */
+function elf_add_patch_with_bits(ctx: *ElfCodegenCtx, rel32_offset: i32, name: [64]u8, name_len: i32, imm_bits: i32): i32 {
+  if (ctx.num_patches >= 128) {
+    return -1;
+  }
+  ctx.patches[ctx.num_patches].rel32_offset = rel32_offset;
+  let k: i32 = 0;
+  while (k < name_len && k < 64) {
+    ctx.patches[ctx.num_patches].name[k] = name[k];
+    k = k + 1;
+  }
+  ctx.patches[ctx.num_patches].name_len = name_len;
+  ctx.patches[ctx.num_patches].patch_imm_bits = imm_bits;
+  ctx.num_patches = ctx.num_patches + 1;
+  return 0;
+}
+
+/** 记录重定位：offset 为 .text 内 rel32 位置，name 为符号名。 */
+function elf_add_reloc(ctx: *ElfCodegenCtx, offset: i32, name: [64]u8, name_len: i32): i32 {
+  if (ctx.num_relocs >= 32) {
+    return -1;
+  }
+  ctx.relocs[ctx.num_relocs].offset = offset;
+  let k: i32 = 0;
+  while (k < name_len && k < 64) {
+    ctx.relocs[ctx.num_relocs].name[k] = name[k];
+    k = k + 1;
+  }
+  ctx.relocs[ctx.num_relocs].name_len = name_len;
+  ctx.num_relocs = ctx.num_relocs + 1;
+  return 0;
+}
+
+/** 记录导出符号（函数）：名称与在 .text 中的偏移。 */
+function elf_add_sym(ctx: *ElfCodegenCtx, name: [64]u8, name_len: i32, offset: i32): i32 {
+  if (ctx.num_syms >= 16) {
+    return -1;
+  }
+  let k: i32 = 0;
+  while (k < name_len && k < 64) {
+    ctx.syms[ctx.num_syms].name[k] = name[k];
+    k = k + 1;
+  }
+  ctx.syms[ctx.num_syms].name_len = name_len;
+  ctx.syms[ctx.num_syms].offset = offset;
+  ctx.num_syms = ctx.num_syms + 1;
+  return 0;
+}
+
+/** 比较两段名字是否相等（按 name_len 长度）。 */
+function elf_name_eq(a: [64]u8, a_len: i32, b: [64]u8, b_len: i32): i32 {
+  if (a_len != b_len) {
+    return 0;
+  }
+  let i: i32 = 0;
+  while (i < a_len) {
+    if (a[i] != b[i]) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  return 1;
+}
+
+/** 根据 patches 与 labels 将 .text 中的 rel32 占位写为实际偏移（x86）；或 arm64 时写指令内 imm26/imm19。 */
+function elf_resolve_patches(ctx: *ElfCodegenCtx): i32 {
+  let p: i32 = 0;
+  while (p < ctx.num_patches) {
+    let rel32_offset: i32 = ctx.patches[p].rel32_offset;
+    let target_offset: i32 = -1;
+    let l: i32 = 0;
+    while (l < ctx.num_labels) {
+      if (elf_name_eq(ctx.patches[p].name, ctx.patches[p].name_len, ctx.labels[l].name, ctx.labels[l].name_len) != 0) {
+        target_offset = ctx.labels[l].offset;
+        break;
+      }
+      l = l + 1;
+    }
+    if (target_offset < 0) {
+      return -1;
+    }
+    let next_insn: i32 = rel32_offset + 4;
+    let delta: i32 = target_offset - next_insn;
+    if (ctx.e_machine == 183) {
+      let imm_bits: i32 = ctx.patches[p].patch_imm_bits;
+      let insn_lo: i32 = (ctx.code.data[rel32_offset] & 255) | ((ctx.code.data[rel32_offset + 1] & 255) << 8);
+      let insn_hi: i32 = ((ctx.code.data[rel32_offset + 2] & 255) << 16) | ((ctx.code.data[rel32_offset + 3] & 255) << 24);
+      let insn: i32 = insn_lo | insn_hi;
+      let imm: i32 = delta / 4;
+      if (imm_bits == 26) {
+        insn = (insn & 4293918720) | (imm & 67108863);
+      } else {
+        if (imm_bits == 19) {
+          insn = (insn & 4278190175) | ((imm & 524287) << 5);
+        }
+      }
+      ctx.code.data[rel32_offset] = elf_to_u8(insn);
+      ctx.code.data[rel32_offset + 1] = elf_to_u8(insn >> 8);
+      ctx.code.data[rel32_offset + 2] = elf_to_u8(insn >> 16);
+      ctx.code.data[rel32_offset + 3] = elf_to_u8(insn >> 24);
+    } else if (ctx.e_machine == 243) {
+      let imm_bits: i32 = ctx.patches[p].patch_imm_bits;
+      let insn_lo: i32 = (ctx.code.data[rel32_offset] & 255) | ((ctx.code.data[rel32_offset + 1] & 255) << 8);
+      let insn_hi: i32 = ((ctx.code.data[rel32_offset + 2] & 255) << 16) | ((ctx.code.data[rel32_offset + 3] & 255) << 24);
+      let insn: i32 = insn_lo | insn_hi;
+      let val: i32 = delta >> 1;
+      if (imm_bits == 13) {
+        let b_imm: i32 = val & 8191;
+        if (val < 0) { b_imm = val & 8191; }
+        insn = (insn & 2097183) | ((b_imm & 4096) << 19) | ((b_imm & 4032) << 20) | ((b_imm & 30) << 7) | ((b_imm & 2048) >> 4);
+      } else {
+        if (imm_bits == 21) {
+          let j_imm: i32 = val & 2097151;
+          if (val < 0) { j_imm = val & 2097151; }
+          insn = (insn & 4095) | ((j_imm & 524288) << 11) | ((j_imm & 1023) << 21) | ((j_imm & 1024) << 8) | ((j_imm & 522240) << 1);
+        }
+      }
+      ctx.code.data[rel32_offset] = elf_to_u8(insn);
+      ctx.code.data[rel32_offset + 1] = elf_to_u8(insn >> 8);
+      ctx.code.data[rel32_offset + 2] = elf_to_u8(insn >> 16);
+      ctx.code.data[rel32_offset + 3] = elf_to_u8(insn >> 24);
+    } else {
+      ctx.code.data[rel32_offset] = elf_to_u8(delta);
+      ctx.code.data[rel32_offset + 1] = elf_to_u8(delta >> 8);
+      ctx.code.data[rel32_offset + 2] = elf_to_u8(delta >> 16);
+      ctx.code.data[rel32_offset + 3] = elf_to_u8(delta >> 24);
+    }
+    p = p + 1;
+  }
+  return 0;
+}
+
+/** 向 out 追加 ptr[0..n-1]，返回 0 成功，-1 缓冲区满。 */
+function elf_append(out: *CodegenOutBuf, ptr: *u8, n: i32): i32 {
+  let i: i32 = 0;
+  while (i < n && out.len < 262144) {
+    out.data[out.len] = ptr[i];
+    out.len = out.len + 1;
+    i = i + 1;
+  }
+  if (i < n) {
+    return -1;
+  }
+  return 0;
+}
+
+/** 将 ELF64 可重定位 .o 写入 out；调用前需已执行 elf_resolve_patches。返回写入字节数，失败返回 -1。 */
+function write_elf_o_to_buf(ctx: *ElfCodegenCtx, out: *CodegenOutBuf): i32 {
+  let code_len: i32 = ctx.code.len;
+  let strtab_start: i32 = 1;
+  let strtab_off: i32 = 1;
+  let s: i32 = 0;
+  while (s < ctx.num_syms) {
+    strtab_off = strtab_off + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+  let strtab_size: i32 = strtab_off;
+  let shstrtab: [64]u8 = [0, 46, 116, 101, 120, 116, 0, 46, 115, 121, 109, 116, 97, 98, 0, 46, 115, 116, 114, 116, 97, 98, 0, 46, 115, 104, 115, 116, 114, 116, 97, 98, 0, 46, 114, 101, 108, 97, 46, 116, 101, 120, 116, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let shstrtab_size: i32 = 46;
+  let symtab_ents: i32 = 1 + ctx.num_syms;
+  let symtab_size: i32 = symtab_ents * 24;
+  let rela_size: i32 = ctx.num_relocs * 24;
+  let align4: i32 = (code_len + 3) & 4294967292;
+  let off_text: i32 = 64;
+  let off_strtab: i32 = off_text + align4;
+  let off_shstrtab: i32 = off_strtab + strtab_size;
+  let off_symtab: i32 = off_shstrtab + shstrtab_size;
+  let off_rela: i32 = off_symtab + symtab_size;
+  let off_shdr: i32 = off_rela + rela_size;
+  out.len = 0;
+  let ehdr: [64]u8 = [127, 69, 76, 70, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 62, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0];
+  ehdr[18] = elf_to_u8(ctx.e_machine);
+  ehdr[19] = elf_to_u8(ctx.e_machine >> 8);
+  ehdr[40] = elf_to_u8(off_shdr);
+  ehdr[41] = elf_to_u8(off_shdr >> 8);
+  ehdr[42] = elf_to_u8(off_shdr >> 16);
+  ehdr[43] = elf_to_u8(off_shdr >> 24);
+  ehdr[44] = 0;
+  ehdr[45] = 0;
+  ehdr[46] = 0;
+  ehdr[47] = 0;
+  ehdr[58] = elf_to_u8(64);
+  ehdr[59] = 0;
+  ehdr[60] = 6;
+  ehdr[61] = 0;
+  ehdr[62] = 4;
+  ehdr[63] = 0;
+  if (elf_append(out, ehdr, 64) != 0) {
+    return -1;
+  }
+  if (elf_append(out, ctx.code.data, code_len) != 0) {
+    return -1;
+  }
+  let zero_byte: [1]u8 = [];
+  let z: i32 = 0;
+  while (z < align4 - code_len) {
+    if (elf_append(out, zero_byte, 1) != 0) {
+      return -1;
+    }
+    z = z + 1;
+  }
+  let strtab_first: [1]u8 = [];
+  if (elf_append(out, strtab_first, 1) != 0) {
+    return -1;
+  }
+  s = 0;
+  while (s < ctx.num_syms) {
+    if (elf_append(out, ctx.syms[s].name, ctx.syms[s].name_len) != 0) {
+      return -1;
+    }
+    if (elf_append(out, strtab_first, 1) != 0) {
+      return -1;
+    }
+    s = s + 1;
+  }
+  if (elf_append(out, shstrtab, shstrtab_size) != 0) {
+    return -1;
+  }
+  let sym0: [24]u8 = [];
+  sym0[4] = 3;
+  sym0[12] = 1;
+  sym0[16] = elf_to_u8(code_len);
+  sym0[17] = elf_to_u8(code_len >> 8);
+  sym0[18] = elf_to_u8(code_len >> 16);
+  sym0[19] = elf_to_u8(code_len >> 24);
+  if (elf_append(out, sym0, 24) != 0) {
+    return -1;
+  }
+  let str_off: i32 = 1;
+  s = 0;
+  while (s < ctx.num_syms) {
+    let ent: [24]u8 = [];
+    ent[4] = 18;
+    ent[12] = 1;
+    ent[0] = elf_to_u8(str_off);
+    ent[1] = elf_to_u8(str_off >> 8);
+    ent[2] = elf_to_u8(str_off >> 16);
+    ent[3] = elf_to_u8(str_off >> 24);
+    ent[16] = elf_to_u8(ctx.syms[s].offset);
+    ent[17] = elf_to_u8(ctx.syms[s].offset >> 8);
+    ent[18] = elf_to_u8(ctx.syms[s].offset >> 16);
+    ent[19] = elf_to_u8(ctx.syms[s].offset >> 24);
+    if (elf_append(out, ent, 24) != 0) {
+      return -1;
+    }
+    str_off = str_off + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+  let r: i32 = 0;
+  while (r < ctx.num_relocs) {
+    let sym_idx: i32 = 0;
+    let m: i32 = 0;
+    while (m < ctx.num_syms) {
+      if (elf_name_eq(ctx.relocs[r].name, ctx.relocs[r].name_len, ctx.syms[m].name, ctx.syms[m].name_len) != 0) {
+        sym_idx = m + 1;
+        break;
+      }
+      m = m + 1;
+    }
+    let rela: [24]u8 = [];
+    rela[12] = 252;
+    rela[13] = 255;
+    rela[14] = 255;
+    rela[15] = 255;
+    rela[16] = 255;
+    rela[17] = 255;
+    rela[18] = 255;
+    rela[19] = 255;
+    rela[0] = elf_to_u8(ctx.relocs[r].offset);
+    rela[1] = elf_to_u8(ctx.relocs[r].offset >> 8);
+    rela[2] = elf_to_u8(ctx.relocs[r].offset >> 16);
+    rela[3] = elf_to_u8(ctx.relocs[r].offset >> 24);
+    rela[4] = elf_to_u8(ctx.reloc_type_r_pc32);
+    rela[5] = elf_to_u8(ctx.reloc_type_r_pc32 >> 8);
+    rela[8] = elf_to_u8(sym_idx);
+    rela[9] = elf_to_u8(sym_idx >> 8);
+    rela[10] = elf_to_u8(sym_idx >> 16);
+    rela[11] = elf_to_u8(sym_idx >> 24);
+    if (elf_append(out, rela, 24) != 0) {
+      return -1;
+    }
+    r = r + 1;
+  }
+  let shdr0: [64]u8 = [];
+  if (elf_append(out, shdr0, 64) != 0) {
+    return -1;
+  }
+  /* ELF64_Shdr: sh_name 0-3, sh_type 4-7, sh_flags 8-15, sh_addr 16-23, sh_offset 24-31, sh_size 32-39, sh_link 40-43, sh_info 44-47, sh_addralign 48-55, sh_entsize 56-63 */
+  let shdr_text: [64]u8 = [1, 0, 0, 0, 1, 0, 0, 0, 6, 0, 0, 0];
+  shdr_text[24] = elf_to_u8(off_text);
+  shdr_text[25] = elf_to_u8(off_text >> 8);
+  shdr_text[26] = elf_to_u8(off_text >> 16);
+  shdr_text[27] = elf_to_u8(off_text >> 24);
+  shdr_text[28] = 0;
+  shdr_text[29] = 0;
+  shdr_text[30] = 0;
+  shdr_text[31] = 0;
+  shdr_text[32] = elf_to_u8(code_len);
+  shdr_text[33] = elf_to_u8(code_len >> 8);
+  shdr_text[34] = elf_to_u8(code_len >> 16);
+  shdr_text[35] = elf_to_u8(code_len >> 24);
+  shdr_text[36] = 0;
+  shdr_text[37] = 0;
+  shdr_text[38] = 0;
+  shdr_text[39] = 0;
+  if (elf_append(out, shdr_text, 64) != 0) {
+    return -1;
+  }
+  let shdr_sym: [64]u8 = [8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0];
+  shdr_sym[24] = elf_to_u8(off_symtab);
+  shdr_sym[25] = elf_to_u8(off_symtab >> 8);
+  shdr_sym[26] = elf_to_u8(off_symtab >> 16);
+  shdr_sym[27] = elf_to_u8(off_symtab >> 24);
+  shdr_sym[28] = 0;
+  shdr_sym[29] = 0;
+  shdr_sym[30] = 0;
+  shdr_sym[31] = 0;
+  shdr_sym[32] = elf_to_u8(symtab_size);
+  shdr_sym[33] = elf_to_u8(symtab_size >> 8);
+  shdr_sym[34] = elf_to_u8(symtab_size >> 16);
+  shdr_sym[35] = elf_to_u8(symtab_size >> 24);
+  shdr_sym[36] = 0;
+  shdr_sym[37] = 0;
+  shdr_sym[38] = 0;
+  shdr_sym[39] = 0;
+  if (elf_append(out, shdr_sym, 64) != 0) {
+    return -1;
+  }
+  let shdr_str: [64]u8 = [16, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  shdr_str[24] = elf_to_u8(off_strtab);
+  shdr_str[25] = elf_to_u8(off_strtab >> 8);
+  shdr_str[26] = elf_to_u8(off_strtab >> 16);
+  shdr_str[27] = elf_to_u8(off_strtab >> 24);
+  shdr_str[28] = 0;
+  shdr_str[29] = 0;
+  shdr_str[30] = 0;
+  shdr_str[31] = 0;
+  shdr_str[32] = elf_to_u8(strtab_size);
+  shdr_str[33] = elf_to_u8(strtab_size >> 8);
+  shdr_str[34] = elf_to_u8(strtab_size >> 16);
+  shdr_str[35] = elf_to_u8(strtab_size >> 24);
+  shdr_str[36] = 0;
+  shdr_str[37] = 0;
+  shdr_str[38] = 0;
+  shdr_str[39] = 0;
+  if (elf_append(out, shdr_str, 64) != 0) {
+    return -1;
+  }
+  let shdr_shstr: [64]u8 = [24, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  shdr_shstr[24] = elf_to_u8(off_shstrtab);
+  shdr_shstr[25] = elf_to_u8(off_shstrtab >> 8);
+  shdr_shstr[26] = elf_to_u8(off_shstrtab >> 16);
+  shdr_shstr[27] = elf_to_u8(off_shstrtab >> 24);
+  shdr_shstr[28] = 0;
+  shdr_shstr[29] = 0;
+  shdr_shstr[30] = 0;
+  shdr_shstr[31] = 0;
+  shdr_shstr[32] = elf_to_u8(shstrtab_size);
+  shdr_shstr[33] = elf_to_u8(shstrtab_size >> 8);
+  shdr_shstr[34] = elf_to_u8(shstrtab_size >> 16);
+  shdr_shstr[35] = elf_to_u8(shstrtab_size >> 24);
+  shdr_shstr[36] = 0;
+  shdr_shstr[37] = 0;
+  shdr_shstr[38] = 0;
+  shdr_shstr[39] = 0;
+  if (elf_append(out, shdr_shstr, 64) != 0) {
+    return -1;
+  }
+  let shdr_rela: [64]u8 = [35, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0];
+  shdr_rela[24] = elf_to_u8(off_rela);
+  shdr_rela[25] = elf_to_u8(off_rela >> 8);
+  shdr_rela[26] = elf_to_u8(off_rela >> 16);
+  shdr_rela[27] = elf_to_u8(off_rela >> 24);
+  shdr_rela[28] = 0;
+  shdr_rela[29] = 0;
+  shdr_rela[30] = 0;
+  shdr_rela[31] = 0;
+  shdr_rela[32] = elf_to_u8(rela_size);
+  shdr_rela[33] = elf_to_u8(rela_size >> 8);
+  shdr_rela[34] = elf_to_u8(rela_size >> 16);
+  shdr_rela[35] = elf_to_u8(rela_size >> 24);
+  shdr_rela[36] = 0;
+  shdr_rela[37] = 0;
+  shdr_rela[38] = 0;
+  shdr_rela[39] = 0;
+  if (elf_append(out, shdr_rela, 64) != 0) {
+    return -1;
+  }
+  return out.len;
+}

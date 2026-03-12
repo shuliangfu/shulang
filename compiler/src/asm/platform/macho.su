@@ -1,0 +1,213 @@
+// macho.su — Mach-O 64 位可重定位 .o 写出（macOS 目标文件）
+//
+// 职责：将 backend 已填充的 ElfCodegenCtx（code/syms/relocs）写出为 Mach-O 64 位 MH_OBJECT，
+//      供 macOS 下 -backend asm -o xxx.o 使用；与 write_elf_o_to_buf 二选一，由 ctx 侧 use_macho_o 决定。
+// 依赖：codegen（CodegenOutBuf）、elf（ElfCodegenCtx、elf_to_u8、elf_name_eq）。
+
+import codegen;
+import platform.elf;
+
+/** 向 out 追加 ptr[0..n-1]，返回 0 成功，-1 缓冲区满。 */
+function macho_append(out: *CodegenOutBuf, ptr: *u8, n: i32): i32 {
+  let i: i32 = 0;
+  while (i < n && out.len < 262144) {
+    out.data[out.len] = ptr[i];
+    out.len = out.len + 1;
+    i = i + 1;
+  }
+  if (i < n) { return -1; }
+  return 0;
+}
+
+/** 将 Mach-O 64 位可重定位 .o 写入 out；调用前需已执行 elf_resolve_patches。ctx 与 ELF 路径共用。返回写入字节数，失败 -1。 */
+function write_macho_o_to_buf(ctx: *ElfCodegenCtx, out: *CodegenOutBuf): i32 {
+  let code_len: i32 = ctx.code.len;
+  let strtab_size: i32 = 1;
+  let s: i32 = 0;
+  while (s < ctx.num_syms) {
+    strtab_size = strtab_size + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+  let symtab_ents: i32 = 1 + ctx.num_syms;
+  let symtab_size: i32 = symtab_ents * 16;
+  let reloc_size: i32 = ctx.num_relocs * 8;
+  let sizeofcmds: i32 = 152 + 24;
+  let off_text: i32 = 32 + sizeofcmds;
+  let off_sym: i32 = (off_text + code_len + 3) & 4294967292;
+  let off_str: i32 = off_sym + symtab_size;
+  let off_reloc: i32 = off_str + strtab_size;
+
+  out.len = 0;
+  let cputype: i32 = 7;
+  let cpusubtype: i32 = 3;
+  if (ctx.e_machine == 183) {
+    cputype = 16777223;
+    cpusubtype = 0;
+  }
+  let hdr: [32]u8 = [];
+  hdr[0] = platform.elf.elf_to_u8(207);
+  hdr[1] = platform.elf.elf_to_u8(250);
+  hdr[2] = platform.elf.elf_to_u8(237);
+  hdr[3] = platform.elf.elf_to_u8(254);
+  hdr[4] = platform.elf.elf_to_u8(cputype);
+  hdr[5] = platform.elf.elf_to_u8(cputype >> 8);
+  hdr[6] = platform.elf.elf_to_u8(cputype >> 16);
+  hdr[7] = platform.elf.elf_to_u8(cputype >> 24);
+  hdr[8] = platform.elf.elf_to_u8(cpusubtype);
+  hdr[9] = platform.elf.elf_to_u8(cpusubtype >> 8);
+  hdr[10] = platform.elf.elf_to_u8(1);
+  hdr[11] = 0;
+  hdr[12] = platform.elf.elf_to_u8(2);
+  hdr[13] = 0;
+  hdr[14] = platform.elf.elf_to_u8(sizeofcmds);
+  hdr[15] = platform.elf.elf_to_u8(sizeofcmds >> 8);
+  if (macho_append(out, hdr, 32) != 0) { return -1; }
+
+  let seg: [152]u8 = [];
+  seg[0] = platform.elf.elf_to_u8(25);
+  seg[1] = 0;
+  seg[2] = 0;
+  seg[3] = 0;
+  seg[4] = platform.elf.elf_to_u8(152);
+  seg[5] = platform.elf.elf_to_u8(152 >> 8);
+  seg[6] = 95;
+  seg[7] = 95;
+  seg[8] = 84;
+  seg[9] = 69;
+  seg[10] = 88;
+  seg[11] = 84;
+  seg[40] = platform.elf.elf_to_u8(off_text);
+  seg[41] = platform.elf.elf_to_u8(off_text >> 8);
+  seg[42] = platform.elf.elf_to_u8(off_text >> 16);
+  seg[43] = platform.elf.elf_to_u8(off_text >> 24);
+  seg[48] = platform.elf.elf_to_u8(code_len);
+  seg[49] = platform.elf.elf_to_u8(code_len >> 8);
+  seg[50] = platform.elf.elf_to_u8(code_len >> 16);
+  seg[51] = platform.elf.elf_to_u8(code_len >> 24);
+  seg[64] = 1;
+  seg[65] = 0;
+  seg[66] = 0;
+  seg[67] = 0;
+  seg[72] = 95;
+  seg[73] = 95;
+  seg[74] = 116;
+  seg[75] = 101;
+  seg[76] = 120;
+  seg[77] = 116;
+  seg[88] = 95;
+  seg[89] = 95;
+  seg[90] = 84;
+  seg[91] = 69;
+  seg[92] = 88;
+  seg[93] = 84;
+  seg[120] = platform.elf.elf_to_u8(off_text);
+  seg[121] = platform.elf.elf_to_u8(off_text >> 8);
+  seg[122] = platform.elf.elf_to_u8(off_text >> 16);
+  seg[123] = platform.elf.elf_to_u8(off_text >> 24);
+  seg[112] = platform.elf.elf_to_u8(code_len);
+  seg[113] = platform.elf.elf_to_u8(code_len >> 8);
+  seg[114] = platform.elf.elf_to_u8(code_len >> 16);
+  seg[115] = platform.elf.elf_to_u8(code_len >> 24);
+  seg[128] = platform.elf.elf_to_u8(off_reloc);
+  seg[129] = platform.elf.elf_to_u8(off_reloc >> 8);
+  seg[130] = platform.elf.elf_to_u8(off_reloc >> 16);
+  seg[131] = platform.elf.elf_to_u8(off_reloc >> 24);
+  seg[132] = platform.elf.elf_to_u8(ctx.num_relocs);
+  seg[133] = platform.elf.elf_to_u8(ctx.num_relocs >> 8);
+  seg[136] = 0;
+  seg[137] = 0;
+  seg[138] = 4;
+  seg[139] = 128;
+  if (macho_append(out, seg, 152) != 0) { return -1; }
+
+  let lc_sym: [24]u8 = [];
+  lc_sym[0] = 2;
+  lc_sym[1] = 0;
+  lc_sym[2] = 0;
+  lc_sym[3] = 0;
+  lc_sym[4] = 24;
+  lc_sym[8] = platform.elf.elf_to_u8(off_sym);
+  lc_sym[9] = platform.elf.elf_to_u8(off_sym >> 8);
+  lc_sym[10] = platform.elf.elf_to_u8(off_sym >> 16);
+  lc_sym[11] = platform.elf.elf_to_u8(off_sym >> 24);
+  lc_sym[12] = platform.elf.elf_to_u8(symtab_ents);
+  lc_sym[13] = platform.elf.elf_to_u8(symtab_ents >> 8);
+  lc_sym[16] = platform.elf.elf_to_u8(off_str);
+  lc_sym[17] = platform.elf.elf_to_u8(off_str >> 8);
+  lc_sym[18] = platform.elf.elf_to_u8(off_str >> 16);
+  lc_sym[19] = platform.elf.elf_to_u8(off_str >> 24);
+  lc_sym[20] = platform.elf.elf_to_u8(strtab_size);
+  lc_sym[21] = platform.elf.elf_to_u8(strtab_size >> 8);
+  if (macho_append(out, lc_sym, 24) != 0) { return -1; }
+
+  if (macho_append(out, ctx.code.data, code_len) != 0) { return -1; }
+  let pad: i32 = off_sym - (off_text + code_len);
+  let zero: [1]u8 = [0];
+  let z: i32 = 0;
+  while (z < pad) {
+    if (macho_append(out, zero, 1) != 0) { return -1; }
+    z = z + 1;
+  }
+
+  let sym0: [16]u8 = [];
+  sym0[4] = 1;
+  sym0[8] = platform.elf.elf_to_u8(code_len);
+  sym0[9] = platform.elf.elf_to_u8(code_len >> 8);
+  sym0[10] = platform.elf.elf_to_u8(code_len >> 16);
+  sym0[11] = platform.elf.elf_to_u8(code_len >> 24);
+  if (macho_append(out, sym0, 16) != 0) { return -1; }
+  let str_off: i32 = 1;
+  s = 0;
+  while (s < ctx.num_syms) {
+    let ent: [16]u8 = [];
+    ent[4] = 18;
+    ent[6] = 1;
+    ent[0] = platform.elf.elf_to_u8(str_off);
+    ent[1] = platform.elf.elf_to_u8(str_off >> 8);
+    ent[2] = platform.elf.elf_to_u8(str_off >> 16);
+    ent[3] = platform.elf.elf_to_u8(str_off >> 24);
+    ent[8] = platform.elf.elf_to_u8(ctx.syms[s].offset);
+    ent[9] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 8);
+    ent[10] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 16);
+    ent[11] = platform.elf.elf_to_u8(ctx.syms[s].offset >> 24);
+    if (macho_append(out, ent, 16) != 0) { return -1; }
+    str_off = str_off + ctx.syms[s].name_len + 1;
+    s = s + 1;
+  }
+
+  if (macho_append(out, zero, 1) != 0) { return -1; }
+  s = 0;
+  while (s < ctx.num_syms) {
+    if (macho_append(out, ctx.syms[s].name, ctx.syms[s].name_len) != 0) { return -1; }
+    if (macho_append(out, zero, 1) != 0) { return -1; }
+    s = s + 1;
+  }
+
+  let rel_type: i32 = 2;
+  let rel_len: i32 = 2;
+  if (ctx.e_machine == 183) { rel_type = 2; rel_len = 2; }
+  let r: i32 = 0;
+  while (r < ctx.num_relocs) {
+    let sym_idx: i32 = 0;
+    let m: i32 = 0;
+    while (m < ctx.num_syms) {
+      if (platform.elf.elf_name_eq(ctx.relocs[r].name, ctx.relocs[r].name_len, ctx.syms[m].name, ctx.syms[m].name_len) != 0) {
+        sym_idx = m + 1;
+        break;
+      }
+      m = m + 1;
+    }
+    let ri: [8]u8 = [];
+    ri[0] = platform.elf.elf_to_u8(ctx.relocs[r].offset);
+    ri[1] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 8);
+    ri[2] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 16);
+    ri[3] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 24);
+    ri[4] = platform.elf.elf_to_u8(sym_idx);
+    ri[5] = platform.elf.elf_to_u8(sym_idx >> 8);
+    ri[6] = platform.elf.elf_to_u8(sym_idx >> 16);
+    ri[7] = platform.elf.elf_to_u8((1 << 7) | (rel_len << 5) | (1 << 4) | rel_type);
+    if (macho_append(out, ri, 8) != 0) { return -1; }
+    r = r + 1;
+  }
+  return out.len;
+}

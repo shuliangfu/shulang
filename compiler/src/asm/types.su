@@ -1,0 +1,121 @@
+// types.su — 汇编后端公共类型（与架构无关）
+//
+// 职责：目标架构枚举、汇编行追加（复用 codegen 的 CodegenOutBuf）、栈槽抽象等，供 backend 与各架构模块共用。
+// 依赖：codegen（与 pipeline 共用 CodegenOutBuf，保证 asm 输出写入同一缓冲区）。
+
+import codegen;
+
+/** 当前支持的目标架构；pipeline 或 driver 按 -target 选择，backend 据此分派到对应 emit 实现。 */
+enum TargetArch {
+  TARGET_X86_64,
+  TARGET_ARM64,
+  TARGET_RISCV64,
+  TARGET_NONE
+}
+
+/** 向 CodegenOutBuf 追加一行汇编（ptr[0..len-1] + 换行）。与 pipeline 共用同一 out，便于 -backend asm 时写汇编到 out。返回 0 成功，缓冲区满返回 -1。 */
+function append_asm_line(out: *CodegenOutBuf, ptr: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len && out.len < 262144) {
+    out.data[out.len] = ptr[i];
+    out.len = out.len + 1;
+    i = i + 1;
+  }
+  if (i < len) {
+    return -1;
+  }
+  if (out.len < 262144) {
+    let nl: [1]u8 = [10];
+    out.data[out.len] = nl[0];
+    out.len = out.len + 1;
+    return 0;
+  }
+  return -1;
+}
+
+/**
+ * 将无符号数 u 的十进制表示写入 buf[off..]，最多写 max 字节，返回写入长度；缓冲区不足返回 -1。
+ * 用于 emit 指令中立即数的十进制输出（如 mov eax, 42）。
+ * 使用迭代实现：生成 pipeline 时 C codegen 对该块未按 stmt_order 输出，递归版会导致栈溢出。
+ */
+function format_u32_to_buf(buf: *u8, off: i32, max: i32, u: i32): i32 {
+  let digit_chars: [10]u8 = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57];
+  if (max < 1) {
+    return -1;
+  }
+  let tmp: [10]u8 = [];
+  let num_digits: i32 = 0;
+  let v: i32 = u;
+  while (v > 0 && num_digits < 10) {
+    tmp[num_digits] = digit_chars[v % 10];
+    num_digits = num_digits + 1;
+    v = v / 10;
+  }
+  /* 0 时 num_digits 为 0，写一位 '0' 并置 num_digits=1，与主流程共用末尾 return，避免 codegen 重排。 */
+  if (num_digits == 0) {
+    buf[off] = digit_chars[0];
+    num_digits = 1;
+  } else {
+    if (num_digits > max) {
+      return -1;
+    }
+    if (off + num_digits >= 262144) {
+      return -1;
+    }
+    let idx: i32 = 0;
+    while (idx < num_digits) {
+      buf[off + idx] = tmp[num_digits - 1 - idx];
+      idx = idx + 1;
+    }
+  }
+  return num_digits;
+}
+
+/**
+ * 将 i32 的十进制表示写入 buf[off..]，最多写 max 字节，返回写入长度；缓冲区不足返回 -1。
+ * 特殊处理 -2147483648（0-val 会溢出）。
+ */
+function format_i32_to_buf(buf: *u8, off: i32, max: i32, val: i32): i32 {
+  if (val < 0) {
+    let u: i32 = 0 - val;
+    if (u < 0) {
+      if (max < 11) {
+        return -1;
+      }
+      let s: [12]u8 = [45, 50, 49, 52, 55, 52, 56, 51, 54, 52, 56, 0];
+      let k: i32 = 0;
+      while (k < 11) {
+        buf[off + k] = s[k];
+        k = k + 1;
+      }
+      return 11;
+    }
+    if (max < 1) {
+      return -1;
+    }
+    let minus: [1]u8 = [45];
+    buf[off] = minus[0];
+    let n: i32 = format_u32_to_buf(buf, off + 1, max - 1, u);
+    if (n < 0) {
+      return -1;
+    }
+    return n + 1;
+  }
+  return format_u32_to_buf(buf, off, max, val);
+}
+
+/** 将 32 位值按 8 个十六进制字符写入 buf[off..off+7]，返回 8。用于 64 位立即数（float 位模式）输出。 */
+function format_u32_hex8_to_buf(buf: *u8, off: i32, val: i32): i32 {
+  let hex: [16]u8 = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102];
+  let i: i32 = 0;
+  while (i < 8) {
+    let shift: i32 = (7 - i) * 4;
+    let nibble: i32 = (val >> shift) & 15;
+    buf[off + i] = hex[nibble];
+    i = i + 1;
+  }
+  return 8;
+}
+
+/** 类型到栈槽/寄存器字节数的映射（与 ABI 一致）。i32→4, i64/指针→8。 */
+// 占位：具体由 backend 或各架构根据 TypeKind 查表得到，此处仅作说明。

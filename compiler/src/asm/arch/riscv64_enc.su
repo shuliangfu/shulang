@@ -1,0 +1,339 @@
+// riscv64_enc.su — RISC-V 64 位机器码编码（供 ELF .o）
+//
+// 职责：与 x86_64_enc/arm64_enc 对等的 enc_* 接口；写入 RV64GC 32 位小端指令，
+//       jz/jnz/jmp/call 写占位并记 patch（B-type 13 位、J-type 21 位）及 reloc。
+// 依赖：elf（ElfCodegenCtx、append_elf_bytes、elf_add_label、elf_add_patch_with_bits、elf_add_reloc、elf_add_sym、elf_to_u8）。
+
+import platform.elf;
+
+/** 向 ctx 追加 4 字节小端 u32（一条 RISC-V 指令）。 */
+function enc_u32_le(ctx: *ElfCodegenCtx, val: i32): i32 {
+  let buf: [4]u8 = [];
+  buf[0] = platform.elf.elf_to_u8(val);
+  buf[1] = platform.elf.elf_to_u8(val >> 8);
+  buf[2] = platform.elf.elf_to_u8(val >> 16);
+  buf[3] = platform.elf.elf_to_u8(val >> 24);
+  return platform.elf.append_elf_bytes(ctx, buf, 4);
+}
+
+/** 标签：记录 label 与符号；is_func 非 0 时记入 sym。 */
+function enc_label(ctx: *ElfCodegenCtx, name: [64]u8, name_len: i32, is_func: i32): i32 {
+  if (platform.elf.elf_add_label(ctx, name, name_len) != 0) { return -1; }
+  if (is_func != 0) {
+    return platform.elf.elf_add_sym(ctx, name, name_len, ctx.code.len);
+  }
+  return 0;
+}
+
+/** 函数入口：addi sp, sp, -frame; sd ra, frame-8(sp)；若 frame≥16 再 sd s0、addi s0, sp, frame。用 current_frame_size 低 12 位存 size，位 12 存是否保存 s0。 */
+function enc_prologue(ctx: *ElfCodegenCtx, frame_sz: i32): i32 {
+  let sz: i32 = frame_sz;
+  if (sz < 16) { sz = 16; }
+  if (frame_sz >= 16) { ctx.current_frame_size = sz | 4096; } else { ctx.current_frame_size = sz; }
+  let imm12: i32 = 0 - sz;
+  imm12 = imm12 & 4095;
+  if (enc_u32_le(ctx, 19 | (2 << 7) | (0 << 12) | (2 << 15) | (imm12 << 20)) != 0) { return -1; }
+  let off_ra: i32 = sz - 8;
+  let imm_lo: i32 = off_ra & 31;
+  let imm_hi: i32 = (off_ra >> 5) & 127;
+  if (enc_u32_le(ctx, 35 | (imm_lo << 7) | (3 << 12) | (2 << 15) | (1 << 20) | (imm_hi << 25)) != 0) { return -1; }
+  if (frame_sz < 16) { return 0; }
+  let off_s0: i32 = sz - 16;
+  imm_lo = off_s0 & 31;
+  imm_hi = (off_s0 >> 5) & 127;
+  if (enc_u32_le(ctx, 35 | (imm_lo << 7) | (3 << 12) | (2 << 15) | (8 << 20) | (imm_hi << 25)) != 0) { return -1; }
+  imm12 = sz & 4095;
+  return enc_u32_le(ctx, 19 | (8 << 7) | (0 << 12) | (2 << 15) | (imm12 << 20));
+}
+
+/** 函数出口：若 current_frame_size 位 12 置位则先 ld s0；再 ld ra；addi sp, size；ret。 */
+function enc_epilogue(ctx: *ElfCodegenCtx): i32 {
+  let saved_s0: i32 = (ctx.current_frame_size & 4096) >> 12;
+  let frame_sz: i32 = ctx.current_frame_size & 4095;
+  if (frame_sz == 0) { frame_sz = 16; }
+  if (saved_s0 != 0) {
+    let off_s0: i32 = frame_sz - 16;
+    let imm12: i32 = off_s0 & 4095;
+    if (enc_u32_le(ctx, 3 | (8 << 7) | (3 << 12) | (2 << 15) | (imm12 << 20)) != 0) { return -1; }
+  }
+  let off_ra: i32 = frame_sz - 8;
+  let imm12: i32 = off_ra & 4095;
+  if (enc_u32_le(ctx, 3 | (1 << 7) | (3 << 12) | (2 << 15) | (imm12 << 20)) != 0) { return -1; }
+  imm12 = frame_sz & 4095;
+  if (enc_u32_le(ctx, 19 | (2 << 7) | (0 << 12) | (2 << 15) | (imm12 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 103 | (0 << 7) | (0 << 12) | (1 << 15) | (0 << 20));
+}
+
+/** li a0, imm32：addi a0, x0, imm（12 位内）；否则 lui + addi。 */
+function enc_ret_imm32(ctx: *ElfCodegenCtx, imm32: i32): i32 {
+  let imm12: i32 = imm32 & 4095;
+  if (imm32 >= 2048 && imm32 < 4096) { imm12 = imm32; }
+  if (imm32 >= 0 && imm32 < 4096) {
+    return enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (0 << 15) | (imm12 << 20));
+  }
+  let hi20: i32 = (imm32 >> 12) & 1048575;
+  if ((imm32 & 2048) != 0) { hi20 = hi20 + 1; }
+  if (enc_u32_le(ctx, 55 | (10 << 7) | (hi20 << 12)) != 0) { return -1; }
+  imm12 = imm32 & 4095;
+  return enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (10 << 15) | (imm12 << 20));
+}
+
+/** li a1, imm32。 */
+function enc_mov_imm32_to_rbx(ctx: *ElfCodegenCtx, imm32: i32): i32 {
+  let imm12: i32 = imm32 & 4095;
+  if (imm32 >= 0 && imm32 < 4096) {
+    return enc_u32_le(ctx, 19 | (11 << 7) | (0 << 12) | (0 << 15) | (imm12 << 20));
+  }
+  let hi20: i32 = (imm32 >> 12) & 1048575;
+  if ((imm32 & 2048) != 0) { hi20 = hi20 + 1; }
+  if (enc_u32_le(ctx, 55 | (11 << 7) | (hi20 << 12)) != 0) { return -1; }
+  imm12 = imm32 & 4095;
+  return enc_u32_le(ctx, 19 | (11 << 7) | (0 << 12) | (11 << 15) | (imm12 << 20));
+}
+
+/** 64 位立即数入 a0：li + slli/srli + lui/addi/slli/add（简化：多条 I-type/U-type）。 */
+function enc_mov_imm64_to_rax(ctx: *ElfCodegenCtx, lo: i32, hi: i32): i32 {
+  let imm12: i32 = lo & 4095;
+  if (enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (0 << 15) | (imm12 << 20)) != 0) { return -1; }
+  if (hi == 0) { return 0; }
+  if (enc_u32_le(ctx, 19 | (10 << 7) | (1 << 12) | (10 << 15) | (32 << 20)) != 0) { return -1; }
+  if (enc_u32_le(ctx, 19 | (10 << 7) | (5 << 12) | (10 << 15) | (32 << 20)) != 0) { return -1; }
+  let hi20: i32 = (hi >> 12) & 1048575;
+  if ((hi & 2048) != 0) { hi20 = hi20 + 1; }
+  if (enc_u32_le(ctx, 55 | (5 << 7) | (hi20 << 12)) != 0) { return -1; }
+  imm12 = hi & 4095;
+  if (enc_u32_le(ctx, 19 | (5 << 7) | (0 << 12) | (5 << 15) | (imm12 << 20)) != 0) { return -1; }
+  if (enc_u32_le(ctx, 19 | (5 << 7) | (1 << 12) | (5 << 15) | (32 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (10 << 15) | (5 << 20));
+}
+
+/** addi sp, sp, -16; sd a0, 0(sp)。 */
+function enc_push_rax(ctx: *ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 19 | (2 << 7) | (0 << 12) | (2 << 15) | (4080 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 35 | (0 << 7) | (3 << 12) | (2 << 15) | (10 << 20) | (0 << 25));
+}
+
+/** ld a1, 0(sp); addi sp, sp, 16。 */
+function enc_pop_rbx(ctx: *ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 3 | (11 << 7) | (3 << 12) | (2 << 15) | (0 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 19 | (2 << 7) | (0 << 12) | (2 << 15) | (16 << 20));
+}
+
+/** ld a0, 0(sp); addi sp, sp, 16。 */
+function enc_pop_rax(ctx: *ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 3 | (10 << 7) | (3 << 12) | (2 << 15) | (0 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 19 | (2 << 7) | (0 << 12) | (2 << 15) | (16 << 20));
+}
+
+/** add a0, a0, a1。 */
+function enc_add_rax_rbx(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (10 << 15) | (11 << 20));
+}
+
+/** sub a0, a1, a0。 */
+function enc_sub_rbx_rax_then_mov(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (11 << 15) | (10 << 20) | (64 << 25));
+}
+
+/** mul a0, a0, a1。 */
+function enc_imul_rbx_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (10 << 15) | (11 << 20) | (1 << 25));
+}
+
+/** mv a1, a0。addi a1, a0, 0。 */
+function enc_mov_rax_to_rbx(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 19 | (11 << 7) | (0 << 12) | (10 << 15) | (0 << 20));
+}
+
+/** not a0, a0。xori a0, a0, -1。 */
+function enc_not_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (4095 << 20));
+}
+
+/** and a0, a1, a0。 */
+function enc_and_rbx_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (7 << 12) | (11 << 15) | (10 << 20));
+}
+
+/** or a0, a1, a0。 */
+function enc_or_rbx_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (6 << 12) | (11 << 15) | (10 << 20));
+}
+
+/** xor a0, a1, a0。 */
+function enc_xor_rbx_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (4 << 12) | (11 << 15) | (10 << 20));
+}
+
+/** 移位计数已在 a1，no-op。 */
+function enc_mov_rbx_to_ecx(ctx: *ElfCodegenCtx): i32 {
+  return 0;
+}
+
+/** sll a0, a0, a1。 */
+function enc_shl_cl_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (1 << 12) | (10 << 15) | (11 << 20));
+}
+
+/** srl a0, a0, a1。 */
+function enc_shr_cl_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (5 << 12) | (10 << 15) | (11 << 20));
+}
+
+/** sra a0, a0, a1。 */
+function enc_sar_cl_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (5 << 12) | (10 << 15) | (11 << 20) | (64 << 25));
+}
+
+/** no-op。 */
+function enc_cltd(ctx: *ElfCodegenCtx): i32 {
+  return 0;
+}
+
+/** div a0, a0, a1。 */
+function enc_idiv_rbx(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (4 << 12) | (10 << 15) | (11 << 20) | (1 << 25));
+}
+
+/** rem 已单独用 enc_rem；此处 no-op。 */
+function enc_mov_edx_to_eax(ctx: *ElfCodegenCtx): i32 {
+  return 0;
+}
+
+/** neg a0, a0。sub a0, x0, a0。 */
+function enc_neg_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (0 << 15) | (10 << 20) | (64 << 25));
+}
+
+/** seqz 前无需单独 test；no-op 或 and a0, a0, a0。 */
+function enc_test_eax_eax(ctx: *ElfCodegenCtx): i32 {
+  return 0;
+}
+
+/** seqz a0, a0。sltiu a0, a0, 1。 */
+function enc_setz_movzbl_eax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 19 | (10 << 7) | (3 << 12) | (10 << 15) | (1 << 20));
+}
+
+/** sub a0, a1, a0；cmp 等价，后续 enc_cmp_setcc_movzbl 会发 slt/seqz 等。 */
+function enc_cmp_rbx_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (11 << 15) | (10 << 20) | (64 << 25));
+}
+
+/** cmp 后 setcc：0=eq→seqz, 1=ne→snez, 2=lt→slt, 3=le, 4=gt, 5=ge。 */
+function enc_cmp_setcc_movzbl(ctx: *ElfCodegenCtx, cc: i32): i32 {
+  let c: i32 = cc;
+  if (c < 0) { c = 0; }
+  if (c > 5) { c = 5; }
+  if (c == 0) { return enc_u32_le(ctx, 19 | (10 << 7) | (3 << 12) | (10 << 15) | (1 << 20)); }
+  if (c == 1) { return enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (0 << 15) | (10 << 20)); }
+  if (c == 2) { return enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (11 << 15) | (10 << 20)); }
+  if (c == 3) {
+    if (enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (10 << 15) | (11 << 20)) != 0) { return -1; }
+    return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
+  }
+  if (c == 4) { return enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (10 << 15) | (11 << 20)); }
+  if (enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (11 << 15) | (10 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
+}
+
+/** sd a0, -offset(s0)。S-type imm = -offset。 */
+function enc_store_rax_to_rbp(ctx: *ElfCodegenCtx, offset: i32): i32 {
+  let imm: i32 = 0 - offset;
+  imm = imm & 4095;
+  let imm_lo: i32 = imm & 31;
+  let imm_hi: i32 = (imm >> 5) & 127;
+  return enc_u32_le(ctx, 35 | (imm_lo << 7) | (3 << 12) | (8 << 15) | (10 << 20) | (imm_hi << 25));
+}
+
+/** ld a0, -offset(s0)。 */
+function enc_load_rbp_to_rax(ctx: *ElfCodegenCtx, offset: i32): i32 {
+  let imm: i32 = 0 - offset;
+  imm = imm & 4095;
+  return enc_u32_le(ctx, 3 | (10 << 7) | (3 << 12) | (8 << 15) | (imm << 20));
+}
+
+/** addi a0, s0, -offset。 */
+function enc_lea_rbp_to_rax(ctx: *ElfCodegenCtx, offset: i32): i32 {
+  let imm12: i32 = 0 - offset;
+  imm12 = imm12 & 4095;
+  return enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (8 << 15) | (imm12 << 20));
+}
+
+/** slli a1, a1, 2; add a0, a0, a1。 */
+function enc_rax_plus_rbx_scale4(ctx: *ElfCodegenCtx): i32 {
+  if (enc_u32_le(ctx, 19 | (11 << 7) | (1 << 12) | (11 << 15) | (2 << 20)) != 0) { return -1; }
+  return enc_u32_le(ctx, 51 | (10 << 7) | (0 << 12) | (10 << 15) | (11 << 20));
+}
+
+/** lw a0, 0(a0)。 */
+function enc_load_32_from_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 3 | (10 << 7) | (2 << 12) | (10 << 15) | (0 << 20));
+}
+
+/** addi a0, a0, imm。imm==0 不发射。 */
+function enc_add_imm_to_rax(ctx: *ElfCodegenCtx, imm: i32): i32 {
+  if (imm == 0) { return 0; }
+  let imm12: i32 = imm & 4095;
+  return enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (10 << 15) | (imm12 << 20));
+}
+
+/** ld a0, 0(a0)。 */
+function enc_load_64_from_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 3 | (10 << 7) | (3 << 12) | (10 << 15) | (0 << 20));
+}
+
+/** sw/sd a0, offset(a1)。 */
+function enc_store_rax_to_rbx_offset(ctx: *ElfCodegenCtx, offset: i32, store_size: i32): i32 {
+  let imm: i32 = offset & 4095;
+  let imm_lo: i32 = imm & 31;
+  let imm_hi: i32 = (imm >> 5) & 127;
+  if (store_size == 4) {
+    return enc_u32_le(ctx, 35 | (imm_lo << 7) | (2 << 12) | (11 << 15) | (10 << 20) | (imm_hi << 25));
+  }
+  return enc_u32_le(ctx, 35 | (imm_lo << 7) | (3 << 12) | (11 << 15) | (10 << 20) | (imm_hi << 25));
+}
+
+/** mv a0, a1。 */
+function enc_mov_rbx_to_rax(ctx: *ElfCodegenCtx): i32 {
+  return enc_u32_le(ctx, 19 | (10 << 7) | (0 << 12) | (11 << 15) | (0 << 20));
+}
+
+/** beqz a0, label。B-type 占位 0，patch 13 位。 */
+function enc_jz(ctx: *ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 99 | (0 << 12) | (10 << 15) | (0 << 20)) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 13);
+}
+
+/** bnez a0, label。B-type 13 位 patch。 */
+function enc_jnz(ctx: *ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 99 | (1 << 12) | (10 << 15) | (0 << 20)) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 13);
+}
+
+/** j label。jal x0, 0；J-type 21 位 patch。 */
+function enc_jmp(ctx: *ElfCodegenCtx, label: [64]u8, label_len: i32): i32 {
+  if (enc_u32_le(ctx, 111 | (0 << 7)) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  return platform.elf.elf_add_patch_with_bits(ctx, at, label, label_len, 21);
+}
+
+/** mv a(k), a0。k=0 no-op；k=1..5 发 addi a(k), a0, 0（a0=10, a1=11, …）。 */
+function enc_mov_rax_to_arg_reg(ctx: *ElfCodegenCtx, k: i32): i32 {
+  let idx: i32 = k;
+  if (idx < 0) { idx = 0; }
+  if (idx > 5) { idx = 5; }
+  if (idx == 0) { return 0; }
+  let rd: i32 = 10 + idx;
+  return enc_u32_le(ctx, 19 | (rd << 7) | (0 << 12) | (10 << 15) | (0 << 20));
+}
+
+/** jal ra, name。JAL 占位，21 位 patch + reloc。 */
+function enc_call(ctx: *ElfCodegenCtx, name: [64]u8, name_len: i32): i32 {
+  if (enc_u32_le(ctx, 111 | (1 << 7)) != 0) { return -1; }
+  let at: i32 = ctx.code.len - 4;
+  if (platform.elf.elf_add_patch_with_bits(ctx, at, name, name_len, 21) != 0) { return -1; }
+  return platform.elf.elf_add_reloc(ctx, at, name, name_len);
+}

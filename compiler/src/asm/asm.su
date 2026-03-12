@@ -1,0 +1,49 @@
+// asm.su — 汇编后端对外入口（供 pipeline 调用）
+//
+// 职责：导出 asm_codegen_ast(module, arena, out, ctx)，供 pipeline 在 -backend asm 时调用；ctx.target_arch 决定架构。
+// 依赖：ast、codegen、types、backend、elf、macho、coff。
+
+import ast;
+import codegen;
+import types;
+import backend;
+import peephole;
+import platform.elf;
+import platform.macho;
+import platform.coff;
+
+/** 汇编后端入口：将 AST 生成汇编文本写入 out（与 codegen 共用 CodegenOutBuf）；ctx.target_arch 决定 x86_64 或 arm64；产出后可选做窥孔优化。 */
+function asm_codegen_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf, ctx: *PipelineDepCtx): i32 {
+  if (backend.asm_codegen_ast(module, arena, out, ctx) != 0) {
+    return -1;
+  }
+  if (peephole.peephole_run(out) != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+/** 将 AST 生成机器码并写出 .o 到 out（ELF / Mach-O / COFF 由 ctx.use_macho_o、use_coff_o 决定）；elf_ctx 由调用方提供并在此处重置。返回 0 成功。 */
+function asm_codegen_elf_o(module: *Module, arena: *ASTArena, ctx: *PipelineDepCtx, elf_ctx: *platform.elf.ElfCodegenCtx, out: *CodegenOutBuf): i32 {
+  platform.elf.elf_ctx_reset(elf_ctx);
+  if (backend.asm_codegen_ast_to_elf(module, arena, elf_ctx, ctx) != 0) {
+    return -1;
+  }
+  if (platform.elf.elf_resolve_patches(elf_ctx) != 0) {
+    return -1;
+  }
+  if (ctx.use_coff_o != 0) {
+    if (platform.coff.write_coff_o_to_buf(elf_ctx, out) < 0) {
+      return -1;
+    }
+  } else if (ctx.use_macho_o != 0) {
+    if (platform.macho.write_macho_o_to_buf(elf_ctx, out) < 0) {
+      return -1;
+    }
+  } else {
+    if (platform.elf.write_elf_o_to_buf(elf_ctx, out) < 0) {
+      return -1;
+    }
+  }
+  return 0;
+}
