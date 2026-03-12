@@ -1,0 +1,5 @@
+// 块末表达式解析测试（parser.su 最小支持）：块以整数字面量结尾，无 return、无分号。
+// 说明：C 版 typeck 要求显式 return，此用例仅在使用 -su 流水线（typeck.su）时通过。
+function main(): i32 {
+  42
+}
