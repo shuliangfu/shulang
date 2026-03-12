@@ -32,7 +32,7 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: "Build shuc_su (for -su -E tests: run-su-multi-file, run-su-pipeline)"
+      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
@@ -53,7 +53,7 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: Build shuc_su (for -su -E tests)
+      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
@@ -78,6 +78,9 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
+      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
+        timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
@@ -98,12 +101,16 @@ jobs:
         with:
           msystem: MSYS
           update: true
-          install: make gcc diffutils
+          install: make gcc diffutils python3
       - name: Build compiler (shuc)
         run: make -C compiler OPT=1
         shell: msys2 {0}
         env:
           CC: gcc
+      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
+        shell: msys2 {0}
+        timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         shell: msys2 {0}
@@ -140,5 +147,6 @@ jobs:
               fi &&
               make -C compiler clean &&
               make -C compiler OPT=1 &&
+              make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline &&
               ./tests/run-all.sh
             '
