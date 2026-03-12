@@ -783,8 +783,11 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         for (int j = 0; j < n && i < MAX_C_FILES + 8; j++)
             argv[i++] = (char *)c_paths[j];
         argv[i++] = NULL;
+        argv[0] = (char *)"cc";
         execvp("cc", argv);
-        perror("shuc: cc");
+        argv[0] = (char *)"gcc";
+        execvp("gcc", argv);
+        perror("shuc: cc/gcc");
         _exit(127);
     }
     int status;
