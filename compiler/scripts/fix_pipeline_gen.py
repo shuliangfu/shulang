@@ -52,39 +52,7 @@ def main():
             content = content[:insert_at] + "    " + _lex_next + "\n" + content[insert_at:]
             idx = insert_at + len(_lex_next) + 2
 
-    # 2.6 细粒度诊断：parser_parse_into 内 after collect_imports、before parse_one_function（精确定位卡点）
-    if "#include <stdio.h>" not in content:
-        content = content.replace("#include <stdint.h>", "#include <stdint.h>\n#include <stdio.h>", 1)
-    _after_imports = " (void)((lex = (import_res).lex));\n  int32_t out_idx = main_idx;"
-    if _after_imports in content and "parse_into: after collect_imports" not in content:
-        content = content.replace(
-            " (void)((lex = (import_res).lex));\n  int32_t out_idx = main_idx;",
-            " (void)((lex = (import_res).lex));\n  fprintf(stderr, \"parse_into: after collect_imports\\n\"); fflush(stderr);\n  int32_t out_idx = main_idx;",
-            1,
-        )
-    _before_parse_one = " } else (__tmp = 0) ; __tmp; }));\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);"
-    if _before_parse_one in content and "parse_into: before parse_one_function" not in content:
-        content = content.replace(
-            " } else (__tmp = 0) ; __tmp; }));\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);",
-            " } else (__tmp = 0) ; __tmp; }));\n    fprintf(stderr, \"parse_into: before parse_one_function\\n\"); fflush(stderr);\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);",
-            1,
-        )
-    # 2.7 诊断 collect_imports/lexer：卡在首 token 时打印 source 长度，便于判断是否 slice 异常
-    _collect_imports_start = "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  uint8_t path_buf[64] = { 0 };"
-    if _collect_imports_start in content and "collect_imports: source_len" not in content:
-        content = content.replace(
-            "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  uint8_t path_buf[64] = { 0 };",
-            "void parser_collect_imports(struct lexer_Lexer lex, struct shulang_slice_uint8_t * source, struct ast_Module * restrict module, struct parser_CollectImportsResult * restrict out) {\n  fprintf(stderr, \"collect_imports: source_len=%zu\\n\", (size_t)(source)->length); fflush(stderr);\n  uint8_t path_buf[64] = { 0 };",
-            1,
-        )
-    # 2.8 诊断 lexer 入口：首调时打印 pos/length，确认是否在 skip_whitespace 死循环
-    _lexer_next_entrance = "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);"
-    if _lexer_next_entrance in content and "lexer_next: pos=" not in content:
-        content = content.replace(
-            "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);",
-            "struct lexer_LexerResult lexer_lexer_next(struct lexer_Lexer lex, struct shulang_slice_uint8_t * data) {\n  fprintf(stderr, \"lexer_next: pos=%zu len=%zu\\n\", (size_t)(lex).pos, (size_t)(data)->length); fflush(stderr);\n  struct lexer_Lexer l = lexer_skip_whitespace_and_comments(lex, data);",
-            1,
-        )
+    # 2.6/2.7/2.8 诊断已关闭：不再注入 parse_into/collect_imports/lexer_next 的 stderr 调试输出
     # 2.9 根因：codegen 将 skip_whitespace 中「//」与「#」分支的 continue 提到 while 前，导致 l 未更新即回到循环 → 死循环。把 continue 移到 while 体后。
     # 行注释：") == 47) {   continue;\n  while" → ") == 47) {\n  while" 且 "  }\n } else" → "  }\n  continue;\n } else"
     content = content.replace(
@@ -257,40 +225,7 @@ def main():
             count=1,
         )
 
-    # 7. 诊断 -su -E 卡住：在 pipeline_run_su_pipeline_impl 内打入点，便于 CI/本地超时后看最后一条输出
-    if "#include <stdio.h>" not in content:
-        content = content.replace("#include <stdint.h>", "#include <stdint.h>\n#include <stdio.h>", 1)
-    # 卡在 dep 0 (foo) 且无 enter/after parse → 卡在 parse；在 impl 最开头打 impl start，parse 后打 after parse
-    impl_first = "int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {\n  struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);"
-    if impl_first in content and "pipeline: impl start" not in content:
-        content = content.replace(
-            "int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {\n  struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);",
-            "int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Module * module, struct shulang_slice_uint8_t * source, struct codegen_CodegenOutBuf * out_buf, struct ast_PipelineDepCtx * ctx) {\n  fprintf(stderr, \"pipeline: impl start\\n\"); fflush(stderr);\n  struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);\n  fprintf(stderr, \"pipeline: after parse\\n\"); fflush(stderr);",
-            1,
-        )
-    typeck_marker = "  (void)(({ int32_t __tmp = 0; if (typeck_typeck_su_ast(module, arena, ctx) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; }));"
-    if typeck_marker in content and "pipeline: before typeck" not in content:
-        content = content.replace(
-            typeck_marker,
-            "  fprintf(stderr, \"pipeline: before typeck\\n\"); fflush(stderr);\n  (void)(({ int32_t __tmp = 0; if (typeck_typeck_su_ast(module, arena, ctx) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; }));",
-            1,
-        )
-    # main 模块的 codegen
-    codegen_main = " } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; });\n } ; __tmp; }));"
-    if codegen_main in content and "pipeline: before codegen" not in content:
-        content = content.replace(
-            codegen_main,
-            " } else {   fprintf(stderr, \"pipeline: before codegen\\n\"); fflush(stderr);   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; });\n } ; __tmp; }));",
-            1,
-        )
-    # dep 循环里的 codegen（与 main 的 pattern 不同）
-    codegen_dep = " } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]),"
-    if codegen_dep in content and content.count("fprintf(stderr, \"pipeline: before codegen") < 2:
-        content = content.replace(
-            codegen_dep,
-            " } else {   fprintf(stderr, \"pipeline: before codegen\\n\"); fflush(stderr);   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]),",
-            1,
-        )
+    # 7. 诊断已关闭：不再注入 pipeline impl/typeck/codegen 的 stderr 调试输出
 
     with open(path, "w") as f:
         f.write(content)
