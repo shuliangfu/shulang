@@ -87,7 +87,9 @@ typedef enum ASTExprKind {
     AST_EXPR_INDEX,        /**< 下标访问 base[index] */
     AST_EXPR_CALL,         /**< 函数调用 callee(args)；callee 为 VAR 标识符，args 为实参表达式数组 */
     AST_EXPR_METHOD_CALL,  /**< 方法调用 base.method(args)；由 typeck 解析为具体 impl 函数（阶段 7.2） */
-    AST_EXPR_ENUM_VARIANT  /**< 已废弃：枚举值现用 Name.Variant（FIELD_ACCESS+is_enum_variant），保留以兼容旧 AST/typeck/codegen 分支 */
+    AST_EXPR_ENUM_VARIANT, /**< 已废弃：枚举值现用 Name.Variant（FIELD_ACCESS+is_enum_variant），保留以兼容旧 AST/typeck/codegen 分支 */
+    AST_EXPR_ADDR_OF,      /**< 取址 &expr（一元 &，用于传指针给 extern 函数）；value.unary.operand 为子表达式 */
+    AST_EXPR_AS            /**< 类型转换 expr as type；value.as_type.operand 为子表达式，value.as_type.type 为目标类型 */
 } ASTExprKind;
 
 /** match 单分支：整数字面量、_、或枚举变体 Name.Variant => 表达式（arms 由 ast_module_free 路径释放） */
@@ -135,6 +137,7 @@ typedef struct ASTExpr {
             struct ASTExpr *base;    /**< AST_EXPR_FIELD_ACCESS 的基表达式（如变量或另一字段访问） */
             char *field_name;        /**< 字段名（strdup，由 ast_expr_free 释放） */
             int is_enum_variant;     /**< 由 typeck 设置：1 表示 Type.Variant 枚举变体访问（base 为类型名），codegen 生成 EnumName_VariantName */
+            int field_offset;        /**< 字段偏移（字节），由 typeck 从结构体布局填写；asm 后端用于 add_imm + load */
         } field_access;
         struct {
             char *struct_name;        /**< 结构体类型名（strdup，由 ast_expr_free 释放） */
@@ -170,13 +173,21 @@ typedef struct ASTExpr {
             struct ASTExpr **args;  /**< 实参表达式数组（不含 self）；由 ast_expr_free 释放 */
             int num_args;
             struct ASTFunc *resolved_impl_func; /**< 由 typeck 填写：实际调用的 impl 函数；不释放，归属 impl 块 */
+            const char *resolved_import_path;   /**< 由 typeck 填写：若为 module.func 形式则为其 import 路径，否则 NULL；不释放 */
         } method_call;
+        struct {
+            struct ASTExpr *operand; /**< AST_EXPR_AS 的被转换表达式；由 ast_expr_free 释放 */
+            struct ASTType *type;    /**< 目标类型；由 ast_expr_free 释放 */
+        } as_type;
     } value;
     /** CTFE 最小集：typeck 对常量表达式求值后填写，codegen 直接输出 const_folded_val 避免运行时计算 */
     int const_folded_val;        /**< 折叠后的整型值（仅当 const_folded_valid 为 1 时有效） */
     unsigned char const_folded_valid; /**< 1 表示本表达式已折叠为整型常量 */
     /** BCE：仅当 kind 为 AST_EXPR_INDEX 时有效；1 表示下标已证明在 [0,len) 内，codegen 可省略边界检查 */
     unsigned char index_proven_in_bounds;
+    /** EXPR_FLOAT_LIT：double 的 64 位位模式（低/高 32 位），由 typeck 填写，asm 后端用于 movq 立即数 */
+    int float_bits_lo;
+    int float_bits_hi;
 } ASTExpr;
 
 /** 块内语句类型：goto 或 return（在 final_expr 前出现） */
@@ -201,8 +212,8 @@ typedef struct ASTStructField {
     struct ASTType *type; /**< 字段类型，不可为 NULL */
 } ASTStructField;
 
-/** 单结构体最大字段数（与 parser 一致），用于布局偏移数组 */
-#define AST_STRUCT_MAX_FIELDS 32
+/** 单结构体最大字段数（与 parser MAX_STRUCT_FIELDS_DEF 一致），用于布局偏移数组 */
+#define AST_STRUCT_MAX_FIELDS 64
 
 /** 单函数/结构体最大泛型参数数（阶段 7.1 泛型） */
 #define AST_MAX_GENERIC_PARAMS 8
@@ -341,8 +352,8 @@ typedef struct ASTImplBlock {
     int num_funcs;
 } ASTImplBlock;
 
-/** 顶层最大函数数（多函数支持，自举前路线分析 §5.1） */
-#define AST_MODULE_MAX_FUNCS 32
+/** 顶层最大函数数（多函数支持，自举前路线分析 §5.1）；自举时 typeck/codegen.su 含大量 extern，故放宽至 256。 */
+#define AST_MODULE_MAX_FUNCS 256
 
 /** 单态化实例：泛型函数 + 类型实参，由 typeck 登记、codegen 按实例生成 C（阶段 7.1）。type_args 与数组由 ast_module_free 释放。 */
 typedef struct ASTMonoInstance {
