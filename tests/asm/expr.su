@@ -1,0 +1,2 @@
+// 测试 asm 后端：二元运算 2*3=6（.su 解析器支持 return int [* int] 与 return int + int；1+2*3 已解析，backend 待修）
+function main(): i32 { return 2 * 3; }
