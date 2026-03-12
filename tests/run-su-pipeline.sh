@@ -65,13 +65,7 @@ if [ "$ec" -ne 0 ]; then
   exit 1
 fi
 
-# 产出应含 C 头与 return（函数名暂可能为 mai 已知问题）
-# shuc_su（main_su.o + runtime_su.o + pipeline_su.o）无 -su -E 解析，仅 bootstrap-driver 的 shuc 有；缺 #include 时视为未支持并 SKIP
-if ! grep -q '#include' "$out"; then
-  echo "run-su-pipeline SKIP (output missing #include; -su -E requires bootstrap-driver build)"
-  rm -f "$out"
-  exit 0
-fi
+# 产出应含 return（有 return 即视为有效 C；#include 可有可无，shuc_su 的 pipeline 可能不生成）
 if ! grep -q 'return' "$out"; then
   echo "run-su-pipeline: output missing return"
   cat "$out"

@@ -1240,8 +1240,10 @@ int RUN_CC_FUNC(int argc, char **argv) {
                 if (elf_ctx_ptr) free(elf_ctx_ptr);
                 return 1;
             }
-            if (!emit_elf_o)
+            if (!emit_elf_o) {
                 fwrite(out_buf.data, 1, (size_t)out_buf.len, asm_out ? asm_out : stdout);
+                if (!asm_out) fflush(stdout);
+            }
         }
         typeck_ndep = n_deps;
         for (int i = 0; i < n_deps; i++) {
@@ -1266,6 +1268,7 @@ int RUN_CC_FUNC(int argc, char **argv) {
                 }
             }
             fwrite(out_buf.data, 1, (size_t)out_buf.len, asm_out ? asm_out : stdout);
+            if (!asm_out) fflush(stdout);
             if (asm_out) fclose(asm_out);
             asm_out = NULL;
             if (elf_ctx_ptr) { free(elf_ctx_ptr); elf_ctx_ptr = NULL; }
