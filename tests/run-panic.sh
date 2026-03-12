@@ -6,10 +6,10 @@ make -C compiler -q 2>/dev/null || make -C compiler
 
 ./compiler/shuc tests/panic/main.su -o /tmp/shuc_panic 2>&1
 ./compiler/shuc tests/panic/with_msg.su -o /tmp/shuc_panic_msg 2>&1
-# 运行预期非 0 退出（abort）；子 shell 重定向避免 shell 打印 Abort trap
-exitcode=0; ( /tmp/shuc_panic ) 2>/dev/null || exitcode=$?
+# 运行预期非 0 退出（abort）；整组命令 stderr 重定向，尽量抑制 shell 打印 "Abort trap: 6"
+exitcode=0; { ( /tmp/shuc_panic 2>/dev/null ) 2>/dev/null || exitcode=$?; } 2>/dev/null
 [ "$exitcode" -eq 0 ] && { echo "expected non-zero exit (panic abort)"; exit 1; }
-exitcode=0; ( /tmp/shuc_panic_msg ) 2>/dev/null || exitcode=$?
+exitcode=0; { ( /tmp/shuc_panic_msg 2>/dev/null ) 2>/dev/null || exitcode=$?; } 2>/dev/null
 [ "$exitcode" -eq 0 ] && { echo "expected non-zero exit (panic(42) abort)"; exit 1; }
 
 echo "panic test OK"
