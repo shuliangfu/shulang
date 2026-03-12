@@ -35,11 +35,9 @@ def main():
         )
 
     # 2.5 parser 死循环根因：parse_into/parse_into_buf 的 while 循环必须在每次成功解析一个函数后用 res.next_lex 更新 lex，
-    # 否则下一轮仍用旧 lex，词法位置不前进导致死循环。若 codegen 漏掉或重排了该行，在此强制补上。
-    # 仅当「下一非空行」为正则匹配的 lex 赋值时才视为已存在，否则一律插入（兼容 codegen 空格/换行差异）。
+    # 否则下一轮仍用旧 lex，词法位置不前进导致死循环。此处一律在 num_funcs 自增后插入该行（已存在则多一行重复赋值，无害）。
     _num_funcs_inc = "(void)(((module)->num_funcs = (module)->num_funcs + 1));"
     _lex_next = "(void)((lex = (res).next_lex));"
-    _lex_line_re = re.compile(r"^\s*\(\s*void\s*\)\s*\(\s*\(\s*lex\s*=\s*\(res\)\.next_lex\s*\)\s*\)", re.MULTILINE)
     if _num_funcs_inc in content:
         idx = 0
         while True:
@@ -47,20 +45,12 @@ def main():
             if pos == -1:
                 break
             after = pos + len(_num_funcs_inc)
-            rest = content[after:]
-            lines_after = [ln.strip() for ln in rest.split("\n")[:3] if ln.strip()]
-            first_nonempty = lines_after[0] if lines_after else ""
-            # 下一非空行必须整行匹配 (void)((lex = (res).next_lex)); 的宽松形式才不插入
-            already = bool(_lex_line_re.match(first_nonempty))
-            if not already:
-                line_end = content.find("\n", after)
-                if line_end == -1:
-                    break
-                insert_at = line_end + 1
-                content = content[:insert_at] + "    " + _lex_next + "\n" + content[insert_at:]
-                idx = insert_at + len(_lex_next) + 2
-            else:
-                idx = after + 1
+            line_end = content.find("\n", after)
+            if line_end == -1:
+                break
+            insert_at = line_end + 1
+            content = content[:insert_at] + "    " + _lex_next + "\n" + content[insert_at:]
+            idx = insert_at + len(_lex_next) + 2
 
     # 3. platform_elf_elf_resolve_patches: 重排 while(p) 体为 [声明+while(l)+赋值] + [原 BLOCK1 + p++]
     fn = "platform_elf_elf_resolve_patches"
