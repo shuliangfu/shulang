@@ -1,0 +1,5 @@
+import ast;
+function expr_type_ref_impl(arena: *ASTArena, expr_ref: i32): i32 {
+  let e: Expr = ast_arena_expr_get(arena, expr_ref);
+  return e.resolved_type_ref;
+}

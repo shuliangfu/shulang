@@ -1,0 +1,5 @@
+import ast;
+function foo(arena: *ASTArena): i32 {
+  let e: Expr = 0;
+  return 0;
+}
