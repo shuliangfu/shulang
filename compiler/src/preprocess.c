@@ -92,8 +92,12 @@ static int is_keeping(void) {
     return depth == 0 || (stack[depth - 1] == 1 || stack[depth - 1] == 2);
 }
 
-char *preprocess(const char *source, const char **defines, int ndefines) {
+char *preprocess_c_fallback(const char *source, size_t source_len, const char **defines, int ndefines, size_t *out_length) {
+    if (out_length) *out_length = 0;
     if (!source) return NULL;
+    int use_explicit_len = (source_len > 0);
+    if (source_len == 0)
+        source_len = strlen(source);
     /* 无 defines 时仍执行分支逻辑，所有 #if SYMBOL 视为未定义，走 #else 或整块跳过 */
     depth = 0;
     size_t out_cap = PREPROCESS_OUT_GROW;
@@ -101,11 +105,14 @@ char *preprocess(const char *source, const char **defines, int ndefines) {
     char *out = (char *)malloc(out_cap);
     if (!out) return NULL;
     const char *p = source;
+    const char *end = source + source_len;
     char line_buf[PREPROCESS_LINE_MAX];
     int line_buf_len = 0;
     for (;;) {
+        if (p >= end)
+            break;
         int ch = *p;
-        if (ch == '\n' || ch == '\0') {
+        if (ch == '\n' || (ch == '\0' && !use_explicit_len)) {
             line_buf[line_buf_len] = '\0';
             if (line_buf_len > 0 || ch == '\n') {
                 int kind = 0;
@@ -193,7 +200,8 @@ char *preprocess(const char *source, const char **defines, int ndefines) {
                 }
             }
             line_buf_len = 0;
-            if (ch == '\0') break;
+            if (ch == '\0' && !use_explicit_len)
+                break;
             p++;
             continue;
         }
@@ -206,5 +214,13 @@ char *preprocess(const char *source, const char **defines, int ndefines) {
         free(out);
         return NULL;
     }
+    if (out_length) *out_length = out_len;
     return out;
 }
+
+/** 对外接口：默认构建（仅链 preprocess.o）时由此提供；SU 构建（-DSHUC_USE_SU_PREPROCESS）时由 runtime.c 提供。 */
+#ifndef SHUC_USE_SU_PREPROCESS
+char *preprocess(const char *source, size_t source_len, const char **defines, int ndefines, size_t *out_length) {
+    return preprocess_c_fallback(source, source_len, defines, ndefines, out_length);
+}
+#endif
