@@ -1,0 +1,244 @@
+// pipeline.su — 自举 9.1/9.2/5.3：纯 .su 编译流水线入口
+//
+// 职责：串联 解析 →（可选）按 import 加载 deps → 类型检查 → 代码生成；5.3 在 .su 内解析 import、按需加载并 parse_into。
+// 依赖：ast、parser（parse_into、get_module_num_imports、get_module_import_path）、typeck、codegen、std.fs。
+// 与 C 关系：6.1 resolve/read/preprocess 全在 .su（std.fs + preprocess_su_buf）；仅 parse 需从 buf+len 组 slice，保留 1 个 C 桥接。
+
+import ast;
+import lexer;
+import parser;
+import typeck;
+import codegen;
+import std.fs;
+import preprocess;
+import asm;
+
+/** 阶段 6.1 完全自举：resolve、read、preprocess、parse 全在 .su；pipeline_parse_into_buf 调 parser.parse_into_buf，不再依赖 C。 */
+
+/** 将 (buf, buf_len) 传入 parser.parse_into_buf，返回 0 成功 -1 失败。调用前由 C 或调用方保证 arena/module 可用；此处先 parse_into_init 再解析。 */
+function pipeline_parse_into_buf(arena: *ASTArena, module: *Module, buf: [262144]u8, buf_len: i32): i32 {
+  parser.parse_into_init(arena, module);
+  let res: ParseIntoResult = parser.parse_into_buf(arena, module, &buf[0], buf_len);
+  if (res.ok != 0) {
+    return -1;
+  }
+  return 0;
+}
+
+/** 6.1：将 buf[0..len-1] 复制到 ctx.path_buf[off..]，返回 off+len；不越界检查由调用方保证。 */
+function path_append_from_buf_256(ctx: *PipelineDepCtx, off: i32, buf: [256]u8, len: i32): i32 {
+  let k: i32 = 0;
+  while (k < len && off < 508) {
+    ctx.path_buf[off] = buf[k];
+    off = off + 1;
+    k = k + 1;
+  }
+  return off;
+}
+/** 6.1：同 path_append_from_buf_256，用于 entry_dir [512]u8。 */
+function path_append_from_buf_512(ctx: *PipelineDepCtx, off: i32, buf: [512]u8, len: i32): i32 {
+  let k: i32 = 0;
+  while (k < len && off < 508) {
+    ctx.path_buf[off] = buf[k];
+    off = off + 1;
+    k = k + 1;
+  }
+  return off;
+}
+
+/** 6.1：将 import_path[0..path_len-1] 中 '.' 换为 '/' 追加到 ctx.path_buf[off..]，返回新 off。 */
+function path_append_import_path(ctx: *PipelineDepCtx, off: i32, import_path: [64]u8, path_len: i32): i32 {
+  let k: i32 = 0;
+  while (k < path_len && off < 508) {
+    if (import_path[k] == 46) {
+      ctx.path_buf[off] = 47;
+    } else {
+      ctx.path_buf[off] = import_path[k];
+    }
+    off = off + 1;
+    k = k + 1;
+  }
+  return off;
+}
+
+/** 6.1：按 lib_roots 与 entry_dir 解析 import 路径，将结果写入 ctx.path_buf（含结尾 0），返回 0 成功 -1 失败。使用 std.fs open 探测存在。 */
+function resolve_path_su(ctx: *PipelineDepCtx, import_path: [64]u8, path_len: i32): i32 {
+  let r: i32 = 0;
+  while (r < ctx.num_lib_roots && r < 8) {
+    let off: i32 = 0;
+    if (ctx.lib_root_lens[r] > 0) {
+      off = path_append_from_buf_256(ctx, 0, ctx.lib_root_bufs[r], ctx.lib_root_lens[r]);
+    }
+    if (off < 509) {
+      ctx.path_buf[off] = 47;
+      off = off + 1;
+    }
+    off = path_append_import_path(ctx, off, import_path, path_len);
+    if (off + 4 <= 512) {
+      ctx.path_buf[off] = 46;
+      ctx.path_buf[off + 1] = 115;
+      ctx.path_buf[off + 2] = 117;
+      ctx.path_buf[off + 3] = 0;
+      let fd: i32 = fs_open_read(ctx.path_buf);
+      if (fd >= 0) {
+        fs_close(fd);
+        return 0;
+      }
+    }
+    r = r + 1;
+  }
+  if (ctx.entry_dir_len > 0) {
+    let has_dot: i32 = 0;
+    let k: i32 = 0;
+    while (k < path_len && k < 64) {
+      if (import_path[k] == 46) {
+        has_dot = 1;
+      }
+      k = k + 1;
+    }
+    if (has_dot == 0) {
+      let off: i32 = path_append_from_buf_512(ctx, 0, ctx.entry_dir_buf, ctx.entry_dir_len);
+      if (off < 509) {
+        ctx.path_buf[off] = 47;
+        off = off + 1;
+      }
+      off = path_append_import_path(ctx, off, import_path, path_len);
+      if (off + 4 <= 512) {
+        ctx.path_buf[off] = 46;
+        ctx.path_buf[off + 1] = 115;
+        ctx.path_buf[off + 2] = 117;
+        ctx.path_buf[off + 3] = 0;
+        let fd: i32 = fs_open_read(ctx.path_buf);
+        if (fd >= 0) {
+          fs_close(fd);
+          return 0;
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+/** 6.1：将 ctx.path_buf 指向的文件读入 ctx.loaded_buf，设置 ctx.loaded_len（isize），返回 0 成功 -1 失败。纯 .su + std.fs。 */
+function read_file_su(ctx: *PipelineDepCtx): i32 {
+  let fd: i32 = fs_open_read(ctx.path_buf);
+  if (fd < 0) {
+    return -1;
+  }
+  let cap: usize = 262144;
+  let n: isize = fs_read(fd, ctx.loaded_buf, cap);
+  fs_close(fd);
+  if (n < 0) {
+    return -1;
+  }
+  ctx.loaded_len = n;
+  return 0;
+}
+
+/**
+ * 诊断用：仅调用 parse_one_function(lexer_init(), source)，返回 res.ok 的整型（1 成功，0 失败）。
+ */
+function parse_one_function_ok(source: []u8): i32 {
+  let lex: Lexer = lexer_init();
+  let res: OneFuncResult = parse_one_function(lex, source);
+  if (res.ok) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * 先 init 再 parse_into，返回结果；单独成函数避免 codegen 将 init 移到 parse_into 之后。
+ */
+function parse_into_with_init(arena: *ASTArena, module: *Module, source: []u8): ParseIntoResult {
+  parse_into_init(arena, module);
+  return parse_into(arena, module, source);
+}
+
+/**
+ * 诊断用：parse_into_with_init + set_main_index 后只跑 typeck_su_ast，返回其返回值（0 通过，-1 失败）。ctx 可为 ndep==0 的上下文。
+ */
+function typeck_after_parse_ok(arena: *ASTArena, module: *Module, source: []u8, ctx: *PipelineDepCtx): i32 {
+  let r: ParseIntoResult = parse_into_with_init(arena, module, source);
+  if (r.ok != 0) {
+    return -2;
+  }
+  parse_into_set_main_index(module, r.main_idx);
+  return typeck_su_ast(module, arena, ctx);
+}
+
+/**
+ * 从源码到 C 的完整 .su 流水线；5.3/6.1 编排逻辑全在此处，dep 通过 ctx 传入，C 只提供 resolve/read/parse_into 原语。
+ * 顺序：parse_into 入口 →（若有 import）对每条 import：resolve_path → read_file → parse_into(ctx.dep_arenas[i], ctx.dep_modules[i]) → ctx.ndep = n_imports → typeck(module, arena, ctx) → 先 codegen 各 ctx.dep 再 codegen 入口。
+ */
+function run_su_pipeline(arena: *ASTArena, module: *Module, source: []u8, out_buf: *CodegenOutBuf, ctx: *PipelineDepCtx): i32 {
+  let r: ParseIntoResult = parse_into_with_init(arena, module, source);
+  if (r.ok != 0) {
+    return -1;
+  }
+  parse_into_set_main_index(module, r.main_idx);
+  let n_imports: i32 = get_module_num_imports(module);
+  ctx.ndep = 0;
+  if (n_imports > 0) {
+    let i: i32 = 0;
+    while (i < n_imports) {
+      if (i >= 32) {
+        return -1;
+      }
+      let path_buf: [64]u8 = [];
+      get_module_import_path(module, i, path_buf);
+      let path_len: i32 = 0;
+      while (path_len < 64 && path_buf[path_len] != 0) {
+        path_len = path_len + 1;
+      }
+      if (resolve_path_su(ctx, path_buf, path_len) != 0) {
+        return -1;
+      }
+      if (read_file_su(ctx) != 0) {
+        return -1;
+      }
+      let out_len: i32 = preprocess_su_buf(ctx.loaded_buf, ctx.loaded_len, ctx.preprocess_buf, 262144);
+      if (out_len < 0) {
+        return -1;
+      }
+      ctx.preprocess_len = out_len;
+      let dep_arena: *ASTArena = ctx.dep_arenas[i];
+      let dep_module: *Module = ctx.dep_modules[i];
+      if (pipeline_parse_into_buf(dep_arena, dep_module, ctx.preprocess_buf, ctx.preprocess_len) != 0) {
+        return -1;
+      }
+      i = i + 1;
+    }
+    ctx.ndep = n_imports;
+  }
+  if (typeck_su_ast(module, arena, ctx) != 0) {
+    return -1;
+  }
+  out_buf.len = 0;
+  let j: i32 = 0;
+  while (j < ctx.ndep) {
+    if (j >= 32) {
+      break;
+    }
+    if (ctx.use_asm_backend != 0) {
+      if (asm.asm_codegen_ast(ctx.dep_modules[j], ctx.dep_arenas[j], out_buf, ctx) != 0) {
+        return -1;
+      }
+    } else {
+      if (codegen_su_ast(ctx.dep_modules[j], ctx.dep_arenas[j], out_buf) != 0) {
+        return -1;
+      }
+    }
+    j = j + 1;
+  }
+  if (ctx.use_asm_backend != 0) {
+    if (asm.asm_codegen_ast(module, arena, out_buf, ctx) != 0) {
+      return -1;
+    }
+  } else {
+    if (codegen_su_ast(module, arena, out_buf) != 0) {
+      return -1;
+    }
+  }
+  return 0;
+}
