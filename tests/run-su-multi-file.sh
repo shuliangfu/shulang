@@ -4,12 +4,6 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# CI 下不构建/不跑 shuc_su -su -E，与 run-su-pipeline.sh 一致，避免卡死（见 tests/README.md 6.1）
-if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-  echo "run-su-multi-file SKIP (CI: skip -su -E to avoid hang; run locally to verify)"
-  exit 0
-fi
-
 make -C compiler -q 2>/dev/null || make -C compiler
 
 # 可移植超时：执行命令，超时秒数 $1，超时返回 124
@@ -35,13 +29,14 @@ if [ -x compiler/shuc_su ]; then SU_SHUC=compiler/shuc_su; else SU_SHUC=compiler
 # 自举两代对比（SHUC=shuc_stage1/2）时 -su -E 多文件路径尚有 bug(139)，暂跳过以免阻塞 check-7.2
 if [ -n "${SHUC:-}" ]; then echo "run-su-multi-file SKIP (SHUC set, -su -E multi-file known issue)"; exit 0; fi
 
+# 标准输出进 $out，stderr 不重定向以便超时/失败时在终端看到最后一条诊断（shuc: -su -E before/after pipeline、pipeline: enter/before typeck/before codegen）
 out=$(mktemp)
 ec=0
-run_timeout 60 "$SU_SHUC" -su -E tests/multi-file/main.su > "$out" 2>/dev/null || ec=$?
+run_timeout 60 "$SU_SHUC" -su -E tests/multi-file/main.su > "$out" || ec=$?
 [ "$ec" -eq 142 ] && ec=124
 if [ "$ec" -eq 124 ]; then
   rm -f "$out"
-  echo "run-su-multi-file SKIP (shuc_su -su -E timed out after 60s)"
+  echo "run-su-multi-file SKIP (shuc_su -su -E timed out after 60s; see stderr above for last diagnostic)"
   exit 0
 fi
 if [ "$ec" -ne 0 ]; then

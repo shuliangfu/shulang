@@ -1225,7 +1225,9 @@ int RUN_CC_FUNC(int argc, char **argv) {
             one_ctx.target_arch = pctx.target_arch;
             one_ctx.use_macho_o = pctx.use_macho_o;
             one_ctx.use_coff_o = pctx.use_coff_o;
+            fprintf(stderr, "shuc: -su -E before pipeline dep %d (%s)\n", i, dep_paths[i]);
             int ec = pipeline_run_su_pipeline(dep_arenas[i], dep_modules[i], (const uint8_t *)dep_sources[i], dep_lens[i], (void *)&out_buf, (void *)&one_ctx);
+            fprintf(stderr, "shuc: -su -E after pipeline dep %d\n", i);
             if (ec != 0 || out_buf.len == 0) {
                 fprintf(stderr, "shuc: -su pipeline failed for import '%s'\n", dep_paths[i]);
                 for (int j = 0; j < n_deps; j++) { free(dep_arenas[j]); free(dep_modules[j]); }
@@ -1248,7 +1250,9 @@ int RUN_CC_FUNC(int argc, char **argv) {
         pipeline_set_dep_slots(dep_arenas, dep_modules);
         memset(arena, 0, arena_sz);
         memset(module, 0, module_sz);
+        fprintf(stderr, "shuc: -su -E before pipeline (main)\n");
         int ec = pipeline_run_su_pipeline(arena, module, src_slice.data, (size_t)src_slice.length, (void *)&out_buf, (void *)&pctx);
+        fprintf(stderr, "shuc: -su -E after pipeline (main)\n");
         if (ec == 0 && (out_buf.len > 0 || emit_elf_o)) {
             if (emit_elf_o && elf_ctx_ptr) {
                 int32_t elf_ec = asm_asm_codegen_elf_o(module, arena, (void *)&pctx, (struct platform_elf_ElfCodegenCtx *)elf_ctx_ptr, &out_buf);
@@ -2068,7 +2072,9 @@ int driver_run_su_emit_c(void) {
             one_ctx.dep_modules[0] = dep_modules[i];
             one_ctx.dep_arenas[0] = dep_arenas[i];
             one_ctx.ndep = 0;
+            fprintf(stderr, "shuc: -su -E before pipeline dep %d (%s)\n", i, dep_paths[i]);
             int ec = pipeline_run_su_pipeline(dep_arenas[i], dep_modules[i], (const uint8_t *)dep_sources[i], dep_lens[i], (void *)&out_buf, (void *)&one_ctx);
+            fprintf(stderr, "shuc: -su -E after pipeline dep %d\n", i);
             if (ec != 0 || out_buf.len == 0) {
                 fprintf(stderr, "shuc: -su pipeline failed for import '%s'\n", dep_paths[i]);
                 for (int j = 0; j < n_deps; j++) { free(dep_arenas[j]); free(dep_modules[j]); }
@@ -2086,7 +2092,9 @@ int driver_run_su_emit_c(void) {
         pipeline_set_dep_slots(dep_arenas, dep_modules);
         memset(arena, 0, arena_sz);
         memset(module, 0, module_sz);
+        fprintf(stderr, "shuc: -su -E before pipeline (main)\n");
         int ec = pipeline_run_su_pipeline(arena, module, src_slice.data, (size_t)src_slice.length, (void *)&out_buf, (void *)&pctx_e);
+        fprintf(stderr, "shuc: -su -E after pipeline (main)\n");
         if (ec == 0 && out_buf.len > 0) {
             fwrite(out_buf.data, 1, (size_t)out_buf.len, stdout);
             for (int j = 0; j < n_deps; j++) { free(dep_arenas[j]); free(dep_modules[j]); }

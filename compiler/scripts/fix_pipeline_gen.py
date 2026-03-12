@@ -180,6 +180,40 @@ def main():
             count=1,
         )
 
+    # 7. 诊断 -su -E 卡住：在 pipeline_run_su_pipeline_impl 内打入点，便于 CI/本地超时后看最后一条输出
+    if "#include <stdio.h>" not in content:
+        content = content.replace("#include <stdint.h>", "#include <stdint.h>\n#include <stdio.h>", 1)
+    impl_enter = "  struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);\n  int32_t n_imports"
+    if impl_enter in content and "fprintf(stderr, \"pipeline: enter impl" not in content:
+        content = content.replace(
+            impl_enter,
+            "  struct parser_ParseIntoResult r = pipeline_parse_into_with_init(arena, module, source);\n  fprintf(stderr, \"pipeline: enter impl\\n\");\n  int32_t n_imports",
+            1,
+        )
+    typeck_marker = "  (void)(({ int32_t __tmp = 0; if (typeck_typeck_su_ast(module, arena, ctx) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; }));"
+    if typeck_marker in content and "pipeline: before typeck" not in content:
+        content = content.replace(
+            typeck_marker,
+            "  fprintf(stderr, \"pipeline: before typeck\\n\");\n  (void)(({ int32_t __tmp = 0; if (typeck_typeck_su_ast(module, arena, ctx) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; }));",
+            1,
+        )
+    # main 模块的 codegen
+    codegen_main = " } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; });\n } ; __tmp; }));"
+    if codegen_main in content and "pipeline: before codegen" not in content:
+        content = content.replace(
+            codegen_main,
+            " } else {   fprintf(stderr, \"pipeline: before codegen\\n\");   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast(module, arena, out_buf) != 0) {   return (-1);\n } else (__tmp = 0) ; __tmp; });\n } ; __tmp; }));",
+            1,
+        )
+    # dep 循环里的 codegen（与 main 的 pattern 不同）
+    codegen_dep = " } else {   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]),"
+    if codegen_dep in content and content.count("fprintf(stderr, \"pipeline: before codegen") < 2:
+        content = content.replace(
+            codegen_dep,
+            " } else {   fprintf(stderr, \"pipeline: before codegen\\n\");   __tmp = ({ int32_t __tmp = 0; if (codegen_codegen_su_ast((j < 0 || (j) >= 32 ? (shulang_panic_(1, 0), ((ctx)->dep_modules)[0]) : ((ctx)->dep_modules)[j]),",
+            1,
+        )
+
     with open(path, "w") as f:
         f.write(content)
     print("fix_pipeline_gen.py: applied fixes to", path)
