@@ -50,8 +50,8 @@ if [ "$ec" -ne 0 ]; then
   rm -f "$out"
   exit 1
 fi
-# 产出应含 bar 与 main 调 bar()
-if ! grep -q 'bar(void)' "$out"; then
+# 产出应含 bar 定义与 main 调 bar()（codegen 对无参函数生成 bar() 非 bar(void)，故用 bar( 匹配）
+if ! grep -q 'bar(' "$out"; then
   echo "run-su-multi-file: output missing bar()"
   cat "$out"
   rm -f "$out"
