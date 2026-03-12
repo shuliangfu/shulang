@@ -1,0 +1,407 @@
+// ast.su — 纯 .su 抽象语法树（完全自举：不依赖 C 的 ast.h）
+//
+// 职责：定义编译器前端/中端/后端共用的 AST 节点类型，全部用 .su 的 struct/enum 表示。
+// 与 C 的关系：无。不引用任何 C 头文件或 extern；parser/typeck/codegen 均基于本模块。
+// 约定：.su 无 union，变体数据用独立字段；子节点用“池下标”表示，0 表示空（无子节点）。
+
+/** 类型节点种类：与 C 的 ASTTypeKind 一一对应，供 typeck/codegen 使用 */
+enum TypeKind {
+  TYPE_I32,
+  TYPE_BOOL,
+  TYPE_U8,
+  TYPE_U32,
+  TYPE_U64,
+  TYPE_I64,
+  TYPE_USIZE,
+  TYPE_ISIZE,
+  TYPE_NAMED,
+  TYPE_PTR,
+  TYPE_ARRAY,
+  TYPE_SLICE,
+  TYPE_VECTOR,
+  TYPE_F32,
+  TYPE_F64,
+  TYPE_VOID
+}
+
+/** 表达式节点种类：与 C 的 ASTExprKind 一一对应（须在 struct 前，因解析顺序为 enum* 再 struct*） */
+enum ExprKind {
+  EXPR_LIT,
+  EXPR_FLOAT_LIT,
+  EXPR_BOOL_LIT,
+  EXPR_VAR,
+  EXPR_ADD,
+  EXPR_SUB,
+  EXPR_MUL,
+  EXPR_DIV,
+  EXPR_MOD,
+  EXPR_SHL,
+  EXPR_SHR,
+  EXPR_BITAND,
+  EXPR_BITOR,
+  EXPR_BITXOR,
+  EXPR_EQ,
+  EXPR_NE,
+  EXPR_LT,
+  EXPR_LE,
+  EXPR_GT,
+  EXPR_GE,
+  EXPR_LOGAND,
+  EXPR_LOGOR,
+  EXPR_NEG,
+  EXPR_BITNOT,
+  EXPR_LOGNOT,
+  EXPR_IF,
+  EXPR_BLOCK,
+  EXPR_TERNARY,
+  EXPR_ASSIGN,
+  EXPR_BREAK,
+  EXPR_CONTINUE,
+  EXPR_RETURN,
+  EXPR_PANIC,
+  EXPR_MATCH,
+  EXPR_FIELD_ACCESS,
+  EXPR_STRUCT_LIT,
+  EXPR_ARRAY_LIT,
+  EXPR_INDEX,
+  EXPR_CALL,
+  EXPR_METHOD_CALL,
+  EXPR_ENUM_VARIANT,
+  /** 通用二元运算占位（parser 在 parse_into_buf 中先用 BINOP 再细分；与 EXPR_ADD/EXPR_MUL 等并存） */
+  EXPR_BINOP
+}
+
+/** 类型节点：kind + 具名类型名（NAMED 时）+ 元素类型下标（PTR/ARRAY/SLICE/VECTOR 时）+ 数组长度（ARRAY/VECTOR 时） */
+struct Type {
+  kind: TypeKind;
+  name: [64]u8;
+  name_len: i32;
+  elem_type_ref: i32;
+  array_size: i32;
+}
+
+/** 表达式节点（最小集）：.su 无 union，变体用独立字段；ref 为池下标，0 表示空。allow(padding) 满足 f64 对齐。 */
+allow(padding) struct Expr {
+  kind: ExprKind;
+  resolved_type_ref: i32;
+  line: i32;
+  col: i32;
+  int_val: i32;
+  float_val: f64;
+  var_name: [64]u8;
+  var_name_len: i32;
+  binop_left_ref: i32;
+  binop_right_ref: i32;
+  unary_operand_ref: i32;
+  if_cond_ref: i32;
+  if_then_ref: i32;
+  if_else_ref: i32;
+  block_ref: i32;
+  match_matched_ref: i32;
+  match_arm_result_refs: [16]i32;
+  match_num_arms: i32;
+  /** 每臂模式：is_wildcard=1 表示 _；否则用 lit_val 或（is_enum_variant=1 时）variant_index 比较。由 parser/typeck 填写。 */
+  match_arm_is_wildcard: [16]i32;
+  match_arm_lit_val: [16]i32;
+  match_arm_is_enum_variant: [16]i32;
+  match_arm_variant_index: [16]i32;
+  field_access_base_ref: i32;
+  field_access_field_name: [64]u8;
+  field_access_field_len: i32;
+  field_access_is_enum_variant: i32;
+  /** 字段偏移（字节），由 typeck 从结构体布局填写；未设时为 0。 */
+  field_access_offset: i32;
+  index_base_ref: i32;
+  index_index_ref: i32;
+  index_base_is_slice: i32;
+  call_callee_ref: i32;
+  call_arg_refs: [16]i32;
+  call_num_args: i32;
+  method_call_base_ref: i32;
+  method_call_name: [64]u8;
+  method_call_name_len: i32;
+  method_call_arg_refs: [16]i32;
+  method_call_num_args: i32;
+  const_folded_val: i32;
+  const_folded_valid: i32;
+  index_proven_in_bounds: i32;
+  /** STRUCT_LIT：结构体类型名 + 字段（名 + 初值表达式 ref）；最多 8 个字段。 */
+  struct_lit_struct_name: [64]u8;
+  struct_lit_struct_name_len: i32;
+  struct_lit_num_fields: i32;
+  struct_lit_field_names: [8][64]u8;
+  struct_lit_field_lens: [8]i32;
+  struct_lit_init_refs: [8]i32;
+  /** ARRAY_LIT：元素个数 + 各元素表达式 ref；最多 16 个元素。 */
+  array_lit_num_elems: i32;
+  array_lit_elem_refs: [16]i32;
+  /** EXPR_FLOAT_LIT：double 的 64 位位模式，由 typeck/parser 填写（低 32 位、高 32 位），asm 用于 movq 立即数。 */
+  float_bits_lo: i32;
+  float_bits_hi: i32;
+  /** EXPR_ENUM_VARIANT：变体 tag（0-based 序号），由 typeck 填写，asm 用于 ret 或比较。 */
+  enum_variant_tag: i32;
+}
+
+/** 常量声明：名称 + 类型池下标 + 初值表达式池下标 */
+struct ConstDecl {
+  name: [64]u8;
+  name_len: i32;
+  type_ref: i32;
+  init_ref: i32;
+}
+
+/** 变量声明：名称 + 类型池下标 + 初值表达式池下标 */
+struct LetDecl {
+  name: [64]u8;
+  name_len: i32;
+  type_ref: i32;
+  init_ref: i32;
+}
+
+/** 单条 while 循环：条件表达式池下标 + 体块池下标 */
+struct WhileLoop {
+  cond_ref: i32;
+  body_ref: i32;
+}
+
+/** 单条 for 循环：init/cond/step 表达式池下标 + 体块池下标 */
+struct ForLoop {
+  init_ref: i32;
+  cond_ref: i32;
+  step_ref: i32;
+  body_ref: i32;
+}
+
+/** 块内语句顺序项：kind 0=const, 1=let, 2=expr_stmt, 3=loop, 4=for；idx 为对应数组下标 */
+allow(padding) struct StmtOrderItem {
+  kind: u8;
+  idx: i32;
+}
+
+/** 带标签的语句：goto 或 return；标签名与目标/返回值由后续字段表示 */
+struct LabeledStmt {
+  label: [32]u8;
+  label_len: i32;
+  is_goto: i32;
+  goto_target: [32]u8;
+  goto_target_len: i32;
+  return_expr_ref: i32;
+}
+
+/** 块：const/let 声明 + while/for + defer 块 + 标签语句 + 表达式语句 + 最终表达式 + stmt_order */
+struct Block {
+  const_decls: [24]ConstDecl;
+  num_consts: i32;
+  let_decls: [24]LetDecl;
+  num_lets: i32;
+  num_early_lets: i32;
+  loops: [8]WhileLoop;
+  num_loops: i32;
+  for_loops: [8]ForLoop;
+  num_for_loops: i32;
+  defer_block_refs: [8]i32;
+  num_defers: i32;
+  labeled_stmts: [8]LabeledStmt;
+  num_labeled_stmts: i32;
+  expr_stmt_refs: [32]i32;
+  num_expr_stmts: i32;
+  final_expr_ref: i32;
+  stmt_order: [96]StmtOrderItem;
+  num_stmt_order: i32;
+}
+
+/** 函数形参：名称 + 类型池下标 */
+struct Param {
+  name: [32]u8;
+  name_len: i32;
+  type_ref: i32;
+}
+
+/** 函数：名称 + 形参 + 返回类型池下标 + 体块/体表达式池下标 + 是否 extern。body_ref 为块池 ref，body_expr_ref 为表达式池 ref（parse_into_buf 用）。 */
+struct Func {
+  name: [64]u8;
+  name_len: i32;
+  params: [16]Param;
+  num_params: i32;
+  return_type_ref: i32;
+  body_ref: i32;
+  /** 体为单表达式时用表达式池 ref（与 body_ref 二选一，0 表示未用） */
+  body_expr_ref: i32;
+  is_extern: i32;
+}
+
+/** 结构体布局（用于 typeck 填 field_access_offset）：名称 + 最多 8 个字段名与偏移；偏移按 8 字节对齐。 */
+struct StructLayout {
+  name: [64]u8;
+  name_len: i32;
+  num_fields: i32;
+  field_names: [8][64]u8;
+  field_lens: [8]i32;
+  field_offsets: [8]i32;
+}
+
+/** 模块：顶层函数列表（或 arena func 池的 ref 表）+ main 函数下标 + import 路径 + 结构体布局（阶段 5 多文件；布局供 typeck 填 FIELD_ACCESS 偏移） */
+struct Module {
+  funcs: [256]Func;
+  /** parse_into_buf 路径：顶层函数在 arena 的 func 池中的 1-based ref，与 num_funcs 同长 */
+  func_refs: [256]i32;
+  num_funcs: i32;
+  main_func_index: i32;
+  /** import 路径扁平存储：路径 i 在 data[i*64..(i+1)*64-1]，len 为 import_path_lens[i] */
+  import_path_data: [2048]u8;
+  import_path_lens: [32]i32;
+  num_imports: i32;
+  /** 结构体布局：由 typeck 从 STRUCT_LIT 推导，供 EXPR_FIELD_ACCESS 填 field_access_offset */
+  struct_layouts: [32]StructLayout;
+  num_struct_layouts: i32;
+}
+
+/** 统一 AST 分配器（池化）：Type/Expr/Block/Func 固定数组 + 计数，1-based ref，0 表示空；不依赖 C 的 malloc。 */
+allow(padding) struct ASTArena {
+  types: [512]Type;
+  num_types: i32;
+  exprs: [4096]Expr;
+  num_exprs: i32;
+  blocks: [512]Block;
+  num_blocks: i32;
+  funcs: [256]Func;
+  num_funcs: i32;
+}
+
+/** 阶段 6.1：pipeline/typeck 共用的 dep 上下文，由调用方分配并传入。
+ *  路径与缓冲：entry_dir/lib_roots 供 .su 内 resolve；path_buf 写解析后路径；loaded/preprocess 缓冲由 C 提供指针与容量。 */
+allow(padding) struct PipelineDepCtx {
+  dep_modules: [32]*Module;
+  dep_arenas: [32]*ASTArena;
+  ndep: i32;
+  /** 6.1 路径解析：入口目录与库根（固定数组避免 .su 中指针下标），供 .su resolve_path_su 使用 */
+  entry_dir_buf: [512]u8;
+  entry_dir_len: i32;
+  num_lib_roots: i32;
+  lib_root_bufs: [8][256]u8;
+  lib_root_lens: [8]i32;
+  /** 解析出的文件路径（含结尾 0，供 open 使用） */
+  path_buf: [512]u8;
+  /** 6.1 完全自举：读入与预处理用固定数组，全部在 .su 内完成，不依赖 C 缓冲指针 */
+  loaded_buf: [262144]u8;
+  loaded_len: isize;
+  preprocess_buf: [262144]u8;
+  preprocess_len: i32;
+  /** 非 0 时 pipeline 使用 asm 后端（出汇编）而非 codegen（出 C）；由 driver 解析 -backend asm 设置。 */
+  use_asm_backend: i32;
+  /** 目标架构：0=x86_64，1=arm64（aarch64），2=riscv64；由 driver 按 -target 设置，asm 后端据此分派。 */
+  target_arch: i32;
+  /** 非 0 时出 .o 走 Mach-O 而非 ELF（macOS 宿主机由 C driver 设置）。 */
+  use_macho_o: i32;
+  /** 非 0 时出 .o 走 COFF/PE .obj（Windows 目标由 C driver 设置）。 */
+  use_coff_o: i32;
+  /** typeck 用：当前检查的块 ref，供 EXPR_VAR 查 const/let 填 resolved_type_ref。0 表示未在块内。 */
+  current_block_ref: i32;
+}
+
+/** 池下标空值：所有 ref 字段用 0 表示“无” */
+function ref_is_null(ref: i32): bool {
+  return ref == 0;
+}
+
+/** 占位：表示本 AST 模块可被 parser/typeck/codegen 引用；后续接池分配与 parser 构建。 */
+function ast_placeholder(): i32 {
+  return 0;
+}
+
+/** 将 Arena 内所有计数清零，用于复用或初始化。 */
+function ast_arena_init(arena: *ASTArena): void {
+  arena.num_types = 0;
+  arena.num_exprs = 0;
+  arena.num_blocks = 0;
+  arena.num_funcs = 0;
+}
+
+/** 在 Type 池中分配一个槽位，返回 1-based ref；已满（512）时返回 0。 */
+function ast_arena_type_alloc(arena: *ASTArena): i32 {
+  if (arena.num_types >= 512) {
+    return 0;
+  }
+  arena.num_types = arena.num_types + 1;
+  return arena.num_types;
+}
+
+/** 在 Expr 池中分配一个槽位，返回 1-based ref；已满（4096）时返回 0。 */
+function ast_arena_expr_alloc(arena: *ASTArena): i32 {
+  if (arena.num_exprs >= 4096) {
+    return 0;
+  }
+  arena.num_exprs = arena.num_exprs + 1;
+  return arena.num_exprs;
+}
+
+/** 在 Block 池中分配一个槽位，返回 1-based ref；已满（512）时返回 0。 */
+function ast_arena_block_alloc(arena: *ASTArena): i32 {
+  if (arena.num_blocks >= 512) {
+    return 0;
+  }
+  arena.num_blocks = arena.num_blocks + 1;
+  return arena.num_blocks;
+}
+
+/** 按 ref 取 Type 池中节点（副本）；ref 须为 1..num_types。 */
+function ast_arena_type_get(arena: *ASTArena, ref: i32): Type {
+  return arena.types[ref - 1];
+}
+
+/** 将 Type 节点写回池中 ref 槽位；ref 须为 1..num_types。用于 parser 构建 AST。 */
+function ast_arena_type_set(arena: *ASTArena, ref: i32, t: Type): void {
+  arena.types[ref - 1] = t;
+}
+
+/** 将 Expr 的 match 每臂数组与 enum_variant_tag 置 0，供 parser 在构建任意 Expr 时调用，避免未初始化。 */
+function expr_init_match_enum(e: *Expr): void {
+  let i: i32 = 0;
+  while (i < 16) {
+    e.match_arm_is_wildcard[i] = 0;
+    e.match_arm_lit_val[i] = 0;
+    e.match_arm_is_enum_variant[i] = 0;
+    e.match_arm_variant_index[i] = 0;
+    i = i + 1;
+  }
+  e.enum_variant_tag = 0;
+}
+
+/** 按 ref 取 Expr 池中节点（副本）；ref 须为 1..num_exprs。 */
+function ast_arena_expr_get(arena: *ASTArena, ref: i32): Expr {
+  return arena.exprs[ref - 1];
+}
+
+/** 将 Expr 节点写回池中 ref 槽位；ref 须为 1..num_exprs。用于 parser 构建 AST。 */
+function ast_arena_expr_set(arena: *ASTArena, ref: i32, e: Expr): void {
+  arena.exprs[ref - 1] = e;
+}
+
+/** 按 ref 取 Block 池中节点（副本）；ref 须为 1..num_blocks。 */
+function ast_arena_block_get(arena: *ASTArena, ref: i32): Block {
+  return arena.blocks[ref - 1];
+}
+
+/** 将 Block 节点写回池中 ref 槽位；ref 须为 1..num_blocks。用于 parser 构建 AST。 */
+function ast_arena_block_set(arena: *ASTArena, ref: i32, b: Block): void {
+  arena.blocks[ref - 1] = b;
+}
+
+/** 在 Func 池中分配一个槽位，返回 1-based ref；已满（256）时返回 0。供 parse_into_buf 使用。 */
+function ast_arena_func_alloc(arena: *ASTArena): i32 {
+  if (arena.num_funcs >= 256) {
+    return 0;
+  }
+  arena.num_funcs = arena.num_funcs + 1;
+  return arena.num_funcs;
+}
+
+/** 按 ref 取 Func 池中节点（副本）；ref 须为 1..num_funcs。 */
+function ast_arena_func_get(arena: *ASTArena, ref: i32): Func {
+  return arena.funcs[ref - 1];
+}
+
+/** 将 Func 节点写回池中 ref 槽位；ref 须为 1..num_funcs。用于 parser 构建 AST。 */
+function ast_arena_func_set(arena: *ASTArena, ref: i32, f: Func): void {
+  arena.funcs[ref - 1] = f;
+}
