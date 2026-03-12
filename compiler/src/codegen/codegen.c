@@ -3004,6 +3004,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                         fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, cinit->value.var.name, name);
                         break;
                     }
+                    if (cinit && cinit->kind == AST_EXPR_LIT && cinit->value.int_val == 0) {
+                        fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
+                        break;
+                    }
                     if (cinit && cinit->kind != AST_EXPR_ARRAY_LIT) {
                         fprintf(out, ";\n%smemcpy(%s, (", pad, name);
                         if (codegen_expr(cinit, out) != 0) return -1;
@@ -3031,6 +3035,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                     emit_local_array_decl(ety, name, "", out);
                     if (linit && linit->kind == AST_EXPR_VAR && linit->value.var.name) {
                         fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, linit->value.var.name, name);
+                        break;
+                    }
+                    if (linit && linit->kind == AST_EXPR_LIT && linit->value.int_val == 0) {
+                        fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
                         break;
                     }
                     if (linit && linit->kind != AST_EXPR_ARRAY_LIT) {
@@ -3101,6 +3109,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                 emit_local_array_decl(ety, name, "", out);
                 if (cinit && cinit->kind == AST_EXPR_VAR && cinit->value.var.name) {
                     fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, cinit->value.var.name, name);
+                    continue;
+                }
+                if (cinit && cinit->kind == AST_EXPR_LIT && cinit->value.int_val == 0) {
+                    fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
                     continue;
                 }
                 if (cinit && cinit->kind != AST_EXPR_ARRAY_LIT) {
@@ -3177,6 +3189,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                         fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, b->let_decls[i].init->value.var.name, name);
                         continue;
                     }
+                    if (b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_LIT && b->let_decls[i].init->value.int_val == 0) {
+                        fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
+                        continue;
+                    }
                     if (b->let_decls[i].init && b->let_decls[i].init->kind != AST_EXPR_ARRAY_LIT) {
                         fprintf(out, ";\n%smemcpy(%s, (", pad, name);
                         if (codegen_expr(b->let_decls[i].init, out) != 0) return -1;
@@ -3250,6 +3266,10 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                         emit_local_array_decl(ety, name, "", out);
                         if (b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_VAR && b->let_decls[i].init->value.var.name) {
                             fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, b->let_decls[i].init->value.var.name, name);
+                            continue;
+                        }
+                        if (b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_LIT && b->let_decls[i].init->value.int_val == 0) {
+                            fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
                             continue;
                         }
                         if (b->let_decls[i].init && b->let_decls[i].init->kind != AST_EXPR_ARRAY_LIT) {
@@ -3660,6 +3680,10 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
                 fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, b->const_decls[i].init->value.var.name, name);
                 continue;
             }
+            if (b->const_decls[i].init && b->const_decls[i].init->kind == AST_EXPR_LIT && b->const_decls[i].init->value.int_val == 0) {
+                fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
+                continue;
+            }
             if (b->const_decls[i].init && b->const_decls[i].init->kind != AST_EXPR_ARRAY_LIT) {
                 fprintf(out, ";\n%smemcpy(%s, (", pad, name);
                 if (codegen_expr(b->const_decls[i].init, out) != 0) return -1;
@@ -3694,6 +3718,10 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
             emit_local_array_decl(ety, name, "", out);
             if (linit && linit->kind == AST_EXPR_VAR && linit->value.var.name) {
                 fprintf(out, ";\n%smemcpy(%s, %s, sizeof(%s));\n", pad, name, linit->value.var.name, name);
+                continue;
+            }
+            if (linit && linit->kind == AST_EXPR_LIT && linit->value.int_val == 0) {
+                fprintf(out, ";\n%smemset(%s, 0, sizeof(%s));\n", pad, name, name);
                 continue;
             }
             if (linit && linit->kind != AST_EXPR_ARRAY_LIT) {
