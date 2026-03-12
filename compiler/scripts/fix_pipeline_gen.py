@@ -52,6 +52,24 @@ def main():
             content = content[:insert_at] + "    " + _lex_next + "\n" + content[insert_at:]
             idx = insert_at + len(_lex_next) + 2
 
+    # 2.6 细粒度诊断：parser_parse_into 内 after collect_imports、before parse_one_function（精确定位卡点）
+    if "#include <stdio.h>" not in content:
+        content = content.replace("#include <stdint.h>", "#include <stdint.h>\n#include <stdio.h>", 1)
+    _after_imports = " (void)((lex = (import_res).lex));\n  int32_t out_idx = main_idx;"
+    if _after_imports in content and "parse_into: after collect_imports" not in content:
+        content = content.replace(
+            " (void)((lex = (import_res).lex));\n  int32_t out_idx = main_idx;",
+            " (void)((lex = (import_res).lex));\n  fprintf(stderr, \"parse_into: after collect_imports\\n\"); fflush(stderr);\n  int32_t out_idx = main_idx;",
+            1,
+        )
+    _before_parse_one = " } else (__tmp = 0) ; __tmp; }));\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);"
+    if _before_parse_one in content and "parse_into: before parse_one_function" not in content:
+        content = content.replace(
+            " } else (__tmp = 0) ; __tmp; }));\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);",
+            " } else (__tmp = 0) ; __tmp; }));\n    fprintf(stderr, \"parse_into: before parse_one_function\\n\"); fflush(stderr);\n    struct parser_OneFuncResult res = parser_parse_one_function(lex, source);",
+            1,
+        )
+
     # 3. platform_elf_elf_resolve_patches: 重排 while(p) 体为 [声明+while(l)+赋值] + [原 BLOCK1 + p++]
     fn = "platform_elf_elf_resolve_patches"
     start = content.find(f"int32_t {fn}(struct platform_elf_ElfCodegenCtx * ctx)")

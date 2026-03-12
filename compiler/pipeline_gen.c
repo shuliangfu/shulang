@@ -1860,6 +1860,7 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
   struct parser_CollectImportsResult import_res = (struct parser_CollectImportsResult){ .lex = lex };
   (void)(parser_collect_imports(lex, source, module, (&(import_res))));
   (void)((lex = (import_res).lex));
+  fprintf(stderr, "parse_into: after collect_imports\n"); fflush(stderr);
   int32_t out_idx = main_idx;
   int32_t out_idx_storage[1] = { 0 };
   while (1) {
@@ -1869,6 +1870,7 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
  } else (__tmp = 0) ; __tmp; }));
     (void)(({ int32_t __tmp = 0; if (((r).tok).kind != token_TokenKind_TOKEN_FUNCTION) {   break;
  } else (__tmp = 0) ; __tmp; }));
+    fprintf(stderr, "parse_into: before parse_one_function\n"); fflush(stderr);
     struct parser_OneFuncResult res = parser_parse_one_function(lex, source);
     (void)(({ int32_t __tmp = 0; if ((!(res).ok)) {   break;
  } else (__tmp = 0) ; __tmp; }));
@@ -2605,6 +2607,7 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * restrict a
  } else (__tmp = 0) ; __tmp; }));
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
     (void)((lex = (res).next_lex));
+    (void)((lex = (res).next_lex));
   }
   (void)(({ int32_t __tmp = 0; if ((module)->num_funcs == 0) {   return (struct parser_ParseIntoResult){ .ok = (-1), .main_idx = (-1) };
  } else (__tmp = 0) ; __tmp; }));
@@ -2837,6 +2840,7 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * restri
     (void)(ast_ast_arena_func_set(arena, func_ref, f));
     (void)((((module)->num_funcs < 0 || ((module)->num_funcs) >= 256 ? (shulang_panic_(1, 0), 0) : (((module)->func_refs)[(module)->num_funcs] = func_ref, 0))));
     (void)(((module)->num_funcs = (module)->num_funcs + 1));
+    (void)((lex = (res).next_lex));
     (void)((lex = (res).next_lex));
   }
   (void)(parser_collect_imports_buf(lex, data, len, module, (&(import_res))));
