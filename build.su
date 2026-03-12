@@ -1,0 +1,78 @@
+// build.su — Shulang 构建配置（对标 Zig 的 build.zig），用于替代 Makefile
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+// 如何使用 shuc 来编译（从零到一次完整构建）
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//  1) 得到「第一个」shuc（仅首次或干净克隆后需要）
+//       cd compiler && make
+//     得到可执行文件 shuc（C 版编译器，在 compiler 目录下）。
+//
+//  2) 用 shuc 编出 build_tool（用 build.su 做配置的构建工具）
+//       make build-tool
+//     会执行：shuc ../build.su -E > build_gen.c，再 cc 编 build_gen.c + build_runtime.c → build_tool。
+//
+//  3) 用 build_tool 完成一次编译器构建（等价于 make bootstrap-driver）
+//       ./build_tool ./shuc
+//     会按 build.su 的步骤顺序：编 C、用 shuc 生成并编各 .su 模块、链接，产出新的 shuc。
+//
+//  之后日常开发：改 .su 后重复 3)；若改了 build.su 或 build_runtime.c，先 2) 再 3)。
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+// 如何用 build.su 替代 Makefile（build_tool 的用法）
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//   • 日常构建（等价于 make bootstrap-driver）：
+//       cd compiler && ./build_tool ./shuc
+//
+//   • 指定 shuc 路径：
+//       ./build_tool /path/to/shuc
+//
+//   • 完全自举 asm 路径（等价于 make bootstrap-asm-full，不生成 C）：
+//       ./build_tool ./shuc asm
+//
+//   build_tool 由「本文件 build.su → shuc -E → build_gen.c」编成，与 build_runtime.o 链接；
+//   运行器（build_runtime.c）只按本文件给出的步骤顺序执行，具体命令与 patch 在运行器内实现。
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+// build.su 里写什么（替代 Makefile 的「配置」部分）
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//   • 步骤顺序：默认先做哪一步、再做哪一步（见下方步骤 ID 与顺序）。
+//   • 步骤含义：每个 step_id 对应「编 C / 生成 _gen.c / 编 _su.o / 链接」中的哪一类（仅注释说明）。
+//   • 构建选项：argv[1]=shuc 路径、argv[2]=asm 时走 asm 路径（仅注释，由运行器解释）。
+//
+//  不写在 build.su 的：具体 shell 命令、sed/patch 内容、编译/链接参数；这些留在 build_runtime.c。
+//
+// ═══════════════════════════════════════════════════════════════════════════════
+// 步骤 ID 与含义（与 Makefile bootstrap-driver 等价）
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//   0 = STEP_INITIAL_C            编初始 C（main、runtime、preprocess、std_fs_shim、preprocess_shim）
+//   6 = STEP_GEN_AND_COMPILE_SU   用 shuc -E 生成并编 parser/typeck/codegen/ast/token/lexer/preprocess → _su.o
+//   1 = STEP_PIPELINE_GEN         生成 pipeline_gen.c 并修正
+//   2 = STEP_COMPILE_PIPELINE_GEN 编 pipeline_gen.c → pipeline_su.o
+//   3 = STEP_DRIVER_GEN           生成 driver_gen.c 并修正
+//   4 = STEP_COMPILE_DRIVER_GEN   编 driver_gen.c → driver_su.o
+//   5 = STEP_LINK                 链接 shuc（main.o + runtime_driver.o + … + pipeline_su.o）
+//
+// 默认步骤顺序：0 → 6 → 1 → 2 → 3 → 4 → 5。
+//
+// 下面两个函数是「配置 → 运行器」的唯一接口：运行器 main() 调它们取步骤数与 step_id，再执行各步。
+
+/** 返回默认构建的步骤数量；运行器据此循环执行各步。 */
+function build_get_step_count(): i32 {
+  return 7;
+}
+
+/** 返回第 i 步的 step_id（0≤i<7）；越界返回 -1。运行器用此按配置顺序执行。 */
+function build_get_step_at(i: i32): i32 {
+  if (i == 0) { return 0; }
+  if (i == 1) { return 6; }
+  if (i == 2) { return 1; }
+  if (i == 3) { return 2; }
+  if (i == 4) { return 3; }
+  if (i == 5) { return 4; }
+  if (i == 6) { return 5; }
+  return -1;
+}
