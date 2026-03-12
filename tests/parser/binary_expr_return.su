@@ -1,0 +1,4 @@
+// 二元运算解析测试（parser.su 最小支持）：return <int> + <int>;
+function main(): i32 {
+  return 1 + 2;
+}
