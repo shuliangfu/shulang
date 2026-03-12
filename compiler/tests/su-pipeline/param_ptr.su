@@ -1,0 +1,4 @@
+import ast;
+function expr_type_ref_impl(arena: *ASTArena, expr_ref: i32): i32 {
+  return 0;
+}

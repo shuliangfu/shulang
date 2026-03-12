@@ -1,0 +1,5 @@
+import ast;
+function main(): i32 {
+  let e: i32 = 0;
+  return 0;
+}
