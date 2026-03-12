@@ -108,6 +108,8 @@ jobs:
         run: ./tests/run-all.sh
         shell: msys2 {0}
         timeout-minutes: 20
+        env:
+          CI: "1"
 
   docker-distro:
     name: Docker (${{ matrix.image }})
@@ -127,7 +129,7 @@ jobs:
       - name: Build and test in ${{ matrix.image }}
         timeout-minutes: 25
         run: |
-          docker run --rm \
+          docker run --rm -e CI=1 \
             -v "${{ github.workspace }}:/src" -w /src \
             ${{ matrix.image }} \
             sh -c '
