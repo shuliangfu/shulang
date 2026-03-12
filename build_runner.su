@@ -1,0 +1,90 @@
+// build_runner.su — build_tool 的入口与编排（无 C main：由 crt0 调 entry）
+//
+// 与 build.su 配合：build.su 提供步骤配置（get_step_count/get_step_at），
+// 本文件提供 entry(argc, argv)。asm 路径（argv[2]=asm）已完全在 .su 中实现（不调 C）；
+// 默认路径仍调 build_run_step（由 build_runtime.c 提供），完全无 C 时需将 run_step 与 patch 迁入 .su。
+// 链接：crt0_x86_64.o + build_runner_gen.o + build_gen.o + build_runtime.o（无 main）+ -lc。
+
+/** 从 argv 取第 i 个参数到 buf，NUL 结尾；由 crt0 提供。 */
+extern function driver_get_argv_i(argc: i32, argv: *u8, i: i32, buf: *u8, max: i32): i32;
+/** 执行单步；由 build_runtime.c 提供（完全无 C 时改由 .su 实现）。 */
+extern function build_run_step(step_id: i32, shuc_path: *u8): i32;
+/** 步骤数量与顺序；由 build.su 生成 build_gen.c 提供。 */
+extern function build_build_get_step_count(): i32;
+extern function build_build_get_step_at(i: i32): i32;
+/** libc：执行命令行；asm 路径完全无 C 时用此拼出 SHUC=path + 脚本并执行。 */
+extern function system(cmd: *u8): i32;
+
+/** 将 asm 路径命令拼入 buf：SHUC=<shuc_path> ./scripts/build_shuc_asm.sh，NUL 结尾。返回 0 成功，-1 溢出。 */
+function build_asm_cmd(buf: *u8, size: i32, shuc_path: *u8): i32 {
+  let k: i32 = 0;
+  let prefix: [6]u8 = [83, 72, 85, 67, 61, 0];
+  while (k < 5 && k < size) {
+    buf[k] = prefix[k];
+    k = k + 1;
+  }
+  if (k >= size) {
+    return -1;
+  }
+  let p: i32 = 0;
+  while (shuc_path[p] != 0 && k < size - 1) {
+    buf[k] = shuc_path[p];
+    k = k + 1;
+    p = p + 1;
+  }
+  if (k >= size - 1) {
+    return -1;
+  }
+  let suffix: [30]u8 = [32, 46, 47, 115, 99, 114, 105, 112, 116, 115, 47, 98, 117, 105, 108, 100, 95, 115, 104, 117, 99, 95, 97, 115, 109, 46, 115, 104, 0, 0];
+  p = 0;
+  while (suffix[p] != 0 && k < size - 1) {
+    buf[k] = suffix[p];
+    k = k + 1;
+    p = p + 1;
+  }
+  buf[k] = 0;
+  return 0;
+}
+
+/** 入口：crt0 调用。argv[1]=shuc 路径，argv[2]=asm 时走 asm 路径（纯 .su，不调 C），否则按步骤顺序执行。返回 0 成功 1 失败。 */
+function entry(argc: i32, argv: *u8): i32 {
+  let shuc_buf: [256]u8 = [];
+  let len: i32 = driver_get_argv_i(argc, argv, 1, shuc_buf, 256);
+  if (len < 0) {
+    shuc_buf[0] = 46;
+    shuc_buf[1] = 47;
+    shuc_buf[2] = 115;
+    shuc_buf[3] = 104;
+    shuc_buf[4] = 117;
+    shuc_buf[5] = 99;
+    len = 6;
+  }
+  if (len < 256) {
+    shuc_buf[len] = 0;
+  }
+  let arg2: [8]u8 = [];
+  let l2: i32 = driver_get_argv_i(argc, argv, 2, arg2, 8);
+  if (l2 == 3 && arg2[0] == 97 && arg2[1] == 115 && arg2[2] == 109) {
+    let cmd_buf: [512]u8 = [];
+    if (build_asm_cmd(cmd_buf, 512, shuc_buf) != 0) {
+      return 1;
+    }
+    if (system(cmd_buf) != 0) {
+      return 1;
+    }
+    return 0;
+  }
+  let n: i32 = build_build_get_step_count();
+  let i: i32 = 0;
+  while (i < n) {
+    let step_id: i32 = build_build_get_step_at(i);
+    if (step_id < 0) {
+      return 1;
+    }
+    if (build_run_step(step_id, shuc_buf) != 0) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
