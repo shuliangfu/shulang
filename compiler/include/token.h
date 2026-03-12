@@ -92,7 +92,8 @@ typedef enum TokenKind {
     TOKEN_AMPAMP,   /**< && 逻辑与 */
     TOKEN_PIPEPIPE, /**< || 逻辑或 */
     TOKEN_BANG,     /**< ! 逻辑非（一元） */
-    TOKEN_QUESTION  /**< ? 三元运算符 cond ? then : else */
+    TOKEN_QUESTION, /**< ? 三元运算符 cond ? then : else */
+    TOKEN_AS        /**< as 类型转换 expr as type */
 } TokenKind;
 
 /** 单个 Token：类型 + 源码位置 + 可选值（字面量/标识符） */
