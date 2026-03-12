@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# 自举相关回归套件：一键运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）。
+# 全量回归套件：一键运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）；不包含自举验证。
 # 在仓库根目录执行：./tests/run-all.sh
 # 可选：SHUC=/path/to/shuc 时使用该二进制代替 compiler/shuc（用于 7.2 两代 shuc 对比）。
+# 自举验证（两代 shuc 全量测试一致）：./tests/run-bootstrap-verify.sh 或 make -C compiler bootstrap-verify。
 
 set -e
 cd "$(dirname "$0")/.."
@@ -63,6 +64,9 @@ run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
 run run-su-pipeline.sh
+run run-su-multi-file.sh
+run run-asm.sh
+run run-without-c.sh
 run run-vector.sh
 # core/std 与标准库
 run run-fmt.sh
