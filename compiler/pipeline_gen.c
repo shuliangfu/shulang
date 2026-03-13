@@ -10668,17 +10668,6 @@ int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena * arena, struct ast_Mo
 /* 包装需 int32_t/uint8_t/size_t 与 shulang_slice_uint8_t；-E 已有则只补 include */
 #include <stdint.h>
 #include <stddef.h>
-
-/* 包装需 int32_t/uint8_t/size_t 与 shulang_slice_uint8_t；-E 已有则只补 include */
-#include <stdint.h>
-#include <stddef.h>
-/* C 包装：main 传 (data, len, ctx)，6.1 dep 通过 ctx 传入；struct ast_PipelineDepCtx 已由 -E 展开 ast 提供 */
-int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *module, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {
-  struct shulang_slice_uint8_t source;
-  source.data = (uint8_t *)source_data;
-  source.length = source_len;
-  return pipeline_run_su_pipeline_impl(arena, module, &source, out_buf, ctx);
-}
 /* C 包装：main 传 (data, len, ctx)，6.1 dep 通过 ctx 传入；struct ast_PipelineDepCtx 已由 -E 展开 ast 提供 */
 int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *module, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {
   struct shulang_slice_uint8_t source;
@@ -10687,37 +10676,15 @@ int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *
   return pipeline_run_su_pipeline_impl(arena, module, &source, out_buf, ctx);
 }
 
-
 #include <stddef.h>
-#include <stddef.h>
-#include "ast.h"
 #include "ast.h"
 size_t pipeline_sizeof_arena(void) { return sizeof(struct ast_ASTArena); }
-size_t pipeline_sizeof_arena(void) { return sizeof(struct ast_ASTArena); }
-size_t pipeline_sizeof_module(void) { return sizeof(struct ast_Module); }
 size_t pipeline_sizeof_module(void) { return sizeof(struct ast_Module); }
 
-
-/* sizeof_elf_ctx 需 size_t 与 platform_elf 结构；无前置 include 时补上 */
 /* sizeof_elf_ctx 需 size_t 与 platform_elf 结构；无前置 include 时补上 */
 #include <stddef.h>
-#include <stddef.h>
-size_t pipeline_sizeof_elf_ctx(void) { return sizeof(struct platform_elf_ElfCodegenCtx); }
 size_t pipeline_sizeof_elf_ctx(void) { return sizeof(struct platform_elf_ElfCodegenCtx); }
 
-
-/* 由 Makefile 追加到 pipeline_gen.c 末尾：调试用，打印 module 中每个函数的 name_len 与 name */
-#include <stdio.h>
-#include "ast.h"
-void pipeline_debug_module_funcs(void *m) {
-  struct ast_Module *mod = (struct ast_Module *)m;
-  int i, n = (int)mod->num_funcs;
-  if (n > 256) n = 256;
-  for (i = 0; i < n; i++) {
-    int len = (int)mod->funcs[i].name_len;
-    fprintf(stderr, "[DEBUG] module func[%d] name_len=%d name=%.*s\n", i, len, len > 0 && len <= 64 ? len : 0, mod->funcs[i].name);
-  }
-}
 /* 由 Makefile 追加到 pipeline_gen.c 末尾：调试用，打印 module 中每个函数的 name_len 与 name */
 #include <stdio.h>
 #include "ast.h"

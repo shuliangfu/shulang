@@ -1,6 +1,6 @@
 # Shulang CI: multi-platform build and full test suite
 # Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
-# Regular test jobs: make -C compiler OPT=1 produces C-only shuc (default target); run-all.sh uses it when SHUC is unset; full test pass means CI pass.
+# Build: shuc (C-only) + shuc_su + bootstrap-driver. After bootstrap-driver we save driver as shuc_driver and set compiler/shuc=shuc-c so run-all uses C-only for run-lexer..run-asm; run-all switches to shuc_driver only for run-without-c, then restores shuc-c for run-vector etc.
 # Bootstrap verify (two-stage shuc) disabled for now; run locally with ./tests/run-bootstrap-verify.sh when needed.
 
 name: CI
@@ -35,8 +35,8 @@ jobs:
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
-      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
-        run: make -C compiler bootstrap-driver
+      - name: Build bootstrap-driver (shuc with -backend asm; save as shuc_driver, use shuc-c for run-all)
+        run: make -C compiler bootstrap-driver && cp compiler/shuc compiler/shuc_driver && cp compiler/shuc-c compiler/shuc
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
@@ -59,8 +59,8 @@ jobs:
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
-      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
-        run: make -C compiler bootstrap-driver
+      - name: Build bootstrap-driver (shuc with -backend asm; save as shuc_driver, use shuc-c for run-all)
+        run: make -C compiler bootstrap-driver && cp compiler/shuc compiler/shuc_driver && cp compiler/shuc-c compiler/shuc
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
@@ -87,8 +87,8 @@ jobs:
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
-      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
-        run: make -C compiler bootstrap-driver
+      - name: Build bootstrap-driver (shuc with -backend asm; save as shuc_driver, use shuc-c for run-all)
+        run: make -C compiler bootstrap-driver && cp compiler/shuc compiler/shuc_driver && cp compiler/shuc-c compiler/shuc
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
@@ -120,8 +120,8 @@ jobs:
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         shell: msys2 {0}
         timeout-minutes: 5
-      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
-        run: make -C compiler bootstrap-driver
+      - name: Build bootstrap-driver (shuc with -backend asm; save as shuc_driver, use shuc-c for run-all)
+        run: make -C compiler bootstrap-driver && cp compiler/shuc compiler/shuc_driver && cp compiler/shuc-c compiler/shuc
         shell: msys2 {0}
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
@@ -161,6 +161,6 @@ jobs:
               make -C compiler clean &&
               make -C compiler OPT=1 &&
               make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline &&
-              make -C compiler bootstrap-driver &&
+              make -C compiler bootstrap-driver && cp compiler/shuc compiler/shuc_driver && cp compiler/shuc-c compiler/shuc &&
               ./tests/run-all.sh
             '
