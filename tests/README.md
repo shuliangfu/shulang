@@ -6,14 +6,15 @@
 
 自举前需保证**同一套测试**覆盖：泛型、trait、多文件、import、core/std 模块、result、option、mem、io、io.driver、net、UB、ABI 等，自举后两代编译器行为一致。
 
-**执行方式（二者等价、全量一致）：**
+**执行方式：**
 
-- 仓库根目录：`./tests/run-all.sh`
-- 编译器目录：`make -C compiler test`
+- **推荐（分轨全量）**：`./tests/run-all-c.sh`（全量用 C 版编译器 shuc-c）、`./tests/run-all-su.sh`（全量用 .su 流水线编译器 shuc_su）。CI 两条都跑，见 `.github/workflows/ci.yml`。
+- **通用脚本**：`./tests/run-all.sh` 跑全部 run-*.sh；通过环境变量 `SHUC=compiler/shuc-c` 或 `SHUC=compiler/shuc_su` 指定用哪支编译器，不设则用当前 `compiler/shuc`。
+- 编译器目录：`make -C compiler test` 与上述等价（内部调 run-all）。
 
 **不纳入回归的脚本**：`run-size-baseline.sh`、`run-perf-baseline.sh` 为可选体积/性能基线，需时单独执行。
 
-**CI 多端测试**：push/PR 时 GitHub Actions 在 **Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**（ubuntu-24.04-arm）、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim）上构建并执行 `./tests/run-all.sh`，见 `.github/workflows/ci.yml`。
+**CI 多端测试**：push/PR 时在 **Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim）上先构建 shuc + shuc_su，再依次执行 `./tests/run-all-c.sh` 与 `./tests/run-all-su.sh`，见 `.github/workflows/ci.yml`。
 
 ## 二、测试脚本与覆盖范围
 

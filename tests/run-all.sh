@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 全量回归套件：一键运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）；不包含自举验证。
-# 在仓库根目录执行：./tests/run-all.sh
-# 可选：SHUC=/path/to/shuc 时使用该二进制代替 compiler/shuc（用于 7.2 两代 shuc 对比）。
+# 全量回归套件：运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）；不包含自举验证。
+# 入口：./tests/run-all.sh；C/su 区分由环境变量 SHUC 决定，不设则用当前 compiler/shuc。
+# 推荐：./tests/run-all-c.sh（SHUC=compiler/shuc-c）、./tests/run-all-su.sh（SHUC=compiler/shuc_su）分别跑全量。
 # 自举验证（两代 shuc 全量测试一致）：./tests/run-bootstrap-verify.sh 或 make -C compiler bootstrap-verify。
 
 set -e
@@ -75,16 +75,16 @@ run run-panic.sh
 run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
+# -su -E 测试：使用 compiler/shuc_su（CI 已构建），验证纯 .su 流水线单文件/多文件
+[ -x compiler/shuc_su ] && echo "run-all: -su pipeline tests (using compiler/shuc_su for -su -E)"
 run run-su-pipeline.sh
 run run-su-multi-file.sh
 run run-asm.sh
-# run-without-c 需要支持 -backend asm 的 driver 版 shuc；若 CI 已构建并保存为 shuc_driver，则临时切过去，跑完再恢复 shuc-c
-if [ -z "${SHUC:-}" ] && [ -f compiler/shuc_driver ]; then
-    cp compiler/shuc_driver compiler/shuc
-fi
 run run-without-c.sh
-# run-without-c 可能已把 compiler/shuc 覆盖为 driver 版，后续 run-vector 等需 C 版；用 shuc-c 恢复
-if [ -z "${SHUC:-}" ]; then
+# run-without-c 可能执行 make bootstrap-driver 覆盖 compiler/shuc；恢复为本次 run 使用的编译器，供 run-vector 等使用
+if [ -n "${SHUC:-}" ] && [ -x "$SHUC" ]; then
+    cp "$SHUC" compiler/shuc
+elif [ -z "${SHUC:-}" ]; then
     make -C compiler shuc-c 2>/dev/null || true
     [ -f compiler/shuc-c ] && cp compiler/shuc-c compiler/shuc
 fi
