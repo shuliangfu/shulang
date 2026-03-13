@@ -8,6 +8,10 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 make -C compiler shuc-c 2>/dev/null || true
 make -C compiler build-tool 2>/dev/null || true
+# 构建 bootstrap-driver 并保存为 shuc_driver，供 run-all 里 run-without-c 临时使用（run-without-c 需要 -backend asm）
+make -C compiler bootstrap-driver 2>/dev/null || true
+[ -x compiler/shuc ] && cp compiler/shuc compiler/shuc_driver
+cp compiler/shuc-c compiler/shuc
 if [ ! -x compiler/shuc-c ]; then
     echo "run-all-c: compiler/shuc-c not found (C-only shuc); run 'make -C compiler' then 'make -C compiler shuc-c'"
     exit 1

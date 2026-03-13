@@ -80,8 +80,12 @@ run run-preprocess.sh
 run run-su-pipeline.sh
 run run-su-multi-file.sh
 run run-asm.sh
+# run-without-c 需要支持 -backend asm 的 driver；若存在 shuc_driver（run-all-c 预构建），则临时切过去以便 run-without-c 能真正跑
+if [ -x compiler/shuc_driver ]; then
+    cp compiler/shuc_driver compiler/shuc
+fi
 run run-without-c.sh
-# run-without-c 可能执行 make bootstrap-driver 覆盖 compiler/shuc；恢复为本次 run 使用的编译器，供 run-vector 等使用
+# run-without-c 可能覆盖 compiler/shuc；恢复为本次 run 使用的编译器，供 run-vector 等使用
 if [ -n "${SHUC:-}" ] && [ -x "$SHUC" ]; then
     cp "$SHUC" compiler/shuc
 elif [ -z "${SHUC:-}" ]; then
