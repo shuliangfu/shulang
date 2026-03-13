@@ -155,7 +155,12 @@ make test
 
 **决策记录**：CI 不安装 asm 工具链、不强制跑 run-asm/run-without-c；asm 为可选功能，需在本地或专用 runner 上验证。见 `analysis/下一步开发分析.md` 阶段 10.3。
 
-### 6.2 run-su-pipeline 与 -su -E 超时
+### 6.2 完全脱离 C 的验证（run-without-c）
+
+- **适用场景**：验证「用 asm 后端构建出的 shuc_asm」能否在不依赖 C 运行时逻辑的前提下通过全量测试（仅链接最少 C 桩）；为日后完全脱离 C/Makefile 的路线提供回归保障。
+- **验证方式**：先 `make -C compiler bootstrap-driver` 得到支持 `-backend asm` 的 shuc，再在仓库根执行 `./tests/run-without-c.sh`。脚本会使用 `build_tool` 以 asm 路径编出 `compiler/shuc_asm`，并用 `SHUC=compiler/shuc_asm ./tests/run-all.sh` 跑全量测试；通过即表示脱离 C 的构建路径可用。CI 下不跑此脚本（见 §6.1）。
+
+### 6.3 run-su-pipeline 与 -su -E 超时
 
 - **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shuc-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
 - **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shuc-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。

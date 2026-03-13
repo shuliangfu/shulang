@@ -217,6 +217,9 @@ struct codegen_CodegenOutBuf {
     unsigned char data[SU_CODEGEN_OUTBUF_CAP];
     int32_t len;
 };
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(struct codegen_CodegenOutBuf, len) == SU_CODEGEN_OUTBUF_CAP, "CodegenOutBuf: len must follow data[] for ABI");
+#endif
 /** asm 后端 C 桩：-backend asm 时由 pipeline 调用，写出最小 GAS（main return 42），便于 pipeline 不 import asm 仍可构建 shuc_su。符号供 pipeline_gen.c 链接。 */
 int32_t asm_codegen_ast(void *module, void *arena, struct codegen_CodegenOutBuf *out) {
     (void)module;
