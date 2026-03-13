@@ -18,7 +18,7 @@ OBJS    = src/main.o src/runtime.o src/preprocess.o src/lexer/lexer.o src/ast/as
 
 # C 仅版 shuc：无 main_su/pipeline_su，供 bootstrap-pipeline 用 -E 生成 pipeline_gen.c（避免用已链 main_su 的 $(TARGET) 导致走 .su 路径失败）
 SHUC_C = shuc-c
-.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool
+.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool first-time
 
 all: $(TARGET)
 
@@ -232,6 +232,9 @@ bootstrap-asm-full: bootstrap-driver bootstrap-asm
 # 6.4 验收：宿主编译器（C-only shuc）能编译整机 .su（typeck+codegen+driver）并产出新 shuc，且新 shuc 能编译运行测试（return-value 返回 42 视为成功）
 check-6.4: $(TARGET)
 	@$(MAKE) bootstrap-driver && ./$(TARGET) ../tests/return-value/main.su -o /tmp/check64 && /tmp/check64; [ $$? -eq 42 ] && echo "check-6.4 OK"
+
+# 首次/从零构建：一条命令得到 shuc + build_tool（build-tool 依赖 $(TARGET) 会先产出 shuc）。与 README「读者一次做对」一致。
+first-time: build-tool
 
 # 阶段 7：build.su 在仓库根目录，用 shuc 编成 build_tool（在 compiler 目录下），运行 build_tool 即完成一次编译器构建
 build-tool: $(TARGET)

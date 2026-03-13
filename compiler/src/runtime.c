@@ -2120,6 +2120,13 @@ int driver_run_su_emit_c(void) {
         memset(module, 0, module_sz);
         int ec = pipeline_run_su_pipeline(arena, module, src_slice.data, (size_t)src_slice.length, (void *)&out_buf, (void *)&pctx_e);
         if (ec == 0 && out_buf.len > 0) {
+            /* 平台差异诊断（分析文档 4.4）：main 段输出过短时打 stderr，便于 CI/本地确认是 len 错误还是内容只写了数字 */
+            if (out_buf.len < 20) {
+                fprintf(stderr, "shuc: -su -E diagnostic: out_buf.len=%d first bytes:", (int)out_buf.len);
+                for (int di = 0; di < out_buf.len && di < 16; di++)
+                    fprintf(stderr, " %02x", (unsigned char)out_buf.data[di]);
+                fprintf(stderr, "\n");
+            }
             fwrite(out_buf.data, 1, (size_t)out_buf.len, stdout);
             fflush(stdout);
             for (int j = 0; j < n_deps; j++) { free(dep_arenas[j]); free(dep_modules[j]); }

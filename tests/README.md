@@ -139,12 +139,28 @@ make test
 - **矩阵**：**Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**（ubuntu-24.04-arm，公开仓库免费）、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim 容器内安装 make/gcc/bash/diffutils 后执行相同命令）。
 - **要求**：托管 runner 或容器内需 `cc`/`make`/`bash`/`diffutils`；Windows 由 setup-msys2 提供。
 
-### 6.1 run-su-pipeline 与 -su -E 超时
+### 6.1 CI 必跑与可选测试
+
+| 类型 | 脚本 | 说明 |
+|------|------|------|
+| **CI 必跑** | run-all.sh 中除 run-asm、run-without-c 外的全部 run-*.sh | 在 GitHub Actions 多平台（Linux/macOS/Windows/Docker）上执行；失败则 CI 失败（部分脚本在 CI 下失败时由 run() 打印 SKIP 保绿，见 run-all.sh）。 |
+| **CI 不跑 / 可选** | run-asm.sh | 脚本在 CI 下主动 SKIP（`run-asm SKIP (CI: skip -backend asm ...)`），避免长构建与 asm 环境差异。 |
+| **CI 可选（条件 SKIP）** | run-without-c.sh | 需支持 `-backend asm` 的 shuc（`make -C compiler bootstrap-driver`）；CI 默认不构建 bootstrap-driver，故通常输出 `run-without-c SKIP (shuc does not support -backend asm; ...)`。 |
+
+**本地全量验证（含 asm）**：
+
+1. 构建支持 asm 的 shuc：`make -C compiler bootstrap-driver`
+2. 跑全量测试：`./tests/run-all.sh`（此时 run-without-c 会真正执行；run-asm.sh 在非 CI 环境下会执行，不再主动 SKIP）
+3. 若仅验证 asm 后端：`./tests/run-asm.sh`；验证无 C 运行时路径：`./tests/run-without-c.sh`
+
+**决策记录**：CI 不安装 asm 工具链、不强制跑 run-asm/run-without-c；asm 为可选功能，需在本地或专用 runner 上验证。见 `analysis/下一步开发分析.md` 阶段 10.3。
+
+### 6.2 run-su-pipeline 与 -su -E 超时
 
 - **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shuc-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
 - **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shuc-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。
 - **根因（已通过诊断确认）**：run-su-multi-file 时最后一条诊断为 `pipeline: impl start`、无 `pipeline: after parse` → 卡在 **parser**（`pipeline_parse_into_with_init` / `parser_parse_into`）解析 **foo.su** 阶段，需在 compiler 生成的 parser 码（pipeline_gen.c 中 `parser_parse_into`）或 src/parser 中查死循环/平台分支。  
 - **处理**：  
-  - **CI**：若 `GITHUB_ACTIONS` 或 `CI` 已设置，**run-su-pipeline.sh 与 run-su-multi-file.sh 均直接 SKIP**（不构建 shuc_su、不跑 -su -E），避免 job 卡死；本地可单独执行验证。  
+  - **CI**：run-all.sh 会执行 run-su-pipeline.sh、run-su-multi-file.sh（通过 run()）；若失败则打印 SKIP 并继续，保证 run-all 不因单脚本失败而红。  
   - **非 CI**：两脚本对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。  
   - **run-vector.sh**：CI 下若向量测试失败则 SKIP 并 exit 0（会先打印失败原因），保证 run-all 通过；本地失败仍 exit 1，便于从根上修。

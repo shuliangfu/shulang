@@ -8,13 +8,16 @@
 
 **构建配置入口 = build.su**（与 Zig 的 **build.zig** 一致：用项目语言描述「怎么编、编什么」；根目录 Makefile 仅做委托，**可由 build.su 完全替代**）。
 
-**日常与自举的正式构建方式**：在编译器目录下执行 **`./build_tool ./shuc`**，不再依赖 Makefile。build_tool 由 **`shuc ../build.su -o build_tool`** 从根目录 build.su 编出。
+### 读者一次做对
 
-- 命令：`cd compiler && ./build_tool ./shuc`
-- 前提：本目录下已有可执行的 `build_tool` 与 `shuc`（首次或从零构建时需先通过 `make -C compiler` 得到初始 shuc，再 `make -C compiler build-tool` 得到 build_tool，之后即可仅用 build_tool 产出 shuc）。
-- 验收：产出 shuc 后，在仓库根执行 `./tests/run-all.sh` 通过即表示自举验证等价通过。
+| 场景 | 命令 | 说明 |
+|------|------|------|
+| **首次 / 从零构建** | `make -C compiler build-tool` | 一条命令：先产出 **shuc**（依赖），再产出 **build_tool**。等价目标 `first-time`。 |
+| **日常与自举** | `cd compiler && ./build_tool ./shuc` | 用 build_tool 重新产出 shuc，不依赖 Makefile。 |
+| **验收** | `./tests/run-all.sh` | 在仓库根执行；全过即自举验证等价通过。 |
 
-详见 `analysis/完全脱离C与Makefile路线图.md` 阶段 5；无 C/无 Makefile 时用 build.su 作唯一入口见 `analysis/完全自举-无C无Makefile.md`。
+- 仅需 shuc 跑测试时可直接 `make -C compiler`；首次建议 `make -C compiler build-tool` 以便日后用 `./build_tool ./shuc`。CI 与本地回归均可用 `make -C compiler test` 或 `./tests/run-all.sh`。
+- 详见 `analysis/完全脱离C与Makefile路线图.md` 阶段 5；无 C/无 Makefile 时用 build.su 作唯一入口见 `analysis/完全自举-无C无Makefile.md`。
 
 ---
 

@@ -7,6 +7,14 @@
 - **子目录**：
   - `src/` — 编译器源码（lexer、parser、ast、typeck、ir、codegen、driver）
   - `include/` — C 头文件（若用 C 实现时使用）
-- **构建**：**唯一推荐构建方式**为 **build_tool**：在 compiler 目录下执行 `./build_tool ./shuc` 即产出 shuc，不依赖 Makefile。Makefile 仅作**兜底/首次**：从零构建时需先 `make` 得到初始 shuc，再 `make build-tool` 得到 build_tool，之后日常仅用 `./build_tool ./shuc` 即可。
+
+### 构建（与根目录 README 一致）
+
+| 场景 | 命令 |
+|------|------|
+| **首次 / 从零** | `make build-tool` 或 `make first-time`（会先产出 shuc 再产出 build_tool，一条命令）。 |
+| **日常与自举** | `./build_tool ./shuc`（本目录下执行，产出 shuc，不依赖 Makefile）。 |
+
+Makefile 仅作兜底/首次；日常推荐仅用 `./build_tool ./shuc`。验收：仓库根执行 `./tests/run-all.sh`。
 
 详见项目根目录下 `analysis/architecture.md` 第三章「编译器架构」。
