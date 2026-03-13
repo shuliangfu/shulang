@@ -39,28 +39,33 @@ fi
 
 # 使用 compiler/shuc 时可能为 C-only 构建（不支持 -su -E），先探测；不支持则跳过以免 make test 失败
 # 对 -su -E 加 60s 超时，避免 shuc_su 在部分环境挂起（pipeline_run_su_pipeline_impl/typeck/codegen）。
+# 将 stderr 写入临时文件，失败时打印以便 CI 看到 -su -E 诊断（如 out_buf.len、前 16 字节 hex）。
 out=$(mktemp)
+err=$(mktemp)
 ec=0
-run_timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>/dev/null || ec=$?
+run_timeout 60 "$SU_SHUC" -su -E "$MIN_SU" > "$out" 2>"$err" || ec=$?
 [ "$ec" -eq 142 ] && ec=124
+_show_stderr() { echo "--- stderr ---"; cat "$err" 2>/dev/null || true; rm -f "$err"; }
 if [ "$ec" -eq 124 ]; then
   rm -f "$out"
+  _show_stderr
   echo "run-su-pipeline FAIL (shuc_su -su -E timed out after 60s)"
   exit 1
 fi
 if [ "$ec" -ne 0 ]; then
   if [ "$SU_SHUC" = "compiler/shuc" ]; then
-    rm -f "$out"
+    rm -f "$out" "$err"
     echo "run-su-pipeline SKIP (shuc does not support -su -E; run make bootstrap-driver or use build_tool for full shuc)"
     exit 0
   fi
   if [ "$ec" -eq 126 ]; then
-    rm -f "$out"
+    rm -f "$out" "$err"
     echo "run-su-pipeline SKIP (shuc_su not runnable in this env, e.g. wrong libc in container; run make -C compiler clean first)"
     exit 0
   fi
   echo "run-su-pipeline: $SU_SHUC -su -E $MIN_SU failed (exit $ec)"
   cat "$out" 2>/dev/null || true
+  _show_stderr
   rm -f "$out"
   exit 1
 fi
@@ -69,9 +74,10 @@ fi
 if ! grep -q 'return' "$out"; then
   echo "run-su-pipeline: output missing return"
   cat "$out"
+  _show_stderr
   rm -f "$out"
   exit 1
 fi
 
-rm -f "$out"
+rm -f "$out" "$err"
 echo "run-su-pipeline OK (-su -E minimal program)"
