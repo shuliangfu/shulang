@@ -21,7 +21,7 @@ jobs:
         os: [ ubuntu-22.04, ubuntu-latest ]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Show job env (debug)
         run: |
           echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Show job env (debug)
         run: |
           echo "Runner OS: $RUNNER_OS | Linux ARM64"
@@ -75,7 +75,7 @@ jobs:
         os: [ macos-14, macos-latest ]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Show job env (debug)
         run: |
           echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
@@ -99,7 +99,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Show job env (debug)
         run: |
           echo "Runner OS: $env:RUNNER_OS | Job: Windows"
@@ -140,7 +140,7 @@ jobs:
         image: [ alpine:latest, debian:bookworm-slim ]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Show job env (debug)
         run: |
           echo "Job: Docker ${{ matrix.image }}"
