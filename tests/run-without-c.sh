@@ -40,10 +40,16 @@ if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer 
 fi
 rm -f "$SHUC_ASM_CHECK"
 # 再次检测：若仍不支持 asm，则 SKIP 以便 run-all 不因环境缺失而失败
-if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline src/lexer/token.su) 2>/dev/null; then
-  echo "run-without-c SKIP (shuc does not support -backend asm; run 'make -C compiler bootstrap-driver' for full no-C path)"
+# 说明：run-all 中 run-asm 在 CI 下会直接 SKIP，不会执行 bootstrap-driver，故此时 compiler/shuc 多为「仅 C 版」；
+# 若上一步已成功执行 bootstrap-driver，则此处失败可能是该环境下 driver 运行 -backend asm 仍失败（依赖/路径/平台）。
+SECOND_CHECK_ERR=$(mktemp)
+if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline src/lexer/token.su) 2>"$SECOND_CHECK_ERR"; then
+  echo "run-without-c SKIP (shuc -backend asm check failed; run 'make -C compiler bootstrap-driver' for full no-C path)"
+  [ -s "$SECOND_CHECK_ERR" ] && { echo "--- shuc -backend asm stderr ---"; cat "$SECOND_CHECK_ERR"; }
+  rm -f "$SECOND_CHECK_ERR"
   exit 0
 fi
+rm -f "$SECOND_CHECK_ERR"
 
 # 3) 用 asm 路径构建 shuc_asm（不编任何 .su 为 C，只编为 asm .o + 最少 C 桩链接）
 echo "run-without-c: building shuc_asm (asm backend, minimal C link) ..."

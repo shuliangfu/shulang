@@ -35,6 +35,9 @@ jobs:
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
         timeout-minutes: 5
+      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
+        run: make -C compiler bootstrap-driver
+        timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
@@ -55,6 +58,9 @@ jobs:
           CC: cc
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
+        timeout-minutes: 5
+      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
+        run: make -C compiler bootstrap-driver
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
@@ -80,6 +86,9 @@ jobs:
           CC: cc
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
+        timeout-minutes: 5
+      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
+        run: make -C compiler bootstrap-driver
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
@@ -109,6 +118,10 @@ jobs:
           CC: gcc
       - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
         run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
+        shell: msys2 {0}
+        timeout-minutes: 5
+      - name: Build bootstrap-driver (shuc with -backend asm for run-without-c)
+        run: make -C compiler bootstrap-driver
         shell: msys2 {0}
         timeout-minutes: 5
       - name: Run full test suite (run-all.sh)
@@ -148,5 +161,6 @@ jobs:
               make -C compiler clean &&
               make -C compiler OPT=1 &&
               make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline &&
+              make -C compiler bootstrap-driver &&
               ./tests/run-all.sh
             '
