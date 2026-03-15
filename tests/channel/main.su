@@ -1,0 +1,26 @@
+// tests/channel/main.su — std.channel 回归：有界 send/recv、try_send/try_recv、close/free。
+// 单线程有界测试；Windows 上 C 层为 stub，跳过并返回 0。
+
+import std.channel;
+import core.debug;
+
+function main(): i32 {
+  let ch: *u8 = channel_i32_bounded(2);
+  if (ch == 0) {
+    return 0;
+  }
+  assert_eq_i32(channel_i32_send(ch, 10), 0);
+  assert_eq_i32(channel_i32_send(ch, 20), 0);
+  assert_eq_i32(channel_i32_try_send(ch, 30), 1);
+  let v: i32 = 0;
+  assert_eq_i32(channel_i32_recv(ch, &v), 0);
+  assert_eq_i32(v, 10);
+  assert_eq_i32(channel_i32_recv(ch, &v), 0);
+  assert_eq_i32(v, 20);
+  assert_eq_i32(channel_i32_try_recv(ch, &v), 1);
+  channel_i32_close(ch);
+  let r: i32 = channel_i32_try_recv(ch, &v);
+  assert_eq_i32(r, 0 - 1);
+  channel_i32_free(ch);
+  return 0;
+}
