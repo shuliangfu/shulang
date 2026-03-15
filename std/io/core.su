@@ -1,14 +1,105 @@
-// std.io.core — 舒 IO 实现桩（Shu IO 核心层，自举前-极致IO与网络性能准备）
-// 供 std.io.driver 与 std.mem 调用；当前为桩（返回 0），自举后可在此模块内改为真实舒 IO 实现或通过 extern 调用内核/驱动。
+// std.io.core — 舒 IO 核心层（分析/舒IO实现路线图.md 阶段 1）
+// 供 std.io.driver 与 std.mem 调用。同步路径：handle 0=stdin、1=stdout，handle≥2 视为 fd；所有读写经 C 侧 io_read/io_write 统一后端。
+// 约定：返回值 >0 表示读写字节数，0 表示 EOF（仅读），-1 表示错误；timeout_ms 传 0 表示无超时。
 
+extern function io_read(fd: i32, buf: *u8, count: usize, timeout_ms: u32): isize;
+extern function io_write(fd: i32, buf: *u8, count: usize, timeout_ms: u32): isize;
+extern function io_read_batch(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32, timeout_ms: u32): isize;
+extern function io_write_batch(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32, timeout_ms: u32): isize;
+extern function io_register_buffer(ptr: *u8, len: usize): i32;
+extern function io_register_buffers_4(p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, nr: u32): i32;
+extern function io_unregister_buffers(): void;
+extern function io_read_fixed(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): isize;
+extern function io_write_fixed(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): isize;
+extern function io_wait_readable(fds: *i32, n: i32, timeout_ms: u32): i32;
+extern function io_read_ptr(handle: usize, timeout_ms: u32): *u8;
+extern function io_read_ptr_len(): i32;
+
+// 预注册当前线程的固定 buffer（单 buffer）：Linux 上走 io_uring_register_buffers，它平台仅存 (ptr,len) 供 read_fixed/write_fixed。handle 暂未使用。返回 1 成功，0 失败。
 function shu_io_register(ptr: *u8, len: usize, handle: usize): i32 {
-  return 0;
+  return io_register_buffer(ptr, len);
 }
 
+// 预注册当前线程的固定 buffer 池（最多 4 块，受 .su 参数个数限制）：(p0,l0)..(p3,l3) 为 (ptr,len) 对，nr 为实际数量 1..4。返回 1 成功，0 失败。
+function shu_io_register_buffers(p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, nr: u32): i32 {
+  return io_register_buffers_4(p0, l0, p1, l1, p2, l2, p3, l3, nr);
+}
+
+// 注销当前线程的固定 buffer 池。
+function shu_io_unregister_buffers(): void {
+  io_unregister_buffers();
+}
+
+// 使用已注册固定 buffer 读：buf_index 当前仅支持 0；offset+len 须 ≤ 注册长度。handle 为 fd；返回读入字节数，0=EOF，-1=错误/超时。
+function shu_io_read_fixed(handle: usize, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
+  let fd: i32 = (handle as i32);
+  let r: isize = io_read_fixed(fd, buf_index, offset, len, timeout_ms);
+  if (r < 0) { return -1; }
+  return (r as i32);
+}
+
+// 使用已注册固定 buffer 写：buf_index 当前仅支持 0；offset+len 须 ≤ 注册长度。返回写入字节数，-1=错误/超时。
+function shu_io_write_fixed(handle: usize, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
+  let fd: i32 = (handle as i32);
+  let r: isize = io_write_fixed(fd, buf_index, offset, len, timeout_ms);
+  if (r < 0) { return -1; }
+  return (r as i32);
+}
+
+// 多 fd 就绪等待：fds 指向 n 个 i32（fd 数组），一次系统调用等待任意可读。返回第一个就绪的下标 0..n-1，超时/错误 -1。n 建议 ≤8。
+function shu_io_wait_readable(fds: *i32, n: i32, timeout_ms: u32): i32 {
+  return io_wait_readable(fds, n, timeout_ms);
+}
+
+// 同步读：handle 0=stdin，handle≥2 视为 fd；timeout_ms 毫秒（0=无超时）传给 C 后端。返回读入字节数，0=EOF，-1=错误/超时。
 function shu_io_submit_read(ptr: *u8, len: usize, handle: usize, timeout_ms: u32): i32 {
-  return 0;
+  let fd: i32 = (handle as i32);
+  if (handle == 0 || handle >= 2) {
+    let r: isize = io_read(fd, ptr, len, timeout_ms);
+    if (r < 0) { return -1; }
+    return (r as i32);
+  }
+  return -1;
 }
 
+// 零拷贝读：读入内部缓冲并返回只读指针；失败返回 0。指针在下次 read_ptr 前有效；长度由 shu_io_read_ptr_len() 返回。
+function shu_io_read_ptr(handle: usize, timeout_ms: u32): *u8 {
+  return io_read_ptr(handle, timeout_ms);
+}
+
+function shu_io_read_ptr_len(): i32 {
+  return io_read_ptr_len();
+}
+
+// 同步写：handle 1=stdout，handle≥2 视为 fd；timeout_ms 传给 C 后端。返回写入字节数，-1=错误/超时。
 function shu_io_submit_write(ptr: *u8, len: usize, handle: usize, timeout_ms: u32): i32 {
-  return 0;
+  let fd: i32 = (handle as i32);
+  if (handle >= 1) {
+    let r: isize = io_write(fd, ptr, len, timeout_ms);
+    if (r < 0) { return -1; }
+    return (r as i32);
+  }
+  return -1;
+}
+
+// 批量读：4 段 (ptr0,len0)..(ptr3,len3)，n 为段数 1..4，handle 为 fd；timeout_ms=0 时 C 端可用 readv。
+function shu_io_submit_read_batch(ptr0: *u8, len0: usize, ptr1: *u8, len1: usize, ptr2: *u8, len2: usize, ptr3: *u8, len3: usize, handle: usize, n: i32, timeout_ms: u32): i32 {
+  let fd: i32 = (handle as i32);
+  if (handle == 0 || handle >= 2) {
+    let r: isize = io_read_batch(fd, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, n, timeout_ms);
+    if (r < 0) { return -1; }
+    return (r as i32);
+  }
+  return -1;
+}
+
+// 批量写：同上；timeout_ms=0 时 C 端可用 writev。
+function shu_io_submit_write_batch(ptr0: *u8, len0: usize, ptr1: *u8, len1: usize, ptr2: *u8, len2: usize, ptr3: *u8, len3: usize, handle: usize, n: i32, timeout_ms: u32): i32 {
+  let fd: i32 = (handle as i32);
+  if (handle >= 1) {
+    let r: isize = io_write_batch(fd, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, n, timeout_ms);
+    if (r < 0) { return -1; }
+    return (r as i32);
+  }
+  return -1;
 }
