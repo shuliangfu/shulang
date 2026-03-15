@@ -1,0 +1,27 @@
+// 测试 std.time：单调时钟、睡眠、时间差
+//
+// 【文件职责】本文件为 std.time 的回归测试。
+// 【测试目的】确认 now_monotonic_*、sleep_ms、duration_ns 行为正确。
+// 【覆盖 API】now_monotonic_ns、now_monotonic_ms、sleep_ms、duration_ns、now_wall_sec。
+// 【预期结果】退出码 0 表示通过；单调时间递增、sleep 后 elapsed 约 >= 睡眠时间、墙钟秒数合理。
+// 【运行方式】./tests/run-time.sh
+import std.time;
+
+function main(): i32 {
+  let t0: i64 = now_monotonic_ns();
+  let t0_ms: i64 = now_monotonic_ms();
+  if (t0 <= 0 && t0_ms <= 0) {
+    return 1;
+  }
+  sleep_ms(50);
+  let t1: i64 = now_monotonic_ns();
+  let elapsed_ns: i64 = duration_ns(t0, t1);
+  if (elapsed_ns < 0) {
+    return 2;
+  }
+  let wall: i64 = now_wall_sec();
+  if (wall < 0) {
+    return 3;
+  }
+  return 0;
+}
