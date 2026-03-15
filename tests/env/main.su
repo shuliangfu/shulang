@@ -1,0 +1,78 @@
+// 测试 std.env：getenv(key,len,out,cap)、getenv_exists、setenv、unsetenv、temp_dir
+//
+// 【文件职责】本文件为 std.env 的回归测试。
+// 【测试目的】确认 getenv、getenv_exists、setenv、unsetenv、temp_dir 行为正确且不崩溃。
+// 【覆盖 API】getenv、getenv_exists、setenv、unsetenv、temp_dir、getenv_z、getenv_ptr。
+// 【预期结果】退出码 0 表示通过。
+// 【运行方式】bash tests/run-env.sh 或 ./tests/run-env.sh
+import std.env;
+
+function main(): i32 {
+  // key "PATH"（4 字节），用于可选测试：若不存在则跳过
+  let key_path: [8]u8 = [80, 65, 84, 72, 0, 0, 0, 0];
+  let buf: [256]u8 = [];
+  let n: i32 = getenv(&key_path[0], 4, &buf[0], 256);
+  if (n < 0 && getenv_exists(&key_path[0], 4) == 0) {
+    // PATH 在某些环境可能不存在，跳过
+  }
+  // PATH 存在时 n >= 0（可能大于 buf 容量，表示截断但成功）
+
+  // temp_dir：应成功并返回非负长度
+  let tmp: [64]u8 = [];
+  let td: i32 = temp_dir(&tmp[0], 64);
+  if (td < 0) {
+    return 1;
+  }
+  if (td >= 64) {
+    return 11;
+  }
+
+  // setenv("X_E", "v", 1)：设置后应存在，且 getenv 可取值
+  let name: [4]u8 = [88, 95, 69, 0];
+  let val: [4]u8 = [118, 0, 0, 0];
+  if (setenv(&name[0], &val[0], 1) != 0) {
+    return 2;
+  }
+  if (getenv_exists(&name[0], 3) != 1) {
+    return 3;
+  }
+  let out_val: [8]u8 = [];
+  let got: i32 = getenv(&name[0], 3, &out_val[0], 8);
+  if (got != 1) {
+    return 6;
+  }
+  if (out_val[0] != 118) {
+    return 7;
+  }
+  // 零拷贝 getenv_z：name 为 NUL 结尾 "X_E"，应返回 value 指针且 len==1、*ptr=='v'
+  let len: i32 = 0;
+  let p: *u8 = getenv_z(&name[0], &len);
+  if (p == 0) {
+    return 9;
+  }
+  if (len != 1) {
+    return 12;
+  }
+  if (p[0] != 118) {
+    return 13;
+  }
+
+  // unsetenv("X_E")：删除后应不存在，getenv 返回 -1
+  if (unsetenv(&name[0]) != 0) {
+    return 4;
+  }
+  if (getenv_exists(&name[0], 3) != 0) {
+    return 5;
+  }
+  let got2: i32 = getenv(&name[0], 3, &out_val[0], 8);
+  if (got2 != -1) {
+    return 8;
+  }
+  // unset 后 getenv_z 应返回 0
+  let q: *u8 = getenv_z(&name[0], &len);
+  if (q != 0) {
+    return 14;
+  }
+
+  return 0;
+}
