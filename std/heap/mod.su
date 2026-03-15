@@ -1,8 +1,79 @@
-// std.heap — 堆分配、Box 等（自举前最小实现）
-// 自举前：提供最小可调用 API；堆分配与 Box 后续扩展。
+// std.heap — 堆分配、alloc/free/realloc（对标 Zig Allocator、Rust alloc、Go 底层）
+//
+// 【文件职责】
+// 提供与 libc 一致的堆分配 API：alloc/free/realloc/alloc_zeroed；供 std.vec、std.map 等使用。
+// 实现由同目录 heap.c 提供并链入 heap.o。
+//
+// 【对标】
+// Zig: page_allocator.alloc / free / realloc；Rust: alloc::alloc::{alloc, dealloc}；Go: 运行时 malloc/free 不直接暴露，此处显式提供。
 
-// 占位函数，表示本模块已可 import。
-function placeholder(): i32 { return 0; }
+extern function heap_alloc_c(size: usize): *u8;
+extern function heap_free_c(ptr: *u8): void;
+extern function heap_realloc_c(ptr: *u8, new_size: usize): *u8;
+extern function heap_alloc_zeroed_c(size: usize): *u8;
+extern function heap_alloc_i32_c(count: i32): *i32;
+extern function heap_realloc_i32_c(ptr: *i32, new_count: i32): *i32;
+extern function heap_free_i32_c(ptr: *i32): void;
+extern function heap_alloc_u8_c(count: i32): *u8;
+extern function heap_realloc_u8_c(ptr: *u8, new_count: i32): *u8;
+extern function heap_free_u8_c(ptr: *u8): void;
+extern function heap_copy_i32_at_c(dst: *i32, dst_offset: i32, src: *i32, count: i32): void;
+extern function heap_copy_u8_at_c(dst: *u8, dst_offset: i32, src: *u8, count: i32): void;
+extern function heap_mem_set_c(ptr: *u8, byte: u8, n: i32): void;
+extern function heap_mem_compare_c(a: *u8, b: *u8, n: i32): i32;
+/** 线性探测查找 key 在 keys/occupied 中的槽位；供 std.map map_i32_i32_find 使用，实现于 heap.c */
+extern function map_i32_i32_find_c(keys: *i32, occupied: *u8, cap: i32, key: i32): i32;
 
-// 表示“分配大小 0”占位，后续扩展为 alloc(size)/free 等。
+/** 分配 size 字节，未初始化；失败返回 null（*u8 的 0）。对标 Zig alloc、Rust alloc。 */
+function alloc(size: usize): *u8 {
+  return heap_alloc_c(size);
+}
+
+/** 释放 ptr；ptr 可为 null（无操作）。对标 Zig free、Rust dealloc。 */
+function free(ptr: *u8): void {
+  heap_free_c(ptr);
+}
+
+/** 将 ptr 调整为 new_size 字节，可能移动；失败返回 null 且原 ptr 未释放。new_size==0 等价于 free 并返回 null。对标 Zig realloc、Rust realloc。 */
+function realloc(ptr: *u8, new_size: usize): *u8 {
+  return heap_realloc_c(ptr, new_size);
+}
+
+/** 分配 size 字节并清零（calloc 语义）；失败返回 null。对标 Zig alloc 后 memset、Rust alloc_zeroed。 */
+function alloc_zeroed(size: usize): *u8 {
+  return heap_alloc_zeroed_c(size);
+}
+
+/** 分配 count 个 i32，未初始化；失败返回 null。供 std.vec Vec_i32 使用。 */
+function alloc_i32(count: i32): *i32 { return heap_alloc_i32_c(count); }
+
+/** 将 ptr 调整为 new_count 个 i32；失败返回 null 且原 ptr 未释放。 */
+function realloc_i32(ptr: *i32, new_count: i32): *i32 { return heap_realloc_i32_c(ptr, new_count); }
+
+/** 释放由 alloc_i32/realloc_i32 分配的 ptr；ptr 可为 null。 */
+function free_i32(ptr: *i32): void { heap_free_i32_c(ptr); }
+
+/** 分配 count 个 u8，未初始化；失败返回 null。供 std.vec Vec_u8 使用。 */
+function alloc_u8(count: i32): *u8 { return heap_alloc_u8_c(count); }
+
+/** 将 ptr 调整为 new_count 个 u8；失败返回 null 且原 ptr 未释放。 */
+function realloc_u8(ptr: *u8, new_count: i32): *u8 { return heap_realloc_u8_c(ptr, new_count); }
+
+/** 释放由 alloc_u8/realloc_u8 分配的 ptr；ptr 可为 null。 */
+function free_u8(ptr: *u8): void { heap_free_u8_c(ptr); }
+
+/** 块拷贝：dst[dst_offset..] = src[0..count-1]（i32 元素）；供 std.vec 快路径，≥8 元素走此路径。 */
+function copy_i32_at(dst: *i32, dst_offset: i32, src: *i32, count: i32): void {
+  heap_copy_i32_at_c(dst, dst_offset, src, count);
+}
+
+/** 块拷贝：dst[dst_offset..] = src[0..count-1]（u8 元素）；供 std.vec 快路径。 */
+function copy_u8_at(dst: *u8, dst_offset: i32, src: *u8, count: i32): void {
+  heap_copy_u8_at_c(dst, dst_offset, src, count);
+}
+
+/** 表示“分配大小 0”占位；保留兼容（测试用）。 */
 function alloc_size_zero(): i32 { return 0; }
+
+/** 占位，表示本模块可 import；保留兼容。 */
+function placeholder(): i32 { return 0; }
