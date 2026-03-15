@@ -30,9 +30,21 @@ struct AsyncContext {
   flags: u32;
 }
 
-// ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；调用 std.io.core（舒 IO 核心），当前桩返回 0 ———
+// ——— 预注册 Buffer（与 std.mem.Buffer 一致，ABI 24 字节）；调用 std.io.core（舒 IO 核心）———
 function register(buf: Buffer): i32 {
   return shu_io_register(buf.ptr, buf.len, buf.handle);
+}
+
+// ——— 预注册固定 buffer 池（最多 4 块）：(p0,l0)..(p3,l3) 为 (ptr,len) 对，nr 为实际数量 1..4。返回 1 成功，0 失败。———
+function register_fixed_buffers(p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, nr: u32): i32 {
+  return shu_io_register_buffers(p0, l0, p1, l1, p2, l2, p3, l3, nr);
+}
+
+// ——— 与 Zig/Rust 对齐：按「指针+块数」注册固定 buffer 池；bufs 指向至少 nr 个 Buffer（ptr/len 有效），nr 为 1..8（IO_FIXED_MAX）。C 侧 io_register_buffers_buf。 ———
+extern function io_register_buffers_buf(bufs: *Buffer, nr: i32): i32;
+/** 内部名，供 mod 导出为 register_fixed_buffers_buf。 */
+function submit_register_fixed_buffers_buf(bufs: *Buffer, nr: u32): i32 {
+  return io_register_buffers_buf(bufs, nr as i32);
 }
 
 // ——— 提交读；buf 目标缓冲区，timeout_ms 毫秒（0=无超时）；预留 []Buffer 多段扩展（高吞吐网络） ———
@@ -40,9 +52,51 @@ function submit_read(buf: Buffer, timeout_ms: u32): i32 {
   return shu_io_submit_read(buf.ptr, buf.len, buf.handle, timeout_ms);
 }
 
+// ——— 零拷贝读（内部名，供 mod 重新导出为 read_ptr/read_ptr_len） ———
+function driver_read_ptr(handle: usize, timeout_ms: u32): *u8 {
+  return shu_io_read_ptr(handle, timeout_ms);
+}
+
+function driver_read_ptr_len(): i32 {
+  return shu_io_read_ptr_len();
+}
+
 // ——— 提交写；预留 []Buffer 多段扩展 ———
 function submit_write(buf: Buffer, timeout_ms: u32): i32 {
   return shu_io_submit_write(buf.ptr, buf.len, buf.handle, timeout_ms);
+}
+
+// ——— 批量读：前 n 段（0 < n ≤ 4）经 core 一次提交；timeout_ms=0 时 C 端用 readv，成功返回总字节数，失败 -1 ———
+function submit_read_batch(buffers: [4]Buffer, n: i32, timeout_ms: u32): i32 {
+  let h: usize = buffers[0].handle;
+  return shu_io_submit_read_batch(buffers[0].ptr, buffers[0].len, buffers[1].ptr, buffers[1].len, buffers[2].ptr, buffers[2].len, buffers[3].ptr, buffers[3].len, h, n, timeout_ms);
+}
+
+// ——— 批量写：同上；timeout_ms=0 时 C 端用 writev ———
+function submit_write_batch(buffers: [4]Buffer, n: i32, timeout_ms: u32): i32 {
+  let h: usize = buffers[0].handle;
+  return shu_io_submit_write_batch(buffers[0].ptr, buffers[0].len, buffers[1].ptr, buffers[1].len, buffers[2].ptr, buffers[2].len, buffers[3].ptr, buffers[3].len, h, n, timeout_ms);
+}
+
+// ——— 与 Zig/Rust 对齐：按「指针+段数」批量读写；bufs 指向至少 n 个 Buffer（ptr/len 有效，handle 可用首元素或忽略），n 为 1..16（IO_READV_BUF_MAX）。C 侧 io_read_batch_buf/io_write_batch_buf。 ———
+extern function io_read_batch_buf(fd: i32, bufs: *Buffer, n: i32, timeout_ms: u32): isize;
+extern function io_write_batch_buf(fd: i32, bufs: *Buffer, n: i32, timeout_ms: u32): isize;
+/** 批量读（切片式）：handle 为 fd；bufs 指向 n 个 Buffer，仅用 ptr/len。返回总字节数，-1 错误。n 建议 1..16。 */
+function submit_read_batch_buf(handle: usize, bufs: *Buffer, n: i32, timeout_ms: u32): i32 {
+  let r: isize = io_read_batch_buf(handle as i32, bufs, n, timeout_ms);
+  if (r < 0) { return -1; }
+  return (r as i32);
+}
+/** 批量写（切片式）：同上。 */
+function submit_write_batch_buf(handle: usize, bufs: *Buffer, n: i32, timeout_ms: u32): i32 {
+  let r: isize = io_write_batch_buf(handle as i32, bufs, n, timeout_ms);
+  if (r < 0) { return -1; }
+  return (r as i32);
+}
+
+// ——— 多 fd 就绪等待：fds 指向 n 个 i32（fd），一次系统调用等待任意可读。返回就绪下标 0..n-1，超时/错误 -1。n 建议 ≤8。———
+function wait_readable(fds: *i32, n: i32, timeout_ms: u32): i32 {
+  return shu_io_wait_readable(fds, n, timeout_ms);
 }
 
 // 占位，表示本模块可 import
