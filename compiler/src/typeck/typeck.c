@@ -24,6 +24,12 @@ static int bce_bound_val[MAX_BCE_RANGES];
 static const struct ASTExpr *bce_bound_base[MAX_BCE_RANGES];
 static int bce_n;
 
+/** 结构体字面量具名类型缓存：为 (Type){0} 等设置 resolved_type，使 if-expr/嵌套 if 能正确推断 __tmp 类型，从源头消除对 sed 补丁的依赖。 */
+#define MAX_STRUCT_LIT_TYPES 32
+static struct ASTType struct_lit_type_cache[MAX_STRUCT_LIT_TYPES];
+static const char *struct_lit_type_names[MAX_STRUCT_LIT_TYPES];
+static int struct_lit_type_n;
+
 /** 字面量默认类型，用于设置 resolved_type 以便函数调用实参匹配 */
 static struct ASTType static_type_i32 = { AST_TYPE_I32, NULL, NULL, 0 };
 static struct ASTType static_type_i64 = { AST_TYPE_I64, NULL, NULL, 0 };
@@ -32,6 +38,9 @@ static struct ASTType static_type_f32 = { AST_TYPE_F32, NULL, NULL, 0 };
 static struct ASTType static_type_bool = { AST_TYPE_BOOL, NULL, NULL, 0 };
 /** 切片 .length 字段类型（与 C 侧 size_t 对应） */
 static struct ASTType static_type_usize = { AST_TYPE_USIZE, NULL, NULL, 0 };
+/** u8 与 *u8，用于切片 []u8 的 .data 字段类型（与 C 侧 elem* data 一致） */
+static struct ASTType static_type_u8 = { AST_TYPE_U8, NULL, NULL, 0 };
+static struct ASTType static_type_ptr_u8 = { AST_TYPE_PTR, NULL, &static_type_u8, 0 };
 
 /** 当前 typeck 的依赖模块列表（与 m->import_paths 顺序一致），供 CALL 跨模块解析；由 typeck_module 设置。 */
 static struct ASTModule **typeck_dep_mods;
@@ -508,6 +517,8 @@ static int is_const_expr(const struct ASTExpr *e, const char **names, int n) {
             return is_const_expr(e->value.unary.operand, names, n);
         case AST_EXPR_ADDR_OF:
             return 0;  /* 取址非常量表达式 */
+        case AST_EXPR_DEREF:
+            return 0;  /* 解引用非常量表达式 */
         case AST_EXPR_AS:
             return 0;  /* 类型转换非常量（或可扩展为递归 is_const_expr(operand)） */
         case AST_EXPR_ARRAY_LIT: {
@@ -694,9 +705,9 @@ static void fold_expr(struct ASTExpr *e, const char **names, const int *const_va
             return;
         }
         case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
-        case AST_EXPR_ADDR_OF:
+        case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             fold_expr(e->value.unary.operand, names, const_values, n_consts, const_start, parent_n_consts);
-            if (e->kind != AST_EXPR_ADDR_OF && e->value.unary.operand->const_folded_valid && e->resolved_type &&
+            if (e->kind != AST_EXPR_ADDR_OF && e->kind != AST_EXPR_DEREF && e->value.unary.operand->const_folded_valid && e->resolved_type &&
                 (e->resolved_type->kind == AST_TYPE_I32 || e->resolved_type->kind == AST_TYPE_BOOL ||
                  e->resolved_type->kind == AST_TYPE_U8 || e->resolved_type->kind == AST_TYPE_U32 ||
                  e->resolved_type->kind == AST_TYPE_I64 || e->resolved_type->kind == AST_TYPE_USIZE || e->resolved_type->kind == AST_TYPE_ISIZE)) {
@@ -768,12 +779,21 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
         int base_kind;
         const char *base_name = NULL;
         if (get_expr_type(e->value.field_access.base, names, type_kinds, type_names, n, type_ptrs, struct_defs, num_structs, enum_defs, num_enums, &base_kind, &base_name, NULL) != 0) return -1;
-        /* 切片 []T 的 .length 字段：类型为 usize（C 侧 struct 的 length 为 size_t） */
+        /* 切片 []T 的 .length（usize）与 .data（*elem_type） */
         if (base_kind == AST_TYPE_SLICE) {
             const char *field = e->value.field_access.field_name;
             if (field && strcmp(field, "length") == 0) {
                 *out_kind = AST_TYPE_USIZE;
                 *out_name = NULL;
+                return 0;
+            }
+            if (field && strcmp(field, "data") == 0) {
+                *out_kind = AST_TYPE_PTR;
+                *out_name = NULL;
+                if (out_elem_type && e->value.field_access.base->resolved_type
+                    && e->value.field_access.base->resolved_type->kind == AST_TYPE_SLICE
+                    && e->value.field_access.base->resolved_type->elem_type)
+                    *out_elem_type = e->value.field_access.base->resolved_type->elem_type;
                 return 0;
             }
             return -1;
@@ -950,6 +970,20 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
         case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
         case AST_EXPR_ADDR_OF:
             return typeck_expr_sym(e->value.unary.operand, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m);
+        case AST_EXPR_DEREF: {
+            if (typeck_expr_sym(e->value.unary.operand, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            const struct ASTType *op_ty = e->value.unary.operand->resolved_type;
+            if (!op_ty || op_ty->kind != AST_TYPE_PTR || !op_ty->elem_type) {
+                if (!typeck_fill_only) {
+                    fprintf(stderr, "typeck error: dereference operand must be pointer type");
+                    typeck_err_loc(e);
+                    return -1;
+                }
+                return 0;
+            }
+            ((struct ASTExpr *)e)->resolved_type = op_ty->elem_type;
+            return 0;
+        }
         case AST_EXPR_AS:
             if (typeck_expr_sym(e->value.as_type.operand, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
             ((struct ASTExpr *)e)->resolved_type = e->value.as_type.type;
@@ -966,13 +1000,26 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             if (typeck_expr_sym(e->value.if_expr.then_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
             if (e->value.if_expr.else_expr && typeck_expr_sym(e->value.if_expr.else_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
-            /* if 表达式类型：取产生值的分支类型（块仅 return 时视为无值，取另一分支） */
+            /* if 表达式类型：两分支均为 struct 时须类型一致，否则 codegen 会生成 struct X = struct Y；一侧 struct 一侧标量时取 struct 以便 __tmp 声明正确 */
             {
                 const struct ASTExpr *te = e->value.if_expr.then_expr;
                 const struct ASTExpr *ee = e->value.if_expr.else_expr;
                 const struct ASTType *ty_t = te ? te->resolved_type : NULL;
                 const struct ASTType *ty_e = ee ? ee->resolved_type : NULL;
-                if (ty_t && ty_e) ((struct ASTExpr *)e)->resolved_type = ty_t;
+                int t_named = (ty_t && ty_t->kind == AST_TYPE_NAMED);
+                int e_named = (ty_e && ty_e->kind == AST_TYPE_NAMED);
+                if (ty_t && ty_e && t_named && e_named && !type_equal(ty_t, ty_e)) {
+                    if (!typeck_fill_only) {
+                        char ebuf[80], fbuf[80];
+                        type_to_string_buf(ty_t, ebuf, sizeof(ebuf));
+                        type_to_string_buf(ty_e, fbuf, sizeof(fbuf));
+                        fprintf(stderr, "typeck error: if-expr branches must have the same type when both are struct: then %s, else %s", ebuf, fbuf);
+                        typeck_err_loc(e);
+                    }
+                    return -1;
+                }
+                if (ty_t && ty_e)
+                    ((struct ASTExpr *)e)->resolved_type = (e_named && !t_named) ? ty_e : ty_t;
                 else if (ty_t) ((struct ASTExpr *)e)->resolved_type = ty_t;
                 else if (ty_e) ((struct ASTExpr *)e)->resolved_type = ty_e;
             }
@@ -982,12 +1029,21 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             /* 块表达式（if 的 then/else 体）：用块表达式上下文 typeck_block（func_return_type=NULL 允许 return） */
             const struct ASTBlock *b = e->value.block;
             if (typeck_block(b, names, type_kinds, type_names, type_ptrs, n, NULL, 0, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m, NULL) != 0) return -1;
-            if (b->final_expr && b->final_expr->kind != AST_EXPR_RETURN)
-                ((struct ASTExpr *)e)->resolved_type = b->final_expr->resolved_type;
-            else if (b->final_expr && b->final_expr->kind == AST_EXPR_RETURN && b->final_expr->value.unary.operand)
+            if (b->final_expr && b->final_expr->kind != AST_EXPR_RETURN) {
+                /* 若 final_expr 为赋值，用 RHS 类型作为块类型（如 else { __tmp = (struct ast_Type){0} } 取 ast.Type），便于 if 表达式 __tmp 推断 */
+                if (b->final_expr->kind == AST_EXPR_ASSIGN && b->final_expr->value.binop.right && b->final_expr->value.binop.right->resolved_type)
+                    ((struct ASTExpr *)e)->resolved_type = b->final_expr->value.binop.right->resolved_type;
+                else
+                    ((struct ASTExpr *)e)->resolved_type = b->final_expr->resolved_type;
+            } else if (b->final_expr && b->final_expr->kind == AST_EXPR_RETURN && b->final_expr->value.unary.operand)
                 ((struct ASTExpr *)e)->resolved_type = b->final_expr->value.unary.operand->resolved_type;
             else if (b->num_labeled_stmts == 1 && b->labeled_stmts[0].kind == AST_STMT_RETURN && b->labeled_stmts[0].u.return_expr)
                 ((struct ASTExpr *)e)->resolved_type = b->labeled_stmts[0].u.return_expr->resolved_type;
+            /* 块仅含一条赋值语句且无 final_expr 时（如 else { __tmp = (struct ast_Type){0} }），用赋值 RHS 类型作为块类型，供 if 表达式取 else 分支 struct 类型 */
+            else if (!b->final_expr && b->expr_stmts && b->num_expr_stmts == 1
+                && b->expr_stmts[0]->kind == AST_EXPR_ASSIGN && b->expr_stmts[0]->value.binop.right
+                && b->expr_stmts[0]->value.binop.right->resolved_type)
+                ((struct ASTExpr *)e)->resolved_type = b->expr_stmts[0]->value.binop.right->resolved_type;
             return 0;
         }
         case AST_EXPR_TERNARY: {
@@ -1034,7 +1090,13 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     int v = e->value.binop.right->value.int_val;
                     if (v >= 0 && v <= 255) { allow_u8_lit = 1; ((struct ASTExpr *)e->value.binop.right)->resolved_type = lt; }
                 }
-                if (!allow_u8_lit && !typeck_fill_only) {
+                /* 允许字面量 0 赋给指针（如 v.ptr = 0），与 C 的 NULL 一致 */
+                int allow_ptr_zero = 0;
+                if (lt && lt->kind == AST_TYPE_PTR && e->value.binop.right->kind == AST_EXPR_LIT && e->value.binop.right->value.int_val == 0) {
+                    allow_ptr_zero = 1;
+                    ((struct ASTExpr *)e->value.binop.right)->resolved_type = lt;
+                }
+                if (!allow_u8_lit && !allow_ptr_zero && !typeck_fill_only) {
                     char ebuf[80], fbuf[80];
                     type_to_string_buf(lt, ebuf, sizeof(ebuf));
                     type_to_string_buf(rt, fbuf, sizeof(fbuf));
@@ -1172,14 +1234,30 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 typeck_err_loc(e);
                 return -1;
             }
-            /* 切片 []T 仅支持 .length，类型为 usize */
+            /* 切片 []T 支持 .length（usize）与 .data（*elem_type；C 侧 struct 为 data/length） */
             if (base_kind == AST_TYPE_SLICE) {
                 const char *field = e->value.field_access.field_name;
+                const struct ASTType *base_type = e->value.field_access.base->resolved_type;
                 if (field && strcmp(field, "length") == 0) {
                     ((struct ASTExpr *)e)->resolved_type = &static_type_usize;
                     return 0;
                 }
-                fprintf(stderr, "typeck error: slice only has field 'length'");
+                if (field && strcmp(field, "data") == 0) {
+                    if (!base_type || base_type->kind != AST_TYPE_SLICE || !base_type->elem_type) {
+                        fprintf(stderr, "typeck error: slice .data requires resolved slice type");
+                        typeck_err_loc(e);
+                        return -1;
+                    }
+                    /* 当前仅支持 []u8.data → *u8；其它 elem_type 可后续扩展 static_type_ptr_* */
+                    if (base_type->elem_type->kind == AST_TYPE_U8) {
+                        ((struct ASTExpr *)e)->resolved_type = &static_type_ptr_u8;
+                        return 0;
+                    }
+                    fprintf(stderr, "typeck error: slice .data currently only supported for []u8");
+                    typeck_err_loc(e);
+                    return -1;
+                }
+                fprintf(stderr, "typeck error: slice only has fields 'length' and 'data'");
                 typeck_err_loc(e);
                 return -1;
             }
@@ -1242,6 +1320,22 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 /* 将字段初值的 resolved_type 设为字段类型，供 codegen 生成正确类型（如 [8]i32 的 data 用 int32_t 而非 uint8_t） */
                 if (sd->fields[i].type)
                     ((struct ASTExpr *)e->value.struct_lit.inits[i])->resolved_type = sd->fields[i].type;
+            }
+            /* 为结构体字面量本身设 resolved_type（AST_TYPE_NAMED），供 if-expr/嵌套 else 推断 __tmp 类型，从源头消除 int __tmp 却赋 (struct X){0} 的补丁 */
+            if (sd->name) {
+                int ci;
+                for (ci = 0; ci < struct_lit_type_n; ci++)
+                    if (struct_lit_type_names[ci] && strcmp(struct_lit_type_names[ci], sd->name) == 0) break;
+                if (ci >= struct_lit_type_n && struct_lit_type_n < MAX_STRUCT_LIT_TYPES) {
+                    ci = struct_lit_type_n++;
+                    struct_lit_type_cache[ci].kind = AST_TYPE_NAMED;
+                    struct_lit_type_cache[ci].name = sd->name;
+                    struct_lit_type_cache[ci].elem_type = NULL;
+                    struct_lit_type_cache[ci].array_size = 0;
+                    struct_lit_type_names[ci] = sd->name;
+                }
+                if (ci < struct_lit_type_n)
+                    ((struct ASTExpr *)e)->resolved_type = &struct_lit_type_cache[ci];
             }
             return 0;
         }
