@@ -763,10 +763,11 @@ function skip_whitespace_and_comments_buf(lex: Lexer, data: *u8, len: i32): Lexe
   return l;
 }
 
-/** 取下一个 Token；跳过空白与注释后，识别关键字/标识符/数字/符号，写 tok 并返回新状态。IDENT 时 ident 置 0，仅 ident_len 有效。遇 NUL 或越界视为 EOF（便于从文件读入的固定长缓冲）。先做 EOF 检查再调 lexer_next_body，避免代码生成将 data[l.pos] 提到越界检查前导致 panic。 */
+/** 取下一个 Token；跳过空白与注释后，识别关键字/标识符/数字/符号，写 tok 并返回新状态。IDENT 时 ident 置 0，仅 ident_len 有效。遇 NUL 或越界视为 EOF（便于从文件读入的固定长缓冲）。先做 EOF 检查再调 lexer_next_body，避免代码生成将 data[l.pos] 提到越界检查前导致 panic。
+ * 使用单一 return + if-else 链使两分支类型一致为 LexerResult，避免 codegen 产出 __tmp=LexerResult 却赋 (Token){0}。 */
 function lexer_next(lex: Lexer, data: []u8): LexerResult {
   let l: Lexer = skip_whitespace_and_comments(lex, data);
-  if (l.pos >= data.length) {
+  return (if (l.pos >= data.length) {
     let t: Token = Token {
       kind: TokenKind.TOKEN_EOF,
       line: l.line,
@@ -776,9 +777,8 @@ function lexer_next(lex: Lexer, data: []u8): LexerResult {
       ident: 0,
       ident_len: 0
     }
-    return LexerResult { next_lex: l, tok: t }
-  }
-  if (data[l.pos] == 0) {
+    LexerResult { next_lex: l, tok: t }
+  } else if (data[l.pos] == 0) {
     let t: Token = Token {
       kind: TokenKind.TOKEN_EOF,
       line: l.line,
@@ -788,24 +788,302 @@ function lexer_next(lex: Lexer, data: []u8): LexerResult {
       ident: 0,
       ident_len: 0
     }
-    return LexerResult { next_lex: l, tok: t }
-  }
-  return lexer_next_body(l, data);
+    LexerResult { next_lex: l, tok: t }
+  } else {
+    lexer_next_body(l, data)
+  });
 }
 
-/** 与 lexer_next 等价，接受 (data: *u8, len) 供无 slice 的 buf 路径使用。 */
+/** 与 lexer_next_body 逻辑相同，但将结果写入 out 而非返回，供 lexer_next_impl 使用以绕过结构体返回 ABI。 */
+function lexer_next_body_into(out: *LexerResult, l: Lexer, data: []u8): void {
+  let c: u8 = data[l.pos];
+  if (is_alpha(c)) {
+    let start: usize = l.pos;
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    l = advance_one(l, c);
+    while (l.pos < data.length && is_alnum_underscore(data[l.pos])) {
+      l = advance_one(l, data[l.pos]);
+    }
+    let len: usize = l.pos - start;
+    let tok: Token = try_keyword(data, start, len, line0, col0);
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (is_digit(c)) {
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    let ival: i32 = 0;
+    l = advance_one(l, c);
+    ival = ival * 10 + (c - 48);
+    while (l.pos < data.length && is_digit(data[l.pos])) {
+      let d: u8 = data[l.pos];
+      l = advance_one(l, d);
+      ival = ival * 10 + (d - 48);
+    }
+    if (l.pos < data.length && data[l.pos] == 46 && l.pos + 1 < data.length && is_digit(data[l.pos + 1])) {
+      l = advance_one(l, 46);
+      let fval: f64 = ival;
+      let frac: f64 = 0.1;
+      while (l.pos < data.length && is_digit(data[l.pos])) {
+        let d: u8 = data[l.pos];
+        l = advance_one(l, d);
+        fval = fval + frac * (d - 48);
+        frac = frac * 0.1;
+      }
+      let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 };
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    if (l.pos < data.length && (data[l.pos] == 101 || data[l.pos] == 69)) {
+      l = advance_one(l, data[l.pos]);
+      let exp_sign: i32 = 1;
+      if (l.pos < data.length && data[l.pos] == 45) {
+        exp_sign = -1;
+        l = advance_one(l, 45);
+      } else {
+        if (l.pos < data.length && data[l.pos] == 43) { l = advance_one(l, 43); }
+      }
+      let exp: i32 = 0;
+      while (l.pos < data.length && is_digit(data[l.pos])) {
+        let d: u8 = data[l.pos];
+        l = advance_one(l, d);
+        exp = exp * 10 + (d - 48);
+      }
+      exp = exp * exp_sign;
+      let scale: f64 = 1.0;
+      let e: i32 = 0;
+      if (exp > 0) {
+        while (e < exp) {
+          scale = scale * 10.0;
+          e = e + 1;
+        }
+      } else {
+        while (e > exp) {
+          scale = scale * 0.1;
+          e = e - 1;
+        }
+      }
+      let fval: f64 = ival * scale;
+      let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 };
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    let tok: Token = Token { kind: TokenKind.TOKEN_INT, line: line0, col: col0, int_val: ival, float_val: 0.0, ident: 0, ident_len: 0 };
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 46 && l.pos + 1 < data.length && is_digit(data[l.pos + 1])) {
+    let line0: i32 = l.line;
+    let col0: i32 = l.col;
+    l = advance_one(l, 46);
+    let fval: f64 = 0.0;
+    let frac: f64 = 0.1;
+    while (l.pos < data.length && is_digit(data[l.pos])) {
+      let d: u8 = data[l.pos];
+      l = advance_one(l, d);
+      fval = fval + frac * (d - 48);
+      frac = frac * 0.1;
+    }
+    let tok: Token = Token { kind: TokenKind.TOKEN_FLOAT, line: line0, col: col0, int_val: 0, float_val: fval, ident: 0, ident_len: 0 };
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  let line0: i32 = l.line;
+  let col0: i32 = l.col;
+  l = advance_one(l, c);
+  let tok: Token = Token { kind: TokenKind.TOKEN_EOF, line: line0, col: col0, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 };
+  if (c == 40) { tok.kind = TokenKind.TOKEN_LPAREN; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 41) { tok.kind = TokenKind.TOKEN_RPAREN; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 123) { tok.kind = TokenKind.TOKEN_LBRACE; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 125) { tok.kind = TokenKind.TOKEN_RBRACE; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 91) { tok.kind = TokenKind.TOKEN_LBRACKET; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 93) { tok.kind = TokenKind.TOKEN_RBRACKET; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 44) { tok.kind = TokenKind.TOKEN_COMMA; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 58) { tok.kind = TokenKind.TOKEN_COLON; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 46) { tok.kind = TokenKind.TOKEN_DOT; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 59) { tok.kind = TokenKind.TOKEN_SEMICOLON; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 43) { tok.kind = TokenKind.TOKEN_PLUS; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 45) {
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_ARROW;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_MINUS;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 42) { tok.kind = TokenKind.TOKEN_STAR; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 47) { tok.kind = TokenKind.TOKEN_SLASH; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 37) { tok.kind = TokenKind.TOKEN_PERCENT; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 94) { tok.kind = TokenKind.TOKEN_CARET; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 126) { tok.kind = TokenKind.TOKEN_TILDE; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 38) {
+    if (l.pos < data.length && data[l.pos] == 38) {
+      l = advance_one(l, 38);
+      tok.kind = TokenKind.TOKEN_AMPAMP;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_AMP;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 124) {
+    if (l.pos < data.length && data[l.pos] == 124) {
+      l = advance_one(l, 124);
+      tok.kind = TokenKind.TOKEN_PIPEPIPE;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_PIPE;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 60) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_LE;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    if (l.pos < data.length && data[l.pos] == 60) {
+      l = advance_one(l, 60);
+      tok.kind = TokenKind.TOKEN_LSHIFT;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_LT;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 62) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_GE;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_RSHIFT;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_GT;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 33) {
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_NE;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_BANG;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  if (c == 63) { tok.kind = TokenKind.TOKEN_QUESTION; write_next_lex_into(out, l); write_tok_into(out, tok); return; }
+  if (c == 61) {
+    if (l.pos < data.length && data[l.pos] == 62) {
+      l = advance_one(l, 62);
+      tok.kind = TokenKind.TOKEN_FATARROW;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    if (l.pos < data.length && data[l.pos] == 61) {
+      l = advance_one(l, 61);
+      tok.kind = TokenKind.TOKEN_EQ;
+      write_next_lex_into(out, l);
+      write_tok_into(out, tok);
+      return;
+    }
+    tok.kind = TokenKind.TOKEN_ASSIGN;
+    write_next_lex_into(out, l);
+    write_tok_into(out, tok);
+    return;
+  }
+  write_next_lex_into(out, l);
+  write_tok_into(out, tok);
+}
+
+/** 将 Lexer 各字段写入 out.next_lex，避免整结构体赋值的 ABI 问题。 */
+function write_next_lex_into(out: *LexerResult, l: Lexer): void {
+  out.next_lex.pos = l.pos;
+  out.next_lex.line = l.line;
+  out.next_lex.col = l.col;
+}
+/** 将 Token 各字段写入 out.tok，避免 out.tok = t 整结构体赋值的 ABI 问题。 */
+function write_tok_into(out: *LexerResult, t: Token): void {
+  out.tok.kind = t.kind;
+  out.tok.line = t.line;
+  out.tok.col = t.col;
+  out.tok.int_val = t.int_val;
+  out.tok.float_val = t.float_val;
+  out.tok.ident = t.ident;
+  out.tok.ident_len = t.ident_len;
+}
+
+/** 核心实现：将下一 token 的结果写入 out（不返回结构体），避免 ABI 下 LexerResult 按值返回错误。 */
+function lexer_next_impl(out: *LexerResult, lex: Lexer, data: []u8): void {
+  let l: Lexer = skip_whitespace_and_comments(lex, data);
+  if (l.pos >= data.length) {
+    let t: Token = Token { kind: TokenKind.TOKEN_EOF, line: l.line, col: l.col, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 };
+    write_next_lex_into(out, l);
+    write_tok_into(out, t);
+    return;
+  }
+  if (data[l.pos] == 0) {
+    let t: Token = Token { kind: TokenKind.TOKEN_EOF, line: l.line, col: l.col, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 };
+    write_next_lex_into(out, l);
+    write_tok_into(out, t);
+    return;
+  }
+  lexer_next_body_into(out, l, data);
+}
+
+/** 将 lexer_next 的结果写入 out，供 parser 关键路径使用，避免结构体返回 ABI 问题。 */
+function lexer_next_into(out: *LexerResult, lex: Lexer, data: []u8): void {
+  lexer_next_impl(out, lex, data);
+}
+
+/** 与 lexer_next 等价，接受 (data: *u8, len) 供无 slice 的 buf 路径使用。单一 return + if-else 链使两分支均为 LexerResult。 */
 function lexer_next_buf(lex: Lexer, data: *u8, len: i32): LexerResult {
   let l: Lexer = skip_whitespace_and_comments_buf(lex, data, len);
   let len_u: usize = len as usize;
-  if (l.pos >= len_u) {
+  return (if (l.pos >= len_u) {
     let t: Token = Token { kind: TokenKind.TOKEN_EOF, line: l.line, col: l.col, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 }
-    return LexerResult { next_lex: l, tok: t }
-  }
-  if (data[l.pos] == 0) {
+    LexerResult { next_lex: l, tok: t }
+  } else if (data[l.pos] == 0) {
     let t: Token = Token { kind: TokenKind.TOKEN_EOF, line: l.line, col: l.col, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 }
-    return LexerResult { next_lex: l, tok: t }
-  }
-  return lexer_next_body_buf(l, data, len);
+    LexerResult { next_lex: l, tok: t }
+  } else {
+    lexer_next_body_buf(l, data, len)
+  });
 }
 
 /** 在已保证 l.pos < data.length 且 data[l.pos] != 0 时取下一 Token；供 lexer_next 在 EOF 检查后调用。 */
