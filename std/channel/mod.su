@@ -1,0 +1,53 @@
+// std.channel — 有界/无界 channel（对标 Rust std::sync::mpsc）
+//
+// 【文件职责】channel_i32 有界/无界、send、recv、try_send、try_recv、close、free。
+// 【依赖】std.heap（C 层 malloc/realloc/free）；与 std/channel/channel.c 同属一模块。Unix 需 -lpthread。
+
+extern function channel_i32_bounded_c(cap: i32): *u8;
+extern function channel_i32_unbounded_c(): *u8;
+extern function channel_i32_send_c(ch: *u8, val: i32): i32;
+extern function channel_i32_recv_c(ch: *u8, out: *i32): i32;
+extern function channel_i32_try_send_c(ch: *u8, val: i32): i32;
+extern function channel_i32_try_recv_c(ch: *u8, out: *i32): i32;
+extern function channel_i32_close_c(ch: *u8): void;
+extern function channel_i32_free_c(ch: *u8): void;
+
+/** 创建容量为 cap 的有界 channel；失败返回 0。 */
+function channel_i32_bounded(cap: i32): *u8 {
+  return channel_i32_bounded_c(cap);
+}
+
+/** 创建无界 channel；失败返回 0。 */
+function channel_i32_unbounded(): *u8 {
+  return channel_i32_unbounded_c();
+}
+
+/** 发送；有界且满时阻塞。返回 0 成功，-1 已关闭。 */
+function channel_i32_send(ch: *u8, val: i32): i32 {
+  return channel_i32_send_c(ch, val);
+}
+
+/** 接收；空时阻塞。返回 0 成功且 *out 有效，-1 已关闭。 */
+function channel_i32_recv(ch: *u8, out: *i32): i32 {
+  return channel_i32_recv_c(ch, out);
+}
+
+/** 非阻塞发送。返回 0 成功，1 满，-1 已关闭。 */
+function channel_i32_try_send(ch: *u8, val: i32): i32 {
+  return channel_i32_try_send_c(ch, val);
+}
+
+/** 非阻塞接收。返回 0 成功，1 空，-1 已关闭。 */
+function channel_i32_try_recv(ch: *u8, out: *i32): i32 {
+  return channel_i32_try_recv_c(ch, out);
+}
+
+/** 关闭 channel，唤醒阻塞的 recv。 */
+function channel_i32_close(ch: *u8): void {
+  channel_i32_close_c(ch);
+}
+
+/** 释放 channel；关闭后调用。 */
+function channel_i32_free(ch: *u8): void {
+  channel_i32_free_c(ch);
+}
