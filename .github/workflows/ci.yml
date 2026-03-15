@@ -136,6 +136,7 @@ jobs:
           CI: "1"
 
   # 当 run-option 段错误时，用 ASan 构建并复现以获取崩溃位置（可选，不阻塞主流程）
+  # 仅 shuc 用 ASan 编译；std/*.o 用普通 CFLAGS，避免链接生成的 option 二进制时出现未定义 __asan_* 符号
   linux-option-asan:
     name: Linux (ASan repro run-option)
     runs-on: ubuntu-22.04
@@ -144,9 +145,15 @@ jobs:
         uses: actions/checkout@v5
       - name: Install dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq liburing-dev zlib1g-dev libbrotli-dev
-      - name: Build compiler with ASan
+      - name: Build std .o and shuc (no ASan)
+        run: make -C compiler clean && make -C compiler all
+        env:
+          CC: cc
+      - name: Rebuild only compiler with ASan
         run: |
-          make -C compiler clean
+          rm -f compiler/src/main.o compiler/src/runtime.o compiler/src/preprocess.o \
+            compiler/src/lexer/lexer.o compiler/src/ast/ast.o compiler/src/parser/parser.o \
+            compiler/src/typeck/typeck.o compiler/src/codegen/codegen.o
           make -C compiler all \
             CFLAGS="-Wall -Wextra -I. -Iinclude -Isrc -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
         env:

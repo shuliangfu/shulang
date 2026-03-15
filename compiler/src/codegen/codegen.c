@@ -1001,11 +1001,12 @@ static int expr_produces_struct_type(const struct ASTExpr *e) {
     return (s && strncmp(s, "struct ", 7) == 0);
 }
 
-/** 表达式 e 的 resolved_type 是否为可折叠为整数的标量（仅此时 const_folded_val 才有意义；struct/float 等不能当整数字面量输出）。 */
+/** 表达式 e 的 resolved_type 是否为可折叠为整数的标量（仅此时 const_folded_val 才有意义；struct/float 等不能当整数字面量输出）。
+ * 不含 U8：u8 的 const_folded_val 可能被误用导致 return -1094795586 等错误，故 u8 一律走正常表达式生成。 */
 static int expr_type_is_foldable_scalar(const struct ASTExpr *e) {
     if (!e || !e->resolved_type) return 0;
     switch (e->resolved_type->kind) {
-        case AST_TYPE_I32: case AST_TYPE_BOOL: case AST_TYPE_U8: case AST_TYPE_U32:
+        case AST_TYPE_I32: case AST_TYPE_BOOL: case AST_TYPE_U32:
         case AST_TYPE_I64: case AST_TYPE_USIZE: case AST_TYPE_ISIZE:
             return 1;
         default:
