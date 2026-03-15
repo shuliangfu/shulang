@@ -31,7 +31,7 @@ void ast_expr_free(ASTExpr *e) {
             ast_expr_free(e->value.binop.left);
             ast_expr_free(e->value.binop.right);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             ast_expr_free(e->value.unary.operand);
             break;
         case AST_EXPR_IF:
