@@ -143,3 +143,10 @@ function spawn_simple(program: *u8): i32 {
 function exec_simple(program: *u8): i32 {
   return process_exec_simple_c(program);
 }
+
+extern function process_pipe_c(read_fd: *i32, write_fd: *i32): i32;
+
+/** 创建管道（P3 扩展）；成功时 *read_fd 可读、*write_fd 可写，返回 0；失败返回 -1。POSIX 可用；Windows 暂返回 -1。 */
+function pipe(read_fd: *i32, write_fd: *i32): i32 {
+  return process_pipe_c(read_fd, write_fd);
+}
