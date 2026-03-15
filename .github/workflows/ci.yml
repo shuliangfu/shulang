@@ -33,6 +33,12 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
+      - name: Verify compiler/shuc was built
+        run: |
+          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
+            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+            exit 1
+          fi
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
@@ -53,6 +59,12 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
+      - name: Verify compiler/shuc was built
+        run: |
+          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
+            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+            exit 1
+          fi
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
@@ -77,6 +89,12 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
+      - name: Verify compiler/shuc was built
+        run: |
+          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
+            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+            exit 1
+          fi
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
@@ -103,6 +121,13 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
+      - name: Verify compiler/shuc was built
+        run: |
+          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
+            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+            exit 1
+          fi
+        shell: msys2 {0}
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         shell: msys2 {0}

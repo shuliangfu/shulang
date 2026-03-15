@@ -14,6 +14,12 @@ else
     make -C compiler -q 2>/dev/null || make -C compiler
 fi
 
+# 无 shuc 则直接失败，避免整次跑完仍打印 all tests OK
+if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
+    echo "run-all.sh: compiler/shuc not found or not executable (run 'make -C compiler' first)." >&2
+    exit 127
+fi
+
 # CI 下单个脚本失败时打印 SKIP 并继续，避免整次 run-all 因 run-vector/run-fmt/run-debug 等（exit 127）以 1 退出
 run() {
     local script="$1"

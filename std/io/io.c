@@ -236,8 +236,9 @@ int io_uring_accept_many(int listener_fd, int32_t *out_fds, int n, unsigned time
     return count;
 }
 
-/** 阶段 2 性能压榨：一次提交 N 个 connect SQE，一次收割 N 个 CQE；out_fds 填满成功的 fd。返回实际成功数量。 */
+/** 阶段 2 性能压榨：一次提交 N 个 connect SQE，一次收割 N 个 CQE；out_fds 填满成功的 fd。返回实际成功数量。timeout_ms 保留供后续超时控制用。 */
 int io_uring_connect_many(uint32_t addr_u32, uint32_t port_u32, int32_t *out_fds, int n, unsigned timeout_ms) {
+    (void)timeout_ms;
     if (n <= 0 || n > IO_NET_BATCH_MAX || !out_fds) return 0;
     struct sockaddr_in sin;
     sin.sin_family = AF_INET;
