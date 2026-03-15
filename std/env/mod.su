@@ -1,0 +1,51 @@
+// std.env — 环境变量与临时目录（对标 Zig/Rust std.env）
+//
+// 【文件职责】
+// 对外暴露 std.env 的完整 API：getenv(key,key_len,out,cap)、getenv_exists(key,key_len)、
+// setenv、unsetenv、temp_dir。key 支持 (ptr,len) 与 std.string/StrView 友好；当前工作目录建议用 std.process.getcwd。
+//
+// 【所属模块/组件】
+// 标准库 std.env；用户通过 import std.env 使用。依赖 core；与 std/env/env.c 同属一模块。
+
+extern function env_getenv_c(key: *u8, key_len: i32, out: *u8, out_cap: i32): i32;
+extern function env_getenv_ptr_c(key: *u8, key_len: i32, out_len: *i32): *u8;
+extern function env_getenv_z_c(key_z: *u8, out_len: *i32): *u8;
+extern function env_getenv_exists_c(key: *u8, key_len: i32): i32;
+extern function env_setenv_c(name: *u8, value: *u8, overwrite: i32): i32;
+extern function env_unsetenv_c(name: *u8): i32;
+extern function env_temp_dir_c(out: *u8, cap: i32): i32;
+
+/** 取环境变量 key[0..key_len) 的值，写入 out[0..out_cap)，保证 NUL 结尾。返回写入字节数（不含 NUL），不存在或错误返回 -1。对标 env::var()。 */
+function getenv(key: *u8, key_len: i32, out: *u8, out_cap: i32): i32 {
+  return env_getenv_c(key, key_len, out, out_cap);
+}
+
+/** 零拷贝：返回 key[0..key_len) 对应 value 的只读指针（NUL 结尾），不存在返回 0。out_len 可选写入长度（不含 NUL）。指针在 setenv/unsetenv 或下次 getenv_ptr/getenv_z 前有效，勿长期持有。key 仍拷贝一次。 */
+function getenv_ptr(key: *u8, key_len: i32, out_len: *i32): *u8 {
+  return env_getenv_ptr_c(key, key_len, out_len);
+}
+
+/** 零拷贝（key+value）：key_z 须 NUL 结尾，无 key 拷贝；返回 value 指针（NUL 结尾）或 0。out_len 可选。指针语义同 getenv_ptr。适合字面量如 getenv_z("PATH", &len)。 */
+function getenv_z(key_z: *u8, out_len: *i32): *u8 {
+  return env_getenv_z_c(key_z, out_len);
+}
+
+/** 判断环境变量 key[0..key_len) 是否存在；存在返回 1，不存在返回 0。不拷贝 value。对标 env::var().is_ok()。 */
+function getenv_exists(key: *u8, key_len: i32): i32 {
+  return env_getenv_exists_c(key, key_len);
+}
+
+/** 设置环境变量 name=value（name、value 须为 NUL 结尾）；overwrite 非 0 时覆盖。返回 0 成功，-1 失败。对标 set_var。 */
+function setenv(name: *u8, value: *u8, overwrite: i32): i32 {
+  return env_setenv_c(name, value, overwrite);
+}
+
+/** 删除环境变量 name（NUL 结尾）。返回 0 成功，-1 失败。对标 remove_var。 */
+function unsetenv(name: *u8): i32 {
+  return env_unsetenv_c(name);
+}
+
+/** 将临时目录路径写入 out（NUL 结尾），最多 cap 字节。返回写入字节数（不含 NUL），失败 -1。TMPDIR/TEMP/TMP → /tmp。对标 temp_dir()。 */
+function temp_dir(out: *u8, cap: i32): i32 {
+  return env_temp_dir_c(out, cap);
+}
