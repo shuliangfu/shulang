@@ -1,0 +1,18 @@
+// 测试 std.crypto：mem_eq、sha256、hmac_sha256
+import std.crypto;
+
+function main(): i32 {
+  let a: [4]u8 = [1, 2, 3, 4];
+  let b: [4]u8 = [1, 2, 3, 4];
+  if (mem_eq(&a[0], &b[0], 4) != 1) { return 1; }
+  b[3] = 5;
+  if (mem_eq(&a[0], &b[0], 4) != 0) { return 2; }
+  let msg: [3]u8 = [97, 98, 99];
+  let out: [32]u8 = [];
+  sha256(&msg[0], 3, &out[0]);
+  if (out[0] == 0 && out[1] == 0) { return 3; }
+  let key: [4]u8 = [107, 101, 121, 0];
+  hmac_sha256(&key[0], 4, &msg[0], 3, &out[0]);
+  if (out[0] == 0 && out[1] == 0) { return 4; }
+  return 0;
+}
