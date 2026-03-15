@@ -1,5 +1,6 @@
-// core.types — 基础类型别名、size_of/align_of 等（自举前最小实现）
-// 自举前：提供基础类型大小与对齐的常量函数；完整 size_of(T)/align_of(T) 可由内建扩展。
+// core.types — 基础类型 size_of/align_of（自举前实现）
+// 当前：上述类型 + 指针（size_of_pointer/align_of_pointer，64 位为 8）；i16/u16 待语言与编译器支持后再补，泛型 size_of(T)/align_of(T) 待内建。
+// 高性能：所有函数为常量/纯函数，可被编译器内联；无隐式分配与间接调用。
 
 function placeholder(): i32 { return 0; }
 
@@ -14,3 +15,19 @@ function size_of_usize(): i32 { return 8; }
 function size_of_isize(): i32 { return 8; }
 function size_of_f32(): i32 { return 4; }
 function size_of_f64(): i32 { return 8; }
+
+// 指针：*T 在 64 位环境下为 8 字节；与 typeck/codegen 一致。
+function size_of_pointer(): i32 { return 8; }
+function align_of_pointer(): i32 { return 8; }
+
+// 基础类型对齐（字节），与 size_of_* 对称；64 位环境下常见布局。
+function align_of_i32(): i32 { return 4; }
+function align_of_bool(): i32 { return 1; }
+function align_of_u8(): i32 { return 1; }
+function align_of_u32(): i32 { return 4; }
+function align_of_u64(): i32 { return 8; }
+function align_of_i64(): i32 { return 8; }
+function align_of_usize(): i32 { return 8; }
+function align_of_isize(): i32 { return 8; }
+function align_of_f32(): i32 { return 4; }
+function align_of_f64(): i32 { return 8; }
