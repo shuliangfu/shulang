@@ -1,8 +1,54 @@
-// std.error — 错误类型与传播（自举前最小实现）
-// 自举前：提供最小可调用 API；错误类型与传播后续扩展。
+// std.error — 错误类型与传播（对标 Zig std.mem.Allocator.Error、Rust Result/error、Go error）
+//
+// 【文件职责】
+// 提供错误码类型 Error、ok/from_code/code/is_ok/is_err、与 io/fs 等返回的错误码约定一致。
+//
+// 【对标】
+// Zig: 错误集、Allocator.Error、anyerror；
+// Rust: Result<T,E>、std::error::Error、Option；
+// Go: error 接口、errors.New、nil。
 
-// 占位函数，表示本模块已可 import。
-function placeholder(): i32 { return 0; }
-
-// 表示“无错误”占位（0），后续扩展为错误码与传播。
+/** 错误码 0 表示无错误；非 0 表示错误（正/负由各模块约定，如 io/fs 用负表示错误）。 */
 function error_ok(): i32 { return 0; }
+
+/** 常用错误码：分配失败（与 std.heap/vec/map 一致）。 */
+function error_code_alloc_fail(): i32 { return -1; }
+
+/** 常用错误码：无效参数或越界。 */
+function error_code_invalid(): i32 { return -2; }
+
+/** 常用错误码：未找到（如 map get 无默认、文件不存在等）。 */
+function error_code_not_found(): i32 { return -3; }
+
+/** 错误类型：仅含 code（i32）；0 表示成功。 */
+struct Error {
+  code: i32;
+}
+
+/** 构造“无错误”。 */
+function error_ok_value(): Error {
+  return Error { code: 0 };
+}
+
+/** 从错误码构造 Error。 */
+function error_from_code(code: i32): Error {
+  return Error { code: code };
+}
+
+/** 取错误码。 */
+function error_code(e: Error): i32 { return e.code; }
+
+/** 是否表示成功（code == 0）。返回 1 是，0 否。 */
+function error_is_ok(e: Error): i32 {
+  if (e.code == 0) { return 1; }
+  return 0;
+}
+
+/** 是否表示错误（code != 0）。返回 1 是，0 否。 */
+function error_is_err(e: Error): i32 {
+  if (e.code != 0) { return 1; }
+  return 0;
+}
+
+/** 占位；保留兼容。 */
+function placeholder(): i32 { return 0; }
