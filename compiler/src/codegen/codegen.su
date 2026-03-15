@@ -6,6 +6,25 @@
 
 import ast;
 
+/** C 侧：base 为指针或 slice 时返回 1（仅 pointer-based AST 时有效）；ref-based 路径用 field_access_base_is_pointer_ref 从 arena 取类型。 */
+extern function codegen_su_field_access_base_is_pointer(expr: *u8): i32;
+
+/** 从 arena 判断 base 表达式（base_ref）类型是否为指针或 slice，用于字段访问输出 ->（ref-based AST 时 resolved_type_ref 有效，source/out_buf 等形参由 typeck 已填）。 */
+function field_access_base_is_pointer_ref(arena: *ASTArena, base_ref: i32): i32 {
+  if (ref_is_null(base_ref) || base_ref <= 0 || base_ref > arena.num_exprs) {
+    return 0;
+  }
+  let base: Expr = ast_arena_expr_get(arena, base_ref);
+  if (ref_is_null(base.resolved_type_ref) || base.resolved_type_ref <= 0 || base.resolved_type_ref > arena.num_types) {
+    return 0;
+  }
+  let ty: Type = ast_arena_type_get(arena, base.resolved_type_ref);
+  if (ty.kind == TypeKind.TYPE_PTR || ty.kind == TypeKind.TYPE_SLICE) {
+    return 1;
+  }
+  return 0;
+}
+
 /** 代码生成输出缓冲区：data 为已写内容，len 为长度。C 侧在 pipeline 返回后将 data[0..len-1] 写入 FILE*。 */
 struct CodegenOutBuf {
   data: [262144]u8;
@@ -758,7 +777,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     }
     return append_byte(out, 93);
   }
-  /* 字段访问：(base).field 或枚举变体 Enum_Variant（由 field_access_is_enum_variant 区分） */
+  /* 字段访问：(base).field 或 (base)->field（base 为指针/slice 时用 ->，C 中 slice 按指针传） */
   if (e.kind == ExprKind.EXPR_FIELD_ACCESS) {
     if (e.field_access_is_enum_variant != 0) {
       /* 枚举变体：输出 TypeName_VariantName 形式（字段名内可能已含类型_变体） */
@@ -770,9 +789,17 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (!ref_is_null(e.field_access_base_ref) && emit_expr(arena, out, e.field_access_base_ref) != 0) {
       return -1;
     }
-    let dot: [2]u8 = [46, 0];
-    if (emit_bytes_2(out, dot, 1) != 0) {
-      return -1;
+    /* base 为指针或 slice 时输出 ->，否则输出 .；用 arena+resolved_type_ref 判断（ref-based AST 下 source/out_buf 等由 typeck 已填），避免 (source).length 导致 C 编译错误 */
+    if (field_access_base_is_pointer_ref(arena, e.field_access_base_ref) != 0) {
+      let arrow: [3]u8 = [45, 62, 0];
+      if (emit_bytes_3(out, arrow, 2) != 0) {
+        return -1;
+      }
+    } else {
+      let dot: [2]u8 = [46, 0];
+      if (emit_bytes_2(out, dot, 1) != 0) {
+        return -1;
+      }
     }
     if (emit_bytes_64(out, e.field_access_field_name, e.field_access_field_len) != 0) {
       return -1;
@@ -1027,7 +1054,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
   let b: Block = ast_arena_block_get(arena, block_ref);
   if (b.num_stmt_order > 0) {
     let si: i32 = 0;
-    while (si < b.num_stmt_order && si < 96) {
+    while (si < b.num_stmt_order) {
       let k: u8 = b.stmt_order[si].kind;
       let idx: i32 = b.stmt_order[si].idx;
       if (k == 0) {
