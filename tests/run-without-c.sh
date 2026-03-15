@@ -31,8 +31,10 @@ if [ ! -x "$BUILD_TOOL" ]; then
 fi
 
 # 2) 当前 shuc 必须支持 -backend asm（bootstrap-driver 产出）；否则先构建 bootstrap-driver
+# 使用含 main 的用例（../tests/return-value/main.su），否则 typeck 会因 main_func_index < 0 失败
+SHUC_ASM_CHECK_INPUT="../tests/return-value/main.su"
 SHUC_ASM_CHECK=$(mktemp)
-if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline src/lexer/token.su) 2>"$SHUC_ASM_CHECK"; then
+if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline "$SHUC_ASM_CHECK_INPUT") 2>"$SHUC_ASM_CHECK"; then
   if grep -q "not available in this build" "$SHUC_ASM_CHECK" 2>/dev/null; then
     echo "run-without-c: building bootstrap-driver (shuc with -backend asm) ..."
     make -C "$COMPILER_DIR" bootstrap-driver 2>/dev/null || true
@@ -43,7 +45,7 @@ rm -f "$SHUC_ASM_CHECK"
 # 说明：run-all 中 run-asm 在 CI 下会直接 SKIP，不会执行 bootstrap-driver，故此时 compiler/shuc 多为「仅 C 版」；
 # 若上一步已成功执行 bootstrap-driver，则此处失败可能是该环境下 driver 运行 -backend asm 仍失败（依赖/路径/平台）。
 SECOND_CHECK_ERR=$(mktemp)
-if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline src/lexer/token.su) 2>"$SECOND_CHECK_ERR"; then
+if ! (cd "$COMPILER_DIR" && ./shuc -backend asm -o /dev/null -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess -L src/pipeline "$SHUC_ASM_CHECK_INPUT") 2>"$SECOND_CHECK_ERR"; then
   echo "run-without-c SKIP (shuc -backend asm check failed; run 'make -C compiler bootstrap-driver' for full no-C path)"
   [ -s "$SECOND_CHECK_ERR" ] && { echo "--- shuc -backend asm stderr ---"; cat "$SECOND_CHECK_ERR"; }
   rm -f "$SECOND_CHECK_ERR"
