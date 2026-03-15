@@ -1,0 +1,45 @@
+// tests/atomic/main.su — std.atomic 回归：load/store、compare_exchange、fetch_add/sub（i32/u32/i64）。
+// 成功退出码 0。
+
+import std.atomic;
+import core.debug;
+
+function main(): i32 {
+  // i32
+  let x: i32 = 0;
+  assert_eq_i32(load_i32(&x), 0);
+  store_i32(&x, 10);
+  assert_eq_i32(load_i32(&x), 10);
+  let prev: i32 = fetch_add_i32(&x, 5);
+  assert_eq_i32(prev, 10);
+  assert_eq_i32(load_i32(&x), 15);
+  let prev2: i32 = fetch_sub_i32(&x, 3);
+  assert_eq_i32(prev2, 15);
+  assert_eq_i32(load_i32(&x), 12);
+  let exp: i32 = 12;
+  let ok: i32 = compare_exchange_i32(&x, &exp, 100);
+  assert_eq_i32(ok, 1);
+  assert_eq_i32(load_i32(&x), 100);
+  let exp2: i32 = 99;
+  let ok2: i32 = compare_exchange_i32(&x, &exp2, 0);
+  assert_eq_i32(ok2, 0);
+  assert_eq_i32(exp2, 100);
+
+  // u32
+  let u: u32 = 0;
+  store_u32(&u, 42);
+  assert_eq_u32(load_u32(&u), 42);
+  let u_prev: u32 = fetch_add_u32(&u, 8);
+  assert_eq_u32(u_prev, 42);
+  assert_eq_u32(load_u32(&u), 50);
+
+  // i64（无 assert_eq_i64，用 if 检查）
+  let y: i64 = 0;
+  store_i64(&y, 1000);
+  if (load_i64(&y) != 1000) { return 1; }
+  let y_prev: i64 = fetch_add_i64(&y, 500);
+  if (y_prev != 1000) { return 2; }
+  if (load_i64(&y) != 1500) { return 3; }
+
+  return 0;
+}
