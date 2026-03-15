@@ -67,9 +67,30 @@ deps/
 Thumbs.db
 *.log
 
+# --- compiler 目录：构建产物与生成文件（不提交） ---
+# 可执行文件（根已有 shuc/shuc-c，此处补 compiler 下特有）
+compiler/shuc_driver
+compiler/build_tool
+# 构建目录
+compiler/build_asm/
+compiler/build/
+compiler/su/
+# 由 -E 或脚本生成的 C 源文件（parser_gen.c, driver_gen.c, pipeline_gen.c, typeck_gen.c, codegen_gen.c 等）
+compiler/*_gen.c
+compiler/**/*_gen.c
+compiler/std_fs_gen.c
+# 备份与临时
+compiler/*.new
+compiler/*.bak
+compiler/*.append
+# 调试与临时
+compiler/scripts/lldb_crash_bt.txt
+compiler/test_perl.txt
+
 # --- 测试与临时 ---
 # 测试 ABI 脚本编译出的可执行文件
 tests/abi/layout_abi
+tests/tmp_out.txt
 # 测试输出、临时目录
 tmp/
 temp/

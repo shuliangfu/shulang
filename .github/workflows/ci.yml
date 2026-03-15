@@ -1,7 +1,6 @@
-# Shulang CI: multi-platform build and full test suite
+# Shulang CI: multi-platform build and C test suite only
 # Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
-# Build: shuc (C) + shuc_su (.su pipeline). Test in two passes: run-all-c.sh (all tests with C compiler shuc-c), run-all-su.sh (all tests with .su compiler shuc_su).
-# Bootstrap verify (two-stage shuc) disabled for now; run locally with ./tests/run-bootstrap-verify.sh when needed.
+# Build: shuc (C compiler). Test: run-all.sh (full run-*.sh suite with compiler/shuc). No bootstrap / shuc_su / run-all-su.sh; run those locally when needed.
 
 name: CI
 
@@ -32,14 +31,8 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
-        timeout-minutes: 5
-      - name: Run full test suite (C compiler, run-all-c.sh)
-        run: ./tests/run-all-c.sh
-        timeout-minutes: 20
-      - name: Run full test suite (shuc_su / Shu, run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
         timeout-minutes: 20
 
   linux-arm64:
@@ -56,14 +49,8 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
-        timeout-minutes: 5
-      - name: Run full test suite (C compiler, run-all-c.sh)
-        run: ./tests/run-all-c.sh
-        timeout-minutes: 20
-      - name: Run full test suite (shuc_su / Shu, run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
         timeout-minutes: 20
 
   mac:
@@ -84,14 +71,8 @@ jobs:
         run: make -C compiler OPT=1
         env:
           CC: cc
-      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
-        timeout-minutes: 5
-      - name: Run full test suite (C compiler, run-all-c.sh)
-        run: ./tests/run-all-c.sh
-        timeout-minutes: 20
-      - name: Run full test suite (shuc_su / Shu, run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
         timeout-minutes: 20
 
   windows:
@@ -116,18 +97,8 @@ jobs:
         shell: msys2 {0}
         env:
           CC: gcc
-      - name: Build shuc_su (bootstrap-pipeline + shuc-su-pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline
-        shell: msys2 {0}
-        timeout-minutes: 5
-      - name: Run full test suite (C compiler, run-all-c.sh)
-        run: ./tests/run-all-c.sh
-        shell: msys2 {0}
-        timeout-minutes: 20
-        env:
-          CI: "1"
-      - name: Run full test suite (shuc_su / Shu, run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run full test suite (run-all.sh)
+        run: ./tests/run-all.sh
         shell: msys2 {0}
         timeout-minutes: 20
         env:
@@ -162,7 +133,5 @@ jobs:
               fi &&
               make -C compiler clean &&
               make -C compiler OPT=1 &&
-              make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline &&
-              ./tests/run-all-c.sh &&
-              ./tests/run-all-su.sh
+              ./tests/run-all.sh
             '
