@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 make -C compiler bootstrap-pipeline 2>/dev/null || true
 make -C compiler shuc-su-pipeline 2>/dev/null || true
+# 构建 bootstrap-driver 并保存为 shuc_driver，供 run-all 里 run-without-c 临时使用（与 run-all-c 一致）
+make -C compiler bootstrap-driver 2>/dev/null || true
+[ -x compiler/shuc ] && cp compiler/shuc compiler/shuc_driver
 if [ ! -x compiler/shuc_su ]; then
     echo "run-all-su: compiler/shuc_su not found; run 'make -C compiler bootstrap-pipeline' then 'make -C compiler shuc-su-pipeline'"
     exit 1
