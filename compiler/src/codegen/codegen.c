@@ -108,6 +108,12 @@ int32_t codegen_su_emit_float(uint8_t *out, uint8_t *ptr, int32_t is_f32) {
 
 static int codegen_expr(const struct ASTExpr *e, FILE *out);
 static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, int cast_return_to_int, const char *final_result_var);
+/** 当 else 为单语句块且唯一语句为 __tmp = (struct X){0} 时返回该 struct 的 C 类型串，否则 NULL。前向声明。 */
+static const char *struct_type_from_else_block(const struct ASTExpr *else_e);
+/** 返回结构体字面量 e 的 C 类型串，与 codegen 发射时一致；前向声明。 */
+static const char *struct_lit_c_type_str(const struct ASTExpr *e, char *buf, size_t bufsize);
+/** 递归求表达式可能产生的 struct 类型 C 串；前向声明。 */
+static const char *expr_struct_type_str(const struct ASTExpr *e, char *buf, size_t bufsize);
 static const char *impl_method_c_name(const struct ASTFunc *f);
 /** CALL 四条分支的 C 内实现，供 .su 统一入口转调；需在 codegen_expr 之后定义。 */
 static int codegen_emit_one_call_arg(FILE *out, const struct ASTExpr *arg);
@@ -274,32 +280,18 @@ int32_t codegen_su_index_skip_bounds(uint8_t *expr) { const struct ASTExpr *e = 
 uint8_t *codegen_su_field_access_base(uint8_t *expr) { const struct ASTExpr *e = (const struct ASTExpr *)expr; return (e && e->kind == AST_EXPR_FIELD_ACCESS && e->value.field_access.base) ? (uint8_t *)e->value.field_access.base : NULL; }
 uint8_t *codegen_su_field_access_field_name(uint8_t *expr) { const struct ASTExpr *e = (const struct ASTExpr *)expr; return (e && e->kind == AST_EXPR_FIELD_ACCESS && e->value.field_access.field_name) ? (uint8_t *)e->value.field_access.field_name : (uint8_t *)""; }
 int32_t codegen_su_field_access_field_len(uint8_t *expr) { const struct ASTExpr *e = (const struct ASTExpr *)expr; const char *fn = (e && e->kind == AST_EXPR_FIELD_ACCESS && e->value.field_access.field_name) ? e->value.field_access.field_name : ""; return (int32_t)strlen(fn); }
-/** .su 侧 FIELD_ACCESS：base 是否为指针类型（1 则输出 ->，0 则输出 .）；自举时 arena.field 需生成 arena->field。 */
+/** .su 侧 FIELD_ACCESS：base 是否为指针或 slice 类型（1 则输出 ->，0 则输出 .）；C 中 slice 按指针传，自举时 arena/source/out_buf.field 需生成 ->。 */
 int32_t codegen_su_field_access_base_is_pointer(uint8_t *expr) {
     const struct ASTExpr *e = (const struct ASTExpr *)expr;
     if (!e || e->kind != AST_EXPR_FIELD_ACCESS || !e->value.field_access.base) return 0;
     const struct ASTExpr *base = e->value.field_access.base;
-    return (base->resolved_type && base->resolved_type->kind == AST_TYPE_PTR) ? 1 : 0;
+    if (!base->resolved_type) return 0;
+    if (base->resolved_type->kind == AST_TYPE_PTR) return 1;
+    if (base->resolved_type->kind == AST_TYPE_SLICE) return 1;
+    return 0;
 }
 int32_t codegen_su_expr_type_kind(uint8_t *expr) { const struct ASTExpr *e = (const struct ASTExpr *)expr; return (e && e->resolved_type) ? (int32_t)e->resolved_type->kind : -1; }
 int32_t codegen_su_expr_type_array_size(uint8_t *expr) { const struct ASTExpr *e = (const struct ASTExpr *)expr; return (e && e->resolved_type && e->resolved_type->kind == AST_TYPE_ARRAY) ? (int32_t)e->resolved_type->array_size : 0; }
-/** .su 侧 INDEX 切片边界检查：((idx)<0||(size_t)(idx)>=(base).length ? (shulang_panic_(1,0),(base).data[0]) : (base).data[(idx)])。 */
-int32_t codegen_su_emit_index_slice_bounds_check(uint8_t *out, uint8_t *base, uint8_t *idx) {
-    FILE *f = (FILE *)out;
-    if (fprintf(f, "(") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
-    if (fprintf(f, " < 0 || (size_t)(") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
-    if (fprintf(f, ") >= (") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
-    if (fprintf(f, ").length ? (shulang_panic_(1, 0), (") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
-    if (fprintf(f, ").data[0]) : (") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
-    if (fprintf(f, ").data[") < 0) return -1;
-    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
-    return fprintf(f, "])") < 0 ? -1 : 0;
-}
 /** .su 侧 INDEX 数组边界检查：((idx)<0||(idx)>=N ? (shulang_panic_(1,0),(base)[0]) : (base)[(idx)])。 */
 int32_t codegen_su_emit_index_array_bounds_check(uint8_t *out, uint8_t *base, uint8_t *idx, int32_t array_size) {
     FILE *f = (FILE *)out;
@@ -607,7 +599,7 @@ static void collect_import_calls_from_expr(const struct ASTExpr *e, const char *
             collect_import_calls_from_expr(e->value.binop.left, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             collect_import_calls_from_expr(e->value.binop.right, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             collect_import_calls_from_expr(e->value.unary.operand, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             break;
         case AST_EXPR_AS:
@@ -693,7 +685,7 @@ next_call: ;
             collect_lib_dep_calls_from_expr(e->value.binop.left, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             collect_lib_dep_calls_from_expr(e->value.binop.right, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             collect_lib_dep_calls_from_expr(e->value.unary.operand, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
         case AST_EXPR_AS:
@@ -738,6 +730,7 @@ next_call: ;
                 collect_lib_dep_calls_from_expr(e->value.method_call.args[i], lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
         case AST_EXPR_PANIC:
+        case AST_EXPR_RETURN:
             if (e->value.unary.operand) collect_lib_dep_calls_from_expr(e->value.unary.operand, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
         default: break;
@@ -845,6 +838,34 @@ static void c_type_to_buf(const struct ASTType *ty, char *buf, size_t size) {
         case AST_TYPE_ISIZE: s = "ptrdiff_t"; break;
         case AST_TYPE_NAMED: {
             const char *n = ty->name ? ty->name : "int";
+            /* 限定类型名（如 elf.ElfCodegenCtx、platform.elf.ElfCodegenCtx）：从最后一个点拆出类型名，在 dep 中按 import_path 匹配并输出 struct dep_prefix_TypeName，避免生成 xxx.elf.ElfCodegenCtx 导致 C 非法。 */
+            if (strchr(n, '.') && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+                const char *last_dot = strrchr(n, '.');
+                if (last_dot && last_dot[1]) {
+                    const char *type_name = last_dot + 1;
+                    size_t module_len = (size_t)(last_dot - n);
+                    for (int i = 0; i < codegen_ndep; i++) {
+                        const struct ASTModule *d = codegen_dep_mods[i];
+                        if (!d || !d->struct_defs) continue;
+                        for (int j = 0; j < d->num_structs; j++) {
+                            if (!d->struct_defs[j]->name || strcmp(d->struct_defs[j]->name, type_name) != 0) continue;
+                            const char *dep_path = codegen_dep_paths[i];
+                            if (!dep_path) continue;
+                            /* 匹配：dep_path 等于 n 的 module 部分，或 dep_path 以 ".module_part" 结尾（如 platform.elf 对 elf） */
+                            size_t dlen = strlen(dep_path);
+                            int match = 0;
+                            if (dlen == module_len && strncmp(dep_path, n, module_len) == 0) match = 1;
+                            else if (dlen > module_len + 1 && dep_path[dlen - module_len - 1] == '.' && strncmp(dep_path + dlen - module_len, n, module_len) == 0) match = 1;
+                            if (match) {
+                                static char dep_pre[256];
+                                import_path_to_c_prefix(dep_path, dep_pre, sizeof(dep_pre));
+                                snprintf(buf, size, "struct %s%s", dep_pre, type_name);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
             /* 入口模块：若类型来自依赖模块的 enum，用 "enum prefix_Name" 与库 .c 一致 */
             if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
                 for (int i = 0; i < codegen_ndep; i++) {
@@ -904,6 +925,14 @@ static void c_type_to_buf(const struct ASTType *ty, char *buf, size_t size) {
                         }
                 }
             }
+            /* 入口模块：本模块内定义的 enum 须用 "enum Name"，否则 C 中 Color c 报错（须 enum Color c） */
+            if (!codegen_library_prefix && codegen_current_module && codegen_current_module->enum_defs) {
+                for (int i = 0; i < codegen_current_module->num_enums; i++)
+                    if (codegen_current_module->enum_defs[i]->name && strcmp(codegen_current_module->enum_defs[i]->name, n) == 0) {
+                        snprintf(buf, size, "enum %s", n);
+                        return;
+                    }
+            }
             /* 入口模块：若类型来自依赖模块的 struct，用 "struct prefix_Name" 与库 .c 一致 */
             if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
                 for (int i = 0; i < codegen_ndep; i++) {
@@ -918,12 +947,28 @@ static void c_type_to_buf(const struct ASTType *ty, char *buf, size_t size) {
                         }
                 }
             }
-            /* 入口模块：本模块内定义的 struct 须用 "struct Name" */
-            if (!codegen_library_prefix && codegen_current_module && codegen_current_module->struct_defs) {
+            /* 入口模块：本模块内定义的 struct 须用 "struct Name"；多模块 -E 时须带 C 前缀（如 ast_Type）与生成 C 一致 */
+            if (codegen_current_module && codegen_current_module->struct_defs) {
                 for (int i = 0; i < codegen_current_module->num_structs; i++)
                     if (codegen_current_module->struct_defs[i]->name && strcmp(codegen_current_module->struct_defs[i]->name, n) == 0) {
-                        snprintf(buf, size, "struct %s", n);
-                        return;
+                        /* 库模块 -E 时须 "struct prefix_Name" 与生成 C 一致 */
+                        if (codegen_library_prefix && *codegen_library_prefix) {
+                            snprintf(buf, size, "struct %s%s", codegen_library_prefix, n);
+                            return;
+                        }
+                        if (!codegen_library_prefix && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+                            for (int di = 0; di < codegen_ndep; di++)
+                                if (codegen_dep_mods[di] == codegen_current_module) {
+                                    char pre[64];
+                                    import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                                    snprintf(buf, size, "struct %s%s", pre, n);
+                                    return;
+                                }
+                        }
+                        if (!codegen_library_prefix) {
+                            snprintf(buf, size, "struct %s", n);
+                            return;
+                        }
                     }
             }
             if (codegen_library_prefix && *codegen_library_prefix)
@@ -946,6 +991,29 @@ static const char *c_type_str(const struct ASTType *ty) {
     static char buf[256];
     c_type_to_buf(ty, buf, sizeof(buf));
     return buf;
+}
+
+/** 表达式 e 的 resolved_type 是否为 struct（用于 if-expr __tmp：当 __tmp 为 struct 而分支产生标量时须赋 (struct X){0} 而非 0）。 */
+static int expr_produces_struct_type(const struct ASTExpr *e) {
+    if (!e || !e->resolved_type) return 0;
+    const char *s = c_type_str(e->resolved_type);
+    return (s && strncmp(s, "struct ", 7) == 0);
+}
+
+/** 当 __tmp 类型为 struct（tmp_ty_str）且 else 分支类型与之不一致时返回 1，此时应输出 (tmp_ty_str){0} 而非 else 表达式，避免 LexerResult __tmp = (Token){0} 等错误。
+ * 统一用 expr_struct_type_str 取 else 的 C struct 类型再与 tmp_ty_str 比较，因 c_type_str(NAMED) 可能无 "struct " 前缀。 */
+static int else_struct_type_mismatch(const char *tmp_ty_str, const struct ASTExpr *else_e) {
+    if (!tmp_ty_str || strncmp(tmp_ty_str, "struct ", 7) != 0 || !else_e) return 0;
+    if (!expr_produces_struct_type(else_e)) return 1;
+    static char else_ty_buf[128];
+    if (!expr_struct_type_str(else_e, else_ty_buf, sizeof(else_ty_buf))) {
+        if (else_e->resolved_type) {
+            const char *es = c_type_str(else_e->resolved_type);
+            if (es && strncmp(es, "struct ", 7) == 0 && strcmp(es, tmp_ty_str) != 0) return 1;
+        }
+        return 0;
+    }
+    return (strcmp(else_ty_buf, tmp_ty_str) != 0) ? 1 : 0;
 }
 
 /**
@@ -987,12 +1055,18 @@ static void emit_local_array_decl(const struct ASTType *ty, const char *name, co
 }
 
 /**
- * §3.4 内建函数映射框架：将 C 符号名映射为后端 intrinsic（如 memcpy -> __builtin_memcpy）；默认返回原名。
- * 供 core.builtin / SIMD 等生成目标平台最优指令时扩展。
+ * §3.4 内建函数映射框架：将 C 符号名映射为后端 intrinsic（如 core_mem_mem_copy -> __builtin_memcpy）；默认返回原名。
+ * 供 core.mem / core.builtin / SIMD 等生成目标平台最优指令时扩展。
+ * core.builtin：copy -> __builtin_memcpy，unreachable -> __builtin_unreachable，abort -> __builtin_abort，便于零开销与冷路径优化。
  */
 static const char *builtin_intrinsic_name(const char *c_name) {
     if (!c_name) return c_name;
-    /* 可扩展：if (strcmp(c_name, "memcpy") == 0) return "__builtin_memcpy"; */
+    if (strcmp(c_name, "core_mem_mem_copy") == 0) return "__builtin_memcpy";
+    if (strcmp(c_name, "core_mem_mem_set") == 0) return "__builtin_memset";
+    if (strcmp(c_name, "core_mem_mem_move") == 0) return "__builtin_memmove";
+    if (strcmp(c_name, "core_builtin_copy") == 0) return "__builtin_memcpy";
+    if (strcmp(c_name, "core_builtin_unreachable") == 0) return "__builtin_unreachable";
+    if (strcmp(c_name, "core_builtin_abort") == 0) return "__builtin_abort";
     return c_name;
 }
 
@@ -1013,6 +1087,42 @@ static int expr_is_slice_ptr_param(const struct ASTExpr *e) {
     return 0;
 }
 
+/** 当 e 为形参且类型为 PTR 或 SLICE 时返回 1，用于字段访问输出 ->（C 中指针/slice 按指针传）；弥补 typeck 未填 base->resolved_type 时仍能正确生成）。 */
+static int expr_is_ptr_or_slice_param(const struct ASTExpr *e) {
+    if (!e || e->kind != AST_EXPR_VAR || !e->value.var.name || !codegen_current_func) return 0;
+    for (int i = 0; i < codegen_current_func->num_params; i++)
+        if (codegen_current_func->params[i].name && strcmp(codegen_current_func->params[i].name, e->value.var.name) == 0
+            && codegen_current_func->params[i].type) {
+            enum ASTTypeKind k = codegen_current_func->params[i].type->kind;
+            if (k == AST_TYPE_PTR || k == AST_TYPE_SLICE) return 1;
+        }
+    return 0;
+}
+
+/** .su 侧：base 是否为 slice 形参（C 中按指针传，用 ->）；否则为局部/全局 struct 用 .；无当前函数时保守返回 0。 */
+int32_t codegen_su_expr_is_slice_ptr_param(uint8_t *expr) {
+    return (codegen_current_func && expr_is_slice_ptr_param((const struct ASTExpr *)expr)) ? 1 : 0;
+}
+/** .su 侧 INDEX 切片边界检查：((idx)<0||(size_t)(idx)>=(base).length 或 (base)->length ? ...）。仅形参用 ->。 */
+int32_t codegen_su_emit_index_slice_bounds_check(uint8_t *out, uint8_t *base, uint8_t *idx) {
+    FILE *f = (FILE *)out;
+    int use_arrow = codegen_su_expr_is_slice_ptr_param(base);
+    const char *da = use_arrow ? ")->" : ").";
+    if (fprintf(f, "(") < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
+    if (fprintf(f, " < 0 || (size_t)(") < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
+    if (fprintf(f, ") >= (") < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
+    if (fprintf(f, "%slength ? (shulang_panic_(1, 0), (", da) < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
+    if (fprintf(f, "%sdata[0]) : (", da) < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)base, f) != 0) return -1;
+    if (fprintf(f, "%sdata[", da) < 0) return -1;
+    if (codegen_expr((const struct ASTExpr *)idx, f) != 0) return -1;
+    return fprintf(f, "])") < 0 ? -1 : 0;
+}
+
 static void codegen_emit_param(const struct ASTParam *p, FILE *out, const struct ASTType *override_ty) {
     if (!p || !out) return;
     const struct ASTType *ty = override_ty ? override_ty : p->type;
@@ -1027,9 +1137,10 @@ static void codegen_emit_param(const struct ASTParam *p, FILE *out, const struct
         fprintf(out, "%s %s", ty ? c_type_str(ty) : "int32_t", name);
 }
 
-/** 已输出的切片结构体 elem 类型 key，避免重复定义；最多 16 种 */
+/** 已输出的切片结构体 elem 类型 key 的副本，避免重复定义；c_type_str 返回静态缓冲区会被覆盖，故存副本 */
 #define MAX_SLICE_STRUCTS 16
-static const char *codegen_slice_emitted[MAX_SLICE_STRUCTS];
+#define SLICE_KEY_MAX 64
+static char codegen_slice_emitted[MAX_SLICE_STRUCTS][SLICE_KEY_MAX];
 static int codegen_slice_emitted_n;
 
 /** 向量 typedef 已输出 key 列表（如 "i32x4","u32x8"），每轮 codegen 开始时清空 */
@@ -1092,9 +1203,10 @@ static void ensure_slice_struct(const struct ASTType *ty, FILE *out) {
         emitted_type_contains(full_slice_name, codegen_emitted_type_names, *codegen_n_emitted_inout))
         return;
     for (int i = 0; i < codegen_slice_emitted_n; i++)
-        if (codegen_slice_emitted[i] && strcmp(codegen_slice_emitted[i], key) == 0) return;
+        if (strcmp(codegen_slice_emitted[i], key) == 0) return;
     if (codegen_slice_emitted_n >= MAX_SLICE_STRUCTS) return;
-    codegen_slice_emitted[codegen_slice_emitted_n++] = key;
+    (void)snprintf(codegen_slice_emitted[codegen_slice_emitted_n], SLICE_KEY_MAX, "%s", key);
+    codegen_slice_emitted_n++;
     if (codegen_emitted_type_names && codegen_n_emitted_inout && codegen_max_emitted > 0)
         emitted_type_add(full_slice_name, codegen_emitted_type_names, codegen_n_emitted_inout, codegen_max_emitted);
     fprintf(out, "struct shulang_slice_%s { %s *data; size_t length; };\n", name_part, key);
@@ -1278,6 +1390,102 @@ static void codegen_emit_struct_type_name_only(FILE *out, const char *struct_nam
     }
 }
 
+/**
+ * 递归求表达式可能产生的 struct 类型 C 串；用于嵌套 if-expr 的 __tmp 推断（else 为 else if 时 typeck 可能未设 resolved_type）。
+ * 返回：若表达式会产生 struct 值则写入 buf 并返回 buf，否则返回 NULL。
+ */
+static const char *expr_struct_type_str(const struct ASTExpr *e, char *buf, size_t bufsize) {
+    if (!e || !buf || bufsize < 16) return NULL;
+    if (e->kind == AST_EXPR_STRUCT_LIT) return struct_lit_c_type_str(e, buf, bufsize);
+    if (e->kind == AST_EXPR_IF) {
+        const struct ASTExpr *ee = e->value.if_expr.else_expr;
+        const struct ASTExpr *te = e->value.if_expr.then_expr;
+        if (ee && expr_struct_type_str(ee, buf, bufsize)) return buf;
+        if (te && expr_struct_type_str(te, buf, bufsize)) return buf;
+        if (e->resolved_type) {
+            const char *s = c_type_str(e->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) { snprintf(buf, bufsize, "%s", s); return buf; }
+        }
+        return NULL;
+    }
+    if (e->kind == AST_EXPR_ASSIGN && e->value.binop.right)
+        return expr_struct_type_str(e->value.binop.right, buf, bufsize);
+    /* 块仅含 return expr 或 if (cond) return 时从操作数/then 推断 struct 类型（如 if (ref<=0) { return Type{...}; } 无 else 时 then 为块） */
+    if (e->kind == AST_EXPR_BLOCK && e->value.block) {
+        const struct ASTBlock *b = e->value.block;
+        const struct ASTExpr *ret_e = NULL;
+        if (b->final_expr && b->final_expr->kind == AST_EXPR_RETURN)
+            ret_e = b->final_expr->value.unary.operand;
+        else if (b->final_expr && b->final_expr->kind == AST_EXPR_IF)
+            return expr_struct_type_str(b->final_expr->value.if_expr.then_expr, buf, bufsize);
+        else if (b->num_expr_stmts == 1 && b->expr_stmts && b->expr_stmts[0]
+                 && b->expr_stmts[0]->kind == AST_EXPR_RETURN)
+            ret_e = b->expr_stmts[0]->value.unary.operand;
+        else if (b->num_labeled_stmts == 1 && b->labeled_stmts
+                 && b->labeled_stmts[0].kind == AST_STMT_RETURN && b->labeled_stmts[0].u.return_expr)
+            ret_e = b->labeled_stmts[0].u.return_expr;
+        if (ret_e && expr_struct_type_str(ret_e, buf, bufsize)) return buf;
+    }
+    if (e->resolved_type) {
+        const char *s = c_type_str(e->resolved_type);
+        if (s && strncmp(s, "struct ", 7) == 0) { snprintf(buf, bufsize, "%s", s); return buf; }
+    }
+    return NULL;
+}
+
+/** 返回结构体字面量 e 的 C 类型串（如 "struct ast_Type"），写入 buf，与 codegen 发射该字面量时用的类型一致。
+ * 用于 if-expr 的 __tmp 类型推断：else 为 (Type){0} 时 typeck 可能未设 resolved_type，用此函数得到正确 __tmp 类型。 */
+static const char *struct_lit_c_type_str(const struct ASTExpr *e, char *buf, size_t bufsize) {
+    if (!e || e->kind != AST_EXPR_STRUCT_LIT || !e->value.struct_lit.struct_name || bufsize < 16) return NULL;
+    const char *sname = e->value.struct_lit.struct_name;
+    if (codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+        for (int di = 0; di < codegen_ndep; di++) {
+            const struct ASTModule *d = codegen_dep_mods[di];
+            if (!d || !d->struct_defs) continue;
+            for (int sj = 0; sj < d->num_structs; sj++)
+                if (d->struct_defs[sj]->name && strcmp(d->struct_defs[sj]->name, sname) == 0) {
+                    char pre[64];
+                    import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                    snprintf(buf, bufsize, "struct %s%s", pre, sname);
+                    return buf;
+                }
+        }
+    }
+    if (codegen_current_module && codegen_current_module->struct_defs) {
+        for (int i = 0; i < codegen_current_module->num_structs; i++)
+            if (codegen_current_module->struct_defs[i]->name && strcmp(codegen_current_module->struct_defs[i]->name, sname) == 0) {
+                /* 库模块 -E 时用 codegen_library_prefix（如 ast_），与生成 C 中 struct ast_Type 一致，避免 incomplete type */
+                if (codegen_library_prefix && *codegen_library_prefix) {
+                    snprintf(buf, bufsize, "struct %s%s", codegen_library_prefix, sname);
+                    return buf;
+                }
+                if (codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
+                    for (int di = 0; di < codegen_ndep; di++)
+                        if (codegen_dep_mods[di] == codegen_current_module) {
+                            char pre[64];
+                            import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                            snprintf(buf, bufsize, "struct %s%s", pre, sname);
+                            return buf;
+                        }
+                }
+                snprintf(buf, bufsize, "struct %s", sname);
+                return buf;
+            }
+    }
+    /* 未在 dep/本模块找到时（如 -E 展开时 dep 未设）：按 "mod.Type" → "struct mod_Type" 兜底，与 C 命名一致 */
+    if (strchr(sname, '.')) {
+        const char *dot = strchr(sname, '.');
+        size_t pre_len = (size_t)(dot - sname);
+        if (pre_len < bufsize && (pre_len + 2 + strlen(dot + 1)) < bufsize)
+            snprintf(buf, bufsize, "struct %.*s_%s", (int)pre_len, sname, dot + 1);
+        else
+            snprintf(buf, bufsize, "struct %s", sname);
+    } else {
+        snprintf(buf, bufsize, "struct %s", sname);
+    }
+    return buf;
+}
+
 /** 仅写结构体字面量的 C 名前缀 "(struct X){ "，供 .su 自己实现字段循环时调用；名解析逻辑仍在 C。 */
 static int codegen_emit_struct_lit_name_prefix(FILE *out, const struct ASTExpr *e) {
     const char *sname = e->value.struct_lit.struct_name ? e->value.struct_lit.struct_name : "";
@@ -1348,6 +1556,10 @@ static int codegen_emit_struct_lit_impl(FILE *out, const struct ASTExpr *e) {
                 /* 数组用 memcpy，放到后面一轮再输出 */
                 continue;
             }
+            if (fty && fty->kind == AST_TYPE_ARRAY && init && init->kind == AST_EXPR_FIELD_ACCESS && init->value.field_access.base) {
+                /* 数组字段来自另一结构体字段（如 scan.name），用 memcpy，放到后面一轮再输出 */
+                continue;
+            }
             if (fty && fty->kind == AST_TYPE_ARRAY && init && init->kind == AST_EXPR_ARRAY_LIT && fty->elem_type && fty->elem_type->kind == AST_TYPE_ARRAY) {
                 /* 多维数组字面量：C 不能对数组赋值，已由 _t = { 0 } 零初始化，跳过 */
                 continue;
@@ -1380,6 +1592,12 @@ static int codegen_emit_struct_lit_impl(FILE *out, const struct ASTExpr *e) {
             const struct ASTExpr *init = e->value.struct_lit.inits[i];
             if (fty && fty->kind == AST_TYPE_ARRAY && init && init->kind == AST_EXPR_VAR && init->value.var.name)
                 fprintf(out, "memcpy(_t.%s, %s, sizeof(_t.%s)); ", fname, init->value.var.name, fname);
+            else if (fty && fty->kind == AST_TYPE_ARRAY && init && init->kind == AST_EXPR_FIELD_ACCESS && init->value.field_access.base) {
+                const char *src_field = init->value.field_access.field_name ? init->value.field_access.field_name : "";
+                fprintf(out, "memcpy(_t.%s, (", fname);
+                if (codegen_expr(init->value.field_access.base, out) != 0) return -1;
+                fprintf(out, ").%s, sizeof(_t.%s)); ", src_field, fname);
+            }
         }
         fprintf(out, "_t; })");
         return 0;
@@ -1714,15 +1932,17 @@ static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, co
     const struct ASTType *base_ty = base ? base->resolved_type : NULL;
     if (left->index_proven_in_bounds) return -1;
     if (left->value.index.base_is_slice && base_ty && base_ty->kind == AST_TYPE_SLICE) {
+        int use_arrow = expr_is_slice_ptr_param(base);
+        const char *da = use_arrow ? ")->" : ").";
         fprintf(out, "(");
         if (codegen_expr(idx, out) != 0) return -1;
         fprintf(out, " < 0 || (size_t)(");
         if (codegen_expr(idx, out) != 0) return -1;
         fprintf(out, ") >= (");
         if (codegen_expr(base, out) != 0) return -1;
-        fprintf(out, ").length ? (shulang_panic_(1, 0), 0) : ((");
+        fprintf(out, "%slength ? (shulang_panic_(1, 0), 0) : ((", da);
         if (codegen_expr(base, out) != 0) return -1;
-        fprintf(out, ").data[");
+        fprintf(out, "%sdata[", da);
         if (codegen_expr(idx, out) != 0) return -1;
         fprintf(out, "] = ");
         if (codegen_expr(right, out) != 0) return -1;
@@ -2146,6 +2366,13 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             fprintf(out, "))");
             return 0;
         }
+        case AST_EXPR_DEREF: {
+            /* 解引用 *expr → C 的 (*(expr)) */
+            fprintf(out, "(*(");
+            if (codegen_expr(e->value.unary.operand, out) != 0) return -1;
+            fprintf(out, "))");
+            return 0;
+        }
         case AST_EXPR_AS: {
             /* 类型转换 expr as type → C 的 (target_type)(expr) */
             const struct ASTType *ty = e->value.as_type.type;
@@ -2178,14 +2405,35 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                     const char *s = c_type_str(then_e->resolved_type);
                     if (s && strncmp(s, "struct ", 7) == 0) tmp_ty = then_e->resolved_type;
                 }
+                /* then 为块（如 if (ref<=0) { return Type{...}; }）且块类型为 struct 时也用上，避免 int __tmp；else 为 null 时赋 (struct X){0} */
+                if (then_e && then_is_block && then_e->resolved_type) {
+                    const char *s = c_type_str(then_e->resolved_type);
+                    if (s && strncmp(s, "struct ", 7) == 0) tmp_ty = then_e->resolved_type;
+                }
+                /* else 为表达式且为 struct 时用 else 类型作 __tmp；但若 then 已为块且产出 struct（如 return LexerResult），则优先用 then 的类型，避免 __tmp=LexerResult 却赋 (Token){0} */
                 if (else_e && !else_is_block && else_e->resolved_type) {
                     const char *s = c_type_str(else_e->resolved_type);
-                    if (s && strncmp(s, "struct ", 7) == 0) tmp_ty = else_e->resolved_type;
+                    if (s && strncmp(s, "struct ", 7) == 0) {
+                        const char *cur = tmp_ty ? c_type_str(tmp_ty) : NULL;
+                        if (!cur || strncmp(cur, "struct ", 7) != 0 || !then_e || !then_is_block)
+                            tmp_ty = else_e->resolved_type;
+                    }
+                }
+                /* else 为嵌套 if 表达式（如 typeck 的 else if (!ref_is_null(ty_t)) { ... } else if (!ref_is_null(ty_e)) { ... }）时，取 else 的 resolved_type，否则会打成 int __tmp 却赋 (struct X){0}；同样不覆盖 then 块已给的 struct */
+                if (else_e && else_e->kind == AST_EXPR_IF && else_e->resolved_type) {
+                    const char *s = c_type_str(else_e->resolved_type);
+                    if (s && strncmp(s, "struct ", 7) == 0) {
+                        const char *cur = tmp_ty ? c_type_str(tmp_ty) : NULL;
+                        if (!cur || strncmp(cur, "struct ", 7) != 0 || !then_e || !then_is_block)
+                            tmp_ty = else_e->resolved_type;
+                    }
                 }
                 const char *tmp_ty_str = tmp_ty ? c_type_str(tmp_ty) : "int32_t";
-                /* else 为结构体字面量且 __tmp 类型尚非 struct 时，用 struct 名在 dep/本模块中推定 C 类型串 */
+                /* else 为结构体字面量且 __tmp 类型尚非 struct 时，用 struct 名在 dep/本模块中推定 C 类型串。
+                 * 但 then 为块且 tmp_ty 已来自 then（如 return LexerResult）时不要用 else（如 Token）覆盖，否则会生成 LexerResult __tmp = (Token){0}。 */
                 if (else_e && !else_is_block && else_e->kind == AST_EXPR_STRUCT_LIT && else_e->value.struct_lit.struct_name
-                    && strncmp(tmp_ty_str, "struct ", 7) != 0) {
+                    && strncmp(tmp_ty_str, "struct ", 7) != 0
+                    && !(then_e && then_is_block && tmp_ty == then_e->resolved_type)) {
                     const char *sname = else_e->value.struct_lit.struct_name;
                     static char struct_fallback_ty_buf[128];
                     int found = 0;
@@ -2214,6 +2462,67 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                             if (found) break;
                         }
                     }
+                    /* 仍未找到时用 else 的 resolved_type（如 (struct ast_Expr){0} / (struct ast_Type){0}），避免 __tmp 打成 int32_t */
+                    if (!found && else_e->resolved_type) {
+                        const char *s = c_type_str(else_e->resolved_type);
+                        if (s && strncmp(s, "struct ", 7) == 0) {
+                            snprintf(struct_fallback_ty_buf, sizeof(struct_fallback_ty_buf), "%s", s);
+                            tmp_ty_str = struct_fallback_ty_buf;
+                        }
+                    }
+                    /* typeck 可能未对 struct literal 设 resolved_type，用与发射时一致的 C 类型名推断（如 typeck 中 (Type){0} → struct ast_Type） */
+                    if (strncmp(tmp_ty_str, "struct ", 7) != 0) {
+                        static char struct_lit_ty_buf[128];
+                        if (struct_lit_c_type_str(else_e, struct_lit_ty_buf, sizeof(struct_lit_ty_buf)))
+                            tmp_ty_str = struct_lit_ty_buf;
+                    }
+                }
+                /* else 为赋值且 RHS 为结构体字面量（如 (__tmp = (struct ast_Type){0})），从 RHS 推断 __tmp 类型 */
+                if (else_e && !else_is_block && strncmp(tmp_ty_str, "struct ", 7) != 0
+                    && else_e->kind == AST_EXPR_ASSIGN && else_e->value.binop.right
+                    && else_e->value.binop.right->kind == AST_EXPR_STRUCT_LIT) {
+                    const struct ASTExpr *rhs = else_e->value.binop.right;
+                    if (rhs->resolved_type) {
+                        const char *s = c_type_str(rhs->resolved_type);
+                        if (s && strncmp(s, "struct ", 7) == 0) {
+                            static char assign_rhs_ty_buf[128];
+                            snprintf(assign_rhs_ty_buf, sizeof(assign_rhs_ty_buf), "%s", s);
+                            tmp_ty_str = assign_rhs_ty_buf;
+                        }
+                    }
+                    if (strncmp(tmp_ty_str, "struct ", 7) != 0 && rhs->value.struct_lit.struct_name) {
+                        static char assign_struct_lit_buf[128];
+                        if (struct_lit_c_type_str(rhs, assign_struct_lit_buf, sizeof(assign_struct_lit_buf)))
+                            tmp_ty_str = assign_struct_lit_buf;
+                    }
+                }
+                /* else 为块且块内仅 __tmp = (struct X){0} 时，从块内推断 __tmp 类型（如 backend EXPR_INDEX 路径） */
+                if (else_e && else_is_block && strncmp(tmp_ty_str, "struct ", 7) != 0) {
+                    const char *block_ty = struct_type_from_else_block(else_e);
+                    if (block_ty) {
+                        static char main_if_else_block_ty_buf[128];
+                        snprintf(main_if_else_block_ty_buf, sizeof(main_if_else_block_ty_buf), "%s", block_ty);
+                        tmp_ty_str = main_if_else_block_ty_buf;
+                    }
+                }
+                /* 最后兜底：else 为嵌套 if 等时递归求其产生的 struct 类型（typeck 可能未设 resolved_type）；then 为块且 tmp_ty 已来自 then 时不覆盖 */
+                if (else_e && strncmp(tmp_ty_str, "struct ", 7) != 0 && !(then_e && then_is_block && tmp_ty == then_e->resolved_type)) {
+                    static char expr_struct_fallback_buf[128];
+                    if (expr_struct_type_str(else_e, expr_struct_fallback_buf, sizeof(expr_struct_fallback_buf)))
+                        tmp_ty_str = expr_struct_fallback_buf;
+                }
+                /* 无 else 且 then 为块（如 if (ref<=0) { return Type{...}; }）时从块内 return 操作数推断 __tmp 类型 */
+                if (!else_e && then_e && then_is_block && strncmp(tmp_ty_str, "struct ", 7) != 0) {
+                    static char then_block_struct_buf[128];
+                    if (expr_struct_type_str(then_e, then_block_struct_buf, sizeof(then_block_struct_buf)))
+                        tmp_ty_str = then_block_struct_buf;
+                }
+                /* c_type_str 对库模块 NAMED 可能返回 "prefix_Type" 无 "struct "，此处统一为 "struct prefix_Type" 以便 C 合法声明；若已是 "enum X" 则不要加 struct。 */
+                if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) != 0 && strncmp(tmp_ty_str, "enum ", 5) != 0
+                    && e->resolved_type && e->resolved_type->kind == AST_TYPE_NAMED) {
+                    static char struct_named_buf[128];
+                    snprintf(struct_named_buf, sizeof(struct_named_buf), "struct %s", tmp_ty_str);
+                    tmp_ty_str = struct_named_buf;
                 }
                 /* 带初值避免 -Wuninitialized：标量用 0，struct 用 (type){0} */
                 if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0)
@@ -2242,12 +2551,16 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                         fprintf(out, "; return __tmp; } ");
                     } else {
                         fprintf(out, "(__tmp = ");
-                        if (codegen_expr(then_e, out) != 0) return -1;
+                        if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && !expr_produces_struct_type(then_e))
+                            fprintf(out, "(%s){0}", tmp_ty_str);
+                        else if (codegen_expr(then_e, out) != 0) return -1;
                         fprintf(out, ") ");
                     }
                 } else {
                     fprintf(out, "(__tmp = ");
-                    if (codegen_expr(then_e, out) != 0) return -1;
+                    if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && !expr_produces_struct_type(then_e))
+                        fprintf(out, "(%s){0}", tmp_ty_str);
+                    else if (codegen_expr(then_e, out) != 0) return -1;
                     fprintf(out, ") ");
                 }
                 fprintf(out, "else ");
@@ -2270,25 +2583,106 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                         fprintf(out, "; return __tmp; } ");
                     } else {
                         fprintf(out, "(__tmp = ");
+                        /* then 为块时 codegen_block_body 可能已覆盖静态缓冲区，用 then_e 重新推断 __tmp 类型到局部缓冲，保证 else 发射时类型正确（LexerResult vs Token）。优先从 then_e 推断，不依赖 tmp_ty_str。 */
+                        char else_emit_ty_buf[128];
+                        const char *else_emit_ty = tmp_ty_str;
+                        if (then_e && then_is_block) {
+                            if (expr_struct_type_str(then_e, else_emit_ty_buf, sizeof(else_emit_ty_buf)))
+                                else_emit_ty = else_emit_ty_buf;
+                            else if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) {
+                                snprintf(else_emit_ty_buf, sizeof(else_emit_ty_buf), "%s", tmp_ty_str);
+                                else_emit_ty = else_emit_ty_buf;
+                            }
+                        }
                         if (else_e) {
-                            if (codegen_expr(else_e, out) != 0) return -1;
+                            /* __tmp 为 struct 时，若 else 类型与 else_emit_ty 不同则输出 (else_emit_ty){0}；先处理结构体字面量（struct_lit_c_type_str 可靠），再统一用 expr_struct_type_str。
+                             * LexerResult vs Token：else_emit_ty 可能无 "struct " 前缀（如 lexer_LexerResult），用 strstr 判 LexerResult 且 else 的 C 类型含 Token 则输出 (else_emit_ty){0}；若无前缀则用 "struct "+else_emit_ty。 */
+                            if (else_emit_ty && else_e->kind == AST_EXPR_STRUCT_LIT) {
+                                static char else_lit_ty[128];
+                                const char *else_ctype = struct_lit_c_type_str(else_e, else_lit_ty, sizeof(else_lit_ty));
+                                int lexer_result_else_token = (strstr(else_emit_ty, "LexerResult") != NULL && else_ctype && strstr(else_ctype, "Token") != NULL);
+                                if (lexer_result_else_token) {
+                                    if (strncmp(else_emit_ty, "struct ", 7) == 0) fprintf(out, "(%s){0}", else_emit_ty);
+                                    else { static char struct_lex_buf[128]; snprintf(struct_lex_buf, sizeof(struct_lex_buf), "struct %s", else_emit_ty); fprintf(out, "(%s){0}", struct_lex_buf); }
+                                } else if (strncmp(else_emit_ty, "struct ", 7) == 0 && else_ctype && strcmp(else_ctype, else_emit_ty) != 0) {
+                                    fprintf(out, "(%s){0}", else_emit_ty);
+                                } else if (else_struct_type_mismatch(else_emit_ty, else_e))
+                                    fprintf(out, "(%s){0}", else_emit_ty);
+                                else if (codegen_expr(else_e, out) != 0) return -1;
+                            } else {
+                                static char else_ty_any[128];
+                                const char *else_ty_ptr = expr_struct_type_str(else_e, else_ty_any, sizeof(else_ty_any));
+                                if (else_emit_ty && strncmp(else_emit_ty, "struct ", 7) == 0 && else_ty_ptr && strcmp(else_ty_ptr, else_emit_ty) != 0) {
+                                    fprintf(out, "(%s){0}", else_emit_ty);
+                                } else if (else_emit_ty && else_struct_type_mismatch(else_emit_ty, else_e))
+                                    fprintf(out, "(%s){0}", else_emit_ty);
+                                else if (codegen_expr(else_e, out) != 0) return -1;
+                            }
                         } else {
-                            /* else 缺失时：struct 用 (type){0}，标量用 0 */
-                            if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0)
-                                fprintf(out, "(%s){0}", tmp_ty_str);
-                            else
+                            if (else_emit_ty && strncmp(else_emit_ty, "struct ", 7) == 0)
+                                fprintf(out, "(%s){0}", else_emit_ty);
+                            else if (then_e && then_is_block) {
+                                if (else_emit_ty && strstr(else_emit_ty, "LexerResult")) {
+                                    static char struct_lex_buf0[128];
+                                    snprintf(struct_lex_buf0, sizeof(struct_lex_buf0), "struct %s", else_emit_ty);
+                                    fprintf(out, "(%s){0}", struct_lex_buf0);
+                                } else if (expr_struct_type_str(then_e, else_emit_ty_buf, sizeof(else_emit_ty_buf)))
+                                    fprintf(out, "(%s){0}", else_emit_ty_buf);
+                                else
+                                    fprintf(out, "0");
+                            } else
                                 fprintf(out, "0");
                         }
                         fprintf(out, ") ");
                     }
                 } else {
                     fprintf(out, "(__tmp = ");
+                    /* 同上：then 为块时优先从 then_e 重算类型到局部缓冲 */
+                    char else_emit_ty_buf2[128];
+                    const char *else_emit_ty2 = tmp_ty_str;
+                    if (then_e && then_is_block) {
+                        if (expr_struct_type_str(then_e, else_emit_ty_buf2, sizeof(else_emit_ty_buf2)))
+                            else_emit_ty2 = else_emit_ty_buf2;
+                        else if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) {
+                            snprintf(else_emit_ty_buf2, sizeof(else_emit_ty_buf2), "%s", tmp_ty_str);
+                            else_emit_ty2 = else_emit_ty_buf2;
+                        }
+                    }
                     if (else_e) {
-                        if (codegen_expr(else_e, out) != 0) return -1;
+                        if (else_emit_ty2 && else_e->kind == AST_EXPR_STRUCT_LIT) {
+                            static char else_lit_ty2[128];
+                            const char *else_ctype2 = struct_lit_c_type_str(else_e, else_lit_ty2, sizeof(else_lit_ty2));
+                            int lexer_result_else_token2 = (strstr(else_emit_ty2, "LexerResult") != NULL && else_ctype2 && strstr(else_ctype2, "Token") != NULL);
+                            if (lexer_result_else_token2) {
+                                if (strncmp(else_emit_ty2, "struct ", 7) == 0) fprintf(out, "(%s){0}", else_emit_ty2);
+                                else { static char struct_lex_buf2[128]; snprintf(struct_lex_buf2, sizeof(struct_lex_buf2), "struct %s", else_emit_ty2); fprintf(out, "(%s){0}", struct_lex_buf2); }
+                            } else if (strncmp(else_emit_ty2, "struct ", 7) == 0 && else_ctype2 && strcmp(else_ctype2, else_emit_ty2) != 0)
+                                fprintf(out, "(%s){0}", else_emit_ty2);
+                            else if (else_struct_type_mismatch(else_emit_ty2, else_e))
+                                fprintf(out, "(%s){0}", else_emit_ty2);
+                            else if (codegen_expr(else_e, out) != 0) return -1;
+                        } else {
+                            static char else_ty_any2[128];
+                            const char *else_ty_ptr2 = expr_struct_type_str(else_e, else_ty_any2, sizeof(else_ty_any2));
+                            if (else_emit_ty2 && strncmp(else_emit_ty2, "struct ", 7) == 0 && else_ty_ptr2 && strcmp(else_ty_ptr2, else_emit_ty2) != 0)
+                                fprintf(out, "(%s){0}", else_emit_ty2);
+                            else if (else_emit_ty2 && else_struct_type_mismatch(else_emit_ty2, else_e))
+                                fprintf(out, "(%s){0}", else_emit_ty2);
+                            else if (codegen_expr(else_e, out) != 0) return -1;
+                        }
                     } else {
-                        if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0)
-                            fprintf(out, "(%s){0}", tmp_ty_str);
-                        else
+                        if (else_emit_ty2 && strncmp(else_emit_ty2, "struct ", 7) == 0)
+                            fprintf(out, "(%s){0}", else_emit_ty2);
+                        else if (then_e && then_is_block) {
+                            if (else_emit_ty2 && strstr(else_emit_ty2, "LexerResult")) {
+                                static char struct_lex_buf02[128];
+                                snprintf(struct_lex_buf02, sizeof(struct_lex_buf02), "struct %s", else_emit_ty2);
+                                fprintf(out, "(%s){0}", struct_lex_buf02);
+                            } else if (expr_struct_type_str(then_e, else_emit_ty_buf2, sizeof(else_emit_ty_buf2)))
+                                fprintf(out, "(%s){0}", else_emit_ty_buf2);
+                            else
+                                fprintf(out, "0");
+                        } else
                             fprintf(out, "0");
                     }
                     fprintf(out, ") ");
@@ -2407,11 +2801,11 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                         return 0;
                     }
             }
-            /* 字段访问 base.field；base 为指针或 slice 指针形参时输出 ->，否则 . */
+            /* 字段访问 base.field；base 为指针、slice 类型或指针/slice 形参时输出 ->（C 中按指针传），否则 .；形参查表弥补 resolved_type 未填。 */
             fprintf(out, "(");
             if (codegen_expr(e->value.field_access.base, out) != 0) return -1;
-            if ((e->value.field_access.base->resolved_type && e->value.field_access.base->resolved_type->kind == AST_TYPE_PTR)
-                || expr_is_slice_ptr_param(e->value.field_access.base))
+            if ((e->value.field_access.base->resolved_type && (e->value.field_access.base->resolved_type->kind == AST_TYPE_PTR || e->value.field_access.base->resolved_type->kind == AST_TYPE_SLICE))
+                || expr_is_ptr_or_slice_param(e->value.field_access.base))
                 fprintf(out, ")->%s", e->value.field_access.field_name ? e->value.field_access.field_name : "");
             else
                 fprintf(out, ").%s", e->value.field_access.field_name ? e->value.field_access.field_name : "");
@@ -2491,7 +2885,9 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                 return 0;
             }
             if (e->value.index.base_is_slice && base_ty && base_ty->kind == AST_TYPE_SLICE) {
-                const char *da = expr_is_slice_ptr_param(base) ? ")->" : ").";
+                /* 仅形参 slice 在 C 中按指针传用 ->；局部/全局 slice 为 struct 用 .；无当前函数时保守用 . */
+                int use_arrow = codegen_current_func && expr_is_slice_ptr_param(base);
+                const char *da = use_arrow ? ")->" : ").";
                 if (skip_bounds_check) {
                     fprintf(out, "(");
                     if (codegen_expr(base, out) != 0) return -1;
@@ -2538,11 +2934,13 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                 }
                 return 0;
             }
+            /* 仅形参 slice 在 C 中按指针传用 ->；局部 slice 为 struct 用 . */
             fprintf(out, "(");
             if (codegen_expr(base, out) != 0) return -1;
-            if (e->value.index.base_is_slice)
-                fprintf(out, ").data[");
-            else
+            if (e->value.index.base_is_slice) {
+                int use_arrow = expr_is_slice_ptr_param(base);
+                fprintf(out, ")%sdata[", use_arrow ? "->" : ".");
+            } else
                 fprintf(out, ")[");
             if (codegen_expr(idx, out) != 0) return -1;
             fprintf(out, "]");
@@ -2706,15 +3104,17 @@ static int codegen_emit_one_call_arg(FILE *out, const struct ASTExpr *arg) {
     return 0;
 }
 
-/** CALL 跨模块（import 解析）：prefix + name(args)。 */
+/** CALL 跨模块（import 解析）：prefix + name(args)；经 builtin_intrinsic_name 映射后可变为 __builtin_memcpy 等。 */
 static int codegen_emit_call_import_path_impl(FILE *out, const struct ASTExpr *e) {
     char pre[256];
     import_path_to_c_prefix(e->value.call.resolved_import_path, pre, sizeof(pre));
     const struct ASTFunc *f = e->value.call.resolved_callee_func;
+    char full_name[256];
     if (e->value.call.num_type_args > 0 && e->value.call.type_args)
-        fprintf(out, "%s%s(", pre, mono_instance_mangled_name(f, e->value.call.type_args, e->value.call.num_type_args));
+        (void)snprintf(full_name, sizeof(full_name), "%s%s", pre, mono_instance_mangled_name(f, e->value.call.type_args, e->value.call.num_type_args));
     else
-        fprintf(out, "%s%s(", pre, f->name ? f->name : "");
+        (void)snprintf(full_name, sizeof(full_name), "%s%s", pre, f->name ? f->name : "");
+    fprintf(out, "%s(", builtin_intrinsic_name(full_name));
     for (int i = 0; i < e->value.call.num_args; i++) {
         if (i) fprintf(out, ", ");
         if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
@@ -2739,7 +3139,7 @@ static int codegen_emit_call_library_same_impl(FILE *out, const struct ASTExpr *
         library_prefixed_name(mono_instance_mangled_name(f, e->value.call.type_args, e->value.call.num_type_args), cname, sizeof(cname));
     else
         library_prefixed_name(f->name ? f->name : "", cname, sizeof(cname));
-    fprintf(out, "%s(", cname);
+    fprintf(out, "%s(", builtin_intrinsic_name(cname));
     for (int i = 0; i < e->value.call.num_args; i++) {
         if (i) fprintf(out, ", ");
         if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
@@ -2759,7 +3159,9 @@ static int codegen_emit_call_library_dep_impl(FILE *out, const struct ASTExpr *e
             if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) {
                 char pre[256];
                 import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
-                fprintf(out, "%s%s(", pre, callee_name);
+                char full_name[256];
+                (void)snprintf(full_name, sizeof(full_name), "%s%s", pre, callee_name);
+                fprintf(out, "%s(", builtin_intrinsic_name(full_name));
                 for (int i = 0; i < e->value.call.num_args; i++) {
                     if (i) fprintf(out, ", ");
                     if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
@@ -2967,18 +3369,8 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     const char *used_buf[MAX_BLOCK_USED_VARS];
     int n_used = 0;
     collect_var_names_from_block(b, used_buf, &n_used, MAX_BLOCK_USED_VARS);
-    /* 有 stmt_order 时按源码顺序输出 const/let/expr/loop/for，保证 if/return 在 let 之前，避免递归或提前 return 错序。
-     * 若 stmt_order 中 loop/for 出现在 expr_stmt 之前且块内有 expr_stmt，则视为错序（parser 时机导致），改用 fallback 保证先 expr 再 loop。 */
-    int use_stmt_order = 0;
-    if (b->num_stmt_order > 0) {
-        int seen_expr = 0;
-        use_stmt_order = 1;
-        for (int i = 0; i < b->num_stmt_order && use_stmt_order; i++) {
-            int k = (int)b->stmt_order[i].kind;
-            if (k == 2) seen_expr = 1;
-            if ((k == 3 || k == 4) && !seen_expr && b->num_expr_stmts > 0) use_stmt_order = 0;
-        }
-    }
+    /* 有 stmt_order 时一律按源码顺序输出 const/let/expr/loop/for，保证 skip_whitespace 等「while; continue」与 copy_onefunc_into「let; while; expr」顺序正确。 */
+    int use_stmt_order = (b->num_stmt_order > 0) ? 1 : 0;
 #ifdef SHUC_USE_SU_CODEGEN
     if (b->num_stmt_order > 0 && use_stmt_order) {
         if (codegen_codegen_su_emit_block_stmt_order((uint8_t *)out, (uint8_t *)b, indent, cast_return_to_int) != 0) return -1;
@@ -3028,7 +3420,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                 const struct ASTType *ty = b->let_decls[idx].type;
                 const struct ASTExpr *linit = b->let_decls[idx].init;
                 const struct ASTType *ety = codegen_emit_type(ty);
-                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%sconst %s * %s = ", pad, c_type_str(ety->elem_type), name);
+                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%s%s * %s = ", pad, c_type_str(ety->elem_type), name);
                 else if (ety && ety->kind == AST_TYPE_NAMED && ety->name) fprintf(out, "%s%s %s = ", pad, c_type_str(ety), name);
                 else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
                     fprintf(out, "%s", pad);
@@ -3134,7 +3526,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
             const struct ASTType *ty = b->let_decls[i].type;
             const struct ASTExpr *linit = b->let_decls[i].init;
             const struct ASTType *ety = codegen_emit_type(ty);
-            if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%sconst %s * %s = ", pad, c_type_str(ety->elem_type), name);
+            if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%s%s * %s = ", pad, c_type_str(ety->elem_type), name);
             else if (ety && ety->kind == AST_TYPE_NAMED && ety->name) fprintf(out, "%s%s %s = ", pad, c_type_str(ety), name);
             else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
                 fprintf(out, "%s", pad);
@@ -3180,7 +3572,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                 if (!is_var_used(name, used_buf, n_used)) continue;
                 const struct ASTType *ty = b->let_decls[i].type;
                 const struct ASTType *ety = codegen_emit_type(ty);
-                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%sconst %s * %s = ", pad, c_type_str(ety->elem_type), name);
+                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%s%s * %s = ", pad, c_type_str(ety->elem_type), name);
                 else if (ety && ety->kind == AST_TYPE_NAMED && ety->name) fprintf(out, "%s%s %s = ", pad, c_type_str(ety), name);
                 else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
                     fprintf(out, "%s", pad);
@@ -3259,7 +3651,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                     if (!is_var_used(name, used_buf, n_used)) continue;
                     const struct ASTType *ty = b->let_decls[i].type;
                     const struct ASTType *ety = codegen_emit_type(ty);
-                    if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%sconst %s * %s = ", pad, c_type_str(ety->elem_type), name);
+                    if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(out, "%s%s * %s = ", pad, c_type_str(ety->elem_type), name);
                     else if (ety && ety->kind == AST_TYPE_NAMED && ety->name) fprintf(out, "%s%s %s = ", pad, c_type_str(ety), name);
                     else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
                         fprintf(out, "%s", pad);
@@ -3431,6 +3823,46 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     return 0;
 }
 
+/** 当 else 分支为单语句块且唯一语句为 __tmp = (struct X){0} 或仅为 (struct X){0} 时，返回该 struct 的 C 类型串，否则返回 NULL。
+ * 用于 EXPR_INDEX 等路径避免 __tmp 打成 int32_t；并修复 typeck 中 if(cond){ block } else (Type){0} 产出 int __tmp 却赋 (struct ast_Type){0} 的错型。 */
+static const char *struct_type_from_else_block(const struct ASTExpr *else_e) {
+    if (!else_e || else_e->kind != AST_EXPR_BLOCK) return NULL;
+    const struct ASTBlock *b = else_e->value.block;
+    if (!b) return NULL;
+    /* 情况 1：块内唯一语句为赋值且 RHS 为结构体字面量（__tmp = (struct X){0}） */
+    const struct ASTExpr *assign = NULL;
+    if (b->expr_stmts && b->num_expr_stmts == 1)
+        assign = b->expr_stmts[0];
+    else if (b->num_expr_stmts == 0 && b->final_expr)
+        assign = b->final_expr;
+    if (assign && assign->kind == AST_EXPR_ASSIGN) {
+        const struct ASTExpr *rhs = assign->value.binop.right;
+        if (rhs && rhs->kind == AST_EXPR_STRUCT_LIT && rhs->resolved_type) {
+            const char *s = c_type_str(rhs->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) return s;
+        }
+    }
+    /* 情况 2：块内唯一语句或 final_expr 为结构体字面量（无赋值，如 else { (Type){0} }），codegen 会生成 __tmp = (struct X){0} */
+    const struct ASTExpr *struct_lit = NULL;
+    if (b->expr_stmts && b->num_expr_stmts == 1 && b->expr_stmts[0]->kind == AST_EXPR_STRUCT_LIT)
+        struct_lit = b->expr_stmts[0];
+    else if (b->num_expr_stmts == 0 && b->final_expr && b->final_expr->kind == AST_EXPR_STRUCT_LIT)
+        struct_lit = b->final_expr;
+    if (struct_lit) {
+        if (struct_lit->resolved_type) {
+            const char *s = c_type_str(struct_lit->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) return s;
+        }
+        /* typeck 可能未对 struct literal 设 resolved_type，用与发射时一致的 C 类型名（需前向声明 struct_lit_c_type_str） */
+        if (struct_lit->value.struct_lit.struct_name) {
+            static char block_struct_ty_buf[128];
+            if (struct_lit_c_type_str(struct_lit, block_struct_ty_buf, sizeof(block_struct_ty_buf)))
+                return block_struct_ty_buf;
+        }
+    }
+    return NULL;
+}
+
 /** if 表达式完整输出（供 .su 转调）：语句表达式 ({ __tmp; if(cond) ... else ...; __tmp; }) 或三元 cond ? then : else。 */
 static int codegen_emit_if_expr_impl(FILE *out, const struct ASTExpr *e) {
     const struct ASTExpr *then_e = e->value.if_expr.then_expr;
@@ -3443,7 +3875,65 @@ static int codegen_emit_if_expr_impl(FILE *out, const struct ASTExpr *e) {
     else_is_block = else_is_block || else_is_control;
     if (then_is_block || else_is_block) {
         const struct ASTType *tmp_ty = e->resolved_type;
+        /* 任一分支为 struct 时用该类型作 __tmp（与 AST_EXPR_IF 主路径一致） */
+        if (then_e && !then_is_block && then_e->resolved_type) {
+            const char *s = c_type_str(then_e->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) tmp_ty = then_e->resolved_type;
+        }
+        /* then 为块且块类型为 struct 时也用上（如 if (ref<=0) { return Type{...}; }） */
+        if (then_e && then_is_block && then_e->resolved_type) {
+            const char *s = c_type_str(then_e->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) tmp_ty = then_e->resolved_type;
+        }
+        /* else 为 struct 时用 else 类型，但若 then 已为块且产出 struct 则优先 then，避免 LexerResult __tmp 赋 (Token){0} */
+        if (else_e && !else_is_block && else_e->resolved_type) {
+            const char *s = c_type_str(else_e->resolved_type);
+            if (s && strncmp(s, "struct ", 7) == 0) {
+                const char *cur = tmp_ty ? c_type_str(tmp_ty) : NULL;
+                if (!cur || strncmp(cur, "struct ", 7) != 0 || !then_e || !then_is_block)
+                    tmp_ty = else_e->resolved_type;
+            }
+        }
+        /* else 为结构体字面量且 tmp_ty 仍非 struct 时，用 else 的 resolved_type（如 ast_Type/ast_Expr）；then 为块且 tmp_ty 已来自 then 时不覆盖，避免 LexerResult __tmp = (Token){0} */
         const char *tmp_ty_str = tmp_ty ? c_type_str(tmp_ty) : "int32_t";
+        if (else_e && !else_is_block && else_e->kind == AST_EXPR_STRUCT_LIT && strncmp(tmp_ty_str, "struct ", 7) != 0
+            && !(then_e && then_is_block && tmp_ty == then_e->resolved_type)) {
+            if (else_e->resolved_type) {
+                const char *s = c_type_str(else_e->resolved_type);
+                if (s && strncmp(s, "struct ", 7) == 0) {
+                    static char if_impl_ty_buf[64];
+                    snprintf(if_impl_ty_buf, sizeof(if_impl_ty_buf), "%s", s);
+                    tmp_ty_str = if_impl_ty_buf;
+                }
+            }
+            if (strncmp(tmp_ty_str, "struct ", 7) != 0) {
+                static char if_impl_struct_lit_buf[128];
+                if (struct_lit_c_type_str(else_e, if_impl_struct_lit_buf, sizeof(if_impl_struct_lit_buf)))
+                    tmp_ty_str = if_impl_struct_lit_buf;
+            }
+        }
+        /* else 为块且块内仅 __tmp = (struct X){0} 时，从块内推断 __tmp 类型（如 backend EXPR_INDEX 路径），避免 sed 兜底 */
+        if (else_e && else_is_block && strncmp(tmp_ty_str, "struct ", 7) != 0) {
+            const char *block_ty = struct_type_from_else_block(else_e);
+            if (block_ty) {
+                static char if_impl_else_block_ty_buf[64];
+                snprintf(if_impl_else_block_ty_buf, sizeof(if_impl_else_block_ty_buf), "%s", block_ty);
+                tmp_ty_str = if_impl_else_block_ty_buf;
+            }
+        }
+        /* 无 else 且 then 为块时从块内 return 操作数推断 struct 类型 */
+        if (!else_e && then_e && then_is_block && strncmp(tmp_ty_str, "struct ", 7) != 0) {
+            static char if_impl_then_block_buf[128];
+            if (expr_struct_type_str(then_e, if_impl_then_block_buf, sizeof(if_impl_then_block_buf)))
+                tmp_ty_str = if_impl_then_block_buf;
+        }
+        /* c_type_str 对库模块 NAMED 可能返回 "prefix_Type" 无 "struct "，此处统一为 "struct prefix_Type"；若已是 "enum X" 则不要加 struct。 */
+        if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) != 0 && strncmp(tmp_ty_str, "enum ", 5) != 0
+            && e->resolved_type && e->resolved_type->kind == AST_TYPE_NAMED) {
+            static char if_impl_struct_named_buf[128];
+            snprintf(if_impl_struct_named_buf, sizeof(if_impl_struct_named_buf), "struct %s", tmp_ty_str);
+            tmp_ty_str = if_impl_struct_named_buf;
+        }
         /* 带初值避免 -Wuninitialized：标量用 0，struct 用 (type){0} */
         if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0)
             fprintf(out, "({ %s __tmp = (%s){0}; if (", tmp_ty_str, tmp_ty_str);
@@ -3470,12 +3960,16 @@ static int codegen_emit_if_expr_impl(FILE *out, const struct ASTExpr *e) {
                 fprintf(out, "; return __tmp; } ");
             } else {
                 fprintf(out, "(__tmp = ");
-                if (codegen_expr(then_e, out) != 0) return -1;
+                if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && !expr_produces_struct_type(then_e))
+                    fprintf(out, "(%s){0}", tmp_ty_str);
+                else if (codegen_expr(then_e, out) != 0) return -1;
                 fprintf(out, ") ");
             }
         } else {
             fprintf(out, "(__tmp = ");
-            if (codegen_expr(then_e, out) != 0) return -1;
+            if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && !expr_produces_struct_type(then_e))
+                fprintf(out, "(%s){0}", tmp_ty_str);
+            else if (codegen_expr(then_e, out) != 0) return -1;
             fprintf(out, ") ");
         }
         fprintf(out, "else ");
@@ -3499,7 +3993,18 @@ static int codegen_emit_if_expr_impl(FILE *out, const struct ASTExpr *e) {
             } else {
                 fprintf(out, "(__tmp = ");
                 if (else_e) {
-                    if (codegen_expr(else_e, out) != 0) return -1;
+                    static char impl_else_ty[128], impl_else_lit_ty[128];
+                    const char *impl_ty_ptr = expr_struct_type_str(else_e, impl_else_ty, sizeof(impl_else_ty));
+                    const char *impl_else_ctype = (else_e->kind == AST_EXPR_STRUCT_LIT) ? struct_lit_c_type_str(else_e, impl_else_lit_ty, sizeof(impl_else_lit_ty)) : NULL;
+                    int impl_lex_tok = (tmp_ty_str && else_e->kind == AST_EXPR_STRUCT_LIT && impl_else_ctype && strstr(tmp_ty_str, "LexerResult") && strstr(impl_else_ctype, "Token"));
+                    if (impl_lex_tok) {
+                        if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) fprintf(out, "(%s){0}", tmp_ty_str);
+                        else { static char impl_lex_buf[128]; snprintf(impl_lex_buf, sizeof(impl_lex_buf), "struct %s", tmp_ty_str ? tmp_ty_str : "lexer_LexerResult"); fprintf(out, "(%s){0}", impl_lex_buf); }
+                    } else if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && impl_ty_ptr && strcmp(impl_ty_ptr, tmp_ty_str) != 0)
+                        fprintf(out, "(%s){0}", tmp_ty_str);
+                    else if (else_struct_type_mismatch(tmp_ty_str, else_e))
+                        fprintf(out, "(%s){0}", tmp_ty_str);
+                    else if (codegen_expr(else_e, out) != 0) return -1;
                 } else {
                     if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) fprintf(out, "(%s){0}", tmp_ty_str);
                     else fprintf(out, "0");
@@ -3509,7 +4014,18 @@ static int codegen_emit_if_expr_impl(FILE *out, const struct ASTExpr *e) {
         } else {
             fprintf(out, "(__tmp = ");
             if (else_e) {
-                if (codegen_expr(else_e, out) != 0) return -1;
+                static char impl_else_ty2[128], impl_else_lit_ty2[128];
+                const char *impl_ty_ptr2 = expr_struct_type_str(else_e, impl_else_ty2, sizeof(impl_else_ty2));
+                const char *impl_else_ctype2 = (else_e->kind == AST_EXPR_STRUCT_LIT) ? struct_lit_c_type_str(else_e, impl_else_lit_ty2, sizeof(impl_else_lit_ty2)) : NULL;
+                int impl_lex_tok2 = (tmp_ty_str && else_e->kind == AST_EXPR_STRUCT_LIT && impl_else_ctype2 && strstr(tmp_ty_str, "LexerResult") && strstr(impl_else_ctype2, "Token"));
+                if (impl_lex_tok2) {
+                    if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) fprintf(out, "(%s){0}", tmp_ty_str);
+                    else { static char impl_lex_buf2[128]; snprintf(impl_lex_buf2, sizeof(impl_lex_buf2), "struct %s", tmp_ty_str); fprintf(out, "(%s){0}", impl_lex_buf2); }
+                } else if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0 && impl_ty_ptr2 && strcmp(impl_ty_ptr2, tmp_ty_str) != 0)
+                    fprintf(out, "(%s){0}", tmp_ty_str);
+                else if (else_struct_type_mismatch(tmp_ty_str, else_e))
+                    fprintf(out, "(%s){0}", tmp_ty_str);
+                else if (codegen_expr(else_e, out) != 0) return -1;
             } else {
                 if (tmp_ty_str && strncmp(tmp_ty_str, "struct ", 7) == 0) fprintf(out, "(%s){0}", tmp_ty_str);
                 else fprintf(out, "0");
@@ -3662,6 +4178,16 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
     const char *used_buf[MAX_BLOCK_USED_VARS];
     int n_used = 0;
     collect_var_names_from_block(b, used_buf, &n_used, MAX_BLOCK_USED_VARS);
+    /* 有 stmt_order 时按源码顺序输出函数体，与 codegen_block_body 一致。 */
+    int used_block_body_order = 0;
+    if (b->num_stmt_order > 0) {
+        if (1) {
+            used_block_body_order = 1;
+            if (codegen_block_body(b, 2, out, cast_return_to_int, use_cleanup ? "shulang_ret_val" : NULL) != 0) return -1;
+            if (use_cleanup) fprintf(out, "%sgoto shulang_cleanup;\n", pad);
+            goto func_body_after_block;
+        }
+    }
     for (int i = 0; i < b->num_consts; i++) {
         const char *name = b->const_decls[i].name ? b->const_decls[i].name : "";
         if (!is_var_used(name, used_buf, n_used)) continue;
@@ -3786,6 +4312,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
         fprintf(out, "%s}\n", pad);
 #endif
     }
+func_body_after_block:
     for (int i = 0; i < b->num_labeled_stmts; i++) {
         if (b->labeled_stmts[i].label) {
 #ifdef SHUC_USE_SU_CODEGEN
@@ -3892,7 +4419,8 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
             }
         }
     }
-    /* 表达式语句 (expr;)：continue/break/return 须直接生成语句，不能包在 (void)(...) 中 */
+    /* 表达式语句 (expr;)：continue/break/return 须直接生成语句，不能包在 (void)(...) 中；若已用 codegen_block_body 按 stmt_order 输出则跳过。 */
+    if (!used_block_body_order) {
     for (int i = 0; i < b->num_expr_stmts; i++) {
         const struct ASTExpr *st = b->expr_stmts[i];
 #ifdef SHUC_USE_SU_CODEGEN
@@ -3933,6 +4461,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
         if (codegen_run_defers(out, b, 2) != 0) return -1;
 #endif
     }
+    }  /* end if (!used_block_body_order): expr_stmts + goto/run_defers */
     if (use_cleanup) {
 #ifdef SHUC_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_shulang_cleanup_label((uint8_t *)out, 2) != 0) return -1;
@@ -3944,7 +4473,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
         fprintf(out, "%sif (shulang_exit_kind) return shulang_ret_val;\n", pad);
 #endif
     }
-    if (!b->final_expr) return 0;
+    if (used_block_body_order || !b->final_expr) return 0;
     if (b->final_expr->kind == AST_EXPR_PANIC) {
         fprintf(out, "%s", pad);
         if (codegen_expr(b->final_expr, out) != 0) return -1;
@@ -3985,6 +4514,13 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
             fprintf(out, "%sreturn;\n", pad);
             return 0;
         }
+        /* void 函数：最后表达式只求值不返回，避免 C 报 "void function should not return a value"（如 vec truncate） */
+        if (is_void) {
+            fprintf(out, "%s(void)(", pad);
+            if (codegen_expr(b->final_expr->kind == AST_EXPR_RETURN ? b->final_expr->value.unary.operand : b->final_expr, out) != 0) return -1;
+            fprintf(out, ");\n");
+            return 0;
+        }
         const struct ASTExpr *ret_op = (b->final_expr->kind == AST_EXPR_RETURN) ? b->final_expr->value.unary.operand : b->final_expr;
         int is_return_if_panic = (ret_op && ret_op->kind == AST_EXPR_IF && ret_op->value.if_expr.then_expr
             && ret_op->value.if_expr.then_expr->kind == AST_EXPR_PANIC && ret_op->value.if_expr.else_expr);
@@ -4023,17 +4559,32 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
     library_prefixed_name(f->name, fname, sizeof(fname));
     /* C 要求 main 返回 int；若 .su 中 main 返回 i64 则在函数体内对 return 包 (int) */
     const char *cret = (f->name && strcmp(f->name, "main") == 0) ? "int" : c_type_str(f->return_type);
-    /* 小函数内联提示（§3.4）：仅入口模块内非 main、非 extern 函数加 static inline（库函数需导出符号，不加 static） */
+    /* 入口模块的 main：生成 main(int argc, char **argv) 并保存到 std.process 全局，供 args_count/arg 使用 */
+    if (!codegen_library_prefix && f->name && strcmp(f->name, "main") == 0) {
+        fprintf(out, "int main(int argc, char **argv) {\n");
+        fprintf(out, "  shulang_process_argc = argc;\n");
+        fprintf(out, "  shulang_process_argv = argv;\n");
+        if (codegen_func_body(f->body, m, out, f) != 0)
+            return -1;
+        fprintf(out, "}\n");
+        return 0;
+    }
+    /* 小函数内联提示（§3.4）：入口模块内非 main、非 extern 加 static inline；core.option/core.result 库函数加 inline；core.types/core.mem 的 size_of_* 与 align_of_* 加 inline 便于常量折叠 */
     if (!codegen_library_prefix && f->name && strcmp(f->name, "main") != 0 && !f->is_extern)
         fprintf(out, "static inline ");
+    else if (codegen_library_prefix && codegen_library_import_path && !f->is_extern
+        && (strcmp(codegen_library_import_path, "core.option") == 0 || strcmp(codegen_library_import_path, "core.result") == 0))
+        fprintf(out, "inline ");
+    else if (codegen_library_prefix && codegen_library_import_path && f->name && !f->is_extern
+        && (strcmp(codegen_library_import_path, "core.types") == 0 || strcmp(codegen_library_import_path, "core.mem") == 0)
+        && (strncmp(f->name, "size_of_", 8) == 0 || strncmp(f->name, "align_of_", 9) == 0))
+        fprintf(out, "inline ");
     fprintf(out, "%s %s(", cret, fname);
     for (int i = 0; i < f->num_params; i++) {
         if (i) fprintf(out, ", ");
         codegen_emit_param(&f->params[i], out, NULL);
     }
     fprintf(out, ") {\n");
-    if (f->name && strcmp(f->name, "main") == 0)
-        fprintf(out, "  printf(\"Hello World\\n\");\n");
     /* std.process.exit(code)：生成对 C exit() 的调用（noreturn） */
     if (codegen_library_import_path && strcmp(codegen_library_import_path, "std.process") == 0
         && f->name && strcmp(f->name, "exit") == 0 && f->num_params == 1
@@ -4201,7 +4752,7 @@ static void dce_collect_from_expr(const struct ASTExpr *e, struct ASTModule *ent
             dce_collect_from_expr(e->value.binop.right, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
             break;
         case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT:
-        case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             dce_collect_from_expr(e->value.unary.operand, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
             break;
         case AST_EXPR_AS:
@@ -4259,7 +4810,7 @@ static int expr_references_func(const struct ASTExpr *e, const struct ASTFunc *f
         case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
             if (expr_references_func(e->value.binop.left, func) || expr_references_func(e->value.binop.right, func)) return 1;
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             if (expr_references_func(e->value.unary.operand, func)) return 1;
             break;
         case AST_EXPR_AS:
@@ -4313,7 +4864,7 @@ static void collect_var_names_from_expr(const struct ASTExpr *e, const char **ou
             collect_var_names_from_expr(e->value.binop.left, out, n, max);
             collect_var_names_from_expr(e->value.binop.right, out, n, max);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_RETURN: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_RETURN: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
             if (e->value.unary.operand) collect_var_names_from_expr(e->value.unary.operand, out, n, max);
             break;
         case AST_EXPR_AS:
@@ -4360,7 +4911,8 @@ static void collect_var_names_from_expr(const struct ASTExpr *e, const char **ou
     }
 }
 
-/** 从块中收集所有被引用的变量名（final_expr、const/let 的 init、循环、defer、labeled）；用于仅输出被使用的 const/let。 */
+/** 从块中收集所有被引用的变量名（final_expr、const/let 的 init、循环 cond/body、defer、labeled）；用于仅输出被使用的 const/let。
+ * 必须收集 while 的 cond（如 pad 在 while (z < pad) 中），否则 DCE 会漏掉 let pad 导致 -E 产出无 pad 声明的 C。 */
 static void collect_var_names_from_block(const struct ASTBlock *b, const char **out, int *n, int max) {
     if (!b || *n >= max) return;
     for (int i = 0; i < b->num_consts; i++) {
@@ -4369,8 +4921,10 @@ static void collect_var_names_from_block(const struct ASTBlock *b, const char **
     for (int i = 0; i < b->num_lets; i++) {
         if (b->let_decls[i].init) collect_var_names_from_expr(b->let_decls[i].init, out, n, max);
     }
-    for (int i = 0; i < b->num_loops; i++)
+    for (int i = 0; i < b->num_loops; i++) {
+        if (b->loops[i].cond) collect_var_names_from_expr(b->loops[i].cond, out, n, max);
         collect_var_names_from_block(b->loops[i].body, out, n, max);
+    }
     for (int i = 0; i < b->num_for_loops; i++) {
         if (b->for_loops[i].init) collect_var_names_from_expr(b->for_loops[i].init, out, n, max);
         if (b->for_loops[i].cond) collect_var_names_from_expr(b->for_loops[i].cond, out, n, max);
@@ -4454,7 +5008,7 @@ int32_t codegen_su_emit_let_decl_prefix(uint8_t *out, uint8_t *block, int32_t id
     const struct ASTType *ety = codegen_emit_type(ty);
     if (ety && ety->kind == AST_TYPE_VECTOR) ensure_vector_typedef(ety, f);
     const char *name = b->let_decls[idx].name ? b->let_decls[idx].name : "";
-    if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(f, "%sconst %s * %s = ", pad, c_type_str(ety->elem_type), name);
+    if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type) fprintf(f, "%s%s * %s = ", pad, c_type_str(ety->elem_type), name);
     else if (ety && ety->kind == AST_TYPE_NAMED && ety->name) fprintf(f, "%s%s %s = ", pad, c_type_str(ety), name);
     else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
         fprintf(f, "%s", pad);
@@ -4593,7 +5147,7 @@ static void collect_type_from_expr(const struct ASTExpr *e, const char **out, in
             collect_type_from_expr(e->value.binop.left, out, n, max);
             collect_type_from_expr(e->value.binop.right, out, n, max);
             break;
-        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF:
+        case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
         case AST_EXPR_RETURN:
             collect_type_from_expr(e->value.unary.operand, out, n, max);
             break;
@@ -4784,6 +5338,9 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
     fprintf(out, "#include <stdint.h>\n");
     fprintf(out, "#include <stddef.h>\n");
     fprintf(out, "#include <string.h>\n"); /* memcpy 用于数组拷贝（自举 parser.su 中 let/const 数组 = 变量） */
+    /* std.process：入口 main 会保存 argc/argv 到此，供 args_count/arg 读取 */
+    fprintf(out, "extern int shulang_process_argc;\n");
+    fprintf(out, "extern char **shulang_process_argv;\n");
     /* 单文件模式（emitted_type_names 非 NULL）时依赖类型已在前面写出，此处不再重复输出，避免 C 重定义 */
     if (!emitted_type_names && codegen_ndep > 0 && codegen_dep_mods && codegen_dep_paths) {
         /* 依赖模块中的 enum 须在 struct 之前输出，避免 struct 字段 "enum prefix_Name" 引用不完整类型 */
@@ -5088,31 +5645,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         fprintf(out, "#include <string.h>\n"); /* memcpy 用于数组拷贝 */
     }
 
-    /* 本库对 lib_dep 的调用：收集后生成 extern，避免 C 编译 undeclared */
-    if (codegen_ndep > 0 && lib_dep_mods && lib_dep_paths) {
-        const char *ext_paths[MAX_IMPORT_DECLS];
-        struct ASTFunc *ext_funcs[MAX_IMPORT_DECLS];
-        int n_ext = 0;
-        for (int i = 0; i < m->num_funcs && m->funcs; i++)
-            if (m->funcs[i] && m->funcs[i]->body)
-                collect_lib_dep_calls_from_block(m->funcs[i]->body, lib_dep_mods, lib_dep_paths, n_lib_dep, ext_paths, ext_funcs, &n_ext, MAX_IMPORT_DECLS);
-        for (int k = 0; k < n_ext && ext_paths[k] && ext_funcs[k]; k++) {
-            char pre[256];
-            import_path_to_c_prefix(ext_paths[k], pre, sizeof(pre));
-            const struct ASTFunc *f = ext_funcs[k];
-            fprintf(out, "extern %s %s%s(", c_type_str(f->return_type), pre, f->name ? f->name : "");
-            for (int p = 0; p < f->num_params; p++) {
-                if (p) fprintf(out, ", ");
-                if (f->params[p].type && f->params[p].type->kind == AST_TYPE_SLICE)
-                    fprintf(out, "%s *", c_type_str(f->params[p].type));
-                else
-                    fprintf(out, "%s", c_type_str(f->params[p].type));
-            }
-            fprintf(out, ");\n");
-        }
-    }
-
-    /* 库模块中若函数参数/返回类型为 []T，须先输出 slice 结构体定义 */
+    /* 本库函数签名若含 []T，须最先输出 slice 结构体定义，否则后续 extern/前向声明中的 struct shulang_slice_* 为不完整类型导致 C 报错 */
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
         const struct ASTFunc *f = m->funcs[i];
         if (!f || strcmp(f->name, "main") == 0 || f->num_generic_params > 0) continue;
@@ -5137,6 +5670,27 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         for (int p = 0; p < f->num_params; p++) {
             const struct ASTType *pt = subst_type(f->params[p].type, f->generic_param_names, inst->type_args, inst->num_type_args);
             if (pt) ensure_slice_struct(pt, out);
+        }
+    }
+
+    /* 本库对 lib_dep 的调用：收集后生成 extern，避免 C 编译 undeclared */
+    if (codegen_ndep > 0 && lib_dep_mods && lib_dep_paths) {
+        const char *ext_paths[MAX_IMPORT_DECLS];
+        struct ASTFunc *ext_funcs[MAX_IMPORT_DECLS];
+        int n_ext = 0;
+        for (int i = 0; i < m->num_funcs && m->funcs; i++)
+            if (m->funcs[i] && m->funcs[i]->body)
+                collect_lib_dep_calls_from_block(m->funcs[i]->body, lib_dep_mods, lib_dep_paths, n_lib_dep, ext_paths, ext_funcs, &n_ext, MAX_IMPORT_DECLS);
+        for (int k = 0; k < n_ext && ext_paths[k] && ext_funcs[k]; k++) {
+            char pre[256];
+            import_path_to_c_prefix(ext_paths[k], pre, sizeof(pre));
+            const struct ASTFunc *f = ext_funcs[k];
+            fprintf(out, "extern %s %s%s(", c_type_str(f->return_type), pre, f->name ? f->name : "");
+            for (int p = 0; p < f->num_params; p++) {
+                if (p) fprintf(out, ", ");
+                codegen_emit_param(&f->params[p], out, NULL);
+            }
+            fprintf(out, ");\n");
         }
     }
 
@@ -5220,6 +5774,8 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         if (dce_ctx && is_func_used && !is_func_used(dce_ctx, m, f)) continue;
         char fwd_name[256];
         library_prefixed_name(f->name, fwd_name, sizeof(fwd_name));
+        if (codegen_library_import_path && !f->is_extern && (strcmp(codegen_library_import_path, "core.option") == 0 || strcmp(codegen_library_import_path, "core.result") == 0))
+            fprintf(out, "inline ");
         fprintf(out, "%s %s(", c_type_str(f->return_type), fwd_name);
         for (int j = 0; j < f->num_params; j++) {
             if (j) fprintf(out, ", ");
