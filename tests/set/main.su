@@ -1,0 +1,17 @@
+// 测试 std.set：Set_i32 insert、contains、remove、len、deinit
+import std.set;
+
+function main(): i32 {
+  let s: Set_i32 = set_i32_new();
+  if (set_i32_with_capacity(&s, 8) != 0) { return 1; }
+  if (set_i32_insert(&s, 10) != 0) { return 2; }
+  if (set_i32_insert(&s, 20) != 0) { return 3; }
+  if (set_i32_contains(s, 10) != 1) { return 4; }
+  if (set_i32_contains(s, 20) != 1) { return 5; }
+  if (set_i32_len(s) != 2) { return 6; }
+  if (set_i32_remove(&s, 10) != 1) { return 7; }
+  if (set_i32_contains(s, 10) != 0) { return 8; }
+  if (set_i32_len(s) != 1) { return 9; }
+  set_i32_deinit(&s);
+  return 0;
+}
