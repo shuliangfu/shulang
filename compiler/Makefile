@@ -60,7 +60,91 @@ SHUC_C = shuc-c
 ../std/time/time.o: ../std/time/time.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: $(TARGET) ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o
+# std.random：密码学安全随机（std/random/random.c）；链接用户程序时由 runtime.c 链入 ../std/random/random.o。
+../std/random/random.o: ../std/random/random.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.env：环境变量与临时目录（std/env/env.c）；链接用户程序时由 runtime.c 链入 ../std/env/env.o。
+../std/env/env.o: ../std/env/env.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.sync：互斥锁（std/sync/sync.c）；链接用户程序时由 runtime.c 链入 ../std/sync/sync.o；Unix 需 -lpthread。
+../std/sync/sync.o: ../std/sync/sync.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.encoding：UTF-8/ASCII（std/encoding/encoding.c）
+../std/encoding/encoding.o: ../std/encoding/encoding.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.base64：Base64 编解码（std/base64/base64.c）
+../std/base64/base64.o: ../std/base64/base64.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.crypto：SHA-256/512、HMAC（std/crypto/crypto.c）
+../std/crypto/crypto.o: ../std/crypto/crypto.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.log：日志 stderr（std/log/log.c）
+../std/log/log.o: ../std/log/log.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.test：测试断言（std/test/test.c）
+../std/test/test.o: ../std/test/test.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.atomic：原子操作（std/atomic/atomic.c）；链接用户程序时由 runtime.c 链入 ../std/atomic/atomic.o。
+../std/atomic/atomic.o: ../std/atomic/atomic.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.channel：有界/无界 channel（std/channel/channel.c）；链接时由 runtime.c 链入；Unix 需 -lpthread。
+../std/channel/channel.o: ../std/channel/channel.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.backtrace：调用栈捕获（std/backtrace/backtrace.c）；链接时由 runtime.c 链入。
+../std/backtrace/backtrace.o: ../std/backtrace/backtrace.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.hash：SipHash-2-4 Hasher（std/hash/hash.c）；链接时由 runtime.c 链入。
+../std/hash/hash.o: ../std/hash/hash.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.math：数学常量与函数（std/math/math.c）；链接时由 runtime.c 链入，需 -lm。
+../std/math/math.o: ../std/math/math.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.sort：排序（std/sort/sort.c）；链接时由 runtime.c 链入。
+../std/sort/sort.o: ../std/sort/sort.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.ffi：C 字符串互操作（std/ffi/ffi.c）；链接时由 runtime.c 链入。
+../std/ffi/ffi.o: ../std/ffi/ffi.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# P4 std 模块（按需链接）
+../std/json/json.o: ../std/json/json.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/csv/csv.o: ../std/csv/csv.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/regex/regex.o: ../std/regex/regex.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/compress/compress.o: ../std/compress/compress.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+# 可选：启用 zlib 的 compress.o，用于 tests/run-compress.sh 测试 gzip
+compress-o-zlib: ../std/compress/compress.c
+	$(CC) $(CFLAGS) -DSHU_USE_ZLIB -c -o ../std/compress/compress.o ../std/compress/compress.c
+../std/unicode/unicode.o: ../std/unicode/unicode.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/dynlib/dynlib.o: ../std/dynlib/dynlib.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/http/http.o: ../std/http/http.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+../std/tar/tar.o: ../std/tar/tar.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# 测试与 shuc 链接 std 时依赖的 .o：所有 std 模块 + runtime_panic.o；make test 前必须先有这些文件
+STD_AND_PANIC_O = ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o ../std/random/random.o ../std/env/env.o ../std/sync/sync.o ../std/encoding/encoding.o ../std/base64/base64.o ../std/crypto/crypto.o ../std/log/log.o ../std/atomic/atomic.o ../std/channel/channel.o ../std/backtrace/backtrace.o ../std/hash/hash.o ../std/math/math.o ../std/sort/sort.o ../std/ffi/ffi.o ../std/json/json.o ../std/csv/csv.o ../std/regex/regex.o ../std/compress/compress.o ../std/unicode/unicode.o ../std/dynlib/dynlib.o ../std/http/http.o ../std/tar/tar.o ../std/test/test.o runtime_panic.o
+
+all: $(TARGET) $(STD_AND_PANIC_O)
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
@@ -130,11 +214,11 @@ src/typeck/typeck_f64_bits.o: src/typeck/typeck_f64_bits.c
 endif
 
 clean:
-	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/time/time.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHUC_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o shuc_asm
+	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o ../std/random/random.o ../std/env/env.o ../std/sync/sync.o ../std/encoding/encoding.o ../std/base64/base64.o ../std/crypto/crypto.o ../std/log/log.o ../std/atomic/atomic.o ../std/channel/channel.o ../std/backtrace/backtrace.o ../std/hash/hash.o ../std/math/math.o ../std/sort/sort.o ../std/ffi/ffi.o ../std/json/json.o ../std/csv/csv.o ../std/regex/regex.o ../std/compress/compress.o ../std/unicode/unicode.o ../std/dynlib/dynlib.o ../std/http/http.o ../std/tar/tar.o ../std/test/test.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHUC_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o shuc_asm
 	rm -rf build_asm
 
-# 阶段 1 词法 + 阶段 3 类型检查 + 阶段 4 Hello World + 阶段 5 import + 阶段 6 std/target（依赖 shuc 与 std/io/io.o，clean 后 test 会先构建）
-test: $(TARGET) ../std/io/io.o
+# 阶段 1 词法 + 阶段 3 类型检查 + …；依赖 shuc 与全部 std .o、runtime_panic.o，clean 后 test 会先构建再跑脚本
+test: $(TARGET) $(STD_AND_PANIC_O)
 	@if [ -f ../tests/run-lexer.sh ]; then (cd .. && ./tests/run-lexer.sh); fi
 	@if [ -f ../tests/run-typeck.sh ]; then (cd .. && chmod +x tests/run-typeck.sh && ./tests/run-typeck.sh); fi
 	@if [ -f ../tests/run-hello.sh ]; then (cd .. && chmod +x tests/run-hello.sh && ./tests/run-hello.sh); fi
