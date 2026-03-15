@@ -1,19 +1,179 @@
-// std.fs — open/read/write/close、文件路径（自举前最小可用实现）
-// 自举前：提供与 libc 一致的 extern 声明及薄封装，便于读 .su 源码、写目标文件。
+// std.fs — open/read/write/close、mmap 只读/可写、pread/pwrite、readv/writev、O_DIRECT、fadvise、copy_file_range、sendfile、sync_range、fallocate（性能压榨到极致）
+//
+// 功能：与 libc 一致的 extern + 薄封装；路径由 std.path 拼接/规范化后传入（*u8 以 NUL 结尾）。
+// 高性能极致压榨：
+//   - 大模型等超大文件：fs_mmap_ro + madvise 顺序 + 大映射 MADV_HUGEPAGE（Linux ≥2MB）；fs_munmap。
+//   - 可写零拷贝：fs_mmap_rw；改完 fs_munmap 即落盘。
+//   - 大块顺序读：fs_read ≥ fs_read_chunk()；fs_fadvise_sequential 压榨预读。
+//   - 同一 fd 多线程并发：fs_pread / fs_pwrite 带 offset。
+//   - 分散读/集中写：fs_readv2 / fs_writev2 一次 syscall 两段，压榨 syscall 数。
+//   - 极致吞吐：fs_open_read_direct（O_DIRECT）；buf 对齐 fs_direct_align()。
+//   - 零拷贝：fs_copy_file_range（文件→文件）；fs_sendfile（文件→socket，Linux）。
+//   - 大文件写：fs_fallocate 预分配；fs_sync_range 范围刷盘不阻塞，重叠写+刷盘。
+//   - 与 std.io 联合：本模块已 import std.io，用户仅 import std.fs 即可用 read_fd/write_fd/read_batch_fd/write_batch_fd 走 io_uring/readv 极致压榨。
 
-extern function open(path: *u8, flags: i32): i32;
-extern function read(fd: i32, buf: *u8, count: usize): isize;
-extern function write(fd: i32, buf: *u8, count: usize): isize;
+import std.io;
+import std.io.driver;
+
+// 与 POSIX open/read/write/close 一致；链接时需 -lc。其余由 std/fs/fs.c 提供。
+// fs_readv_buf/fs_writev_buf 的 bufs 与 std.io.driver.Buffer ABI 一致（ptr+len+handle），可传 Buffer 数组首地址。
+extern function open(path: *u8, flags: i32, mode: i32): i32;
+extern function fs_posix_read_c(fd: i32, buf: *u8, count: usize): isize;
+extern function fs_posix_write_c(fd: i32, buf: *u8, count: usize): isize;
 extern function close(fd: i32): i32;
+extern function pread(fd: i32, buf: *u8, count: usize, offset: i64): isize;
+extern function pwrite(fd: i32, buf: *u8, count: usize, offset: i64): isize;
+extern function fs_mmap_ro_c(path: *u8, out_size: *usize): *u8;
+extern function fs_mmap_rw_c(path: *u8, out_size: *usize): *u8;
+extern function fs_munmap_c(ptr: *u8, size: usize): i32;
+extern function fs_open_read_direct_c(path: *u8): i32;
+extern function fs_direct_align_c(): u64;
+extern function fs_fadvise_sequential_c(fd: i32): i32;
+extern function fs_fadvise_willneed_c(fd: i32, offset: i64, len: usize): i32;
+extern function fs_copy_file_range_c(fd_in: i32, fd_out: i32, len: usize): i64;
+extern function fs_readv2_c(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize): i64;
+extern function fs_writev2_c(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize): i64;
+extern function fs_sendfile_c(out_fd: i32, in_fd: i32, count: usize): i64;
+extern function fs_sync_range_c(fd: i32, offset: i64, len: usize): i32;
+extern function fs_fallocate_c(fd: i32, offset: i64, len: i64): i32;
+extern function fs_open_append_c(path: *u8): i32;
+extern function fs_open_create_c(path: *u8): i32;
+extern function fs_last_error_c(): i32;
+extern function fs_readv4_c(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize): i64;
+extern function fs_writev4_c(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize): i64;
+struct FsIovecBuf { ptr: *u8; len: usize; handle: usize }
+extern function fs_readv_buf_c(fd: i32, bufs: *FsIovecBuf, n: i32): i64;
+extern function fs_writev_buf_c(fd: i32, bufs: *FsIovecBuf, n: i32): i64;
 
 function placeholder(): i32 { return 0; }
 
 function fs_invalid_handle(): i32 { return -1; }
 
-function fs_open_read(path: *u8): i32 { return open(path, 0); }
+/** 推荐大块读单次字节数（1MiB），极致压榨时用此大小循环 fs_read。 */
+function fs_read_chunk(): usize { return 1048576; }
+
+/** 只读打开 path（NUL 结尾）；失败返回 -1。 */
+function fs_open_read(path: *u8): i32 { return open(path, 0, 0); }
+
+/** 写打开 path，不存在则创建、存在则截断；失败返回 -1。 */
+function fs_open_write(path: *u8): i32 { return open(path, 577, 420); }
 
 function fs_close(fd: i32): i32 { return close(fd); }
 
-function fs_read(fd: i32, buf: *u8, count: usize): isize { return read(fd, buf, count); }
+/** 大块读：从 fd 读入最多 count 字节到 buf。推荐 count ≥ fs_read_chunk()。返回读入字节数，0=EOF，-1=错误。 */
+function fs_read(fd: i32, buf: *u8, count: usize): isize { return fs_posix_read_c(fd, buf, count); }
 
-function fs_write(fd: i32, buf: *u8, count: usize): isize { return write(fd, buf, count); }
+/** 大块写：将 buf[0..count-1] 写入 fd。返回写入字节数，-1=错误。 */
+function fs_write(fd: i32, buf: *u8, count: usize): isize { return fs_posix_write_c(fd, buf, count); }
+
+/** 并发读：从 fd 的 offset 处读最多 count 字节到 buf，不改变 fd 位置；多线程可同时对同一 fd 调 fs_pread 读不同 offset，极致并发。返回读入字节数，0=EOF，-1=错误。 */
+function fs_pread(fd: i32, buf: *u8, count: usize, offset: i64): isize { return pread(fd, buf, count, offset); }
+
+/** 并发写：向 fd 的 offset 处写 count 字节，不改变 fd 位置；多线程可同时对同一 fd 调 fs_pwrite 写不同 offset。返回写入字节数，-1=错误。 */
+function fs_pwrite(fd: i32, buf: *u8, count: usize, offset: i64): isize { return pwrite(fd, buf, count, offset); }
+
+/** 只读 + O_DIRECT 打开（Linux）；绕过页缓存，适合大文件顺序读极致吞吐。buf 与 offset 须对齐 fs_direct_align()；不可用或失败返回 -1。 */
+function fs_open_read_direct(path: *u8): i32 { return fs_open_read_direct_c(path); }
+
+/** O_DIRECT 对齐要求（字节）；buf 与 offset 须为该值的整数倍。用于 fs_open_read_direct 后的读。 */
+function fs_direct_align(): u64 { return fs_direct_align_c(); }
+
+/** 提示内核将 fd 视为顺序访问，可激进预读与释放，压榨顺序读吞吐；0 成功，-1 失败。 */
+function fs_fadvise_sequential(fd: i32): i32 { return fs_fadvise_sequential_c(fd); }
+
+/** 提示内核即将访问 [offset, offset+len)，可预取页；0 成功，-1 失败。 */
+function fs_fadvise_willneed(fd: i32, offset: i64, len: usize): i32 { return fs_fadvise_willneed_c(fd, offset, len); }
+
+/** 零拷贝：从 fd_in 当前偏移复制 len 字节到 fd_out 当前偏移（Linux copy_file_range）；返回复制字节数，-1 失败。两 fd 偏移会前进。 */
+function fs_copy_file_range(fd_in: i32, fd_out: i32, len: usize): i64 { return fs_copy_file_range_c(fd_in, fd_out, len); }
+
+/** 分散读：一次 syscall 读入两段 [p0,l0] 与 [p1,l1]；返回总字节数，0=EOF，-1 错误。压榨 syscall 数。 */
+function fs_readv2(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize): i64 { return fs_readv2_c(fd, p0, l0, p1, l1); }
+
+/** 集中写：一次 syscall 写出两段 [p0,l0] 与 [p1,l1]；返回总字节数，-1 错误。压榨 syscall 数。 */
+function fs_writev2(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize): i64 { return fs_writev2_c(fd, p0, l0, p1, l1); }
+
+/** 零拷贝：从 in_fd 当前偏移发送 count 字节到 out_fd（Linux sendfile，常用于文件→socket）；返回发送字节数，-1 失败。in_fd 偏移会前进。 */
+function fs_sendfile(out_fd: i32, in_fd: i32, count: usize): i64 { return fs_sendfile_c(out_fd, in_fd, count); }
+
+/** 范围刷盘（Linux）：将 [offset, offset+len) 写回磁盘，不阻塞全文件 sync；大文件顺序写时可重叠写+刷盘压榨吞吐。0 成功，-1 失败。 */
+function fs_sync_range(fd: i32, offset: i64, len: usize): i32 { return fs_sync_range_c(fd, offset, len); }
+
+/** 预分配文件空间 [offset, offset+len)（Linux fallocate）；减少大文件写时的碎片与元数据更新。0 成功，-1 失败。 */
+function fs_fallocate(fd: i32, offset: i64, len: i64): i32 { return fs_fallocate_c(fd, offset, len); }
+
+/** 追加写打开 path（不存在则创建）；失败返回 -1。 */
+function fs_open_append(path: *u8): i32 { return fs_open_append_c(path); }
+
+/** 写打开 path，不存在则创建、存在则不截断；失败返回 -1。 */
+function fs_open_create(path: *u8): i32 { return fs_open_create_c(path); }
+
+/** 返回上次 fs_* 失败时的平台错误码（Linux/macOS errno，Windows GetLastError）。调用方在任意 fs_* 返回 -1 或失败后可调用本函数获取细粒度错误码。 */
+function fs_last_error(): i32 { return fs_last_error_c(); }
+
+/** 分散读：一次 syscall 读入四段 [p0,l0]..[p3,l3]；返回总字节数，0=EOF，-1 错误。 */
+function fs_readv4(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize): i64 {
+  return fs_readv4_c(fd, p0, l0, p1, l1, p2, l2, p3, l3);
+}
+
+/** 集中写：一次 syscall 写出四段 [p0,l0]..[p3,l3]；返回总字节数，-1 错误。 */
+function fs_writev4(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize): i64 {
+  return fs_writev4_c(fd, p0, l0, p1, l1, p2, l2, p3, l3);
+}
+
+/** 与 Zig/Rust 对齐：按「指针+段数」分散读；bufs 指向至少 n 个 FsIovecBuf（ptr/len 有效，与 std.io.driver.Buffer ABI 一致），n 为 1..16。返回总字节数，0=EOF，-1=错误。 */
+function fs_readv_buf(fd: i32, bufs: *FsIovecBuf, n: i32): i64 {
+  return fs_readv_buf_c(fd, bufs, n);
+}
+
+/** 与 Zig/Rust 对齐：按「指针+段数」集中写；bufs 同上，n 为 1..16。返回总字节数，-1=错误。 */
+function fs_writev_buf(fd: i32, bufs: *FsIovecBuf, n: i32): i64 {
+  return fs_writev_buf_c(fd, bufs, n);
+}
+
+/** 只读 mmap 整个文件（极速读大模型等大文件）；path 为 NUL 结尾；内核 madvise 顺序+大页（≥2MB 时 Linux）。返回映射首地址，*out_size 为文件字节数；失败返回 0。用毕必须 fs_munmap(ptr, *out_size)。 */
+function fs_mmap_ro(path: *u8, out_size: *usize): *u8 { return fs_mmap_ro_c(path, out_size); }
+
+/** 可写 mmap 整个文件（写回磁盘）；path 须已存在且可写。返回映射首地址，*out_size 为文件字节数；失败返回 0。用毕必须 fs_munmap(ptr, *out_size)。 */
+function fs_mmap_rw(path: *u8, out_size: *usize): *u8 { return fs_mmap_rw_c(path, out_size); }
+
+/** 解除 mmap；ptr 与 size 须为 fs_mmap_ro/fs_mmap_rw 的返回值与 *out_size。返回 0 成功，-1 失败。 */
+function fs_munmap(ptr: *u8, size: usize): i32 { return fs_munmap_c(ptr, size); }
+
+// ——— 与 std.io 联合：用户仅 import std.fs 即可用下列 fd 接口，走 io_uring/readv 极致压榨（无需再 import std.io） ———
+/** 将 fd 转为 io handle；与 read_fd/write_fd/read_batch_fd/write_batch_fd 配套。 */
+function handle_from_fd(fd: i32): usize { return (fd as usize); }
+
+/** 从 fd 单次大块读（走 std.io，Linux 下 io_uring）；推荐 len ≥ fs_read_chunk()。返回读入字节数，0=EOF，-1=错误。 */
+function read_fd(fd: i32, ptr: *u8, len: usize): i32 {
+  return read_into(handle_from_fd(fd), ptr, len, 0);
+}
+
+/** 向 fd 单次大块写（走 std.io，Linux 下 io_uring）。返回写入字节数，-1=错误。 */
+function write_fd(fd: i32, ptr: *u8, len: usize): i32 {
+  return write_from(handle_from_fd(fd), ptr, len, 0);
+}
+
+/** 从 fd 批量读：一次 submit 最多 4 段，n 为段数 1..4；走 io_uring/readv。返回总字节数，-1=错误。 */
+function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  let bufs: [4]Buffer = [
+    Buffer { ptr: p0, len: l0, handle: h },
+    Buffer { ptr: p1, len: l1, handle: h },
+    Buffer { ptr: p2, len: l2, handle: h },
+    Buffer { ptr: p3, len: l3, handle: h }
+  ];
+  return submit_read_batch(bufs, n, 0);
+}
+
+/** 向 fd 批量写：一次 submit 最多 4 段，n 为段数 1..4；走 io_uring/writev。返回总字节数，-1=错误。 */
+function write_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  let bufs: [4]Buffer = [
+    Buffer { ptr: p0, len: l0, handle: h },
+    Buffer { ptr: p1, len: l1, handle: h },
+    Buffer { ptr: p2, len: l2, handle: h },
+    Buffer { ptr: p3, len: l3, handle: h }
+  ];
+  return submit_write_batch(bufs, n, 0);
+}
