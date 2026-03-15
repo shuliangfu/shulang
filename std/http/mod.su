@@ -1,0 +1,10 @@
+// std.http — 最小 HTTP 客户端/服务（P4 可选；占位）
+//
+// 【文件职责】get 等占位；后续可基于 std.net、std.io 实现。
+// 【依赖】std.net、std.io；与 std/http/http.c 同属一模块。
+
+extern function http_get_c(url: *u8, url_len: i32, out_buf: *u8, out_cap: i32): i32;
+
+function get(url: *u8, url_len: i32, out_buf: *u8, out_cap: i32): i32 {
+  return http_get_c(url, url_len, out_buf, out_cap);
+}
