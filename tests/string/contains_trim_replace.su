@@ -1,0 +1,33 @@
+// 测试 std.string：string_contains、string_find_slice、string_rfind_char、string_trim_space、string_replace_char
+import std.string;
+
+function main(): i32 {
+  // "abracadabra" -> 11 字节
+  let buf: [16]u8 = [97, 98, 114, 97, 99, 97, 100, 97, 98, 114, 97, 0, 0, 0, 0, 0];
+  let s: String = string_from_slice(&buf[0], 11);
+  let ab: [2]u8 = [97, 98];
+  if (string_contains(s, &ab[0], 2) != 1) { return 1; }
+  let xz: [2]u8 = [120, 122];
+  if (string_contains(s, &xz[0], 2) != 0) { return 2; }
+  if (string_find_slice(s, &ab[0], 2) != 0) { return 3; }
+  let ra: [2]u8 = [114, 97];
+  if (string_find_slice(s, &ra[0], 2) != 2) { return 4; }
+  if (string_find_slice(s, &xz[0], 2) != -1) { return 5; }
+  if (string_rfind_char(s, 97) != 10) { return 6; }
+  if (string_rfind_char(s, 98) != 8) { return 7; }
+  if (string_rfind_char(s, 122) != -1) { return 8; }
+  // trim: "  hi  " -> "hi"
+  let with_sp: [8]u8 = [32, 32, 104, 105, 32, 32, 0, 0];
+  let st: String = string_from_slice(&with_sp[0], 6);
+  let out: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let n: i32 = string_trim_space(st, &out[0], 8);
+  if (n != 2) { return 9; }
+  if (out[0] != 104 || out[1] != 105) { return 10; }
+  // replace_char
+  let ss: String = string_from_slice(&buf[0], 11);
+  let cnt: i32 = string_replace_char(&ss, 97, 65);
+  if (cnt != 5) { return 11; }
+  if (string_get(ss, 0) != 65) { return 12; }
+  if (string_get(ss, 3) != 65) { return 13; }
+  return 0;
+}

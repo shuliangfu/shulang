@@ -1,0 +1,15 @@
+// 测试 std.string：string_from_slice、string_eq、string_len、string_is_empty
+import std.string;
+
+function main(): i32 {
+  let buf: [4]u8 = [97, 98, 99, 0];
+  let s: String = string_from_slice(&buf[0], 3);
+  if (string_len(s) != 3) { return 1; }
+  if (string_is_empty(s) != 0) { return 2; }
+  let t: String = string_from_slice(&buf[0], 3);
+  if (string_eq(s, t) != 1) { return 3; }
+  let u: String = string_new();
+  if (string_is_empty(u) != 1) { return 4; }
+  if (string_eq(s, u) != 0) { return 5; }
+  return 0;
+}

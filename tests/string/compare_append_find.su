@@ -1,0 +1,30 @@
+// 测试 std.string：string_compare、string_append_char、string_append_slice、string_find_char、string_starts_with、string_ends_with、string_copy_to
+import std.string;
+
+function main(): i32 {
+  let a_buf: [2]u8 = [97, 98];
+  let b_buf: [2]u8 = [97, 99];
+  let a: String = string_from_slice(&a_buf[0], 2);
+  let b: String = string_from_slice(&b_buf[0], 2);
+  if (string_compare(a, b) >= 0) { return 1; }
+  if (string_compare(b, a) <= 0) { return 2; }
+  if (string_compare(a, a) != 0) { return 3; }
+  let s: String = string_new();
+  let s2: String = s;
+  if (string_append_char(&s2, 104) != 0) { return 4; }
+  if (string_len(s2) != 1) { return 5; }
+  let hi: [2]u8 = [105, 0];
+  if (string_append_slice(&s2, &hi[0], 1) != 0) { return 6; }
+  if (string_find_char(s2, 104) != 0) { return 7; }
+  if (string_find_char(s2, 105) != 1) { return 8; }
+  if (string_find_char(s2, 122) != -1) { return 9; }
+  let pre: [1]u8 = [104];
+  if (string_starts_with(s2, &pre[0], 1) != 1) { return 10; }
+  let suf: [1]u8 = [105];
+  if (string_ends_with(s2, &suf[0], 1) != 1) { return 11; }
+  let out: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let n: i32 = string_copy_to(s2, &out[0], 8);
+  if (n != 2) { return 12; }
+  if (out[0] != 104 || out[1] != 105) { return 13; }
+  return 0;
+}
