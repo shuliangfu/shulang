@@ -119,6 +119,41 @@ function expr_var_name_equal_func(arena: *ASTArena, callee_expr_ref: i32, mod: *
   return true;
 }
 
+/** 在 arena 中按名查找或分配 TYPE_NAMED，返回 type_ref；供 struct literal 设 resolved_type_ref，使 if-expr 能取到 else 分支类型。 */
+function find_or_alloc_named_type_ref(arena: *ASTArena, name: *u8, name_len: i32): i32 {
+  if (name_len <= 0 || name_len > 63) {
+    return 0;
+  }
+  let k: i32 = 1;
+  while (k <= arena.num_types) {
+    let tk: Type = ast_arena_type_get(arena, k);
+    if (tk.kind == TypeKind.TYPE_NAMED && name_equal(tk.name, tk.name_len, name, name_len)) {
+      return k;
+    }
+    k = k + 1;
+  }
+  let new_ref: i32 = ast_arena_type_alloc(arena);
+  if (new_ref == 0) {
+    return 0;
+  }
+  let ti: Type = ast_arena_type_get(arena, new_ref);
+  ti.kind = TypeKind.TYPE_NAMED;
+  ti.name_len = name_len;
+  let i: i32 = 0;
+  while (i < 64) {
+    if (i < name_len) {
+      ti.name[i] = name[i];
+    } else {
+      ti.name[i] = 0;
+    }
+    i = i + 1;
+  }
+  ti.elem_type_ref = 0;
+  ti.array_size = 0;
+  ast_arena_type_set(arena, new_ref, ti);
+  return new_ref;
+}
+
 /** 在当前 arena 中取或分配 TYPE_I32，返回其 type_ref；供跨模块调用时 dep 返回 i32 时复用本 arena 的类型。 */
 function ensure_i32_type_ref(arena: *ASTArena): i32 {
   let k: i32 = 1;
@@ -322,10 +357,53 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
     if (!ref_is_null(e.if_else_ref) && check_expr(module, arena, e.if_else_ref, return_type_ref, ctx) != 0) {
       return -1;
     }
+    /* if 表达式：两分支均为 NAMED（struct）时须类型一致；一侧 struct 一侧标量时取 struct 以便 __tmp 声明正确 */
+    let ty_t: i32 = expr_type_ref(arena, e.if_then_ref);
+    let ty_e: i32 = expr_type_ref(arena, e.if_else_ref);
+    let t_named: bool = false;
+    let e_named: bool = false;
+    if (!ref_is_null(ty_t) && ty_t > 0 && ty_t <= arena.num_types) {
+      let tt: Type = ast_arena_type_get(arena, ty_t);
+      t_named = (tt.kind == TypeKind.TYPE_NAMED);
+    }
+    if (!ref_is_null(ty_e) && ty_e > 0 && ty_e <= arena.num_types) {
+      let te: Type = ast_arena_type_get(arena, ty_e);
+      e_named = (te.kind == TypeKind.TYPE_NAMED);
+    }
+    if (!ref_is_null(ty_t) && !ref_is_null(ty_e) && t_named && e_named && !type_refs_equal(arena, ty_t, ty_e)) {
+      return -1;
+    }
+    if (!ref_is_null(ty_t) && !ref_is_null(ty_e)) {
+      e.resolved_type_ref = (e_named && !t_named) ? ty_e : ty_t;
+      ast_arena_expr_set(arena, expr_ref, e);
+    } else if (!ref_is_null(ty_t)) {
+      e.resolved_type_ref = ty_t;
+      ast_arena_expr_set(arena, expr_ref, e);
+    } else if (!ref_is_null(ty_e)) {
+      e.resolved_type_ref = ty_e;
+      ast_arena_expr_set(arena, expr_ref, e);
+    }
     return 0;
   }
   if (e.kind == ExprKind.EXPR_BLOCK) {
-    return check_block(module, arena, e.block_ref, return_type_ref, ctx);
+    if (check_block(module, arena, e.block_ref, return_type_ref, ctx) != 0) {
+      return -1;
+    }
+    /* 块类型：有 final_expr 用其类型；否则若仅一条赋值语句则用赋值 RHS 类型（如 else { __tmp = (struct ast_Type){0} }），供 if 表达式取 else 分支 struct 类型 */
+    if (e.block_ref > 0 && e.block_ref <= arena.num_blocks) {
+      let b: Block = ast_arena_block_get(arena, e.block_ref);
+      if (!ref_is_null(b.final_expr_ref)) {
+        e.resolved_type_ref = expr_type_ref(arena, b.final_expr_ref);
+        ast_arena_expr_set(arena, expr_ref, e);
+      } else if (b.num_expr_stmts == 1 && b.expr_stmt_refs[0] > 0 && b.expr_stmt_refs[0] <= arena.num_exprs) {
+        let st: Expr = ast_arena_expr_get(arena, b.expr_stmt_refs[0]);
+        if (st.kind == ExprKind.EXPR_ASSIGN && !ref_is_null(st.binop_right_ref)) {
+          e.resolved_type_ref = expr_type_ref(arena, st.binop_right_ref);
+          ast_arena_expr_set(arena, expr_ref, e);
+        }
+      }
+    }
+    return 0;
   }
   if (e.kind == ExprKind.EXPR_ASSIGN) {
     let left_ref: i32 = e.binop_left_ref;
@@ -471,6 +549,20 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
       i = i + 1;
     }
   }
+  /* 未在块内找到时，从当前函数的形参解析（供库函数如 token_is_eof(t: Token) 使用） */
+  if (e.kind == ExprKind.EXPR_VAR && ctx.current_func_index >= 0 && ctx.current_func_index < module.num_funcs) {
+    let f: Func = module.funcs[ctx.current_func_index];
+    let pi: i32 = 0;
+    while (pi < f.num_params && pi < 16) {
+      let p: Param = f.params[pi];
+      if (!ref_is_null(p.type_ref) && name_equal(p.name, p.name_len, e.var_name, e.var_name_len)) {
+        e.resolved_type_ref = p.type_ref;
+        ast_arena_expr_set(arena, expr_ref, e);
+        return 0;
+      }
+      pi = pi + 1;
+    }
+  }
   if (e.kind == ExprKind.EXPR_STRUCT_LIT) {
     let fi: i32 = 0;
     while (fi < e.struct_lit_num_fields && fi < 8) {
@@ -481,6 +573,12 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
     }
     if (ensure_struct_layout_from_struct_lit(module, e) != 0) {
       return -1;
+    }
+    /* 为结构体字面量设 resolved_type_ref，使 if-expr 的 then/else 类型推断正确，避免 codegen 生成 int __tmp = (struct X){0} */
+    let tr: i32 = find_or_alloc_named_type_ref(arena, e.struct_lit_struct_name, e.struct_lit_struct_name_len);
+    if (tr != 0) {
+      e.resolved_type_ref = tr;
+      ast_arena_expr_set(arena, expr_ref, e);
     }
     return 0;
   }
@@ -658,12 +756,39 @@ function typeck_su_ast_impl(module: *Module, arena: *ASTArena, ctx: *PipelineDep
     if (i >= 256) {
       break;
     }
+    ctx.current_func_index = i;
     let f: Func = module.funcs[i];
     if (!ref_is_null(f.body_ref) && f.is_extern == 0) {
       if (check_block(module, arena, f.body_ref, f.return_type_ref, ctx) != 0) {
+        ctx.current_func_index = -1;
         return -5;
       }
     }
+    ctx.current_func_index = -1;
+    i = i + 1;
+  }
+  return 0;
+}
+
+/**
+ * 库模块类型检查：无 main 时仅遍历所有有体函数做 check_block，供 -backend asm -o xxx.o 编库用。
+ * 返回 0 通过，-5 为 check_block 失败。
+ */
+function typeck_su_ast_library(module: *Module, arena: *ASTArena, ctx: *PipelineDepCtx): i32 {
+  let i: i32 = 0;
+  while (i < module.num_funcs) {
+    if (i >= 256) {
+      break;
+    }
+    ctx.current_func_index = i;
+    let f: Func = module.funcs[i];
+    if (!ref_is_null(f.body_ref) && f.is_extern == 0) {
+      if (check_block(module, arena, f.body_ref, f.return_type_ref, ctx) != 0) {
+        ctx.current_func_index = -1;
+        return -5;
+      }
+    }
+    ctx.current_func_index = -1;
     i = i + 1;
   }
   return 0;
