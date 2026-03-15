@@ -1,0 +1,16 @@
+// 测试 std.fmt：重导出 core.fmt、print/println、format_2_i32_i32
+// 【运行方式】bash tests/run-fmt-std.sh 或 shuc -L . tests/fmt-std/main.su -o /tmp/fmt_std_main && /tmp/fmt_std_main
+import std.fmt;
+
+function main(): i32 {
+  let buf: [32]u8 = [];
+  let n: i32 = fmt_i32_to_buf(buf, 32, 42);
+  if (n != 2) { return 1; }
+  let total: i32 = format_2_i32_i32(buf, 32, 10, 20);
+  if (total != 4) { return 2; }
+  let r: i32 = print(&buf[0], 4);
+  if (r < 0) { return 3; }
+  let nl: [1]u8 = [10];
+  let r2: i32 = println(&nl[0], 0);
+  return 0;
+}
