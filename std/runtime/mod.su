@@ -1,8 +1,28 @@
-// std.runtime — 运行时初始化、panic 钩子等（自举前最小实现）
-// 自举前：提供最小可调用 API；panic 钩子等后续扩展。
+// std.runtime — 运行时初始化、panic/abort（对标 Zig @panic、Rust std::panic/process::abort、Go runtime）
+//
+// 【文件职责】
+// 提供 panic()、abort()、runtime_ready()；panic/abort 经 std/runtime/runtime.c 对接 shulang_panic_，
+// 链接时需提供 runtime_panic.o（或 libc abort）及 std/runtime/runtime.o。
+//
+// 【对标】
+// Zig: @panic 内建、无独立 runtime 模块；Rust: std::panic::panic!、std::process::abort、panic::set_hook；
+// Go: panic()、recover()、runtime.Goexit、runtime.NumCPU 等。我们提供最小集：panic/abort/ready。
 
-// 占位函数，表示本模块已可 import。
-function placeholder(): i32 { return 0; }
+extern function runtime_panic(): void;
+extern function runtime_abort(): void;
 
-// 表示运行时已就绪（占位），返回 0。
+/** 无参 panic：终止程序（noreturn）。用于断言失败、不可达分支等。对标 Rust panic!()、Zig @panic、Go panic()。 */
+function panic(): void {
+  runtime_panic();
+}
+
+/** 终止程序（noreturn）；与 panic 同义。对标 C abort()、Rust std::process::abort。 */
+function abort(): void {
+  runtime_abort();
+}
+
+/** 运行时已就绪（占位）；返回 0。可用于初始化检查。对标 Go runtime 初始化语义。 */
 function runtime_ready(): i32 { return 0; }
+
+/** 占位，表示本模块可 import。 */
+function placeholder(): i32 { return 0; }
