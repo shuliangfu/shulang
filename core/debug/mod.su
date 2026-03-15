@@ -1,13 +1,44 @@
-// core.debug — assert、debug 打印等（自举前最小实现）
-// 自举前：assert(b) 在条件为假时 panic；返回 0 便于作为表达式使用。
+// core.debug — 断言与调试辅助（自举前最小实现）
+// 所有断言在条件不满足时调用 panic 终止；返回 0 便于在表达式中使用。不提供 debug_print（与零 OS 依赖冲突时放 std.debug）。
 
 function placeholder(): i32 { return 0; }
 
-// 条件为假时终止程序（调用 panic）；条件为真时返回 0。if-else 分分支 return，可读性更好。
+// 条件为假时终止程序（调用 panic）；条件为真时返回 0。
 function assert(b: bool): i32 {
-  if (!b) {
-    return panic();
-  } else {
-    return 0;
-  }
+  if (!b) { return panic(); }
+  return 0;
+}
+
+// 与 assert 同义；可约定仅在 debug 构建生效，当前实现与 assert 一致。
+function debug_assert(b: bool): i32 {
+  if (!b) { return panic(); }
+  return 0;
+}
+
+// 断言 a == b，否则 panic；返回 0。
+function assert_eq_i32(a: i32, b: i32): i32 {
+  if (a != b) { return panic(); }
+  return 0;
+}
+// 断言 a != b，否则 panic；返回 0。
+function assert_ne_i32(a: i32, b: i32): i32 {
+  if (a == b) { return panic(); }
+  return 0;
+}
+
+// 断言 a == b，否则 panic；返回 0。
+function assert_eq_u32(a: u32, b: u32): i32 {
+  if (a != b) { return panic(); }
+  return 0;
+}
+// 断言 a != b，否则 panic；返回 0。
+function assert_ne_u32(a: u32, b: u32): i32 {
+  if (a == b) { return panic(); }
+  return 0;
+}
+
+// 断言 a == b（bool），否则 panic；返回 0。
+function assert_eq_bool(a: bool, b: bool): i32 {
+  if (a != b) { return panic(); }
+  return 0;
 }
