@@ -1,0 +1,29 @@
+// std.base64 — Base64 编解码（标准/URL 变体，单遍无分配，对标 Zig std.base64）
+//
+// 【文件职责】encode/decode standard 与 URL；单遍、静态表、无堆分配。
+// 【依赖】core；与 std/base64/base64.c 同属一模块。
+
+extern function base64_encode_standard_c(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32;
+extern function base64_encode_url_c(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32;
+extern function base64_decode_standard_c(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32;
+extern function base64_decode_url_c(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32;
+
+/** 标准 Base64 编码；返回写入字节数，缓冲区不足返回 -1。 */
+function encode_standard(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32 {
+  return base64_encode_standard_c(src, src_len, out, out_cap);
+}
+
+/** URL 安全 Base64 编码（无填充）；返回写入字节数。 */
+function encode_url(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32 {
+  return base64_encode_url_c(src, src_len, out, out_cap);
+}
+
+/** 标准 Base64 解码；返回写入 out 的字节数，非法输入返回 -1。 */
+function decode_standard(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32 {
+  return base64_decode_standard_c(src, src_len, out, out_cap);
+}
+
+/** URL 变体解码；返回写入字节数，非法返回 -1。 */
+function decode_url(src: *u8, src_len: i32, out: *u8, out_cap: i32): i32 {
+  return base64_decode_url_c(src, src_len, out, out_cap);
+}
