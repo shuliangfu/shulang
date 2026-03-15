@@ -1,0 +1,22 @@
+// 测试 std.fs：fs_mmap_ro、fs_munmap（极速读大文件）
+// 先写一个临时文件再 mmap 只读，检查首字节后 munmap。
+import std.fs;
+
+function main(): i32 {
+  let path: [16]u8 = [47, 116, 109, 112, 47, 109, 102, 115, 0, 0, 0, 0, 0, 0, 0, 0];
+  let fd: i32 = fs_open_write(&path[0]);
+  if (fd < 0) { return 1; }
+  let buf: [4]u8 = [88, 89, 90, 10];
+  let n: isize = fs_write(fd, &buf[0], 4);
+  fs_close(fd);
+  if (n != 4) { return 2; }
+  let size: usize = 0;
+  let ptr: *u8 = fs_mmap_ro(&path[0], &size);
+  if (ptr == 0) { return 3; }
+  if (size != 4) { return 4; }
+  if (ptr[0] != 88) { return 5; }
+  if (ptr[1] != 89) { return 6; }
+  let r: i32 = fs_munmap(ptr, size);
+  if (r != 0) { return 7; }
+  return 0;
+}
