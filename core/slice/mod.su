@@ -1,8 +1,40 @@
-// core.slice — 切片类型与边界安全访问（自举前最小实现）
-// 自举前：[]T 支持 .length 字段（类型 usize）；本模块提供 len_i32 等最小 API。
+// core.slice — 切片类型与边界安全访问（自举前实现）
+// []T 支持 .length 字段（类型 usize）；本模块提供 len/get 的边界安全 API（越界返回 Option 的 none）。
+// 当前：[]i32 / []u8 的 len、get（边界安全）、get_*_unchecked（热路径，调用方保证 i < len）。
 
+import core.option;
+
+// ——— []i32 ———
 // 返回 []i32 切片的长度（元素个数），类型为 usize。
 function len_i32(s: []i32): usize { return s.length; }
 
-// 占位函数，表示本模块可 import；get 等安全访问后续扩展。
+// 边界内返回 some(s[i])，越界返回 none_i32()。
+function get_i32(s: []i32, i: usize): Option_i32 {
+  if (i < s.length) {
+    return some_i32(s[i]);
+  } else {
+    return none_i32();
+  }
+}
+
+// 直接返回 s[i]；仅当调用方已保证 i < s.length 时使用，否则未定义。
+function get_i32_unchecked(s: []i32, i: usize): i32 { return s[i]; }
+
+// ——— []u8 ———
+// 返回 []u8 切片的长度（元素个数），类型为 usize。
+function len_u8(s: []u8): usize { return s.length; }
+
+// 边界内返回 some(s[i])，越界返回 none_u8()。
+function get_u8(s: []u8, i: usize): Option_u8 {
+  if (i < s.length) {
+    return some_u8(s[i]);
+  } else {
+    return none_u8();
+  }
+}
+
+// 直接返回 s[i]；仅当调用方已保证 i < s.length 时使用，否则未定义。
+function get_u8_unchecked(s: []u8, i: usize): u8 { return s[i]; }
+
+// 占位函数，表示本模块可 import。
 function placeholder(): i32 { return 0; }
