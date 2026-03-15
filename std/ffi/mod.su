@@ -1,0 +1,23 @@
+// std.ffi — C 字符串互操作（对标 Zig std.cstr、Rust std::ffi）
+//
+// 【文件职责】cstr_len（NUL 结尾长度）、cstring_new（分配并 NUL 结尾）、cstring_free。
+// 【依赖】core；与 std/ffi/ffi.c 同属一模块。
+
+extern function ffi_cstr_len_c(ptr: *u8): i32;
+extern function ffi_cstring_new_c(ptr: *u8, len: i32): *u8;
+extern function ffi_cstring_free_c(ptr: *u8): void;
+
+/** 返回 NUL 结尾字符串的字节长度（不含 NUL）；ptr 为 0 返回 -1。 */
+function cstr_len(ptr: *u8): i32 {
+  return ffi_cstr_len_c(ptr);
+}
+
+/** 分配并复制 ptr[0..len]，末尾加 NUL；失败返回 0。需用 cstring_free 释放。 */
+function cstring_new(ptr: *u8, len: i32): *u8 {
+  return ffi_cstring_new_c(ptr, len);
+}
+
+/** 释放由 cstring_new 返回的指针。 */
+function cstring_free(ptr: *u8): void {
+  ffi_cstring_free_c(ptr);
+}
