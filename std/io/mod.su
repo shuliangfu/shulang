@@ -1,6 +1,12 @@
-// std.io — Read/Write 最小接口、标准输入输出（自举前最小实现）
-// I/O 抽象：Reader/Writer trait、ReadOnlySlice/WriteOnlySlice、超时参数预留；std.io 为 std.io.driver 的薄封装（全异步实现，同步 = submit + 等一次完成）。
-// print_i32/print_u32 由 codegen 生成 printf 调用。
+// std.io — Read/Write 与标准流 API（高性能 Shu IO 三层之 API 层，与 std.fs 联合极致压榨）
+//
+// 职责：Reader/Writer trait、ReadOnlySlice/WriteOnlySlice；对 std.io.driver 的薄封装，同步 = submit + 等一次完成。
+// 提供：handle 常量、单次/批量读写、标准流（stdin/stdout/stderr）；fd 便捷 API（read_fd/write_fd/read_batch_fd/write_batch_fd）与 std.fs 联合走 io_uring/readv 极致压榨。
+// 零拷贝：写路径已零拷贝（write/write_fd 直接传用户 ptr 进内核，无库内二次拷贝）；读零拷贝为 read_ptr/read_ptr_len、read_stdin_ptr，返回内部缓冲只读指针，指针在下次 read_ptr 前有效。
+// 依赖：std.io.driver（Buffer、submit_read/submit_write、read_ptr/read_ptr_len）；std.io.core（固定 buffer 池多块注册）。
+
+import std.io.driver;
+import std.io.core;
 
 // ——— ReadOnlySlice / WriteOnlySlice（零拷贝只读/只写视图，预留与 driver 对接） ———
 struct ReadOnlySlice {
@@ -21,32 +27,176 @@ trait Writer {
   function write(self): i32;
 }
 
-// ——— 超时参数预留：统一 u32 毫秒（ms），0 表示无超时（TIMEOUT_MS_NONE）；与 driver timeout_ms 一致 ———
-// 占位：预留带超时的读接口，自举后由 driver 实现；buf 为写入目标，timeout_ms 为 0 表示阻塞直到有数据
-function read_with_timeout(buf: []u8, timeout_ms: u32): i32 {
-  return 0;
+// ——— 超时常量：timeout_ms 传 0 表示无超时（阻塞直到完成），与 driver 一致 ———
+// 使用示例：read_with_timeout(ptr, len, 0) 等价于 read_stdin(ptr, len)。
+
+// ——— 标准 handle（0=stdin，1=stdout，2=stderr；≥2 可与 std.fs/std.net fd 统一） ———
+function handle_stdin(): usize { return 0; }
+function handle_stdout(): usize { return 1; }
+function handle_stderr(): usize { return 2; }
+
+/** 将 std.fs 等得到的 fd 转为 io handle，用于 read/write；与 std.fs 联合压榨时 fd 走 io_uring/readv。 */
+function handle_from_fd(fd: i32): usize { return (fd as usize); }
+
+// ——— 通用 handle 读写：任意 handle（stdin/stdout/stderr 或 fd）均可走同一套 submit ———
+// 从 handle 读入至 ptr[0..len]，timeout_ms 毫秒（0=无超时）。返回读入字节数，0=EOF，-1=错误。
+function read(handle: usize, ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  let buf: Buffer = Buffer { ptr: ptr, len: len, handle: handle };
+  return submit_read(buf, timeout_ms);
 }
 
-// 占位：预留带超时的写接口，自举后由 driver 实现
-function write_with_timeout(buf: []u8, timeout_ms: u32): i32 {
-  return 0;
+// 将 ptr[0..len] 写入 handle，timeout_ms 毫秒（0=无超时）。返回写入字节数，-1=错误。
+function write(handle: usize, ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  let buf: Buffer = Buffer { ptr: ptr, len: len, handle: handle };
+  return submit_write(buf, timeout_ms);
 }
 
-// ——— 标准输出（现有） ———
-// 向标准输出打印有符号整数 x 并换行，返回 0
-function print_i32(x: i32): i32 {
-  return 0;
+/** 与 read 同义；供 std.fs 等模块调用，避免与 libc read(fd,buf,count) 同名冲突。 */
+function read_into(handle: usize, ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  return read(handle, ptr, len, timeout_ms);
 }
 
-// 向标准输出打印无符号整数 x 并换行，返回 0
-function print_u32(x: u32): i32 {
-  return 0;
+/** 与 write 同义；供 std.fs 等模块调用，避免与 libc write(fd,buf,count) 同名冲突。 */
+function write_from(handle: usize, ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  return write(handle, ptr, len, timeout_ms);
 }
 
-// 向标准输出打印 64 位有符号整数 x 并换行，返回 0
-function print_i64(x: i64): i32 {
-  return 0;
+// ——— 标准流便捷 API（等价于 read(0,...)/write(1,...)/write(2,...)，timeout=0） ———
+function read_stdin(ptr: *u8, len: usize): i32 {
+  return read(0, ptr, len, 0);
 }
+
+/** 零拷贝读：读入内部缓冲，返回只读指针；失败返回 0。指针在下次 read_ptr 前有效。 */
+function read_ptr(handle: usize, timeout_ms: u32): *u8 {
+  return driver_read_ptr(handle, timeout_ms);
+}
+
+/** 返回最近一次 read_ptr/read_stdin_ptr 成功读入的字节数；与 read_ptr/read_stdin_ptr 配套使用。 */
+function read_ptr_len(): i32 {
+  return driver_read_ptr_len();
+}
+
+/** 零拷贝读 stdin：读入内部缓冲，返回只读指针；失败返回 0。指针在下次 read_stdin_ptr/read_ptr 前有效；长度用 read_ptr_len()。 */
+function read_stdin_ptr(): *u8 {
+  return read_ptr(0, 0);
+}
+
+function write_stdout(ptr: *u8, len: usize): i32 {
+  return write(1, ptr, len, 0);
+}
+
+function write_stderr(ptr: *u8, len: usize): i32 {
+  return write(2, ptr, len, 0);
+}
+
+// ——— 带超时的标准流 API ———
+function read_with_timeout(ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  return read(0, ptr, len, timeout_ms);
+}
+
+function write_with_timeout(ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  return write(1, ptr, len, timeout_ms);
+}
+
+// 向 stderr 写入 ptr[0..len]，超时 timeout_ms（0=无超时）。返回写入字节数，-1=错误。
+function write_stderr_with_timeout(ptr: *u8, len: usize, timeout_ms: u32): i32 {
+  return write(2, ptr, len, timeout_ms);
+}
+
+// ——— 批量读写：直接使用 std.io.driver 的 submit_read_batch / submit_write_batch（import std.io.driver 后传 [4]Buffer + n + timeout_ms） ———
+
+// ——— 与 std.fs 联合极致压榨：fd 单次/批量走 io_uring（Linux）/readv/writev，一次 submit 多段 ———
+/** 从 fd 读入至 ptr[0..len]（timeout=0）；fd 可为 std.fs 打开的文件。推荐 len ≥ std.fs.fs_read_chunk() 压榨 syscall。返回读入字节数，0=EOF，-1=错误。 */
+function read_fd(fd: i32, ptr: *u8, len: usize): i32 {
+  return read(handle_from_fd(fd), ptr, len, 0);
+}
+
+/** 将 ptr[0..len] 写入 fd（timeout=0）；fd 可为 std.fs 打开的文件。返回写入字节数，-1=错误。 */
+function write_fd(fd: i32, ptr: *u8, len: usize): i32 {
+  return write(handle_from_fd(fd), ptr, len, 0);
+}
+
+/** 从 fd 批量读：一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4。Linux 走 io_uring 多 SQE 或 readv，极致压榨。返回总字节数，-1=错误。 */
+function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  let bufs: [4]Buffer = [
+    Buffer { ptr: p0, len: l0, handle: h },
+    Buffer { ptr: p1, len: l1, handle: h },
+    Buffer { ptr: p2, len: l2, handle: h },
+    Buffer { ptr: p3, len: l3, handle: h }
+  ];
+  return submit_read_batch(bufs, n, 0);
+}
+
+/** 向 fd 批量写：一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4。Linux 走 io_uring 多 SQE 或 writev，极致压榨。返回总字节数，-1=错误。 */
+function write_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  let bufs: [4]Buffer = [
+    Buffer { ptr: p0, len: l0, handle: h },
+    Buffer { ptr: p1, len: l1, handle: h },
+    Buffer { ptr: p2, len: l2, handle: h },
+    Buffer { ptr: p3, len: l3, handle: h }
+  ];
+  return submit_write_batch(bufs, n, 0);
+}
+
+/** 与 Zig/Rust 对齐：从 fd 按「指针+段数」批量读；buffers 指向至少 n 个 Buffer（ptr/len 有效），n 为 1..16。timeout=0。返回总字节数，-1=错误。 */
+function read_batch_fd_buf(fd: i32, buffers: *Buffer, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  return submit_read_batch_buf(h, buffers, n, 0);
+}
+
+/** 与 Zig/Rust 对齐：向 fd 按「指针+段数」批量写；buffers 同上，n 为 1..16。返回总字节数，-1=错误。 */
+function write_batch_fd_buf(fd: i32, buffers: *Buffer, n: i32): i32 {
+  let h: usize = handle_from_fd(fd);
+  return submit_write_batch_buf(h, buffers, n, 0);
+}
+
+// ——— 便捷：向 stdout 写一段字节（等价于 write_stdout(ptr, len)） ———
+function print_str(ptr: *u8, len: usize): i32 {
+  return write_stdout(ptr, len);
+}
+
+// ——— 固定 buffer 池（多块）：注册最多 4 块 (p0,l0)..(p3,l3)，nr 为实际数量 1..4。返回 1 成功，0 失败。———
+function register_fixed_buffers(p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, nr: u32): i32 {
+  return shu_io_register_buffers(p0, l0, p1, l1, p2, l2, p3, l3, nr);
+}
+
+/** 与 Zig/Rust 对齐：按「指针+块数」注册固定 buffer 池；bufs 指向至少 nr 个 Buffer（ptr/len 有效），nr 为 1..8。返回 1 成功，0 失败。 */
+function register_fixed_buffers_buf(bufs: *Buffer, nr: u32): i32 {
+  return submit_register_fixed_buffers_buf(bufs, nr);
+}
+
+/** 阶段 4 性能压榨：从 fd 用已注册 fixed buffer 读；buf_index 为 register_fixed_buffers 池下标，offset+len 须 ≤ 该块长度。返回读入字节数，0=EOF，-1=错误。供 std.net 热路径用。 */
+function read_fixed_fd(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
+  return shu_io_read_fixed(handle_from_fd(fd), buf_index, offset, len, timeout_ms);
+}
+
+/** 阶段 4 性能压榨：向 fd 用已注册 fixed buffer 写；buf_index/offset/len 同上。返回写入字节数，-1=错误。 */
+function write_fixed_fd(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
+  return shu_io_write_fixed(handle_from_fd(fd), buf_index, offset, len, timeout_ms);
+}
+
+// ——— 多 fd 就绪等待：fds 指向 n 个 i32（fd），一次系统调用等待任意可读。返回就绪下标 0..n-1，超时/错误 -1。———
+function wait_readable(fds: *i32, n: i32, timeout_ms: u32): i32 {
+  return shu_io_wait_readable(fds, n, timeout_ms);
+}
+
+// ——— slice 版 API：使用 []u8 的 .data（*u8）与 .length（usize）对接 read/write ———
+// 从 stdin 读入至 buf[0..buf.length]，timeout_ms 毫秒（0=无超时）。返回读入字节数，0=EOF，-1=错误。
+function read_into_slice(buf: []u8, timeout_ms: u32): i32 {
+  return read(handle_stdin(), buf.data, buf.length, timeout_ms);
+}
+
+// 将 buf[0..buf.length] 写入 stdout，timeout_ms 毫秒（0=无超时）。返回写入字节数，-1=错误。
+function write_from_slice(buf: []u8, timeout_ms: u32): i32 {
+  return write(handle_stdout(), buf.data, buf.length, timeout_ms);
+}
+
+// ——— 标准输出（print_* 由 codegen 生成 printf 调用，此处占位保证可 import） ———
+function print_i32(x: i32): i32 { return 0; }
+function print_u32(x: u32): i32 { return 0; }
+function print_i64(x: i64): i32 { return 0; }
 
 // 占位，表示本模块可 import
 function placeholder(): i32 { return 0; }
