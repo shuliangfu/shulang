@@ -89,6 +89,7 @@ typedef enum ASTExprKind {
     AST_EXPR_METHOD_CALL,  /**< 方法调用 base.method(args)；由 typeck 解析为具体 impl 函数（阶段 7.2） */
     AST_EXPR_ENUM_VARIANT, /**< 已废弃：枚举值现用 Name.Variant（FIELD_ACCESS+is_enum_variant），保留以兼容旧 AST/typeck/codegen 分支 */
     AST_EXPR_ADDR_OF,      /**< 取址 &expr（一元 &，用于传指针给 extern 函数）；value.unary.operand 为子表达式 */
+    AST_EXPR_DEREF,        /**< 解引用 *expr（一元 *，操作数须为 *T，结果类型为 T）；value.unary.operand 为子表达式 */
     AST_EXPR_AS            /**< 类型转换 expr as type；value.as_type.operand 为子表达式，value.as_type.type 为目标类型 */
 } ASTExprKind;
 
@@ -271,8 +272,9 @@ typedef struct ASTForLoop {
     struct ASTBlock *body;  /**< 循环体块 */
 } ASTForLoop;
 
-/** 块内语句顺序：kind 0=const, 1=let, 2=expr_stmt, 3=loop, 4=for；idx 为对应数组下标；codegen 按此顺序生成保证 let/expr/loop 交错正确。 */
-#define MAX_BLOCK_STMT_ORDER 96
+/** 块内语句顺序：kind 0=const, 1=let, 2=expr_stmt, 3=loop, 4=for；idx 为对应数组下标；codegen 按此顺序生成保证 let/expr/loop 交错正确。
+ * 需足够大以容纳 parse_into 等大块（成功路径含大量 let/loop/expr_stmt），否则写回 block_set/num_funcs++/lex 等被截断。 */
+#define MAX_BLOCK_STMT_ORDER 256
 typedef struct ASTBlockStmtOrder {
     unsigned char kind;
     int idx;
