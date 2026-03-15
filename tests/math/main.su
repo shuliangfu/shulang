@@ -1,0 +1,13 @@
+// tests/math/main.su — std.math 回归：常量、floor/ceil、sqrt、sin/cos。
+import std.math;
+
+function main(): i32 {
+  if (pi() <= 3.0 || pi() >= 4.0) { return 1; }
+  if (e() <= 2.0 || e() >= 3.0) { return 2; }
+  if (floor(2.3) != 2.0) { return 3; }
+  if (ceil(2.3) != 3.0) { return 4; }
+  if (sqrt(4.0) != 2.0) { return 5; }
+  if (abs(0.0 - 1.5) != 1.5) { return 6; }
+  if (signum(0.0 - 3.0) != (0.0 - 1.0)) { return 7; }
+  return 0;
+}
