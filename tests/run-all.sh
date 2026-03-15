@@ -10,8 +10,8 @@ if [ -n "$SHUC" ]; then
     cp "$SHUC" compiler/shuc
     trap '[ -f compiler/shuc.bak ] && mv compiler/shuc.bak compiler/shuc' EXIT
 else
-    # 无 SHUC 时构建 compiler：make all 产出 C 版 shuc，用于功能测试。
-    make -C compiler -q 2>/dev/null || make -C compiler
+    # 无 SHUC 时构建 compiler：显式目标 all，否则 make 默认只构建 Makefile 第一个目标（io.o）。
+    make -C compiler -q all 2>/dev/null || make -C compiler all
 fi
 
 # 无 shuc 则直接失败，避免整次跑完仍打印 all tests OK

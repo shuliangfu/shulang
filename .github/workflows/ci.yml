@@ -30,7 +30,7 @@ jobs:
           pwd && ls -la
           which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
-        run: make -C compiler OPT=1
+        run: make -C compiler OPT=1 all
         env:
           CC: cc
       - name: Verify compiler/shuc was built
@@ -56,7 +56,7 @@ jobs:
           echo "Runner OS: $RUNNER_OS | Linux ARM64"
           uname -a && pwd && which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
-        run: make -C compiler OPT=1
+        run: make -C compiler OPT=1 all
         env:
           CC: cc
       - name: Verify compiler/shuc was built
@@ -86,7 +86,7 @@ jobs:
           echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
           uname -a && pwd && which cc make 2>/dev/null || true
       - name: Build compiler (shuc)
-        run: make -C compiler OPT=1
+        run: make -C compiler OPT=1 all
         env:
           CC: cc
       - name: Verify compiler/shuc was built
@@ -117,7 +117,7 @@ jobs:
           update: true
           install: make gcc diffutils python3 sed gawk zlib-devel brotli
       - name: Build compiler (shuc)
-        run: make -C compiler OPT=1
+        run: make -C compiler OPT=1 all
         shell: msys2 {0}
         env:
           CC: gcc
@@ -163,6 +163,6 @@ jobs:
                 apt-get update -qq && apt-get install -y -qq build-essential bash diffutils python3 liburing-dev zlib1g-dev libbrotli-dev
               fi &&
               make -C compiler clean &&
-              make -C compiler OPT=1 &&
+              make -C compiler OPT=1 all &&
               ./tests/run-all.sh
             '
