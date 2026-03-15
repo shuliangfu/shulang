@@ -1,0 +1,71 @@
+// std.thread — 线程：spawn/join/self，多核易用（与 std.net 多 worker 配合压榨性能）
+//
+// 职责：提供 thread_self、thread_create、thread_join；实现由 std/thread/thread.c 提供，链接 thread.o；Unix 需 -lpthread。
+// 约定：thread_create(entry, arg) 的 entry 为 C 函数地址（void* (*)(void*)），当前 .su 无函数指针时可用 thread_dummy_entry_ptr() 测试或由 C 层提供入口。
+// 后续：语言支持 &fn 后可直接 spawn(.su 函数)；或 net 提供 listen_workers 时内部使用本模块。
+
+// ——— C 层：由 std/thread/thread.c 提供 ———
+extern function thread_self_c(): i64;
+extern function thread_create_c(entry: usize, arg: usize): i64;
+extern function thread_create_with_stack_c(entry: usize, arg: usize, stack_size: usize): i64;
+extern function thread_join_c(thread_id: i64): i32;
+extern function thread_set_affinity_self_c(cpu_index: i32): i32;
+extern function thread_set_affinity_c(thread_id: i64, cpu_index: i32): i32;
+extern function thread_set_qos_class_self_c(qos_class: i32): i32;
+extern function thread_dummy_entry_ptr_c(): usize;
+
+/** 返回当前线程 ID（用于区分线程、多核时每线程一 io_uring）。 */
+function thread_self(): i64 {
+  return thread_self_c();
+}
+
+/**
+ * 创建新线程；entry 为 C 函数地址（签名 void* (*)(void*)），arg 传入该函数。
+ * 成功返回 thread_id（用于 join），失败返回 0。
+ * 当前 .su 无法直接取 .su 函数地址时，可用 thread_dummy_entry_ptr() 做测试，或由 C 提供入口。
+ */
+function thread_create(entry: usize, arg: usize): i64 {
+  return thread_create_c(entry, arg);
+}
+
+/**
+ * 创建新线程并指定栈大小；stack_size 为 0 表示使用默认栈。
+ * 多 worker 时可用较小栈（如 262144）省内存。成功返回 thread_id，失败返回 0。
+ */
+function thread_create_with_stack(entry: usize, arg: usize, stack_size: usize): i64 {
+  return thread_create_with_stack_c(entry, arg, stack_size);
+}
+
+/** 等待线程结束；thread_id 为 thread_create 返回值。返回 0 成功，-1 失败。 */
+function thread_join(thread_id: i64): i32 {
+  return thread_join_c(thread_id);
+}
+
+/**
+ * 将当前线程绑定到指定 CPU（绑核）；多 worker 时减少迁移与缓存抖动。
+ * cpu_index 为逻辑 CPU 编号（从 0 开始）。成功返回 0，失败返回 -1；macOS/BSD 暂不支持返回 -1。
+ */
+function thread_set_affinity_self(cpu_index: i32): i32 {
+  return thread_set_affinity_self_c(cpu_index);
+}
+
+/**
+ * 将指定线程绑定到指定 CPU；thread_id 为 thread_create 返回值。
+ * 成功返回 0，失败返回 -1。
+ */
+function thread_set_affinity(thread_id: i64, cpu_index: i32): i32 {
+  return thread_set_affinity_c(thread_id, cpu_index);
+}
+
+/**
+ * 仅 macOS 有效：设置当前线程 QoS 等级，提升调度优先级（无法绑核时的替代）。
+ * qos_class：0=default，1=user_interactive，2=user_initiated，3=utility，4=background；worker 建议 2。成功 0，失败或非 macOS 返回 -1。
+ */
+function thread_set_qos_class_self(qos_class: i32): i32 {
+  return thread_set_qos_class_self_c(qos_class);
+}
+
+/** 返回测试用 C 入口 thread_dummy_entry 的地址，可用于 thread_create(thread_dummy_entry_ptr(), 0) 验证 spawn+join。 */
+function thread_dummy_entry_ptr(): usize {
+  return thread_dummy_entry_ptr_c();
+}
