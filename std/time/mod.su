@@ -1,0 +1,95 @@
+// std.time — 时间与睡眠（单调时钟、墙钟、sleep）
+//
+// 【文件职责】
+// 对外暴露 std.time 的完整 API：单调时间（now_monotonic_ns/us/ms/sec）、墙钟时间（now_wall_sec/ms/us/ns）、
+// 睡眠（sleep_ns/us/ms/sec）、时间差 duration_ns。对标 Zig std.time、Rust std::time::Instant/SystemTime/Duration。
+// 本文件为类型安全的薄封装，实际实现由同目录 time.c 提供并链入 time.o。
+//
+// 【所属模块/组件】
+// 标准库 std.time；用户通过 import std.time 使用。依赖 core；与 std/time/time.c、std/time/README.md 同属一模块。
+//
+// 【与其它文件的关系】
+// - 被依赖：任何 import std.time 的用户代码；compiler 在 -o exe 时自动链入 std/time/time.o。
+// - 依赖：无其它 .su 模块；通过 extern 调用 time_*_c 系列 C 函数（定义在 time.c）。
+//
+// 【性能】
+// 单调/墙钟单次系统调用、无分配；目标延迟 ≤ Zig/Rust 同场景（见 analysis/std标准库全量清单与优先级.md 3.1）。
+
+extern function time_now_monotonic_ns_c(): i64;
+extern function time_now_monotonic_us_c(): i64;
+extern function time_now_monotonic_ms_c(): i64;
+extern function time_now_monotonic_sec_c(): i64;
+extern function time_now_wall_sec_c(): i64;
+extern function time_now_wall_ms_c(): i64;
+extern function time_now_wall_us_c(): i64;
+extern function time_now_wall_ns_c(): i64;
+extern function time_sleep_ns_c(ns: i64): void;
+extern function time_sleep_us_c(us: i64): void;
+extern function time_sleep_ms_c(ms: i32): void;
+extern function time_sleep_sec_c(s: i32): void;
+extern function time_duration_ns_c(from_ns: i64, to_ns: i64): i64;
+
+/** 单调时钟：纳秒（自任意起点，仅用于差值；对标 Rust Instant、Zig Timer）。 */
+function now_monotonic_ns(): i64 {
+  return time_now_monotonic_ns_c();
+}
+
+/** 单调时钟：微秒。 */
+function now_monotonic_us(): i64 {
+  return time_now_monotonic_us_c();
+}
+
+/** 单调时钟：毫秒。 */
+function now_monotonic_ms(): i64 {
+  return time_now_monotonic_ms_c();
+}
+
+/** 单调时钟：秒。 */
+function now_monotonic_sec(): i64 {
+  return time_now_monotonic_sec_c();
+}
+
+/** 墙钟：自 Unix 纪元 1970-01-01 00:00:00 UTC 的秒。 */
+function now_wall_sec(): i64 {
+  return time_now_wall_sec_c();
+}
+
+/** 墙钟：毫秒。 */
+function now_wall_ms(): i64 {
+  return time_now_wall_ms_c();
+}
+
+/** 墙钟：微秒。 */
+function now_wall_us(): i64 {
+  return time_now_wall_us_c();
+}
+
+/** 墙钟：纳秒（Windows 粒度为 100ns）。 */
+function now_wall_ns(): i64 {
+  return time_now_wall_ns_c();
+}
+
+/** 睡眠：纳秒。可能提前唤醒，不保证精度。 */
+function sleep_ns(ns: i64): void {
+  time_sleep_ns_c(ns);
+}
+
+/** 睡眠：微秒。 */
+function sleep_us(us: i64): void {
+  time_sleep_us_c(us);
+}
+
+/** 睡眠：毫秒。 */
+function sleep_ms(ms: i32): void {
+  time_sleep_ms_c(ms);
+}
+
+/** 睡眠：秒。 */
+function sleep_sec(s: i32): void {
+  time_sleep_sec_c(s);
+}
+
+/** 时间差（纳秒）：to_ns - from_ns；纯算术。 */
+function duration_ns(from_ns: i64, to_ns: i64): i64 {
+  return time_duration_ns_c(from_ns, to_ns);
+}
