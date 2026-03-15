@@ -1,0 +1,9 @@
+// std.elf — 二进制格式 ELF/COFF 等（P4 按需占位）
+//
+// 【文件职责】占位；编译器/工具链用时可按需实现 std.elf、std.coff、std.macho。
+// 【依赖】core。当前无 C 实现，仅占位。
+
+/** 占位：当前未实现，返回 0。 */
+function placeholder(): i32 {
+  return 0;
+}
