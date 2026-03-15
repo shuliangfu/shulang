@@ -1,0 +1,18 @@
+// tests/hash/main.su — std.hash 回归：hash_start/write_u32/finish、hash_bytes。
+import std.hash;
+
+function main(): i32 {
+  let h: *u8 = hash_start();
+  if (h == 0) { return 1; }
+  hash_write_u32(h, 42);
+  let r: u64 = hash_finish(h);
+  hash_free(h);
+  if (r == 0) { return 2; }
+  let buf: [2]u8 = [97, 98];
+  let r2: u64 = hash_bytes(&buf[0], 2);
+  if (r2 == 0) { return 3; }
+  let buf2: [2]u8 = [98, 97];
+  let r3: u64 = hash_bytes(&buf2[0], 2);
+  if (r2 == r3) { return 4; }
+  return 0;
+}
