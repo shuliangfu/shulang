@@ -1,0 +1,16 @@
+// std.sort — 排序（对标 Zig std.sort、Rust Vec::sort）
+//
+// 【文件职责】sort_i32、sort_u8 原地不稳定升序；与 std/sort/sort.c 同属一模块。
+
+extern function sort_i32_c(ptr: *i32, len: i32): void;
+extern function sort_u8_c(ptr: *u8, len: i32): void;
+
+/** 原地对 ptr[0..len] 升序排序（i32）；不稳定。 */
+function sort_i32(ptr: *i32, len: i32): void {
+  sort_i32_c(ptr, len);
+}
+
+/** 原地对 ptr[0..len] 升序排序（u8）；不稳定。 */
+function sort_u8(ptr: *u8, len: i32): void {
+  sort_u8_c(ptr, len);
+}
