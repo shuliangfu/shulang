@@ -20,13 +20,17 @@ if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
     exit 127
 fi
 
-# CI 下单个脚本失败时打印 SKIP 并继续，避免整次 run-all 因 run-vector/run-fmt/run-debug 等（exit 127）以 1 退出
+# CI 下单个脚本失败时打印 SKIP 并继续，但统计失败数；结束时若有失败则报错并 exit 1，不再误报 all tests OK
+RUN_FAILED_COUNT=0
 run() {
     local script="$1"
     if [ ! -f "tests/$script" ]; then return 0; fi
     chmod +x "tests/$script"
     if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-        ./tests/$script || { echo "run-all: $script failed in CI (exit $?); SKIP to keep run-all green"; true; }
+        if ! ./tests/$script; then
+            echo "run-all: $script failed in CI (exit $?); SKIP to keep running"
+            RUN_FAILED_COUNT=$((RUN_FAILED_COUNT + 1))
+        fi
     else
         ./tests/$script
     fi
@@ -130,4 +134,10 @@ run run-io-driver.sh
 run run-ub.sh
 run run-abi-layout.sh
 
+if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
+    if [ "$RUN_FAILED_COUNT" -gt 0 ]; then
+        echo "run-all: $RUN_FAILED_COUNT test(s) failed (buffer overflow / abort / segfault etc.); not OK" >&2
+        exit 1
+    fi
+fi
 echo "all tests OK"
