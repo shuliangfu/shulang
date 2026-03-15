@@ -1,0 +1,27 @@
+// 测试 std.net 切片化 UDP API：udp_recv_many_buf、udp_send_many_buf（指针+段数）
+// 覆盖 net_udp_recv_many_buf_c/net_udp_send_many_buf_c 的编译与链接；bind 后 recv 无数据、send 一发。
+import std.net;
+import std.io.driver;
+
+function main(): i32 {
+  let addr: Ipv4Addr = Ipv4Addr { a: 127, b: 0, c: 0, d: 1 };
+  let sock: UdpSocket = udp_bind(addr, 0);
+  if (sock.fd < 0) { return 1; }
+  let recv_buf: [64]u8 = 0;
+  let bufs: [1]Buffer = [ Buffer { ptr: &recv_buf[0], len: 64, handle: 0 } ];
+  let out_sizes: [1]i32 = [0];
+  let out_addrs: [1]u32 = [0];
+  let out_ports: [1]u32 = [0];
+  let n_recv: i32 = udp_recv_many_buf(sock, &bufs[0], 1, 1, &out_sizes[0], &out_addrs[0], &out_ports[0]);
+  let dst_addr: u32 = addr_to_u32(addr);
+  let dst_port: u32 = 9;
+  let addrs: [1]u32 = [dst_addr];
+  let ports: [1]u32 = [dst_port];
+  let payload: [4]u8 = [1, 2, 3, 4];
+  let send_bufs: [1]Buffer = [ Buffer { ptr: &payload[0], len: 4, handle: 0 } ];
+  let n_send: i32 = udp_send_many_buf(sock, &addrs[0], &ports[0], &send_bufs[0], 1);
+  let c: i32 = close_udp(sock);
+  if (c != 0) { return 2; }
+  if (n_send != 1) { return 3; }
+  return 0;
+}
