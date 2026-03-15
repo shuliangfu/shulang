@@ -435,3 +435,22 @@ int32_t process_exec_simple_c(uint8_t *program) {
     char *argv[] = { (char *)program, NULL };
     return process_exec_c(program, (uint8_t *)(void *)argv);
 }
+
+/**
+ * 创建管道（P3 process 扩展）；成功时 *read_fd 可读、*write_fd 可写，返回 0；失败返回 -1。
+ * POSIX: pipe(2)；Windows 暂不支持，返回 -1。
+ */
+int32_t process_pipe_c(int32_t *read_fd, int32_t *write_fd) {
+    if (read_fd == NULL || write_fd == NULL) return -1;
+#if defined(_WIN32) || defined(_WIN64)
+    (void)read_fd;
+    (void)write_fd;
+    return -1;
+#else
+    int fd[2];
+    if (pipe(fd) != 0) return -1;
+    *read_fd = (int32_t)fd[0];
+    *write_fd = (int32_t)fd[1];
+    return 0;
+#endif
+}
