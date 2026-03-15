@@ -1,0 +1,9 @@
+// tests/dynlib/main.su — std.dynlib open(null) 返回 0
+import std.dynlib;
+
+function main(): i32 {
+  let path: [4]u8 = [0, 0, 0, 0];
+  let lib: *u8 = open(&path[0]);
+  if (lib != 0) { return 1; }
+  return 0;
+}
