@@ -73,215 +73,87 @@ static const char *get_io_o_path(const char *argv0) {
     return buf;
 }
 
-/** std.fs 高性能 .o 路径（mmap/munmap）；与 get_io_o_path 类似，产出 std/fs/fs.o。 */
+/** std.fs 高性能 .o 路径（mmap/munmap）；优先 cwd 以兼容多工作区，产出 std/fs/fs.o。 */
 static const char *get_std_fs_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 20) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 18 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/fs/fs.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/fs/fs.o", resolved) != NULL) return resolved;
-#ifdef __APPLE__
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 16) != NULL) {
-            strcat(cwd_buf, "/std/fs/fs.o");
-            if (realpath(cwd_buf, resolved) != NULL) return resolved;
-        }
-    }
-#endif
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/fs/fs.o", 13); cwd[L+13] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 18 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/fs/fs.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 18 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/fs/fs.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
-/** std.process argc/argv/getenv；与 get_std_fs_o_path 类似，产出 std/process/process.o。 */
+/** std.process argc/argv/getenv；优先 cwd，产出 std/process/process.o。 */
 static const char *get_std_process_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 24) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 24 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/process/process.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/process/process.o", resolved) != NULL) return resolved;
-#ifdef __APPLE__
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 20) != NULL) {
-            strcat(cwd_buf, "/std/process/process.o");
-            if (realpath(cwd_buf, resolved) != NULL) return resolved;
-        }
-    }
-#endif
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/process/process.o", 23); cwd[L+23] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 24 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/process/process.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 24 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/process/process.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
-/** std.string 长串快路径（memcmp/memmem）；与 get_std_process_o_path 类似，产出 std/string/string.o。 */
+/** std.string 长串快路径（memcmp/memmem）；优先 cwd，产出 std/string/string.o。 */
 static const char *get_std_string_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 22) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 22 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/string/string.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/string/string.o", resolved) != NULL) return resolved;
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 24) != NULL) {
-            size_t cwd_len = strlen(cwd_buf);
-            if (cwd_len + 22 < sizeof(cwd_buf)) {
-                memcpy(cwd_buf + cwd_len, "/std/string/string.o", 21);
-                cwd_buf[cwd_len + 20] = '\0';
-                if (realpath(cwd_buf, resolved) != NULL) return resolved;
-            }
-        }
-    }
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/string/string.o", 21); cwd[L+21] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 22 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/string/string.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 22 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/string/string.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
-/** std.heap 堆分配（malloc/free）；与 get_std_string_o_path 类似，产出 std/heap/heap.o。 */
+/** std.heap 堆分配（malloc/free）；优先 cwd，产出 std/heap/heap.o。 */
 static const char *get_std_heap_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 20) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 20 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/heap/heap.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/heap/heap.o", resolved) != NULL) return resolved;
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 22) != NULL) {
-            size_t cwd_len = strlen(cwd_buf);
-            if (cwd_len + 20 < sizeof(cwd_buf)) {
-                memcpy(cwd_buf + cwd_len, "/std/heap/heap.o", 17);
-                cwd_buf[cwd_len + 16] = '\0';
-                if (realpath(cwd_buf, resolved) != NULL) return resolved;
-            }
-        }
-    }
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/heap/heap.o", 17); cwd[L+17] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 20 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/heap/heap.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 20 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/heap/heap.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
-/** std.runtime panic/abort（std/runtime/runtime.o）；与 get_std_heap_o_path 类似。 */
+/** std.runtime panic/abort（std/runtime/runtime.o）；优先 cwd。 */
 static const char *get_std_runtime_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 26) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 26 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/runtime/runtime.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/runtime/runtime.o", resolved) != NULL) return resolved;
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 28) != NULL) {
-            size_t cwd_len = strlen(cwd_buf);
-            if (cwd_len + 26 < sizeof(cwd_buf)) {
-                memcpy(cwd_buf + cwd_len, "/std/runtime/runtime.o", 24);
-                cwd_buf[cwd_len + 23] = '\0';
-                if (realpath(cwd_buf, resolved) != NULL) return resolved;
-            }
-        }
-    }
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 28) != NULL) { size_t L = strlen(cwd); if (L + 28 <= sizeof(cwd)) { memcpy(cwd + L, "/std/runtime/runtime.o", 24); cwd[L+24] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 26 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/runtime/runtime.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 26 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/runtime/runtime.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
-/** std.net TCP 网络（std/net/net.o）；与 get_std_runtime_o_path 类似，产出 std/net/net.o。 */
+/** std.net TCP 网络（std/net/net.o）；优先 cwd，产出 std/net/net.o。 */
 static const char *get_std_net_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
-    buf[0] = '\0';
-    resolved[0] = '\0';
-    if (!argv0 || !argv0[0]) return buf;
-    const char *last_slash = strrchr(argv0, '/');
-    int n;
-    if (last_slash) {
-        n = (int)(last_slash - argv0);
-        if (n >= (int)sizeof(buf) - 20) return buf;
-        memcpy(buf, argv0, (size_t)n);
-        buf[n] = '\0';
-    } else {
-        buf[0] = '.'; buf[1] = '\0';
-        n = 1;
-    }
-    if (n + 18 >= (int)sizeof(buf)) return buf;
-    strcat(buf, "/../std/net/net.o");
-    if (realpath(buf, resolved) != NULL) return resolved;
+    buf[0] = resolved[0] = '\0';
     if (realpath("std/net/net.o", resolved) != NULL) return resolved;
-    {
-        char cwd_buf[512];
-        if (getcwd(cwd_buf, sizeof(cwd_buf) - 20) != NULL) {
-            size_t cwd_len = strlen(cwd_buf);
-            if (cwd_len + 18 < sizeof(cwd_buf)) {
-                memcpy(cwd_buf + cwd_len, "/std/net/net.o", 15);
-                cwd_buf[cwd_len + 14] = '\0';
-                if (realpath(cwd_buf, resolved) != NULL) return resolved;
-            }
-        }
-    }
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/net/net.o", 15); cwd[L+15] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (!argv0 || !argv0[0]) return buf;
+    { const char *last_slash = strrchr(argv0, '/'); int n = last_slash ? (int)(last_slash - argv0) : 0;
+      if (last_slash && n + 18 < (int)sizeof(buf)) { memcpy(buf, argv0, (size_t)n); buf[n] = '\0'; strcat(buf, "/../std/net/net.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+      else if (!last_slash && 18 < (int)sizeof(buf)) { buf[0] = '.'; buf[1] = '\0'; strcat(buf, "/../std/net/net.o"); if (realpath(buf, resolved) != NULL) return resolved; } }
     return buf;
 }
 
@@ -364,13 +236,392 @@ static const char *get_std_time_o_path(const char *argv0) {
     return buf;
 }
 
-/** 根据 argv[0]（shuc 可执行路径）得到同目录下的 runtime_panic.o 路径，用于 cc/ld 链接时提供 shulang_panic_；返回静态缓冲区，可能为空。 */
-static const char *get_runtime_panic_o_path(const char *argv0) {
+/** std.random 密码学安全随机（std/random/random.o）；与 get_std_time_o_path 类似，产出 std/random/random.o。 */
+static const char *get_std_random_o_path(const char *argv0) {
     static char buf[512];
     static char resolved[512];
     buf[0] = '\0';
     resolved[0] = '\0';
+    if (realpath("std/random/random.o", resolved) != NULL) return resolved;
+    {
+        char cwd_buf[512];
+        if (getcwd(cwd_buf, sizeof(cwd_buf) - 22) != NULL) {
+            size_t cwd_len = strlen(cwd_buf);
+            if (cwd_len + 22 < sizeof(cwd_buf)) {
+                memcpy(cwd_buf + cwd_len, "/std/random/random.o", 21);
+                cwd_buf[cwd_len + 20] = '\0';
+                if (realpath(cwd_buf, resolved) != NULL) return resolved;
+            }
+        }
+    }
+    if (argv0 && argv0[0]) {
+        const char *last_slash = strrchr(argv0, '/');
+        int n;
+        if (last_slash) {
+            n = (int)(last_slash - argv0);
+            if (n >= (int)sizeof(buf) - 26) return buf;
+            memcpy(buf, argv0, (size_t)n);
+            buf[n] = '\0';
+        } else {
+            buf[0] = '.'; buf[1] = '\0';
+            n = 1;
+        }
+        if (n + 26 < (int)sizeof(buf)) {
+            strcat(buf, "/../std/random/random.o");
+            if (realpath(buf, resolved) != NULL) return resolved;
+        }
+    }
+    return buf;
+}
+
+/** std.env 环境变量与临时目录（std/env/env.o）；与 get_std_random_o_path 类似，产出 std/env/env.o。优先基于 argv[0] 解析绝对路径，避免依赖当前工作目录。 */
+static const char *get_std_env_o_path(const char *argv0) {
+    static char buf[512];
+    static char resolved[512];
+    buf[0] = '\0';
+    resolved[0] = '\0';
+    /* 优先用 argv[0] 得到可执行文件绝对路径，再推导 std/env/env.o，不依赖 cwd */
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last_slash = strrchr(buf, '/');
+        if (last_slash && (size_t)(last_slash - buf) + 22 < sizeof(buf)) {
+            *last_slash = '\0';
+            strcat(buf, "/../std/env/env.o");
+            if (realpath(buf, resolved) != NULL) return resolved;
+        }
+    }
+    buf[0] = '\0';
+    if (realpath("std/env/env.o", resolved) != NULL) return resolved;
+    {
+        char cwd_buf[512];
+        if (getcwd(cwd_buf, sizeof(cwd_buf) - 18) != NULL) {
+            size_t cwd_len = strlen(cwd_buf);
+            if (cwd_len + 18 < sizeof(cwd_buf)) {
+                memcpy(cwd_buf + cwd_len, "/std/env/env.o", 15);
+                cwd_buf[cwd_len + 14] = '\0';
+                if (realpath(cwd_buf, resolved) != NULL) return resolved;
+            }
+        }
+    }
+    if (argv0 && argv0[0]) {
+        const char *last_slash = strrchr(argv0, '/');
+        int n;
+        if (last_slash) {
+            n = (int)(last_slash - argv0);
+            if (n >= (int)sizeof(buf) - 22) return buf;
+            memcpy(buf, argv0, (size_t)n);
+            buf[n] = '\0';
+        } else {
+            buf[0] = '.'; buf[1] = '\0';
+            n = 1;
+        }
+        if (n + 22 < (int)sizeof(buf)) {
+            strcat(buf, "/../std/env/env.o");
+            if (realpath(buf, resolved) != NULL) return resolved;
+        }
+    }
+    return buf;
+}
+
+/** std.sync 互斥锁（std/sync/sync.o）；与 get_std_env_o_path 类似，产出 std/sync/sync.o。链接时 Unix 需 -lpthread。 */
+static const char *get_std_sync_o_path(const char *argv0) {
+    static char buf[512];
+    static char resolved[512];
+    buf[0] = '\0';
+    resolved[0] = '\0';
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last_slash = strrchr(buf, '/');
+        if (last_slash && (size_t)(last_slash - buf) + 22 < sizeof(buf)) {
+            *last_slash = '\0';
+            strcat(buf, "/../std/sync/sync.o");
+            if (realpath(buf, resolved) != NULL) return resolved;
+        }
+    }
+    buf[0] = '\0';
+    if (realpath("std/sync/sync.o", resolved) != NULL) return resolved;
+    {
+        char cwd_buf[512];
+        if (getcwd(cwd_buf, sizeof(cwd_buf) - 18) != NULL) {
+            size_t cwd_len = strlen(cwd_buf);
+            if (cwd_len + 17 < sizeof(cwd_buf)) {
+                memcpy(cwd_buf + cwd_len, "/std/sync/sync.o", 17);
+                cwd_buf[cwd_len + 16] = '\0';
+                if (realpath(cwd_buf, resolved) != NULL) return resolved;
+            }
+        }
+    }
+    if (argv0 && argv0[0]) {
+        const char *last_slash = strrchr(argv0, '/');
+        int n;
+        if (last_slash) {
+            n = (int)(last_slash - argv0);
+            if (n >= (int)sizeof(buf) - 22) return buf;
+            memcpy(buf, argv0, (size_t)n);
+            buf[n] = '\0';
+        } else {
+            buf[0] = '.'; buf[1] = '\0';
+            n = 1;
+        }
+        if (n + 22 < (int)sizeof(buf)) {
+            strcat(buf, "/../std/sync/sync.o");
+            if (realpath(buf, resolved) != NULL) return resolved;
+        }
+    }
+    return buf;
+}
+
+/** std.encoding UTF-8/ASCII（std/encoding/encoding.o）；优先 cwd。 */
+static const char *get_std_encoding_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/encoding/encoding.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/encoding/encoding.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 28 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/encoding/encoding.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** std.base64（std/base64/base64.o）。 */
+static const char *get_std_base64_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/base64/base64.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/base64/base64.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 24 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/base64/base64.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** std.crypto（std/crypto/crypto.o）。 */
+static const char *get_std_crypto_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/crypto/crypto.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/crypto/crypto.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 24 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/crypto/crypto.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** std.log（std/log/log.o）。 */
+static const char *get_std_log_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/log/log.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/log/log.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 20 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/log/log.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** std.test（std/test/test.o）。 */
+static const char *get_std_test_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/test/test.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/test/test.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/test/test.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/atomic/atomic.o 路径，供链接 std.atomic 时使用；优先 cwd 以兼容多工作区。 */
+static const char *get_std_atomic_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/atomic/atomic.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/atomic/atomic.o", 21); cwd[L+21] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 24 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/atomic/atomic.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/channel/channel.o 路径；优先 cwd。 */
+static const char *get_std_channel_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/channel/channel.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/channel/channel.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 26 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/channel/channel.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/backtrace/backtrace.o 路径；优先 cwd。 */
+static const char *get_std_backtrace_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/backtrace/backtrace.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 30) != NULL) { size_t L = strlen(cwd); if (L + 30 <= sizeof(cwd)) { memcpy(cwd + L, "/std/backtrace/backtrace.o", 29); cwd[L+29] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 28 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/backtrace/backtrace.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/hash/hash.o 路径；优先 cwd。 */
+static const char *get_std_hash_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/hash/hash.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/hash/hash.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/hash/hash.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/math/math.o 路径；优先 cwd。链接时需 -lm。 */
+static const char *get_std_math_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/math/math.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/math/math.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/math/math.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/sort/sort.o 路径；优先 cwd。 */
+static const char *get_std_sort_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/sort/sort.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/sort/sort.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/sort/sort.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** 根据 cwd 或 argv[0] 得到 std/ffi/ffi.o 路径；优先 cwd。 */
+static const char *get_std_ffi_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/ffi/ffi.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/ffi/ffi.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 20 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/ffi/ffi.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** P4 std 模块 .o 路径（按需链接）；优先 cwd 以兼容多工作区。 */
+static const char *get_std_json_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/json/json.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/json/json.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/json/json.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_csv_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/csv/csv.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/csv/csv.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 20 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/csv/csv.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_regex_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/regex/regex.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/regex/regex.o", 18); cwd[L+18] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 24 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/regex/regex.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_compress_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/compress/compress.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 28) != NULL) { size_t L = strlen(cwd); if (L + 28 <= sizeof(cwd)) { memcpy(cwd + L, "/std/compress/compress.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 28 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/compress/compress.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_unicode_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/unicode/unicode.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/unicode/unicode.o", 22); cwd[L+22] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 26 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/unicode/unicode.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_dynlib_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/dynlib/dynlib.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/dynlib/dynlib.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 26 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/dynlib/dynlib.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_http_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/http/http.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/http/http.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 22 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/http/http.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+static const char *get_std_tar_o_path(const char *argv0) {
+    static char buf[512], resolved[512];
+    buf[0] = resolved[0] = '\0';
+    if (realpath("std/tar/tar.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/tar/tar.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
+    if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
+        char *last = strrchr(buf, '/');
+        if (last && (size_t)(last - buf) + 20 < sizeof(buf)) { *last = '\0'; strcat(buf, "/../std/tar/tar.o"); if (realpath(buf, resolved) != NULL) return resolved; }
+    }
+    return buf;
+}
+
+/** runtime_panic.o 路径；优先 cwd（compiler/runtime_panic.o 或 getcwd+"/compiler/runtime_panic.o"），再 argv[0] 目录。 */
+static const char *get_runtime_panic_o_path(const char *argv0) {
+    static char buf[512];
+    static char resolved[512];
+    buf[0] = resolved[0] = '\0';
     if (realpath("compiler/runtime_panic.o", resolved) != NULL) return resolved;
+    { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/compiler/runtime_panic.o", 25); cwd[L+24] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
     if (argv0 && argv0[0]) {
         const char *last_slash = strrchr(argv0, '/');
         int n;
@@ -1211,9 +1462,13 @@ static char *read_file(const char *path, size_t *out_len) {
  * net_o：可选，std.net .o（TCP socket）；NULL 则不链入。
  * thread_o：可选，std.thread .o（线程）；NULL 则不链入；Unix 需 -lpthread。
  * time_o：可选，std.time .o（时间与睡眠）；NULL 则不链入。
+ * random_o：可选，std.random .o（密码学安全随机）；NULL 则不链入。
+ * env_o：可选，std.env .o（环境变量与临时目录）；NULL 则不链入。
+ * sync_o：可选，std.sync .o（互斥锁）；NULL 则不链入；Unix 需 -lpthread。
+ * encoding_o, base64_o, crypto_o, log_o, test_o：可选，std.encoding/base64/crypto/log/test .o。
  * 返回值：0 表示 cc 执行成功且退出码为 0；-1 表示参数非法、fork/exec 失败或 cc 非零退出。
  */
-static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target, const char *opt_level, int use_lto, const char *io_o, const char *fs_o, const char *process_o, const char *string_o, const char *heap_o, const char *runtime_o, const char *runtime_panic_o, const char *net_o, const char *thread_o, const char *time_o) {
+static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target, const char *opt_level, int use_lto, const char *io_o, const char *fs_o, const char *process_o, const char *string_o, const char *heap_o, const char *runtime_o, const char *runtime_panic_o, const char *net_o, const char *thread_o, const char *time_o, const char *random_o, const char *env_o, const char *sync_o, const char *encoding_o, const char *base64_o, const char *crypto_o, const char *log_o, const char *atomic_o, const char *channel_o, const char *backtrace_o, const char *hash_o, const char *math_o, const char *sort_o, const char *ffi_o, const char *json_o, const char *csv_o, const char *regex_o, const char *compress_o, const char *unicode_o, const char *dynlib_o, const char *http_o, const char *tar_o, const char *test_o) {
     (void)target;
     if (!c_paths || n < 1) return -1;
     if (!opt_level || !*opt_level) opt_level = "2";
@@ -1223,7 +1478,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         return -1;
     }
     if (pid == 0) {
-        char *argv[MAX_C_FILES + 14];
+        char *argv[MAX_C_FILES + 24];
         int i = 0;
         argv[i++] = (char *)"cc";
         {
@@ -1330,6 +1585,186 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
 #endif
             argv[i++] = (char *)time_o;
         }
+        if (random_o && random_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char random_o_abs[512];
+            if (realpath(random_o, random_o_abs) != NULL)
+                random_o = random_o_abs;
+#endif
+            argv[i++] = (char *)random_o;
+#if defined(_WIN32) || defined(_WIN64)
+            argv[i++] = (char *)"-lbcrypt";
+#endif
+        }
+        if (env_o && env_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char env_o_abs[512];
+            if (realpath(env_o, env_o_abs) != NULL)
+                env_o = env_o_abs;
+#endif
+            argv[i++] = (char *)env_o;
+        }
+        if (sync_o && sync_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char sync_o_abs[512];
+            if (realpath(sync_o, sync_o_abs) != NULL)
+                sync_o = sync_o_abs;
+#endif
+            argv[i++] = (char *)sync_o;
+#if defined(__linux__)
+            argv[i++] = (char *)"-lpthread";
+#endif
+        }
+        if (encoding_o && encoding_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char encoding_o_abs[512];
+            if (realpath(encoding_o, encoding_o_abs) != NULL) encoding_o = encoding_o_abs;
+#endif
+            argv[i++] = (char *)encoding_o;
+        }
+        if (base64_o && base64_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char base64_o_abs[512];
+            if (realpath(base64_o, base64_o_abs) != NULL) base64_o = base64_o_abs;
+#endif
+            argv[i++] = (char *)base64_o;
+        }
+        if (crypto_o && crypto_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char crypto_o_abs[512];
+            if (realpath(crypto_o, crypto_o_abs) != NULL) crypto_o = crypto_o_abs;
+#endif
+            argv[i++] = (char *)crypto_o;
+        }
+        if (log_o && log_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char log_o_abs[512];
+            if (realpath(log_o, log_o_abs) != NULL) log_o = log_o_abs;
+#endif
+            argv[i++] = (char *)log_o;
+        }
+        if (atomic_o && atomic_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char atomic_o_abs[512];
+            if (realpath(atomic_o, atomic_o_abs) != NULL) atomic_o = atomic_o_abs;
+#endif
+            argv[i++] = (char *)atomic_o;
+        }
+        if (channel_o && channel_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char channel_o_abs[512];
+            if (realpath(channel_o, channel_o_abs) != NULL) channel_o = channel_o_abs;
+#endif
+            argv[i++] = (char *)channel_o;
+#if defined(__linux__)
+            argv[i++] = (char *)"-lpthread";
+#endif
+        }
+        if (backtrace_o && backtrace_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char backtrace_o_abs[512];
+            if (realpath(backtrace_o, backtrace_o_abs) != NULL) backtrace_o = backtrace_o_abs;
+#endif
+            argv[i++] = (char *)backtrace_o;
+        }
+        if (hash_o && hash_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char hash_o_abs[512];
+            if (realpath(hash_o, hash_o_abs) != NULL) hash_o = hash_o_abs;
+#endif
+            argv[i++] = (char *)hash_o;
+        }
+        if (math_o && math_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char math_o_abs[512];
+            if (realpath(math_o, math_o_abs) != NULL) math_o = math_o_abs;
+#endif
+            argv[i++] = (char *)math_o;
+            argv[i++] = (char *)"-lm";
+        }
+        if (sort_o && sort_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char sort_o_abs[512];
+            if (realpath(sort_o, sort_o_abs) != NULL) sort_o = sort_o_abs;
+#endif
+            argv[i++] = (char *)sort_o;
+        }
+        if (ffi_o && ffi_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char ffi_o_abs[512];
+            if (realpath(ffi_o, ffi_o_abs) != NULL) ffi_o = ffi_o_abs;
+#endif
+            argv[i++] = (char *)ffi_o;
+        }
+        if (json_o && json_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char json_o_abs[512];
+            if (realpath(json_o, json_o_abs) != NULL) json_o = json_o_abs;
+#endif
+            argv[i++] = (char *)json_o;
+        }
+        if (csv_o && csv_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char csv_o_abs[512];
+            if (realpath(csv_o, csv_o_abs) != NULL) csv_o = csv_o_abs;
+#endif
+            argv[i++] = (char *)csv_o;
+        }
+        if (regex_o && regex_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char regex_o_abs[512];
+            if (realpath(regex_o, regex_o_abs) != NULL) regex_o = regex_o_abs;
+#endif
+            argv[i++] = (char *)regex_o;
+        }
+        if (compress_o && compress_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char compress_o_abs[512];
+            if (realpath(compress_o, compress_o_abs) != NULL) compress_o = compress_o_abs;
+#endif
+            argv[i++] = (char *)compress_o;
+        }
+        if (unicode_o && unicode_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char unicode_o_abs[512];
+            if (realpath(unicode_o, unicode_o_abs) != NULL) unicode_o = unicode_o_abs;
+#endif
+            argv[i++] = (char *)unicode_o;
+        }
+        if (dynlib_o && dynlib_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char dynlib_o_abs[512];
+            if (realpath(dynlib_o, dynlib_o_abs) != NULL) dynlib_o = dynlib_o_abs;
+#endif
+            argv[i++] = (char *)dynlib_o;
+#if defined(__linux__)
+            argv[i++] = (char *)"-ldl";
+#endif
+        }
+        if (http_o && http_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char http_o_abs[512];
+            if (realpath(http_o, http_o_abs) != NULL) http_o = http_o_abs;
+#endif
+            argv[i++] = (char *)http_o;
+        }
+        if (tar_o && tar_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char tar_o_abs[512];
+            if (realpath(tar_o, tar_o_abs) != NULL) tar_o = tar_o_abs;
+#endif
+            argv[i++] = (char *)tar_o;
+        }
+        if (test_o && test_o[0]) {
+#if !defined(_WIN32) && !defined(_WIN64)
+            static char test_o_abs[512];
+            if (realpath(test_o, test_o_abs) != NULL) test_o = test_o_abs;
+#endif
+            argv[i++] = (char *)test_o;
+        }
+        /* 使用 std.compress 时末尾加 -lz，满足启用 zlib 的 compress.o 链接 */
+        if (compress_o && compress_o[0])
+            argv[i++] = (char *)"-lz";
         argv[i++] = NULL;
         argv[0] = (char *)"cc";
         execvp("cc", argv);
@@ -2176,7 +2611,30 @@ int RUN_CC_FUNC(int argc, char **argv) {
         const char *net_o = get_std_net_o_path(argv[0]);
         const char *thread_o = get_std_thread_o_path(argv[0]);
         const char *time_o = get_std_time_o_path(argv[0]);
-        int cc_ok = invoke_cc(c_paths, n_c, out_path, target, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o);
+        const char *random_o = get_std_random_o_path(argv[0]);
+        const char *env_o = get_std_env_o_path(argv[0]);
+        const char *sync_o = get_std_sync_o_path(argv[0]);
+        const char *encoding_o = get_std_encoding_o_path(argv[0]);
+        const char *base64_o = get_std_base64_o_path(argv[0]);
+        const char *crypto_o = get_std_crypto_o_path(argv[0]);
+        const char *log_o = get_std_log_o_path(argv[0]);
+        const char *atomic_o = get_std_atomic_o_path(argv[0]);
+        const char *channel_o = get_std_channel_o_path(argv[0]);
+        const char *backtrace_o = get_std_backtrace_o_path(argv[0]);
+        const char *hash_o = get_std_hash_o_path(argv[0]);
+        const char *math_o = get_std_math_o_path(argv[0]);
+        const char *sort_o = get_std_sort_o_path(argv[0]);
+        const char *ffi_o = get_std_ffi_o_path(argv[0]);
+        const char *json_o = get_std_json_o_path(argv[0]);
+        const char *csv_o = get_std_csv_o_path(argv[0]);
+        const char *regex_o = get_std_regex_o_path(argv[0]);
+        const char *compress_o = get_std_compress_o_path(argv[0]);
+        const char *unicode_o = get_std_unicode_o_path(argv[0]);
+        const char *dynlib_o = get_std_dynlib_o_path(argv[0]);
+        const char *http_o = get_std_http_o_path(argv[0]);
+        const char *tar_o = get_std_tar_o_path(argv[0]);
+        const char *test_o = get_std_test_o_path(argv[0]);
+        int cc_ok = invoke_cc(c_paths, n_c, out_path, target, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o, random_o, env_o, sync_o, encoding_o, base64_o, crypto_o, log_o, atomic_o, channel_o, backtrace_o, hash_o, math_o, sort_o, ffi_o, json_o, csv_o, regex_o, compress_o, unicode_o, dynlib_o, http_o, tar_o, test_o);
         unlink(tmp_c);
         while (n_all--) { free(all_dep_paths[n_all]); ast_module_free(all_dep_mods[n_all]); }
         ast_module_free(mod);
@@ -2372,7 +2830,7 @@ int run_compiler_su_path(int argc, char **argv) {
     int fd = -1;
     FILE *cf;
     if (emit_to_stdout) {
-        cf = stdout;
+†        cf = stdout;
     } else {
         fd = mkstemp(tmp);
         if (fd < 0) {
@@ -2505,7 +2963,30 @@ int run_compiler_su_path(int argc, char **argv) {
             const char *net_o = get_std_net_o_path(argv[0]);
             const char *thread_o = get_std_thread_o_path(argv[0]);
             const char *time_o = get_std_time_o_path(argv[0]);
-            int cc_ret = invoke_cc(c_paths, 1, out_path, NULL, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o);
+            const char *random_o = get_std_random_o_path(argv[0]);
+            const char *env_o = get_std_env_o_path(argv[0]);
+            const char *sync_o = get_std_sync_o_path(argv[0]);
+            const char *encoding_o = get_std_encoding_o_path(argv[0]);
+            const char *base64_o = get_std_base64_o_path(argv[0]);
+            const char *crypto_o = get_std_crypto_o_path(argv[0]);
+            const char *log_o = get_std_log_o_path(argv[0]);
+            const char *atomic_o = get_std_atomic_o_path(argv[0]);
+            const char *channel_o = get_std_channel_o_path(argv[0]);
+            const char *backtrace_o = get_std_backtrace_o_path(argv[0]);
+            const char *hash_o = get_std_hash_o_path(argv[0]);
+            const char *math_o = get_std_math_o_path(argv[0]);
+            const char *sort_o = get_std_sort_o_path(argv[0]);
+            const char *ffi_o = get_std_ffi_o_path(argv[0]);
+            const char *json_o = get_std_json_o_path(argv[0]);
+            const char *csv_o = get_std_csv_o_path(argv[0]);
+            const char *regex_o = get_std_regex_o_path(argv[0]);
+            const char *compress_o = get_std_compress_o_path(argv[0]);
+            const char *unicode_o = get_std_unicode_o_path(argv[0]);
+            const char *dynlib_o = get_std_dynlib_o_path(argv[0]);
+            const char *http_o = get_std_http_o_path(argv[0]);
+            const char *tar_o = get_std_tar_o_path(argv[0]);
+            const char *test_o = get_std_test_o_path(argv[0]);
+            int cc_ret = invoke_cc(c_paths, 1, out_path, NULL, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o, random_o, env_o, sync_o, encoding_o, base64_o, crypto_o, log_o, atomic_o, channel_o, backtrace_o, hash_o, math_o, sort_o, ffi_o, json_o, csv_o, regex_o, compress_o, unicode_o, dynlib_o, http_o, tar_o, test_o);
             unlink(tmp);
             return cc_ret == 0 ? 0 : 1;
         }
@@ -2991,7 +3472,30 @@ int driver_run_compiler_full(int argc, char **argv) {
             const char *net_o = get_std_net_o_path(argv[0]);
             const char *thread_o = get_std_thread_o_path(argv[0]);
             const char *time_o = get_std_time_o_path(argv[0]);
-            int cc_ret = invoke_cc(c_paths, 1, out_path, NULL, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o);
+            const char *random_o = get_std_random_o_path(argv[0]);
+            const char *env_o = get_std_env_o_path(argv[0]);
+            const char *sync_o = get_std_sync_o_path(argv[0]);
+            const char *encoding_o = get_std_encoding_o_path(argv[0]);
+            const char *base64_o = get_std_base64_o_path(argv[0]);
+            const char *crypto_o = get_std_crypto_o_path(argv[0]);
+            const char *log_o = get_std_log_o_path(argv[0]);
+            const char *atomic_o = get_std_atomic_o_path(argv[0]);
+            const char *channel_o = get_std_channel_o_path(argv[0]);
+            const char *backtrace_o = get_std_backtrace_o_path(argv[0]);
+            const char *hash_o = get_std_hash_o_path(argv[0]);
+            const char *math_o = get_std_math_o_path(argv[0]);
+            const char *sort_o = get_std_sort_o_path(argv[0]);
+            const char *ffi_o = get_std_ffi_o_path(argv[0]);
+            const char *json_o = get_std_json_o_path(argv[0]);
+            const char *csv_o = get_std_csv_o_path(argv[0]);
+            const char *regex_o = get_std_regex_o_path(argv[0]);
+            const char *compress_o = get_std_compress_o_path(argv[0]);
+            const char *unicode_o = get_std_unicode_o_path(argv[0]);
+            const char *dynlib_o = get_std_dynlib_o_path(argv[0]);
+            const char *http_o = get_std_http_o_path(argv[0]);
+            const char *tar_o = get_std_tar_o_path(argv[0]);
+            const char *test_o = get_std_test_o_path(argv[0]);
+            int cc_ret = invoke_cc(c_paths, 1, out_path, NULL, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o, random_o, env_o, sync_o, encoding_o, base64_o, crypto_o, log_o, atomic_o, channel_o, backtrace_o, hash_o, math_o, sort_o, ffi_o, json_o, csv_o, regex_o, compress_o, unicode_o, dynlib_o, http_o, tar_o, test_o);
             unlink(tmp);
             return cc_ret == 0 ? 0 : 1;
         }
