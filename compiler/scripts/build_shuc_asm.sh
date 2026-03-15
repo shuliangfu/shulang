@@ -13,11 +13,16 @@ mkdir -p "$BUILD_DIR"
 echo "build_shuc_asm: using SHUC=$SHUC"
 
 # 按依赖顺序尝试编译各 .su 为 .o（-o xxx.o 仅产出入口模块，依赖为未定义符号，需全部编出后一起链接）
+# 若需看 SKIP 原因，可设 SHUC_ASM_VERBOSE=1 保留 stderr
 compile_su() {
   local out="$BUILD_DIR/$1"
   local src="$2"
   printf "  asm %s -> %s ... " "$src" "$out"
-  if "$SHUC" -backend asm -o "$out" $LIBROOT "$src" 2>/dev/null; then echo OK; else echo SKIP; fi
+  if [ -n "${SHUC_ASM_VERBOSE}" ]; then
+    if "$SHUC" -backend asm -o "$out" $LIBROOT "$src"; then echo OK; else echo SKIP; fi
+  else
+    if "$SHUC" -backend asm -o "$out" $LIBROOT "$src" 2>/dev/null; then echo OK; else echo SKIP; fi
+  fi
 }
 
 compile_su token.o src/lexer/token.su
