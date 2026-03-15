@@ -183,6 +183,8 @@ function elf_resolve_patches(ctx: *ElfCodegenCtx): i32 {
   while (p < ctx.num_patches) {
     let rel32_offset: i32 = ctx.patches[p].rel32_offset;
     let target_offset: i32 = -1;
+    let next_insn: i32 = 0;
+    let delta: i32 = 0;
     let l: i32 = 0;
     while (l < ctx.num_labels) {
       if (elf_name_eq(ctx.patches[p].name, ctx.patches[p].name_len, ctx.labels[l].name, ctx.labels[l].name_len) != 0) {
@@ -194,8 +196,8 @@ function elf_resolve_patches(ctx: *ElfCodegenCtx): i32 {
     if (target_offset < 0) {
       return -1;
     }
-    let next_insn: i32 = rel32_offset + 4;
-    let delta: i32 = target_offset - next_insn;
+    next_insn = rel32_offset + 4;
+    delta = target_offset - next_insn;
     if (ctx.e_machine == 183) {
       let imm_bits: i32 = ctx.patches[p].patch_imm_bits;
       let insn_lo: i32 = (ctx.code.data[rel32_offset] & 255) | ((ctx.code.data[rel32_offset + 1] & 255) << 8);
@@ -372,26 +374,26 @@ function write_elf_o_to_buf(ctx: *ElfCodegenCtx, out: *CodegenOutBuf): i32 {
       }
       m = m + 1;
     }
-    let rela: [24]u8 = [];
-    rela[12] = 252;
-    rela[13] = 255;
-    rela[14] = 255;
-    rela[15] = 255;
-    rela[16] = 255;
-    rela[17] = 255;
-    rela[18] = 255;
-    rela[19] = 255;
-    rela[0] = elf_to_u8(ctx.relocs[r].offset);
-    rela[1] = elf_to_u8(ctx.relocs[r].offset >> 8);
-    rela[2] = elf_to_u8(ctx.relocs[r].offset >> 16);
-    rela[3] = elf_to_u8(ctx.relocs[r].offset >> 24);
-    rela[4] = elf_to_u8(ctx.reloc_type_r_pc32);
-    rela[5] = elf_to_u8(ctx.reloc_type_r_pc32 >> 8);
-    rela[8] = elf_to_u8(sym_idx);
-    rela[9] = elf_to_u8(sym_idx >> 8);
-    rela[10] = elf_to_u8(sym_idx >> 16);
-    rela[11] = elf_to_u8(sym_idx >> 24);
-    if (elf_append(out, rela, 24) != 0) {
+    let rela_buf: [24]u8 = [];
+    rela_buf[12] = 252;
+    rela_buf[13] = 255;
+    rela_buf[14] = 255;
+    rela_buf[15] = 255;
+    rela_buf[16] = 255;
+    rela_buf[17] = 255;
+    rela_buf[18] = 255;
+    rela_buf[19] = 255;
+    rela_buf[0] = elf_to_u8(ctx.relocs[r].offset);
+    rela_buf[1] = elf_to_u8(ctx.relocs[r].offset >> 8);
+    rela_buf[2] = elf_to_u8(ctx.relocs[r].offset >> 16);
+    rela_buf[3] = elf_to_u8(ctx.relocs[r].offset >> 24);
+    rela_buf[4] = elf_to_u8(ctx.reloc_type_r_pc32);
+    rela_buf[5] = elf_to_u8(ctx.reloc_type_r_pc32 >> 8);
+    rela_buf[8] = elf_to_u8(sym_idx);
+    rela_buf[9] = elf_to_u8(sym_idx >> 8);
+    rela_buf[10] = elf_to_u8(sym_idx >> 16);
+    rela_buf[11] = elf_to_u8(sym_idx >> 24);
+    if (elf_append(out, rela_buf, 24) != 0) {
       return -1;
     }
     r = r + 1;

@@ -188,6 +188,7 @@ function write_macho_o_to_buf(ctx: *ElfCodegenCtx, out: *CodegenOutBuf): i32 {
   if (ctx.e_machine == 183) { rel_type = 2; rel_len = 2; }
   let r: i32 = 0;
   while (r < ctx.num_relocs) {
+    let ri: [8]u8 = [];
     let sym_idx: i32 = 0;
     let m: i32 = 0;
     while (m < ctx.num_syms) {
@@ -197,7 +198,6 @@ function write_macho_o_to_buf(ctx: *ElfCodegenCtx, out: *CodegenOutBuf): i32 {
       }
       m = m + 1;
     }
-    let ri: [8]u8 = [];
     ri[0] = platform.elf.elf_to_u8(ctx.relocs[r].offset);
     ri[1] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 8);
     ri[2] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 16);

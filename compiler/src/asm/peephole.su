@@ -28,11 +28,13 @@ function peephole_remove_redundant_push_pop(out: *CodegenOutBuf): i32 {
   let i: i32 = 0;
   while (i < out.len) {
     let line_end: i32 = i;
+    let line_len: i32 = 0;
+    let next_start: i32 = 0;
+    let remove_len: i32 = 0;
     while (line_end < out.len && out.data[line_end] != 10) { line_end = line_end + 1; }
     if (line_end >= out.len) { break; }
-    let line_len: i32 = line_end - i;
-    let next_start: i32 = line_end + 1;
-    let remove_len: i32 = 0;
+    line_len = line_end - i;
+    next_start = line_end + 1;
     if (line_len == 10 && next_start + 10 <= out.len && slice_eq(out, i, x86_push, 11) != 0 && slice_eq(out, next_start, x86_pop, 10) != 0) {
       remove_len = 11 + 10;
     } else if (line_len == 19 && next_start + 18 <= out.len && slice_eq(out, i, arm_push, 20) != 0 && slice_eq(out, next_start, arm_pop, 18) != 0) {

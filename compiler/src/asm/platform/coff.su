@@ -121,6 +121,7 @@ function write_coff_o_to_buf(ctx: *platform.elf.ElfCodegenCtx, out: *CodegenOutB
 
   let r: i32 = 0;
   while (r < num_relocs) {
+    let rel: [10]u8 = [];
     let sym_idx: i32 = 0;
     let m: i32 = 0;
     while (m < num_syms) {
@@ -130,7 +131,6 @@ function write_coff_o_to_buf(ctx: *platform.elf.ElfCodegenCtx, out: *CodegenOutB
       }
       m = m + 1;
     }
-    let rel: [10]u8 = [];
     rel[0] = platform.elf.elf_to_u8(ctx.relocs[r].offset);
     rel[1] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 8);
     rel[2] = platform.elf.elf_to_u8(ctx.relocs[r].offset >> 16);
