@@ -1,5 +1,47 @@
 // core.builtin — 内建函数 / intrinsics（自举前最小实现）
-// 自举前占位：提供最小可编译导出；内建映射由编译器识别后在此声明。
+// 已提供：copy、unreachable、abort、min/max、clz/ctz/popcount（u32）、placeholder；不新增 extern，保持 core 零 OS 依赖。
+// 与编译器内建对齐后，可改为 extern 或编译器识别符号，以产生单指令/ libcall 优化。
 
-// 占位函数，表示本模块已可 import；内建由编译器特殊处理，此处仅占位。
+import core.mem;
+
+// ——— 占位与测试用 ———
 function placeholder(): i32 { return 0; }
+
+// ——— 内存与终止 ———
+function copy(dst: *u8, src: *u8, n: usize): void { mem_copy(dst, src, n); }
+function unreachable(): void { panic(); }
+function abort(): void { panic(); }
+
+// ——— 比较（可内联，后续可映射为 min/max 指令） ———
+function min_i32(a: i32, b: i32): i32 { return if (a < b) { a } else { b }; }
+function max_i32(a: i32, b: i32): i32 { return if (a > b) { a } else { b }; }
+function min_u32(a: u32, b: u32): u32 { return if (a < b) { a } else { b }; }
+function max_u32(a: u32, b: u32): u32 { return if (a > b) { a } else { b }; }
+
+// ——— 位运算（后续可映射为 __builtin_clz/ctz/popcount） ———
+// 前导零个数；x==0 返回 32。
+function clz_u32(x: u32): i32 {
+  if (x == 0) { return 32; }
+  let n: i32 = 0;
+  let t: u32 = x;
+  while (t != 0) { t = t >> 1; n = n + 1; }
+  return 32 - n;
+}
+// 尾随零个数；x==0 返回 32。
+function ctz_u32(x: u32): i32 {
+  if (x == 0) { return 32; }
+  let n: i32 = 0;
+  let t: u32 = x;
+  while (t % 2 == 0) { t = t >> 1; n = n + 1; }
+  return n;
+}
+// 二进制中 1 的个数。
+function popcount_u32(x: u32): i32 {
+  let c: i32 = 0;
+  let t: u32 = x;
+  while (t != 0) {
+    c = c + (t % 2);
+    t = t >> 1;
+  }
+  return c;
+}
