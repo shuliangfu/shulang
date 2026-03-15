@@ -24,6 +24,9 @@ struct DriverSuEmitState {
   use_asm_backend: i32;
   /** 目标架构：0=x86_64，1=arm64，2=riscv64；按 -target aarch64/arm64/riscv64 设置。 */
   target_arch: i32;
+  /** -backend asm 且 -o <path> 时：输出路径，否则 len 为 0。供 driver_run_su_emit_su 写入 -o 文件。 */
+  out_path_buf: [512]u8;
+  out_path_len: i32;
 }
 
 /** 与 C 的 struct shulang_slice_uint8_t 布局一致，供直接调 pipeline_run_su_pipeline_impl。 */
@@ -34,6 +37,15 @@ struct PipelineSourceSlice {
 
 /** C 极薄原语：将 argv[i] 复制到 buf[0..max-1]，NUL 结尾，返回长度；越界或失败 -1。必须 C：.su 无 char** 与 argv 索引能力。 */
 extern function driver_get_argv_i(argc: i32, argv: *u8, i: i32, buf: *u8, max: i32): i32;
+/** C 极薄原语：以 path[0..path_len-1] 为路径打开读文件，返回 fd，失败 -1。供 driver_run_su_emit_su 读入口文件，避免 -E-extern 生成顺序导致 path_buf 未填就调 open。 */
+extern function driver_fs_open_read_path(path: *u8, path_len: i32): i32;
+/** C 提供静态 arena/module 缓冲（约 12MB/512KB），避免栈上超大数组导致越界或栈溢出。 */
+extern function driver_arena_buf(): *u8;
+extern function driver_module_buf(): *u8;
+/** C 极薄原语：以 path[0..path_len-1] 为路径打开写文件（O_WRONLY|O_CREAT|O_TRUNC），返回 fd，失败 -1。供 -backend asm -o 时写 -o 文件。 */
+extern function driver_fs_open_write(path: *u8, path_len: i32): i32;
+/** 诊断：pipeline 返回非 0 时打印 rc 到 stderr；rc==-7（resolve 失败）时 path 为尝试过的路径（以 0 结尾），否则 path 可忽略。 */
+extern function driver_pipeline_fail_code(rc: i32, path: *u8): void;
 
 /** -su -E 多文件：将 path 与 -L 库根灌入 C 侧，再调 driver_run_su_emit_c 走完整 deps+main 路径（.su 的 driver_run_su_emit_su 仅单文件无 import）。 */
 extern function driver_run_su_emit_c_set_path(path: *u8, path_len: i32): i32;
@@ -46,14 +58,16 @@ function run_compiler_su_path(argc: i32, argv: *u8): i32 {
   return run_compiler_su_path_impl(argc, argv);
 }
 
-/** pipeline 实现入口（.su 内自构 slice 后调用，不再用 C 薄包装）。 */
-extern function pipeline_run_su_pipeline_impl(arena: *u8, module: *u8, source: *PipelineSourceSlice, out_buf: *u8, ctx: *u8): i32;
+/** pipeline 实现入口（.su 内自构 slice 后调用）。形参顺序 (module, arena) 与调用时 (module_buf, arena_buf) 一致；out_buf/ctx 用真实类型以匹配 pipeline_gen.c 签名，消除指针类型警告。 */
+extern function pipeline_run_su_pipeline_impl(module: *u8, arena: *u8, source: *PipelineSourceSlice, out_buf: *CodegenOutBuf, ctx: *PipelineDepCtx): i32;
 
-/** 原 C 侧完整编译实现（-o/import 等复杂路径）；完全自举时桩掉：.su 内实现为直接返回 1，不再调用 C。 */
+/** C 侧完整编译实现：解析 -o/-L/-O、读文件、pipeline、cc 生成可执行文件。供 r==1/r==2 时（如带 -o）从 .su 路径转调。 */
+extern function driver_run_compiler_full(argc: i32, argv: *u8): i32;
+/** 原 C 侧完整编译实现（-o/import 等复杂路径）；现转调 C 的 driver_run_compiler_full，使带 -o 的 shuc 能产出可执行文件。 */
 function run_compiler_c_impl(argc: i32, argv: *u8): i32 {
-  return 1;
+  return driver_run_compiler_full(argc, argv);
 }
-/** 原 run_compiler_c：转调 run_compiler_c_impl（现为 .su 桩），供 r==1/r==2 时走复杂路径；桩下恒返回 1。 */
+/** 原 run_compiler_c：转调 run_compiler_c_impl，供 r==1/r==2 时走 C 的完整编译路径（-o、多文件等）。 */
 function run_compiler_c(argc: i32, argv: *u8): i32 {
   return run_compiler_c_impl(argc, argv);
 }
@@ -164,6 +178,7 @@ function driver_argv_parse_su_path(argc: i32, argv: *u8, state: *DriverSuEmitSta
   state.n_lib_roots = 0;
   state.use_asm_backend = 0;
   state.target_arch = 0;
+  state.out_path_len = 0;
   if (argc < 2) {
     return 2;
   }
@@ -210,10 +225,18 @@ function driver_argv_parse_su_path(argc: i32, argv: *u8, state: *DriverSuEmitSta
       continue;
     }
     if (len == 2 && arg_buf[0] == 45 && arg_buf[1] == 111) {
-      has_o = 1;
-      i = i + 1;
-      if (i < argc) {
+      if (state.use_asm_backend != 0 && i + 1 < argc) {
+        let olen: i32 = driver_get_argv_i(argc, argv, i + 1, state.out_path_buf, 512);
+        if (olen >= 0) {
+          state.out_path_len = olen;
+        }
+        i = i + 2;
+      } else {
+        has_o = 1;
         i = i + 1;
+        if (i < argc) {
+          i = i + 1;
+        }
       }
       continue;
     }
@@ -261,6 +284,7 @@ function driver_argv_parse_su(argc: i32, argv: *u8, state: *DriverSuEmitState): 
   state.n_lib_roots = 0;
   state.use_asm_backend = 0;
   state.target_arch = 0;
+  state.out_path_len = 0;
   if (argc < 4) {
     return 0;
   }
@@ -322,6 +346,11 @@ function driver_argv_parse_su(argc: i32, argv: *u8, state: *DriverSuEmitState): 
  * 使用固定缓冲与 ctx；仅无 import 单文件时正确（deps 为 0）。
  */
 function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
+  /* 用 C 原语按 state.path_buf/len 打开，避免 -E-extern 生成顺序把 open 提到 path_buf 填充之前 */
+  let fd: i32 = driver_fs_open_read_path(state.path_buf, state.path_len);
+  if (fd < 0) {
+    return 1;
+  }
   let path_buf: [512]u8 = [];
   let k: i32 = 0;
   while (k < state.path_len && k < 512) {
@@ -331,14 +360,12 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
   if (k < 512) {
     path_buf[k] = 0;
   }
-  let fd: i32 = fs_open_read(path_buf);
-  if (fd < 0) {
-    return 1;
-  }
   let loaded_buf: [262144]u8 = [];
   let cap: usize = 262144;
   let n: isize = fs_read(fd, loaded_buf, cap);
-  fs_close(fd);
+  if (fd >= 0) {
+    fs_close(fd);
+  }
   if (n < 0) {
     return 1;
   }
@@ -347,8 +374,9 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
   if (out_len < 0) {
     return 1;
   }
-  let arena_buf: [2097152]u8 = [];
-  let module_buf: [524288]u8 = [];
+  /* arena/module 由 C 提供静态缓冲，避免栈上超大数组；pipeline 要求 sizeof(ast_ASTArena) 约 9MB+ */
+  let arena_buf: *u8 = driver_arena_buf();
+  let module_buf: *u8 = driver_module_buf();
   let ctx: PipelineDepCtx = PipelineDepCtx {
     dep_modules: [],
     dep_arenas: [],
@@ -367,7 +395,8 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
     target_arch: state.target_arch,
     use_macho_o: 0,
     use_coff_o: 0,
-    current_block_ref: 0
+    current_block_ref: 0,
+    current_func_index: -1
   };
   let last_slash: i32 = -1;
   k = 0;
@@ -404,20 +433,41 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
   let out: CodegenOutBuf = CodegenOutBuf { data: [], len: 0 };
   let source_len: usize = out_len;
   let source_slice: PipelineSourceSlice = PipelineSourceSlice { data: preprocess_buf, length: source_len };
-  let rc: i32 = pipeline_run_su_pipeline_impl(arena_buf, module_buf, &source_slice, &out, &ctx);
+  let rc: i32 = pipeline_run_su_pipeline_impl(module_buf, arena_buf, &source_slice, &out, &ctx);
   if (rc != 0) {
+    driver_pipeline_fail_code(rc, &ctx.path_buf[0]);
     return 1;
   }
   let len: usize = out.len;
-  if (len > 262144) {
-    let written: isize = fs_write(1, out.data, 262144);
-    if (written != 262144) {
+  if (state.out_path_len > 0) {
+    let fd: i32 = driver_fs_open_write(state.out_path_buf, state.out_path_len);
+    if (fd < 0) {
       return 1;
     }
+    if (len > 262144) {
+      let written: isize = fs_write(fd, out.data, 262144);
+      fs_close(fd);
+      if (written < 0 || (written as usize) != 262144) {
+        return 1;
+      }
+    } else {
+      let written: isize = fs_write(fd, out.data, len);
+      fs_close(fd);
+      if (written < 0 || (written as usize) != len) {
+        return 1;
+      }
+    }
   } else {
-    let written: isize = fs_write(1, out.data, len);
-    if (written != len) {
-      return 1;
+    if (len > 262144) {
+      let written: isize = fs_write(1, out.data, 262144);
+      if (written < 0 || (written as usize) != 262144) {
+        return 1;
+      }
+    } else {
+      let written: isize = fs_write(1, out.data, len);
+      if (written < 0 || (written as usize) != len) {
+        return 1;
+      }
     }
   }
   return 0;
@@ -428,7 +478,7 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
  * 返回 0 成功，1 错误，或 C 的返回值。
  */
 function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
-  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0 };
+  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0, out_path_buf: [], out_path_len: 0 };
   let r: i32 = driver_argv_parse_su_path(argc, argv, &state);
   if (r == 1) {
     return run_compiler_c_impl(argc, argv);
@@ -444,7 +494,7 @@ function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
  * 6.2：-su -E 的解析与执行全部在 .su；非 -su -E 时由 run_compiler_su_path_impl 优先走 .su 简化路径。
  */
 function entry(argc: i32, argv: *u8): i32 {
-  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0 };
+  let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0, out_path_buf: [], out_path_len: 0 };
   if (driver_argv_parse_su(argc, argv, &state) != 0) {
     /* -su -E：走 C 的 driver_run_su_emit_c，支持多文件（deps+main）；.su 的 driver_run_su_emit_su 仅单文件无 import。 */
     driver_run_su_emit_c_set_path(state.path_buf, state.path_len);
