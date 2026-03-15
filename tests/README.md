@@ -71,12 +71,12 @@
 | `run-vec.sh` | 动态数组/vec | 正例 |
 | `run-heap.sh` | 堆分配 | 正例 |
 | `run-runtime.sh` | 运行时接口 | 正例 |
-| `run-fs.sh` | std.fs 文件系统 | 正例 |
+| `run-fs.sh` | std.fs 文件系统（含 fs_readv_buf/fs_writev_buf 切片化） | 正例 |
 | `run-path.sh` | 路径处理 | 正例 |
 | `run-map.sh` | 映射/字典 | 正例 |
 | `run-error.sh` | 错误处理 | 正例 |
-| `run-net.sh` | std.net 占位（Ipv4Addr、TcpStream 等） | 正例 |
-| `run-io-driver.sh` | std.io.driver 占位（Buffer、submit 等） | 正例 |
+| `run-net.sh` | std.net 占位（Ipv4Addr、TcpStream、udp_recv_many_buf/udp_send_many_buf） | 正例 |
+| `run-io-driver.sh` | std.io.driver 占位（Buffer、submit、submit_*_batch_buf、register_fixed_buffers_buf） | 正例 |
 | `run-ub.sh` | 未定义行为收窄：除零、越界等应 panic | 正例 + 负例 |
 | `run-abi-layout.sh` | ABI/布局断言（layout_abi.c），与 analysis/ABI与布局.md 一致 | 正例 |
 
@@ -115,7 +115,7 @@ make test
 | **编译器链路** | lexer → parser → preprocess → typeck → codegen → cc 全链路有正例；parser/typeck/lexer 有负例或边界用例（见 README-boundary.md）。 |
 | **语言特性** | 泛型、trait、多文件、import、let/const、if/ternary/while/for、match、enum、struct、slice、数组、指针、向量、defer、goto、panic、return 表达式、二元/一元运算、浮点、布尔 均有对应 run-*.sh。 |
 | **core 模块** | types（core-types）、slice、option、result、builtin、debug、fmt 有独立或 stdlib-import 覆盖；core.mem 通过 std.mem 或 stdlib-import 间接使用。 |
-| **std 模块** | io、io.driver、io.core（经 driver/mem 传递依赖）、mem、net、fs、path、map、string、vec、heap、process、error、runtime 均有 run-*.sh；net 含 connect/listen/accept 与 accept_many/connect_many 调用。 |
+| **std 模块** | io、io.driver、io.core（经 driver/mem 传递依赖）、mem、net、fs、path、map、string、vec、heap、process、error、runtime 均有 run-*.sh；net 含 connect/listen/accept、accept_many/connect_many 及 udp_recv_many_buf/udp_send_many_buf；fs 含 fs_readv_buf/fs_writev_buf；io.driver 含 submit_*_batch_buf、register_fixed_buffers_buf。 |
 | **边界/负例** | preprocess、parser、lexer、typeck、struct、float、while、for、let-const、import、match、array、slice、generic、trait、ub、panic 已补边界或负例（见 README-boundary.md）。 |
 | **自举相关** | std.io.driver、std.io.core、std.mem、std.net、UB 收窄、ABI 布局 均纳入 run-all.sh。 |
 
