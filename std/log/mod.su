@@ -1,0 +1,18 @@
+// std.log — 日志级别与 stderr 输出（对标 Zig std.log、Rust log，零分配）
+//
+// 【文件职责】set_min_level、log(level, ptr, len)；输出到 stderr，带 [DEBUG]/[INFO]/[WARN]/[ERROR] 前缀。
+// 【依赖】core；与 std/log/log.c 同属一模块。
+
+extern function log_set_min_level_c(level: i32): void;
+extern function log_write_c(level: i32, ptr: *u8, len: i32): i32;
+
+function level_debug(): i32 { return 0; }
+function level_info(): i32 { return 1; }
+function level_warn(): i32 { return 2; }
+function level_error(): i32 { return 3; }
+
+/** 设置最小输出级别；低于此级别的 log 不写。0=DEBUG, 1=INFO, 2=WARN, 3=ERROR。 */
+function set_min_level(level: i32): void { log_set_min_level_c(level); }
+
+/** 写一条日志到 stderr："[LEVEL] " + ptr[0..len] + 换行。返回 0 成功，-1 失败。 */
+function log(level: i32, ptr: *u8, len: i32): i32 { return log_write_c(level, ptr, len); }
