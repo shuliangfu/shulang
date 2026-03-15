@@ -1,2 +1,8 @@
 import core.types;
-function main(): i32 { return 0; }
+import std.io;
+
+function main(): i32 {
+  let msg: [12]u8 = [72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100, 10];
+  let n: i32 = print_str(&msg[0], 12);
+  return if (n >= 0) { 0 } else { 1 };
+}
