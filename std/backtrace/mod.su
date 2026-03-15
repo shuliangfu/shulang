@@ -1,0 +1,17 @@
+// std.backtrace — 调用栈捕获（对标 Rust std::backtrace）
+//
+// 【文件职责】capture 将当前栈帧写入 buf（每帧 sizeof(void*) 字节），返回帧数；symbolicate 为占位。
+// 【依赖】core；与 std/backtrace/backtrace.c 同属一模块。平台差异见 README。
+
+extern function backtrace_capture_c(buf: *u8, max_frames: i32): i32;
+extern function backtrace_symbolicate_c(buf: *u8, len: i32, out_ptrs: *u8, out_names: *u8, max: i32): i32;
+
+/** 捕获当前调用栈到 buf；buf 需至少 max_frames * sizeof(void*) 字节。返回实际帧数，失败为 0。 */
+function capture(buf: *u8, max_frames: i32): i32 {
+  return backtrace_capture_c(buf, max_frames);
+}
+
+/** 将 capture 得到的 buf 符号化（平台相关）；当前为 stub，返回 0。 */
+function symbolicate(buf: *u8, len: i32, out_ptrs: *u8, out_names: *u8, max: i32): i32 {
+  return backtrace_symbolicate_c(buf, len, out_ptrs, out_names, max);
+}
