@@ -1,0 +1,52 @@
+// std.math — 数学常量与函数（对标 Zig std.math、Rust std::f64）
+//
+// 【文件职责】PI、E、Tau；floor/ceil/trunc/round；sin/cos/tan、asin/acos/atan、atan2；sqrt、cbrt、pow、exp、log、abs、signum；min/max。
+// 【依赖】core；与 std/math/math.c 同属一模块。链接时需 -lm。
+
+extern function math_pi_c(): f64;
+extern function math_e_c(): f64;
+extern function math_tau_c(): f64;
+extern function math_floor_c(x: f64): f64;
+extern function math_ceil_c(x: f64): f64;
+extern function math_trunc_c(x: f64): f64;
+extern function math_round_c(x: f64): f64;
+extern function math_sin_c(x: f64): f64;
+extern function math_cos_c(x: f64): f64;
+extern function math_tan_c(x: f64): f64;
+extern function math_asin_c(x: f64): f64;
+extern function math_acos_c(x: f64): f64;
+extern function math_atan_c(x: f64): f64;
+extern function math_atan2_c(y: f64, x: f64): f64;
+extern function math_sqrt_c(x: f64): f64;
+extern function math_cbrt_c(x: f64): f64;
+extern function math_pow_c(base: f64, exp: f64): f64;
+extern function math_exp_c(x: f64): f64;
+extern function math_log_c(x: f64): f64;
+extern function math_fabs_c(x: f64): f64;
+extern function math_signum_c(x: f64): f64;
+extern function math_fmin_c(a: f64, b: f64): f64;
+extern function math_fmax_c(a: f64, b: f64): f64;
+
+function pi(): f64 { return math_pi_c(); }
+function e(): f64 { return math_e_c(); }
+function tau(): f64 { return math_tau_c(); }
+function floor(x: f64): f64 { return math_floor_c(x); }
+function ceil(x: f64): f64 { return math_ceil_c(x); }
+function trunc(x: f64): f64 { return math_trunc_c(x); }
+function round(x: f64): f64 { return math_round_c(x); }
+function sin(x: f64): f64 { return math_sin_c(x); }
+function cos(x: f64): f64 { return math_cos_c(x); }
+function tan(x: f64): f64 { return math_tan_c(x); }
+function asin(x: f64): f64 { return math_asin_c(x); }
+function acos(x: f64): f64 { return math_acos_c(x); }
+function atan(x: f64): f64 { return math_atan_c(x); }
+function atan2(y: f64, x: f64): f64 { return math_atan2_c(y, x); }
+function sqrt(x: f64): f64 { return math_sqrt_c(x); }
+function cbrt(x: f64): f64 { return math_cbrt_c(x); }
+function pow(base: f64, exp: f64): f64 { return math_pow_c(base, exp); }
+function exp(x: f64): f64 { return math_exp_c(x); }
+function log(x: f64): f64 { return math_log_c(x); }
+function abs(x: f64): f64 { return math_fabs_c(x); }
+function signum(x: f64): f64 { return math_signum_c(x); }
+function min(a: f64, b: f64): f64 { return math_fmin_c(a, b); }
+function max(a: f64, b: f64): f64 { return math_fmax_c(a, b); }
