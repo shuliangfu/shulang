@@ -1,5 +1,5 @@
-// core.option — Option<T> 与可空语义（自举前最小实现）
-// 当前：提供 Option_i32 具体类型及 some/none/unwrap_or，供无泛型类型语法时使用；泛型 Option<T> 待编译器支持类型实参后扩展。
+// core.option — Option<T> 与可空语义（自举前实现）
+// 当前：Option_i32 / Option_u8 具象类型及 some/none/unwrap_or/is_some/is_none/expect、or/and；泛型 Option<T> 与 map/and_then 待类型实参与函数类型支持后扩展。
 
 // Option_i32：可空 i32，is_some 为真时 value 有效
 struct Option_i32 {
@@ -32,5 +32,40 @@ function is_none_i32(opt: Option_i32): bool {
   return !opt.is_some;
 }
 
+// 有值则返回值，否则 panic（用于必须有的场景）
+function expect_i32(opt: Option_i32): i32 {
+  if (opt.is_some) {
+    return opt.value;
+  } else {
+    return panic();
+  }
+}
+
+// 若 opt 有值则返回 opt，否则返回 other（组合两个可选值，取第一个 Some）
+function or_i32(opt: Option_i32, other: Option_i32): Option_i32 {
+  return opt.is_some ? opt : other;
+}
+
+// 若 opt 无值则返回 None，否则返回 other（串联：当前有值才继续）
+function and_i32(opt: Option_i32, other: Option_i32): Option_i32 {
+  return opt.is_some ? other : none_i32();
+}
+
+// ——— Option_u8：可空 u8，供切片 get_u8、字节流等使用 ———
+allow(padding) struct Option_u8 {
+  is_some: bool;
+  value: u8;
+}
+function none_u8(): Option_u8 { return Option_u8 { is_some: false, value: 0 } }
+function some_u8(x: u8): Option_u8 { return Option_u8 { is_some: true, value: x } }
+function unwrap_or_u8(opt: Option_u8, default_val: u8): u8 { return opt.is_some ? opt.value : default_val; }
+function is_some_u8(opt: Option_u8): bool { return opt.is_some; }
+function is_none_u8(opt: Option_u8): bool { return !opt.is_some; }
+function expect_u8(opt: Option_u8): u8 { if (opt.is_some) { return opt.value; } else { return panic(); } }
+
+function or_u8(opt: Option_u8, other: Option_u8): Option_u8 { return opt.is_some ? opt : other; }
+function and_u8(opt: Option_u8, other: Option_u8): Option_u8 { return opt.is_some ? other : none_u8(); }
+
 // 泛型占位，表示本模块可 import；完整 Option<T> 待类型实参语法后实现
+// map_i32 / and_then_i32 需语言支持函数类型（fn(i32)->i32）后实现
 function option_placeholder<T>(x: T): T { return x; }
