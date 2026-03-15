@@ -1,4 +1,10 @@
-// 测试 std.process.exit(code)：终止进程并返回退出码（exit 不返回，return 仅满足语法）
+// 测试 std.process.exit(code)
+//
+// 【文件职责】本文件为 std.process 单用例测试，用于验证进程退出码行为。
+// 【测试目的】确认 exit(code) 由 codegen 生成对 C exit() 的调用，进程以指定退出码终止。
+// 【覆盖 API】exit(code: i32)。
+// 【预期结果】进程退出码为 99；由 run-process.sh 通过「运行后检查 $? -eq 99」校验。
+// 【运行方式】./tests/run-process.sh 或 shuc -L . tests/process/main.su -o exe && ./exe; echo $?
 import std.process;
 
 function main(): i32 {
