@@ -1,0 +1,17 @@
+// 测试 std.process：exec_simple(program) 失败路径
+//
+// 【文件职责】本文件为 std.process 替换当前进程（exec）失败路径的回归测试。
+// 【测试目的】确认对不存在的路径调用 exec_simple("/nonexistent") 时返回 -1 且不替换当前进程（进程继续执行并退出 0）。
+// 【覆盖 API】exec_simple(program: *u8): i32。
+// 【预期结果】退出码 0 表示 exec_simple 返回 -1（符合预期）；退出码 1 表示返回值非 -1（异常）。Windows 上 exec 不支持，同样应返回 -1。
+// 【运行方式】./tests/run-process.sh
+import std.process;
+
+function main(): i32 {
+  let program: [16]u8 = [47, 110, 111, 110, 101, 120, 105, 115, 116, 101, 110, 116, 0, 0, 0, 0];
+  let r: i32 = exec_simple(&program[0]);
+  if (r != -1) {
+    return 1;
+  }
+  return 0;
+}

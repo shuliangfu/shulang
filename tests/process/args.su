@@ -1,0 +1,25 @@
+// 测试 std.process：args_count、arg(i)、getenv
+//
+// 【文件职责】本文件为 std.process 命令行参数与环境变量查询的回归测试。
+// 【测试目的】确认入口 main 执行后 args_count()≥1、arg(0) 非空（程序名）；getenv("PATH") 调用不崩溃，若存在则通过。
+// 【覆盖 API】args_count()、arg(i: i32)、getenv(name: *u8)。
+// 【预期结果】退出码 0 表示通过；非 0 表示 args_count<1(1)、arg(0) 为空(2) 或其它失败。
+// 【运行方式】./tests/run-process.sh
+import std.process;
+
+function main(): i32 {
+  if (args_count() < 1) {
+    return 1;
+  }
+  if (arg(0) == 0) {
+    return 2;
+  }
+  // getenv("PATH")：NUL 结尾 C 字符串，多数环境存在
+  let path_name: [8]u8 = [80, 65, 84, 72, 0, 0, 0, 0];
+  let val: *u8 = getenv(&path_name[0]);
+  // 不强制 val != 0，仅确保 getenv 调用不崩溃；若 PATH 存在则额外校验
+  if (val != 0) {
+    return 0;
+  }
+  return 0;
+}

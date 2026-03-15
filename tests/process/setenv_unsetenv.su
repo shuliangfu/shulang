@@ -1,0 +1,33 @@
+// 测试 std.process：setenv、getenv、unsetenv 全覆盖
+//
+// 【文件职责】本文件为 std.process 环境变量设置与删除的回归测试。
+// 【测试目的】确认 setenv 后 getenv 能读到值、unsetenv 后 getenv 返回 0；覆盖 setenv(name, value, overwrite) 与 unsetenv(name)。
+// 【覆盖 API】setenv(name, value, overwrite)、getenv(name)、unsetenv(name)。
+// 【测试步骤】setenv("X","v",1) → getenv("X") 得 "v"（首字节 118）→ unsetenv("X") → getenv("X") 得 0。
+// 【预期结果】退出码 0 表示通过；1~5 分别表示 setenv 失败、getenv 空、值首字节非 'v'、unsetenv 失败、unset 后仍非空。
+// 【运行方式】./tests/run-process.sh
+import std.process;
+
+function main(): i32 {
+  // name "X" = [88, 0, ...], value "v" = [118, 0, ...]
+  let name: [4]u8 = [88, 0, 0, 0];
+  let value: [4]u8 = [118, 0, 0, 0];
+  if (setenv(&name[0], &value[0], 1) != 0) {
+    return 1;
+  }
+  let v: *u8 = getenv(&name[0]);
+  if (v == 0) {
+    return 2;
+  }
+  if (v[0] != 118) {
+    return 3;
+  }
+  if (unsetenv(&name[0]) != 0) {
+    return 4;
+  }
+  let v2: *u8 = getenv(&name[0]);
+  if (v2 != 0) {
+    return 5;
+  }
+  return 0;
+}
