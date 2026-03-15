@@ -1,0 +1,36 @@
+// std.compress — 压缩封装（P4 可选；zlib / gzip / Brotli，对标 Zig std.compress、Rust flate2）
+//
+// 【文件职责】deflate/inflate（zlib）、gzip（.gz）、brotli（.br）；各格式可选 -lz / -lbrotlienc -lbrotlidec。
+// 【依赖】std.heap、std.io；与 std/compress/compress.c 同属一模块。
+
+extern function compress_deflate_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+extern function compress_inflate_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+extern function compress_gzip_compress_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+extern function compress_gzip_decompress_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+extern function compress_brotli_compress_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+extern function compress_brotli_decompress_c(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32;
+
+function deflate(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_deflate_c(in, in_len, out, out_cap);
+}
+function inflate(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_inflate_c(in, in_len, out, out_cap);
+}
+
+/** 压缩为 gzip 格式（.gz），返回写入字节数，失败 -1。 */
+function gzip_compress(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_gzip_compress_c(in, in_len, out, out_cap);
+}
+/** 解压 gzip 流，返回写入字节数，失败 -1。 */
+function gzip_decompress(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_gzip_decompress_c(in, in_len, out, out_cap);
+}
+
+/** 压缩为 Brotli 格式（.br），压缩率通常优于 gzip，返回写入字节数，失败 -1。 */
+function brotli_compress(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_brotli_compress_c(in, in_len, out, out_cap);
+}
+/** 解压 Brotli 流，返回写入字节数，失败 -1。 */
+function brotli_decompress(in: *u8, in_len: i32, out: *u8, out_cap: i32): i32 {
+  return compress_brotli_decompress_c(in, in_len, out, out_cap);
+}
