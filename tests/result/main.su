@@ -1,4 +1,4 @@
-// 测试 core.result 的 Result_i32：ok_i32、err_i32、unwrap_or_i32
+// 测试 core.result 的 Result_i32：ok_i32、err_i32、unwrap_or_i32、expect_i32、expect_i32_or_panic
 import core.result;
 
 function main(): i32 {
@@ -6,5 +6,17 @@ function main(): i32 {
   let err_r: Result_i32 = err_i32(7);
   let a: i32 = unwrap_or_i32(ok_r, 0);
   let b: i32 = unwrap_or_i32(err_r, 0);
-  return a + b;
+  let c: i32 = expect_i32(ok_i32(3), 0);
+  let d: i32 = expect_i32_or_panic(ok_i32(5));
+  if (!is_ok_i32(ok_r) || is_err_i32(ok_r)) { return -1; }
+  if (is_ok_i32(err_r) || !is_err_i32(err_r)) { return -2; }
+  let o1: Result_i32 = or_i32(err_r, ok_i32(99));
+  let o2: Result_i32 = or_i32(ok_r, ok_i32(99));
+  if (!is_ok_i32(o1) || expect_i32_or_panic(o1) != 99) { return -3; }
+  if (expect_i32_or_panic(o2) != 42) { return -4; }
+  let a1: Result_i32 = and_i32(ok_i32(1), ok_i32(2));
+  let a2: Result_i32 = and_i32(err_i32(10), ok_i32(2));
+  if (expect_i32_or_panic(a1) != 2) { return -5; }
+  if (is_ok_i32(a2)) { return -6; }
+  return a + b + c + d;
 }
