@@ -22,6 +22,7 @@ fi
 
 # CI 下单个脚本失败时打印 SKIP 并继续，但统计失败数；结束时若有失败则报错并 exit 1，不再误报 all tests OK
 RUN_FAILED_COUNT=0
+RUN_FAILED_SCRIPTS=""
 run() {
     local script="$1"
     if [ ! -f "tests/$script" ]; then return 0; fi
@@ -32,6 +33,7 @@ run() {
         if [ "$s" -ne 0 ]; then
             echo "run-all: $script failed in CI (exit $s); SKIP to keep running"
             RUN_FAILED_COUNT=$((RUN_FAILED_COUNT + 1))
+            RUN_FAILED_SCRIPTS="$RUN_FAILED_SCRIPTS $script"
         fi
     else
         ./tests/$script
@@ -139,6 +141,7 @@ run run-abi-layout.sh
 if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
     if [ "$RUN_FAILED_COUNT" -gt 0 ]; then
         echo "run-all: $RUN_FAILED_COUNT test(s) failed (buffer overflow / abort / segfault etc.); not OK" >&2
+        echo "run-all: failed scripts:$RUN_FAILED_SCRIPTS" >&2
         exit 1
     fi
 fi

@@ -473,6 +473,17 @@ int32_t fs_sync_range_c(int32_t fd, int64_t offset, size_t len) {
 #endif
 }
 
+/** 整文件刷盘（POSIX fsync / Windows FlushFileBuffers）；写完后 close 前调用可保证后续 open/mmap 可见，避免 macOS CI 等环境下 mmap 读到空文件。0 成功，-1 失败。 */
+int32_t fs_sync_c(int32_t fd) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE h = (HANDLE)_get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    return FlushFileBuffers(h) ? 0 : -1;
+#else
+    return fsync(fd) == 0 ? 0 : -1;
+#endif
+}
+
 /** 预分配文件空间 [offset, offset+len)（Linux fallocate）；减少大文件写时的碎片与元数据更新。0 成功，-1 失败。 */
 int32_t fs_fallocate_c(int32_t fd, int64_t offset, int64_t len) {
 #if defined(__linux__)
