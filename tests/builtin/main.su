@@ -1,7 +1,15 @@
-// 测试 core.builtin：占位可 import 并调用
+// 测试 core.builtin：placeholder、copy、min/max、clz/ctz/popcount；unreachable/abort 仅死分支覆盖（不执行）
 import core.builtin;
 
 function main(): i32 {
   let n: i32 = placeholder();
+  let src: [4]u8 = [1, 2, 3, 4];
+  let dst: [4]u8 = [0, 0, 0, 0];
+  copy(dst, src, 4);
+  if (dst[0] != 1 || dst[3] != 4) { return 1; }
+  if (min_i32(3, 7) != 3 || max_i32(3, 7) != 7) { return 2; }
+  if (min_u32(5, 2) != 2 || max_u32(5, 2) != 5) { return 3; }
+  if (clz_u32(1) != 31 || ctz_u32(4) != 2 || popcount_u32(5) != 2) { return 4; }
+  if (false) { unreachable(); abort(); }
   return n;
 }
