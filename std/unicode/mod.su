@@ -1,0 +1,35 @@
+// std.unicode — Unicode 分类、大小写、空白、ASCII（对标 Zig std.unicode、Rust char）
+//
+// 【文件职责】category、to_lower/to_upper、is_whitespace、is_ascii；ASCII 表驱动，非 ASCII 占位。
+// 【依赖】core、std.encoding；与 std/unicode/unicode.c 同属一模块。
+
+extern function unicode_category_c(rune: u32): i32;
+extern function unicode_is_whitespace_c(rune: u32): i32;
+extern function unicode_is_ascii_c(rune: u32): i32;
+extern function unicode_to_lower_c(rune: u32): u32;
+extern function unicode_to_upper_c(rune: u32): u32;
+
+/** rune 分类：0 未知，1 Letter，2 Number，3 Whitespace。 */
+function category(rune: u32): i32 {
+  return unicode_category_c(rune);
+}
+
+/** 是否为空白（\\t \\n \\v \\f \\r 空格）。 */
+function is_whitespace(rune: u32): i32 {
+  return unicode_is_whitespace_c(rune);
+}
+
+/** 是否为 ASCII（rune <= 127）。 */
+function is_ascii(rune: u32): i32 {
+  return unicode_is_ascii_c(rune);
+}
+
+/** rune 转小写；非 ASCII 暂返回原值。 */
+function to_lower(rune: u32): u32 {
+  return unicode_to_lower_c(rune);
+}
+
+/** rune 转大写；非 ASCII 暂返回原值。 */
+function to_upper(rune: u32): u32 {
+  return unicode_to_upper_c(rune);
+}
