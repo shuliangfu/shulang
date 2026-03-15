@@ -1001,6 +1001,18 @@ static int expr_produces_struct_type(const struct ASTExpr *e) {
     return (s && strncmp(s, "struct ", 7) == 0);
 }
 
+/** 表达式 e 的 resolved_type 是否为可折叠为整数的标量（仅此时 const_folded_val 才有意义；struct/float 等不能当整数字面量输出）。 */
+static int expr_type_is_foldable_scalar(const struct ASTExpr *e) {
+    if (!e || !e->resolved_type) return 0;
+    switch (e->resolved_type->kind) {
+        case AST_TYPE_I32: case AST_TYPE_BOOL: case AST_TYPE_U8: case AST_TYPE_U32:
+        case AST_TYPE_I64: case AST_TYPE_USIZE: case AST_TYPE_ISIZE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 /** 当 __tmp 类型为 struct（tmp_ty_str）且 else 分支类型与之不一致时返回 1，此时应输出 (tmp_ty_str){0} 而非 else 表达式，避免 LexerResult __tmp = (Token){0} 等错误。
  * 统一用 expr_struct_type_str 取 else 的 C struct 类型再与 tmp_ty_str 比较，因 c_type_str(NAMED) 可能无 "struct " 前缀。 */
 static int else_struct_type_mismatch(const char *tmp_ty_str, const struct ASTExpr *else_e) {
@@ -1974,8 +1986,8 @@ static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, co
  */
 static int codegen_expr(const struct ASTExpr *e, FILE *out) {
     if (!e || !out) return -1;
-    /* CTFE 最小集：typeck 已折叠的常量表达式直接输出整型值，避免运行时计算 */
-    if (e->const_folded_valid) {
+    /* CTFE 最小集：仅当表达式类型为标量（整型/布尔/浮点）时才用 const_folded_val；struct 等类型不能当整数输出，否则会生成 return -1094795586 等错误 */
+    if (e->const_folded_valid && expr_type_is_foldable_scalar(e)) {
 #ifdef SHUC_USE_SU_CODEGEN
         if (codegen_codegen_su_format_int_lit((uint8_t *)out, (int32_t)e->const_folded_val) != 0) return -1;
         return 0;
