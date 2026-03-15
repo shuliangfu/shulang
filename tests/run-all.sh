@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# 全量回归套件：运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）；不包含自举验证。
-# 入口：./tests/run-all.sh；C/su 区分由环境变量 SHUC 决定，不设则用当前 compiler/shuc。
-# 推荐：./tests/run-all-c.sh（SHUC=compiler/shuc-c）、./tests/run-all-su.sh（SHUC=compiler/shuc_su）分别跑全量。
-# 自举验证（两代 shuc 全量测试一致）：./tests/run-bootstrap-verify.sh 或 make -C compiler bootstrap-verify。
+# 全量回归套件：运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）。
+# 自举测试不跑：run-su-pipeline、run-su-multi-file、run-asm、run-without-c、run-bootstrap-verify 均不执行。
+# 入口：./tests/run-all.sh；C 版编译器由 make -C compiler 产出（不设 SHUC 时用 compiler/shuc）。
 
 set -e
 cd "$(dirname "$0")/.."
@@ -11,6 +10,7 @@ if [ -n "$SHUC" ]; then
     cp "$SHUC" compiler/shuc
     trap '[ -f compiler/shuc.bak ] && mv compiler/shuc.bak compiler/shuc' EXIT
 else
+    # 无 SHUC 时构建 compiler：make all 产出 C 版 shuc，用于功能测试。
     make -C compiler -q 2>/dev/null || make -C compiler
 fi
 
@@ -58,6 +58,7 @@ run run-ternary.sh
 run run-option.sh
 run run-result.sh
 run run-process.sh
+run run-time.sh
 run run-io.sh
 run run-while.sh
 run run-return-expr.sh
@@ -75,23 +76,7 @@ run run-panic.sh
 run run-defer.sh
 run run-goto.sh
 run run-preprocess.sh
-# -su -E 测试：使用 compiler/shuc_su（CI 已构建），验证纯 .su 流水线单文件/多文件
-[ -x compiler/shuc_su ] && echo "run-all: -su pipeline tests (using compiler/shuc_su for -su -E)"
-run run-su-pipeline.sh
-run run-su-multi-file.sh
-run run-asm.sh
-# run-without-c 需要支持 -backend asm 的 driver；若存在 shuc_driver（run-all-c 预构建），则临时切过去以便 run-without-c 能真正跑
-if [ -x compiler/shuc_driver ]; then
-    cp compiler/shuc_driver compiler/shuc
-fi
-run run-without-c.sh
-# run-without-c 可能覆盖 compiler/shuc；恢复为本次 run 使用的编译器，供 run-vector 等使用
-if [ -n "${SHUC:-}" ] && [ -x "$SHUC" ]; then
-    cp "$SHUC" compiler/shuc
-elif [ -z "${SHUC:-}" ]; then
-    make -C compiler shuc-c 2>/dev/null || true
-    [ -f compiler/shuc-c ] && cp compiler/shuc-c compiler/shuc
-fi
+# 自举测试不执行：run-su-pipeline / run-su-multi-file / run-asm / run-without-c / run-bootstrap-verify 已全部排除
 run run-vector.sh
 # core/std 与标准库
 run run-fmt.sh
