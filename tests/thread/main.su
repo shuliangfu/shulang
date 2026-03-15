@@ -1,0 +1,11 @@
+// 测试 std.thread：thread_self、thread_create(dummy_entry)、thread_join
+import std.thread;
+
+function main(): i32 {
+  let main_id: i64 = thread_self();
+  if (main_id == 0) { return 1; }
+  let tid: i64 = thread_create(thread_dummy_entry_ptr(), 0);
+  if (tid == 0) { return 2; }
+  if (thread_join(tid) != 0) { return 3; }
+  return 0;
+}
