@@ -1,5 +1,6 @@
-// core.result — Result<T,E> 与错误传播（自举前最小实现）
+// core.result — Result<T,E> 与错误传播（自举前实现）
 // Result 寄存器化：双 8 字节槽布局，满足 x86-64 SysV 两寄存器返回（rax/rdx），错误检查零内存访问（见 analysis/Result寄存器化.md）。
+// 当前：Result_i32 全系列（ok/err、unwrap_or、is_ok/is_err、expect、expect_i32_or_panic、or/and）；泛型 Result<T,E> 与 map/and_then 待类型实参与函数类型支持后扩展。
 
 // Result_i32：两对 (i32, padding) 共 16 字节，C 侧两寄存器返回；第二槽 err 为 0 表示成功
 allow(padding) struct Result_i32 {
@@ -34,5 +35,30 @@ function is_err_i32(r: Result_i32): bool {
   return r.err != 0;
 }
 
+// 成功则返回值，否则返回默认值（与 unwrap_or_i32 同义，命名供“期望有默认”的调用方使用）
+function expect_i32(r: Result_i32, default_val: i32): i32 {
+  return r.err == 0 ? r.value : default_val;
+}
+
+// 成功则返回值，否则 panic（用于必须成功的场景）
+function expect_i32_or_panic(r: Result_i32): i32 {
+  if (r.err == 0) {
+    return r.value;
+  } else {
+    return panic();
+  }
+}
+
+// 成功则返回本结果，否则返回 other（组合两个结果，取第一个 Ok）
+function or_i32(r: Result_i32, other: Result_i32): Result_i32 {
+  return r.err == 0 ? r : other;
+}
+
+// 失败则返回本结果，否则返回 other（串联：当前成功才继续）
+function and_i32(r: Result_i32, other: Result_i32): Result_i32 {
+  return r.err != 0 ? r : other;
+}
+
 // 泛型占位，表示本模块可 import；完整 Result<T,E> 待类型实参语法后实现
+// map_i32 / and_then_i32 需语言支持函数类型后实现
 function result_placeholder<T>(x: T): T { return x; }
