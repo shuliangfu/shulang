@@ -1,0 +1,8 @@
+// std.simd — SIMD/arch 预留（P4 长期；与语言/目标架构一致再做）
+//
+// 【文件职责】占位；向量类型与 std::arch 类 API 待语言阶段支持后实现。
+// 【依赖】语言/目标架构。当前仅占位。
+
+function placeholder(): i32 {
+  return 0;
+}
