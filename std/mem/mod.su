@@ -1,19 +1,46 @@
-// std.mem — 零拷贝 Buffer、内核预注册预留（自举前最小实现）
-// 高并发IO 第八节三项约定之一：Buffer ABI 24 字节（ptr + len + handle），与 Slice (ptr, len) 兼容扩展。
+// std.mem — 内存操作 + 零拷贝 Buffer（对标 Zig std.mem、Rust std::mem/ptr、Go bytes）
+//
+// 【文件职责】
+// 1) 内存操作：copy/set/compare（对标 Zig std.mem.copy/set/compare、Rust ptr::copy/write_bytes、Go bytes.Equal/Compare）；
+// 2) Buffer ABI 与舒 IO 预注册（高并发 IO 第八节）：Buffer 24 字节、register_buffer 调 shu_io_register。
+//
+// 【对标】
+// Zig: std.mem.copy、std.mem.set、std.mem.compare、@sizeOf；Rust: std::mem::size_of、std::ptr::copy/copy_nonoverlapping、write_bytes；
+// Go: bytes.Equal、bytes.Compare（无独立 mem 包，bytes 提供比较）。
 
 import std.io.core;
+import std.heap;
 
-// Buffer：ptr 指向内存，len 为字节数，handle 为可选内核预注册句柄（0 表示未注册）；64 位下 8+8+8=24 字节
+// ——— Buffer ABI 与预注册（与 std.io.driver 同布局） ———
+
+/** Buffer：ptr 指向内存，len 为字节数，handle 为可选内核预注册句柄（0 表示未注册）；64 位下 8+8+8=24 字节。 */
 struct Buffer {
   ptr: *u8
   len: usize
   handle: usize
 }
 
-// 舒 IO 预注册：调用 std.io.core.shu_io_register，与 std.io.driver 共用同一实现
+/** 舒 IO 预注册：调用 std.io.core.shu_io_register，与 std.io.driver 共用同一实现。 */
 function register_buffer(buf: Buffer): i32 {
   return shu_io_register(buf.ptr, buf.len, buf.handle);
 }
 
-// 占位，表示本模块可 import
+// ——— 内存操作（对标 Zig/Rust/Go） ———
+
+/** 字节拷贝：dst[0..n-1] = src[0..n-1]；n<=0 不写。对标 Zig std.mem.copy、Rust ptr::copy。 */
+function copy(dst: *u8, src: *u8, n: i32): void {
+  copy_u8_at(dst, 0, src, n);
+}
+
+/** 字节填充：ptr[0..n-1] = byte；n<=0 不写。对标 Zig std.mem.set、Rust ptr::write_bytes。 */
+function set(ptr: *u8, byte: u8, n: i32): void {
+  heap_mem_set_c(ptr, byte, n);
+}
+
+/** 字节比较：比较 a[0..n-1] 与 b[0..n-1]；返回 <0 / 0 / >0。对标 Zig std.mem.compare、Go bytes.Compare。 */
+function compare(a: *u8, b: *u8, n: i32): i32 {
+  return heap_mem_compare_c(a, b, n);
+}
+
+/** 占位，表示本模块可 import。 */
 function placeholder(): i32 { return 0; }
