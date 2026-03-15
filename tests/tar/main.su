@@ -1,0 +1,45 @@
+// tests/tar/main.su — std.tar UStar 头读写：全面 + 边界
+// 覆盖：write_header、read_header 往返（name/size）、边界 len<512 读失败、空名与 size=0。
+
+import std.tar;
+
+function main(): i32 {
+  let buf: [512]u8 = [];
+  let name_out: [128]u8 = [];
+  let size_out: i32 = 0;
+
+  let name_a: [2]u8 = [97, 0];
+  let w: i32 = write_header(&buf[0], 512, &name_a[0], 1, 100);
+  if (w != 0) { return 1; }
+  let r: i32 = read_header(&buf[0], 512, &name_out[0], 128, &size_out);
+  if (r != 0) { return 2; }
+  if (name_out[0] != 97 || name_out[1] != 0) { return 3; }
+  if (size_out != 100) { return 4; }
+
+  let name_long: [11]u8 = [102, 111, 111, 47, 98, 97, 114, 46, 116, 120, 0];
+  let w3: i32 = write_header(&buf[0], 512, &name_long[0], 10, 42);
+  if (w3 != 0) { return 5; }
+  let size_out3: i32 = 0;
+  let r3: i32 = read_header(&buf[0], 512, &name_out[0], 128, &size_out3);
+  if (r3 != 0) { return 6; }
+  if (size_out3 != 42) { return 7; }
+  let i: i32 = 0;
+  while (i < 10) {
+    if (name_out[i] != name_long[i]) { return 8; }
+    i = i + 1;
+  }
+  if (name_out[10] != 0) { return 9; }
+
+  let r_fail: i32 = read_header(&buf[0], 400, &name_out[0], 128, &size_out);
+  if (r_fail == 0) { return 10; }
+
+  let empty_name: [1]u8 = [0];
+  let w2: i32 = write_header(&buf[0], 512, &empty_name[0], 0, 0);
+  if (w2 != 0) { return 11; }
+  let size_out2: i32 = 0;
+  let r2: i32 = read_header(&buf[0], 512, &name_out[0], 128, &size_out2);
+  if (r2 != 0) { return 12; }
+  if (size_out2 != 0) { return 13; }
+
+  return 0;
+}
