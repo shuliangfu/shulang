@@ -15,6 +15,6 @@
 | **首次 / 从零** | `make build-tool` 或 `make first-time`（会先产出 shuc 再产出 build_tool，一条命令）。 |
 | **日常与自举** | `./build_tool ./shuc`（本目录下执行，产出 shuc，不依赖 Makefile）。 |
 
-Makefile 仅作兜底/首次；日常推荐仅用 `./build_tool ./shuc`。验收：仓库根执行 `./tests/run-all.sh`。
+Makefile 仅作从零构建/首次；日常推荐仅用 `./build_tool ./shuc`。生成 C（pipeline_gen.c / driver_gen.c）后无补丁，由 runtime/codegen 从根源产出。验收：仓库根执行 `./tests/run-all.sh`。
 
 详见项目根目录下 `analysis/architecture.md` 第三章「编译器架构」。
