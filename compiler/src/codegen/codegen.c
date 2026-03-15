@@ -4728,7 +4728,7 @@ static void dce_collect_from_expr(const struct ASTExpr *e, struct ASTModule *ent
                     used_mono[mi][k] = 1;
             }
         }
-        for (int i = 0; i < *n_wl; i++)
+        for (int i = 0; i < *n_wl && i < max_wl; i++)
             if (worklist[i] == (struct ASTFunc *)callee) goto skip_add;
         if (*n_wl < max_wl) {
             worklist[*n_wl++] = (struct ASTFunc *)callee;
@@ -4738,7 +4738,7 @@ static void dce_collect_from_expr(const struct ASTExpr *e, struct ASTModule *ent
     }
     if (e->kind == AST_EXPR_METHOD_CALL && e->value.method_call.resolved_impl_func) {
         const struct ASTFunc *callee = e->value.method_call.resolved_impl_func;
-        for (int i = 0; i < *n_wl; i++)
+        for (int i = 0; i < *n_wl && i < max_wl; i++)
             if (worklist[i] == (struct ASTFunc *)callee) goto skip_impl;
         if (*n_wl < max_wl) worklist[*n_wl++] = (struct ASTFunc *)callee;
     skip_impl: ;
@@ -5094,13 +5094,14 @@ void codegen_compute_used(struct ASTModule *entry, struct ASTModule **dep_mods, 
     }
     int n = 0;
     used_funcs_out[n++] = entry->main_func;
-    struct ASTFunc *worklist[256];
+#define DCE_WORKLIST_MAX 512
+    struct ASTFunc *worklist[DCE_WORKLIST_MAX];
     int n_wl = 0;
     worklist[n_wl++] = (struct ASTFunc *)entry->main_func;
     int used_mono_rows = used_mono ? (1 + ndep) : 0;
     /* 种子：先遍历 main 体填满 worklist，再把 worklist 中所有函数加入 used，确保入口引用的 import 符号不被误删 */
     if (entry->main_func->body)
-        dce_collect_from_block(entry->main_func->body, entry, dep_mods, ndep, worklist, &n_wl, 256, NULL, used_mono, used_mono_rows);
+        dce_collect_from_block(entry->main_func->body, entry, dep_mods, ndep, worklist, &n_wl, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
     for (int i = 0; i < n_wl && n < max_used; i++) {
         struct ASTFunc *f = worklist[i];
         if (!f) continue;
@@ -5116,9 +5117,10 @@ void codegen_compute_used(struct ASTModule *entry, struct ASTModule **dep_mods, 
             for (int i = 0; i < n; i++) if (used_funcs_out[i] == f) { already = 1; break; }
             if (!already && n < max_used) used_funcs_out[n++] = f;
         }
-        dce_collect_from_block(f->body, entry, dep_mods, ndep, worklist, &n_wl, 256, NULL, used_mono, used_mono_rows);
+        dce_collect_from_block(f->body, entry, dep_mods, ndep, worklist, &n_wl, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
     }
     *n_used_out = n;
+#undef DCE_WORKLIST_MAX
 }
 
 /** 若 name 非空且未在 out[0..*n) 中则追加并返回 1，否则返回 0；*n 不超过 max。 */
@@ -5540,10 +5542,10 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             fprintf(out, "};\n");
         if (emitted_type_names && n_emitted_inout) emitted_type_add(sd->name, emitted_type_names, n_emitted_inout, max_emitted);
     }
-    /* 冷路径辅助：panic 分支标记 noreturn+cold；单文件时已在第一个库块中输出，此处仅多文件时输出；非 static 以免被 inline 调用触发 C 警告 */
+    /* 冷路径辅助：panic 分支标记 noreturn+cold；单文件时已在第一个库块中输出，此处仅多文件时输出；static inline 避免与 runtime_panic.o 重复符号且可被同 TU 内 inline 调用 */
     if (!emitted_type_names) {
-        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "static inline void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "static inline void shulang_panic_(int has_msg, int msg_val) {\n");
         fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
         fprintf(out, "  abort();\n");
         fprintf(out, "}\n");
@@ -5758,8 +5760,8 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
     }
     /* 单文件时 panic 已在第一个库的 include 块中输出；仅多文件（无 emitted_type_names）时每库各自输出 panic */
     if (!emitted_type_names) {
-        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "static inline void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "static inline void shulang_panic_(int has_msg, int msg_val) {\n");
         fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
         fprintf(out, "  abort();\n");
         fprintf(out, "}\n");
