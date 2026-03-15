@@ -1,0 +1,8 @@
+// std.async — 异步/ future 预留（P4 长期；与语言阶段一致再做）
+//
+// 【文件职责】占位；异步运行时待语言支持 std.future/task 后实现。
+// 【依赖】std.io、语言支持。当前仅占位。
+
+function placeholder(): i32 {
+  return 0;
+}
