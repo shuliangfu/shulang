@@ -5095,29 +5095,32 @@ void codegen_compute_used(struct ASTModule *entry, struct ASTModule **dep_mods, 
     int n = 0;
     used_funcs_out[n++] = entry->main_func;
 #define DCE_WORKLIST_MAX 512
-    struct ASTFunc *worklist[DCE_WORKLIST_MAX];
-    int n_wl = 0;
-    worklist[n_wl++] = (struct ASTFunc *)entry->main_func;
+    /* worklist 与 n_wl 放在同一 struct 内，避免栈上 n_wl 与 used_mono_rows 相邻导致 &n_wl 被误用为相邻变量地址（ASan 报 offset 52 越界） */
+    struct dce_worklist {
+        struct ASTFunc *list[DCE_WORKLIST_MAX];
+        int n;
+    } wl = { .n = 0 };
+    wl.list[wl.n++] = (struct ASTFunc *)entry->main_func;
     int used_mono_rows = used_mono ? (1 + ndep) : 0;
     /* 种子：先遍历 main 体填满 worklist，再把 worklist 中所有函数加入 used，确保入口引用的 import 符号不被误删 */
     if (entry->main_func->body)
-        dce_collect_from_block(entry->main_func->body, entry, dep_mods, ndep, worklist, &n_wl, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
-    for (int i = 0; i < n_wl && n < max_used; i++) {
-        struct ASTFunc *f = worklist[i];
+        dce_collect_from_block(entry->main_func->body, entry, dep_mods, ndep, wl.list, &wl.n, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
+    for (int i = 0; i < wl.n && n < max_used; i++) {
+        struct ASTFunc *f = wl.list[i];
         if (!f) continue;
         int already = 0;
         for (int j = 0; j < n; j++) if (used_funcs_out[j] == f) { already = 1; break; }
         if (!already) used_funcs_out[n++] = f;
     }
-    while (n_wl > 0) {
-        struct ASTFunc *f = worklist[--n_wl];
+    while (wl.n > 0) {
+        struct ASTFunc *f = wl.list[--wl.n];
         if (!f || !f->body) continue;
         {
             int already = 0;
             for (int i = 0; i < n; i++) if (used_funcs_out[i] == f) { already = 1; break; }
             if (!already && n < max_used) used_funcs_out[n++] = f;
         }
-        dce_collect_from_block(f->body, entry, dep_mods, ndep, worklist, &n_wl, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
+        dce_collect_from_block(f->body, entry, dep_mods, ndep, wl.list, &wl.n, DCE_WORKLIST_MAX, NULL, used_mono, used_mono_rows);
     }
     *n_used_out = n;
 #undef DCE_WORKLIST_MAX
