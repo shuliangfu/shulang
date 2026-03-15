@@ -16,4 +16,26 @@ echo "$out" | grep -q "100" || { echo "expected stdout to contain 100 (print_u32
 out=$(/tmp/shuc_io_i64 2>&1)
 echo "$out" | grep -q "123" || { echo "expected stdout to contain 123 (print_i64), got: $out"; exit 1; }
 
+./compiler/shuc -L . tests/io/write_stdout.su -o /tmp/shuc_io_write 2>&1
+out=$(/tmp/shuc_io_write 2>&1)
+echo "$out" | grep -q "Hi" || { echo "expected stdout to contain Hi (write_stdout), got: $out"; exit 1; }
+ec=0; /tmp/shuc_io_write >/dev/null 2>&1 || ec=$?
+[ "$ec" -ne 0 ] && { echo "expected exit 0 (write_stdout), got $ec"; exit 1; }
+
+./compiler/shuc -L . tests/io/write_with_timeout.su -o /tmp/shuc_io_wto 2>&1
+out=$(/tmp/shuc_io_wto 2>&1)
+echo "$out" | grep -q "Hi" || { echo "expected stdout to contain Hi (write_with_timeout), got: $out"; exit 1; }
+ec=0; /tmp/shuc_io_wto >/dev/null 2>&1 || ec=$?
+[ "$ec" -ne 0 ] && { echo "expected exit 0 (write_with_timeout), got $ec"; exit 1; }
+
+./compiler/shuc -L . tests/io/print_str.su -o /tmp/shuc_io_print_str 2>&1
+out=$(/tmp/shuc_io_print_str 2>&1)
+echo "$out" | grep -q "ok" || { echo "expected stdout to contain ok (print_str), got: $out"; exit 1; }
+
+# 零拷贝读 read_stdin_ptr / read_ptr_len（管道喂入 "AB"）
+./compiler/shuc -L . tests/io/read_ptr.su -o /tmp/shuc_io_read_ptr 2>&1
+echo -n "AB" | /tmp/shuc_io_read_ptr
+ec=$?
+[ "$ec" -ne 0 ] && { echo "expected exit 0 (read_stdin_ptr), got $ec"; exit 1; }
+
 echo "io test OK"
