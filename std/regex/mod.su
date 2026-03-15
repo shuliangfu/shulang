@@ -1,0 +1,18 @@
+// std.regex — 最小正则（P4 可选；字面量/字符类/*? 或 regex.h）
+//
+// 【文件职责】compile(pat)、match(re, str, len)、free(re)。
+// 【依赖】std.heap；与 std/regex/regex.c 同属一模块。Windows 暂 stub。
+
+extern function regex_compile_c(pat: *u8, pat_len: i32): *u8;
+extern function regex_match_c(re: *u8, str: *u8, len: i32): i32;
+extern function regex_free_c(re: *u8): void;
+
+function compile(pat: *u8, pat_len: i32): *u8 {
+  return regex_compile_c(pat, pat_len);
+}
+function match(re: *u8, str: *u8, len: i32): i32 {
+  return regex_match_c(re, str, len);
+}
+function free(re: *u8): void {
+  regex_free_c(re);
+}
