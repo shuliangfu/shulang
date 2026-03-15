@@ -6,12 +6,26 @@
  * 链接：用户程序 import std.thread 时链入本目录产出的 thread.o；Unix 需 -lpthread，Windows 需 kernel32。
  */
 
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
 #include <stddef.h>
 #include <stdint.h>
 
 #if defined(__linux__)
-#define _GNU_SOURCE
 #include <sched.h>
+#include <string.h>
+/* 手写 cpu_set 清零与置位，避免依赖 CPU_ZERO/CPU_SET/CPU_ZERO_S/CPU_SET_S 的链接符号（部分 glibc 会未定义） */
+static void shu_cpu_zero(cpu_set_t *set) {
+    memset(set, 0, sizeof(cpu_set_t));
+}
+static void shu_cpu_set(unsigned int cpu, cpu_set_t *set) {
+    if (cpu < sizeof(cpu_set_t) * 8) {
+        size_t idx = cpu / (8 * sizeof(unsigned long));
+        size_t bit = cpu % (8 * sizeof(unsigned long));
+        ((unsigned long *)set)[idx] |= (unsigned long)1 << bit;
+    }
+}
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -148,8 +162,8 @@ int32_t thread_set_affinity_self_c(int32_t cpu_index) {
 #elif defined(__linux__)
     {
         cpu_set_t set;
-        CPU_ZERO(&set);
-        CPU_SET((unsigned)cpu_index, &set);
+        shu_cpu_zero(&set);
+        shu_cpu_set((unsigned)cpu_index, &set);
         if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) != 0) return -1;
         return 0;
     }
@@ -174,8 +188,8 @@ int32_t thread_set_affinity_c(int64_t thread_id, int32_t cpu_index) {
 #elif defined(__linux__)
     {
         cpu_set_t set;
-        CPU_ZERO(&set);
-        CPU_SET((unsigned)cpu_index, &set);
+        shu_cpu_zero(&set);
+        shu_cpu_set((unsigned)cpu_index, &set);
         if (pthread_setaffinity_np((pthread_t)(uintptr_t)thread_id, sizeof(set), &set) != 0) return -1;
         return 0;
     }

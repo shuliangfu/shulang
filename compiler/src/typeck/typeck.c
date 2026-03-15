@@ -1160,6 +1160,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
+                            if (!dm->funcs[i]) continue;
                             if (dm->funcs[i]->name && strcmp(dm->funcs[i]->name, fn_name) == 0) {
                                 if (dm->funcs[i]->return_type)
                                     ((struct ASTExpr *)e)->resolved_type = dm->funcs[i]->return_type;
@@ -1209,6 +1210,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
+                            if (!dm->funcs[i]) continue;
                             if (dm->funcs[i]->name && strcmp(dm->funcs[i]->name, fn_name) == 0) {
                                 if (dm->funcs[i]->return_type)
                                     ((struct ASTExpr *)e)->resolved_type = dm->funcs[i]->return_type;
@@ -1412,6 +1414,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
+                            if (!dm->funcs[i]) continue;
                             if (dm->funcs[i]->name && strcmp(dm->funcs[i]->name, fn_name) == 0) {
                                 func = dm->funcs[i];
                                 from_dep = j;
@@ -1427,6 +1430,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 callee_name = e->value.call.callee->value.var.name;
                 if (m && m->funcs) {
                     for (int i = 0; i < m->num_funcs; i++) {
+                        if (!m->funcs[i]) continue;
                         if (m->funcs[i]->name && callee_name && strcmp(m->funcs[i]->name, callee_name) == 0) {
                             func = m->funcs[i];
                             break;
@@ -1438,6 +1442,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
+                            if (!dm->funcs[i]) continue;
                             if (dm->funcs[i]->name && callee_name && strcmp(dm->funcs[i]->name, callee_name) == 0) {
                                 func = dm->funcs[i];
                                 from_dep = j;
@@ -1627,6 +1632,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         struct ASTModule *dm = typeck_dep_mods[j];
                     if (!dm || !dm->funcs) continue;
                     for (int i = 0; i < dm->num_funcs; i++) {
+                        if (!dm->funcs[i]) continue;
                         if (dm->funcs[i]->name && strcmp(dm->funcs[i]->name, method_name) == 0) {
                             struct ASTFunc *func = dm->funcs[i];
                             if (e->value.method_call.num_args != func->num_params) {

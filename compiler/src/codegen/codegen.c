@@ -660,6 +660,7 @@ static void collect_lib_dep_calls_from_expr(const struct ASTExpr *e, struct ASTM
                 const struct ASTModule *dm = lib_dep_mods[di];
                 if (!dm || !dm->funcs) continue;
                 for (int fi = 0; fi < dm->num_funcs; fi++) {
+                    if (!dm->funcs[fi]) continue;
                     if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) {
                         for (int k = 0; k < *n_out; k++)
                             if (paths_out[k] == lib_dep_paths[di] && funcs_out[k] == dm->funcs[fi]) goto next_call;
@@ -3128,6 +3129,7 @@ static int codegen_emit_call_library_same_impl(FILE *out, const struct ASTExpr *
     const char *callee_name = e->value.call.callee->value.var.name;
     const struct ASTFunc *f = NULL;
     for (int i = 0; i < codegen_library_module->num_funcs && codegen_library_module->funcs; i++) {
+        if (!codegen_library_module->funcs[i]) continue;
         if (codegen_library_module->funcs[i]->name && callee_name && strcmp(codegen_library_module->funcs[i]->name, callee_name) == 0) {
             f = codegen_library_module->funcs[i];
             break;
@@ -3156,6 +3158,7 @@ static int codegen_emit_call_library_dep_impl(FILE *out, const struct ASTExpr *e
         const struct ASTModule *dm = codegen_dep_mods[di];
         if (!dm || !dm->funcs) continue;
         for (int fi = 0; fi < dm->num_funcs; fi++) {
+            if (!dm->funcs[fi]) continue;
             if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) {
                 char pre[256];
                 import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
@@ -3179,6 +3182,7 @@ static int codegen_emit_call_mono_impl(FILE *out, const struct ASTExpr *e) {
     const char *callee_name = e->value.call.callee->value.var.name;
     const struct ASTFunc *func = NULL;
     for (int i = 0; i < codegen_current_module->num_funcs; i++) {
+        if (!codegen_current_module->funcs[i]) continue;
         if (codegen_current_module->funcs[i]->name && callee_name
             && strcmp(codegen_current_module->funcs[i]->name, callee_name) == 0) {
             func = codegen_current_module->funcs[i];
@@ -3214,6 +3218,7 @@ int32_t codegen_su_call_dispatch_kind(uint8_t *expr) {
     if (codegen_library_prefix && *codegen_library_prefix && codegen_library_module && e->value.call.callee && e->value.call.callee->kind == AST_EXPR_VAR) {
         const char *callee_name = e->value.call.callee->value.var.name;
         for (int i = 0; i < codegen_library_module->num_funcs && codegen_library_module->funcs; i++) {
+            if (!codegen_library_module->funcs[i]) continue;
             if (codegen_library_module->funcs[i]->name && callee_name && strcmp(codegen_library_module->funcs[i]->name, callee_name) == 0) {
                 if (!codegen_library_module->funcs[i]->is_extern) return 2;
                 break;
@@ -3226,6 +3231,7 @@ int32_t codegen_su_call_dispatch_kind(uint8_t *expr) {
             const struct ASTModule *dm = codegen_dep_mods[di];
             if (!dm || !dm->funcs) continue;
             for (int fi = 0; fi < dm->num_funcs; fi++) {
+                if (!dm->funcs[fi]) continue;
                 if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) return 3;
             }
         }
@@ -3234,6 +3240,7 @@ int32_t codegen_su_call_dispatch_kind(uint8_t *expr) {
         const char *callee_name = e->value.call.callee->value.var.name;
         const struct ASTFunc *func = NULL;
         for (int i = 0; i < codegen_current_module->num_funcs; i++) {
+            if (!codegen_current_module->funcs[i]) continue;
             if (codegen_current_module->funcs[i]->name && callee_name && strcmp(codegen_current_module->funcs[i]->name, callee_name) == 0) {
                 func = codegen_current_module->funcs[i];
                 break;
@@ -3273,6 +3280,7 @@ int32_t codegen_su_emit_call_library_same_target(uint8_t *out, uint8_t *expr) {
     const char *callee_name = e->value.call.callee->value.var.name;
     const struct ASTFunc *f = NULL;
     for (int i = 0; i < codegen_library_module->num_funcs && codegen_library_module->funcs; i++) {
+        if (!codegen_library_module->funcs[i]) continue;
         if (codegen_library_module->funcs[i]->name && callee_name && strcmp(codegen_library_module->funcs[i]->name, callee_name) == 0) {
             f = codegen_library_module->funcs[i];
             break;
@@ -3297,6 +3305,7 @@ int32_t codegen_su_emit_call_library_dep_target(uint8_t *out, uint8_t *expr) {
         const struct ASTModule *dm = codegen_dep_mods[di];
         if (!dm || !dm->funcs) continue;
         for (int fi = 0; fi < dm->num_funcs; fi++) {
+            if (!dm->funcs[fi]) continue;
             if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) {
                 char pre[256];
                 import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
@@ -3313,6 +3322,7 @@ int32_t codegen_su_emit_call_mono_target(uint8_t *out, uint8_t *expr) {
     const char *callee_name = e->value.call.callee->value.var.name;
     const struct ASTFunc *func = NULL;
     for (int i = 0; i < codegen_current_module->num_funcs; i++) {
+        if (!codegen_current_module->funcs[i]) continue;
         if (codegen_current_module->funcs[i]->name && callee_name && strcmp(codegen_current_module->funcs[i]->name, callee_name) == 0) {
             func = codegen_current_module->funcs[i];
             break;
