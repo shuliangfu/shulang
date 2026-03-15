@@ -1,0 +1,23 @@
+// std.crypto — 常量时间比较、SHA-256/512、HMAC（对标 Zig std.crypto，性能压榨）
+//
+// 【文件职责】mem_eq、sha256、sha512、hmac_sha256；无外部依赖，单文件 C。
+// 【依赖】core；与 std/crypto/crypto.c 同属一模块。
+
+extern function crypto_mem_eq_c(a: *u8, b: *u8, len: i32): i32;
+extern function crypto_sha256_c(msg: *u8, len: i32, out: *u8): void;
+extern function crypto_sha512_c(msg: *u8, len: i32, out: *u8): void;
+extern function crypto_hmac_sha256_c(key: *u8, key_len: i32, msg: *u8, msg_len: i32, out: *u8): void;
+
+/** 常量时间比较 a[0..len] 与 b[0..len]；相等返回 1，否则 0。 */
+function mem_eq(a: *u8, b: *u8, len: i32): i32 { return crypto_mem_eq_c(a, b, len); }
+
+/** SHA-256 哈希，写入 out[0..32]。 */
+function sha256(msg: *u8, len: i32, out: *u8): void { crypto_sha256_c(msg, len, out); }
+
+/** SHA-512 哈希，写入 out[0..64]。 */
+function sha512(msg: *u8, len: i32, out: *u8): void { crypto_sha512_c(msg, len, out); }
+
+/** HMAC-SHA256(key, msg)，结果写入 out[0..32]。 */
+function hmac_sha256(key: *u8, key_len: i32, msg: *u8, msg_len: i32, out: *u8): void {
+  crypto_hmac_sha256_c(key, key_len, msg, msg_len, out);
+}
