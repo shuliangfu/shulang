@@ -1,0 +1,25 @@
+// std.test — 测试断言与 runner（对标 Zig std.testing、Rust test）
+//
+// 【文件职责】expect、expect_eq_i32、expect_eq_u32、expect_ne_i32 返回 0=通过/1=失败；test_run 执行测试函数。
+// 【依赖】core；与 std/test/test.c 同属一模块。
+
+extern function test_expect_c(cond: i32): i32;
+extern function test_expect_eq_i32_c(a: i32, b: i32): i32;
+extern function test_expect_eq_u32_c(a: u32, b: u32): i32;
+extern function test_expect_ne_i32_c(a: i32, b: i32): i32;
+extern function test_run_c(fn: usize): i32;
+
+/** 断言 cond 为真；返回 0 通过，1 失败。 */
+function expect(cond: i32): i32 { return test_expect_c(cond); }
+
+/** 断言 a == b（i32）；返回 0 通过，1 失败。 */
+function expect_eq_i32(a: i32, b: i32): i32 { return test_expect_eq_i32_c(a, b); }
+
+/** 断言 a == b（u32）；返回 0 通过，1 失败。 */
+function expect_eq_u32(a: u32, b: u32): i32 { return test_expect_eq_u32_c(a, b); }
+
+/** 断言 a != b（i32）；返回 0 通过，1 失败。 */
+function expect_ne_i32(a: i32, b: i32): i32 { return test_expect_ne_i32_c(a, b); }
+
+/** 运行测试函数 fn（无参返回 i32）；返回 fn 的返回值（0=通过）。fn 为函数地址（如从 test 入口取）。 */
+function test_run(fn: usize): i32 { return test_run_c(fn); }
