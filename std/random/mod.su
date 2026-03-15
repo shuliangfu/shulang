@@ -1,0 +1,55 @@
+// std.random — 密码学安全随机数（CSPRNG）
+//
+// 【文件职责】
+// 对外暴露 std.random 的完整 API：fill_bytes、u32、u64、range_u32（[lo,hi] 闭区间）、bool。
+// 对标 Zig std.crypto / getentropy、Rust getrandom / OsRng。仅 CSPRNG，无 PRNG 引擎。
+//
+// 【所属模块/组件】
+// 标准库 std.random；用户通过 import std.random 使用。依赖 core；与 std/random/random.c 同属一模块。
+//
+// 【与其它文件的关系】
+// - 被依赖：任何 import std.random 的用户代码；compiler 在 -o exe 时自动链入 std/random/random.o。
+// - 依赖：无其它 .su 模块；通过 extern 调用 random_*_c 系列 C 函数（定义在 random.c）。
+
+extern function random_fill_bytes_c(buf: *u8, len: i32): i32;
+extern function random_u32_c(): u32;
+extern function random_u64_c(): u64;
+
+/** 用密码学安全随机字节填满 buf[0..len)，返回写入的字节数（成功时为 len），失败时返回负值。一次/多次系统调用填满，避免逐字节。对标 getrandom/OsRng.fill_bytes。 */
+function fill_bytes(buf: *u8, len: i32): i32 {
+  return random_fill_bytes_c(buf, len);
+}
+
+/** 生成一个密码学安全的随机 u32；内部 fill 4 字节后按本机字节序解释。对标 OsRng::next_u32。 */
+function u32(): u32 {
+  return random_u32_c();
+}
+
+/** 生成一个密码学安全的随机 u64；内部 fill 8 字节后按本机字节序解释。对标 OsRng::next_u64。 */
+function u64(): u64 {
+  return random_u64_c();
+}
+
+/** 生成 [lo, hi] 闭区间内均匀分布的 u32（含两端）；拒绝采样法避免 bias。若 lo > hi 返回 lo。对标 Zig intRangeAtMost、Rust gen_range。 */
+function range_u32(lo: u32, hi: u32): u32 {
+  if (lo > hi) {
+    return lo;
+  }
+  let range: u32 = hi - lo + 1;
+  if (range == 0) {
+    return lo;
+  }
+  /* 最大可接受的 u32 上界，使得 0..limit 中能被 range 整除的个数均匀：limit = (2^32 - 1) - ((2^32 - 1) % range) */
+  let max_u32: u32 = 4294967295;
+  let limit: u32 = max_u32 - (max_u32 % range);
+  let x: u32 = random_u32_c();
+  while (x >= limit) {
+    x = random_u32_c();
+  }
+  return lo + (x % range);
+}
+
+/** 生成均匀随机布尔，返回 0 或 1。单次 u32 取低位。对标 gen_bool。 */
+function bool(): i32 {
+  return (random_u32_c() & 1) as i32;
+}
