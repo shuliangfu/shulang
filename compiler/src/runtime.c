@@ -22,6 +22,7 @@ extern int codegen_codegen_entry_library_module_to_c(struct ASTModule *m, const 
     char (*emitted_type_names)[CODEGEN_EMITTED_TYPE_NAME_MAX], int *n_emitted_inout, int max_emitted);
 #endif
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,9 @@ extern int codegen_codegen_entry_library_module_to_c(struct ASTModule *m, const 
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 /* 提前声明，供 SHUC_USE_SU_PIPELINE 块内 pipeline_* 调用 */
 static char *read_file(const char *path, size_t *out_len);
 static void resolve_import_file_path_multi(const char **lib_roots, int n_lib_roots, const char *entry_dir, const char *import_path, char *path, size_t path_size);
@@ -40,7 +44,7 @@ extern int typeck_typeck_entry(struct ASTModule *mod, struct ASTModule **deps, i
 /** 舒 IO 后端 .o 路径（分析/舒IO实现路线图.md 阶段 1）；源码在 std/io/io.c，产出 std/io/io.o（与 shuc 所在目录的上一级 std/io/ 下）；C 与 -su 路径均需链入。 */
 static const char *get_io_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     if (!argv0 || !argv0[0]) return buf;
@@ -76,7 +80,7 @@ static const char *get_io_o_path(const char *argv0) {
 /** std.fs 高性能 .o 路径（mmap/munmap）；优先 cwd 以兼容多工作区，产出 std/fs/fs.o。 */
 static const char *get_std_fs_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/fs/fs.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/fs/fs.o", 13); cwd[L+13] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -90,7 +94,7 @@ static const char *get_std_fs_o_path(const char *argv0) {
 /** std.process argc/argv/getenv；优先 cwd，产出 std/process/process.o。 */
 static const char *get_std_process_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/process/process.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/process/process.o", 23); cwd[L+23] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -104,7 +108,7 @@ static const char *get_std_process_o_path(const char *argv0) {
 /** std.string 长串快路径（memcmp/memmem）；优先 cwd，产出 std/string/string.o。 */
 static const char *get_std_string_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/string/string.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/string/string.o", 21); cwd[L+21] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -118,7 +122,7 @@ static const char *get_std_string_o_path(const char *argv0) {
 /** std.heap 堆分配（malloc/free）；优先 cwd，产出 std/heap/heap.o。 */
 static const char *get_std_heap_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/heap/heap.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/heap/heap.o", 17); cwd[L+17] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -132,7 +136,7 @@ static const char *get_std_heap_o_path(const char *argv0) {
 /** std.runtime panic/abort（std/runtime/runtime.o）；优先 cwd。 */
 static const char *get_std_runtime_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/runtime/runtime.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 28) != NULL) { size_t L = strlen(cwd); if (L + 28 <= sizeof(cwd)) { memcpy(cwd + L, "/std/runtime/runtime.o", 24); cwd[L+24] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -146,7 +150,7 @@ static const char *get_std_runtime_o_path(const char *argv0) {
 /** std.net TCP 网络（std/net/net.o）；优先 cwd，产出 std/net/net.o。 */
 static const char *get_std_net_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/net/net.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/net/net.o", 15); cwd[L+15] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -160,7 +164,7 @@ static const char *get_std_net_o_path(const char *argv0) {
 /** std.thread 线程（std/thread/thread.o）；与 get_std_net_o_path 类似，产出 std/thread/thread.o。优先用 getcwd 与相对路径，避免依赖 argv[0] 解析。 */
 static const char *get_std_thread_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     /* 1) 相对路径 std/thread/thread.o（调用方 cwd 常为仓库根） */
@@ -201,7 +205,7 @@ static const char *get_std_thread_o_path(const char *argv0) {
 /** std.time 时间与睡眠（std/time/time.o）；与 get_std_thread_o_path 类似，产出 std/time/time.o。 */
 static const char *get_std_time_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     if (realpath("std/time/time.o", resolved) != NULL) return resolved;
@@ -239,7 +243,7 @@ static const char *get_std_time_o_path(const char *argv0) {
 /** std.random 密码学安全随机（std/random/random.o）；与 get_std_time_o_path 类似，产出 std/random/random.o。 */
 static const char *get_std_random_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     if (realpath("std/random/random.o", resolved) != NULL) return resolved;
@@ -276,8 +280,8 @@ static const char *get_std_random_o_path(const char *argv0) {
 
 /** std.env 环境变量与临时目录（std/env/env.o）；与 get_std_random_o_path 类似，产出 std/env/env.o。优先基于 argv[0] 解析绝对路径，避免依赖当前工作目录。 */
 static const char *get_std_env_o_path(const char *argv0) {
-    static char buf[512];
-    static char resolved[512];
+    static char buf[PATH_MAX];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     /* 优先用 argv[0] 得到可执行文件绝对路径，再推导 std/env/env.o，不依赖 cwd */
@@ -324,8 +328,8 @@ static const char *get_std_env_o_path(const char *argv0) {
 
 /** std.sync 互斥锁（std/sync/sync.o）；与 get_std_env_o_path 类似，产出 std/sync/sync.o。链接时 Unix 需 -lpthread。 */
 static const char *get_std_sync_o_path(const char *argv0) {
-    static char buf[512];
-    static char resolved[512];
+    static char buf[PATH_MAX];
+    static char resolved[PATH_MAX];
     buf[0] = '\0';
     resolved[0] = '\0';
     if (argv0 && argv0[0] && realpath(argv0, buf) != NULL) {
@@ -371,7 +375,7 @@ static const char *get_std_sync_o_path(const char *argv0) {
 
 /** std.encoding UTF-8/ASCII（std/encoding/encoding.o）；优先 cwd。 */
 static const char *get_std_encoding_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/encoding/encoding.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/encoding/encoding.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -384,7 +388,7 @@ static const char *get_std_encoding_o_path(const char *argv0) {
 
 /** std.base64（std/base64/base64.o）。 */
 static const char *get_std_base64_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/base64/base64.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/base64/base64.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -397,7 +401,7 @@ static const char *get_std_base64_o_path(const char *argv0) {
 
 /** std.crypto（std/crypto/crypto.o）。 */
 static const char *get_std_crypto_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/crypto/crypto.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/std/crypto/crypto.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -410,7 +414,7 @@ static const char *get_std_crypto_o_path(const char *argv0) {
 
 /** std.log（std/log/log.o）。 */
 static const char *get_std_log_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/log/log.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/log/log.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -423,7 +427,7 @@ static const char *get_std_log_o_path(const char *argv0) {
 
 /** std.test（std/test/test.o）。 */
 static const char *get_std_test_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/test/test.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/test/test.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -436,7 +440,7 @@ static const char *get_std_test_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/atomic/atomic.o 路径，供链接 std.atomic 时使用；优先 cwd 以兼容多工作区。 */
 static const char *get_std_atomic_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/atomic/atomic.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/atomic/atomic.o", 21); cwd[L+21] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -449,7 +453,7 @@ static const char *get_std_atomic_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/channel/channel.o 路径；优先 cwd。 */
 static const char *get_std_channel_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/channel/channel.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/channel/channel.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -462,7 +466,7 @@ static const char *get_std_channel_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/backtrace/backtrace.o 路径；优先 cwd。 */
 static const char *get_std_backtrace_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/backtrace/backtrace.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 30) != NULL) { size_t L = strlen(cwd); if (L + 30 <= sizeof(cwd)) { memcpy(cwd + L, "/std/backtrace/backtrace.o", 29); cwd[L+29] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -475,7 +479,7 @@ static const char *get_std_backtrace_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/hash/hash.o 路径；优先 cwd。 */
 static const char *get_std_hash_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/hash/hash.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/hash/hash.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -488,7 +492,7 @@ static const char *get_std_hash_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/math/math.o 路径；优先 cwd。链接时需 -lm。 */
 static const char *get_std_math_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/math/math.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/math/math.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -501,7 +505,7 @@ static const char *get_std_math_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/sort/sort.o 路径；优先 cwd。 */
 static const char *get_std_sort_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/sort/sort.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/sort/sort.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -514,7 +518,7 @@ static const char *get_std_sort_o_path(const char *argv0) {
 
 /** 根据 cwd 或 argv[0] 得到 std/ffi/ffi.o 路径；优先 cwd。 */
 static const char *get_std_ffi_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/ffi/ffi.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/ffi/ffi.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -527,7 +531,7 @@ static const char *get_std_ffi_o_path(const char *argv0) {
 
 /** P4 std 模块 .o 路径（按需链接）；优先 cwd 以兼容多工作区。 */
 static const char *get_std_json_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/json/json.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/json/json.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -538,7 +542,7 @@ static const char *get_std_json_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_csv_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/csv/csv.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/csv/csv.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -549,7 +553,7 @@ static const char *get_std_csv_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_regex_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/regex/regex.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 22) != NULL) { size_t L = strlen(cwd); if (L + 22 <= sizeof(cwd)) { memcpy(cwd + L, "/std/regex/regex.o", 18); cwd[L+18] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -560,7 +564,7 @@ static const char *get_std_regex_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_compress_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/compress/compress.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 28) != NULL) { size_t L = strlen(cwd); if (L + 28 <= sizeof(cwd)) { memcpy(cwd + L, "/std/compress/compress.o", 25); cwd[L+25] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -571,7 +575,7 @@ static const char *get_std_compress_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_unicode_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/unicode/unicode.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/unicode/unicode.o", 22); cwd[L+22] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -582,7 +586,7 @@ static const char *get_std_unicode_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_dynlib_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/dynlib/dynlib.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 26) != NULL) { size_t L = strlen(cwd); if (L + 26 <= sizeof(cwd)) { memcpy(cwd + L, "/std/dynlib/dynlib.o", 20); cwd[L+20] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -593,7 +597,7 @@ static const char *get_std_dynlib_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_http_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/http/http.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 20) != NULL) { size_t L = strlen(cwd); if (L + 20 <= sizeof(cwd)) { memcpy(cwd + L, "/std/http/http.o", 16); cwd[L+16] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -604,7 +608,7 @@ static const char *get_std_http_o_path(const char *argv0) {
     return buf;
 }
 static const char *get_std_tar_o_path(const char *argv0) {
-    static char buf[512], resolved[512];
+    static char buf[PATH_MAX], resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("std/tar/tar.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 18) != NULL) { size_t L = strlen(cwd); if (L + 18 <= sizeof(cwd)) { memcpy(cwd + L, "/std/tar/tar.o", 14); cwd[L+14] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -618,7 +622,7 @@ static const char *get_std_tar_o_path(const char *argv0) {
 /** runtime_panic.o 路径；优先 cwd（compiler/runtime_panic.o 或 getcwd+"/compiler/runtime_panic.o"），再 argv[0] 目录。 */
 static const char *get_runtime_panic_o_path(const char *argv0) {
     static char buf[512];
-    static char resolved[512];
+    static char resolved[PATH_MAX];
     buf[0] = resolved[0] = '\0';
     if (realpath("compiler/runtime_panic.o", resolved) != NULL) return resolved;
     { char cwd[512]; if (getcwd(cwd, sizeof(cwd) - 24) != NULL) { size_t L = strlen(cwd); if (L + 24 <= sizeof(cwd)) { memcpy(cwd + L, "/compiler/runtime_panic.o", 25); cwd[L+24] = '\0'; if (realpath(cwd, resolved) != NULL) return resolved; } } }
@@ -1497,7 +1501,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
             argv[i++] = (char *)c_paths[j];
         if (io_o && io_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char io_o_abs[512];
+            static char io_o_abs[PATH_MAX];
             if (realpath(io_o, io_o_abs) != NULL)
                 io_o = io_o_abs;
 #endif
@@ -1512,7 +1516,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (fs_o && fs_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char fs_o_abs[512];
+            static char fs_o_abs[PATH_MAX];
             if (realpath(fs_o, fs_o_abs) != NULL)
                 fs_o = fs_o_abs;
 #endif
@@ -1520,7 +1524,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (process_o && process_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char process_o_abs[512];
+            static char process_o_abs[PATH_MAX];
             if (realpath(process_o, process_o_abs) != NULL)
                 process_o = process_o_abs;
 #endif
@@ -1528,7 +1532,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (string_o && string_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char string_o_abs[512];
+            static char string_o_abs[PATH_MAX];
             if (realpath(string_o, string_o_abs) != NULL)
                 string_o = string_o_abs;
 #endif
@@ -1536,7 +1540,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (heap_o && heap_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char heap_o_abs[512];
+            static char heap_o_abs[PATH_MAX];
             if (realpath(heap_o, heap_o_abs) != NULL)
                 heap_o = heap_o_abs;
 #endif
@@ -1544,7 +1548,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (runtime_o && runtime_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char runtime_o_abs[512];
+            static char runtime_o_abs[PATH_MAX];
             if (realpath(runtime_o, runtime_o_abs) != NULL)
                 runtime_o = runtime_o_abs;
 #endif
@@ -1552,7 +1556,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (runtime_panic_o && runtime_panic_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char runtime_panic_o_abs[512];
+            static char runtime_panic_o_abs[PATH_MAX];
             if (realpath(runtime_panic_o, runtime_panic_o_abs) != NULL)
                 runtime_panic_o = runtime_panic_o_abs;
 #endif
@@ -1560,7 +1564,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (net_o && net_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char net_o_abs[512];
+            static char net_o_abs[PATH_MAX];
             if (realpath(net_o, net_o_abs) != NULL)
                 net_o = net_o_abs;
 #endif
@@ -1568,7 +1572,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (thread_o && thread_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char thread_o_abs[512];
+            static char thread_o_abs[PATH_MAX];
             if (realpath(thread_o, thread_o_abs) != NULL)
                 thread_o = thread_o_abs;
 #endif
@@ -1579,7 +1583,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (time_o && time_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char time_o_abs[512];
+            static char time_o_abs[PATH_MAX];
             if (realpath(time_o, time_o_abs) != NULL)
                 time_o = time_o_abs;
 #endif
@@ -1587,7 +1591,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (random_o && random_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char random_o_abs[512];
+            static char random_o_abs[PATH_MAX];
             if (realpath(random_o, random_o_abs) != NULL)
                 random_o = random_o_abs;
 #endif
@@ -1598,7 +1602,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (env_o && env_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char env_o_abs[512];
+            static char env_o_abs[PATH_MAX];
             if (realpath(env_o, env_o_abs) != NULL)
                 env_o = env_o_abs;
 #endif
@@ -1606,7 +1610,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (sync_o && sync_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char sync_o_abs[512];
+            static char sync_o_abs[PATH_MAX];
             if (realpath(sync_o, sync_o_abs) != NULL)
                 sync_o = sync_o_abs;
 #endif
@@ -1617,42 +1621,42 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (encoding_o && encoding_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char encoding_o_abs[512];
+            static char encoding_o_abs[PATH_MAX];
             if (realpath(encoding_o, encoding_o_abs) != NULL) encoding_o = encoding_o_abs;
 #endif
             argv[i++] = (char *)encoding_o;
         }
         if (base64_o && base64_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char base64_o_abs[512];
+            static char base64_o_abs[PATH_MAX];
             if (realpath(base64_o, base64_o_abs) != NULL) base64_o = base64_o_abs;
 #endif
             argv[i++] = (char *)base64_o;
         }
         if (crypto_o && crypto_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char crypto_o_abs[512];
+            static char crypto_o_abs[PATH_MAX];
             if (realpath(crypto_o, crypto_o_abs) != NULL) crypto_o = crypto_o_abs;
 #endif
             argv[i++] = (char *)crypto_o;
         }
         if (log_o && log_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char log_o_abs[512];
+            static char log_o_abs[PATH_MAX];
             if (realpath(log_o, log_o_abs) != NULL) log_o = log_o_abs;
 #endif
             argv[i++] = (char *)log_o;
         }
         if (atomic_o && atomic_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char atomic_o_abs[512];
+            static char atomic_o_abs[PATH_MAX];
             if (realpath(atomic_o, atomic_o_abs) != NULL) atomic_o = atomic_o_abs;
 #endif
             argv[i++] = (char *)atomic_o;
         }
         if (channel_o && channel_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char channel_o_abs[512];
+            static char channel_o_abs[PATH_MAX];
             if (realpath(channel_o, channel_o_abs) != NULL) channel_o = channel_o_abs;
 #endif
             argv[i++] = (char *)channel_o;
@@ -1662,21 +1666,21 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (backtrace_o && backtrace_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char backtrace_o_abs[512];
+            static char backtrace_o_abs[PATH_MAX];
             if (realpath(backtrace_o, backtrace_o_abs) != NULL) backtrace_o = backtrace_o_abs;
 #endif
             argv[i++] = (char *)backtrace_o;
         }
         if (hash_o && hash_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char hash_o_abs[512];
+            static char hash_o_abs[PATH_MAX];
             if (realpath(hash_o, hash_o_abs) != NULL) hash_o = hash_o_abs;
 #endif
             argv[i++] = (char *)hash_o;
         }
         if (math_o && math_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char math_o_abs[512];
+            static char math_o_abs[PATH_MAX];
             if (realpath(math_o, math_o_abs) != NULL) math_o = math_o_abs;
 #endif
             argv[i++] = (char *)math_o;
@@ -1684,56 +1688,56 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (sort_o && sort_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char sort_o_abs[512];
+            static char sort_o_abs[PATH_MAX];
             if (realpath(sort_o, sort_o_abs) != NULL) sort_o = sort_o_abs;
 #endif
             argv[i++] = (char *)sort_o;
         }
         if (ffi_o && ffi_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char ffi_o_abs[512];
+            static char ffi_o_abs[PATH_MAX];
             if (realpath(ffi_o, ffi_o_abs) != NULL) ffi_o = ffi_o_abs;
 #endif
             argv[i++] = (char *)ffi_o;
         }
         if (json_o && json_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char json_o_abs[512];
+            static char json_o_abs[PATH_MAX];
             if (realpath(json_o, json_o_abs) != NULL) json_o = json_o_abs;
 #endif
             argv[i++] = (char *)json_o;
         }
         if (csv_o && csv_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char csv_o_abs[512];
+            static char csv_o_abs[PATH_MAX];
             if (realpath(csv_o, csv_o_abs) != NULL) csv_o = csv_o_abs;
 #endif
             argv[i++] = (char *)csv_o;
         }
         if (regex_o && regex_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char regex_o_abs[512];
+            static char regex_o_abs[PATH_MAX];
             if (realpath(regex_o, regex_o_abs) != NULL) regex_o = regex_o_abs;
 #endif
             argv[i++] = (char *)regex_o;
         }
         if (compress_o && compress_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char compress_o_abs[512];
+            static char compress_o_abs[PATH_MAX];
             if (realpath(compress_o, compress_o_abs) != NULL) compress_o = compress_o_abs;
 #endif
             argv[i++] = (char *)compress_o;
         }
         if (unicode_o && unicode_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char unicode_o_abs[512];
+            static char unicode_o_abs[PATH_MAX];
             if (realpath(unicode_o, unicode_o_abs) != NULL) unicode_o = unicode_o_abs;
 #endif
             argv[i++] = (char *)unicode_o;
         }
         if (dynlib_o && dynlib_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char dynlib_o_abs[512];
+            static char dynlib_o_abs[PATH_MAX];
             if (realpath(dynlib_o, dynlib_o_abs) != NULL) dynlib_o = dynlib_o_abs;
 #endif
             argv[i++] = (char *)dynlib_o;
@@ -1743,21 +1747,21 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         }
         if (http_o && http_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char http_o_abs[512];
+            static char http_o_abs[PATH_MAX];
             if (realpath(http_o, http_o_abs) != NULL) http_o = http_o_abs;
 #endif
             argv[i++] = (char *)http_o;
         }
         if (tar_o && tar_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char tar_o_abs[512];
+            static char tar_o_abs[PATH_MAX];
             if (realpath(tar_o, tar_o_abs) != NULL) tar_o = tar_o_abs;
 #endif
             argv[i++] = (char *)tar_o;
         }
         if (test_o && test_o[0]) {
 #if !defined(_WIN32) && !defined(_WIN64)
-            static char test_o_abs[512];
+            static char test_o_abs[PATH_MAX];
             if (realpath(test_o, test_o_abs) != NULL) test_o = test_o_abs;
 #endif
             argv[i++] = (char *)test_o;
@@ -2070,7 +2074,7 @@ int RUN_CC_FUNC(int argc, char **argv) {
                 path_c[k] = '\0';
                 if (find_loaded_index(path_c, dep_paths, n_deps) >= 0)
                     continue;
-                char resolved[512];
+                char resolved[PATH_MAX];
                 resolve_import_file_path_multi(lib_roots_arr, n_lib_roots, entry_dir, path_c, resolved, sizeof(resolved));
                 size_t raw_len = 0;
                 char *raw = read_file(resolved, &raw_len);
@@ -2794,7 +2798,7 @@ int run_compiler_su_path(int argc, char **argv) {
             while (k < sizeof(path_buf) && path_buf[k]) { path_c[k] = (char)path_buf[k]; k++; }
             path_c[k] = '\0';
             if (find_loaded_index(path_c, dep_paths, n_deps) >= 0) continue;
-            char resolved[512];
+            char resolved[PATH_MAX];
             resolve_import_file_path_multi(lib_roots_arr, n_lib_roots, entry_dir_buf, path_c, resolved, sizeof(resolved));
             size_t raw_len = 0;
             char *raw = read_file(resolved, &raw_len);
@@ -3303,7 +3307,7 @@ int driver_run_compiler_full(int argc, char **argv) {
             while (k < sizeof(path_buf) && path_buf[k]) { path_c[k] = (char)path_buf[k]; k++; }
             path_c[k] = '\0';
             if (find_loaded_index(path_c, dep_paths, n_deps) >= 0) continue;
-            char resolved[512];
+            char resolved[PATH_MAX];
             resolve_import_file_path_multi(lib_roots_arr, n_lib_roots, entry_dir_buf, path_c, resolved, sizeof(resolved));
             size_t raw_len = 0;
             char *raw = read_file(resolved, &raw_len);
@@ -3597,7 +3601,7 @@ int driver_run_su_emit_c(void) {
                 while (k < sizeof(path_buf) && path_buf[k]) { path_c[k] = (char)path_buf[k]; k++; }
                 path_c[k] = '\0';
                 if (find_loaded_index(path_c, dep_paths, n_deps) >= 0) continue;
-                char resolved[512];
+                char resolved[PATH_MAX];
                 resolve_import_file_path_multi(lib_roots_arr, n_lib_roots, entry_dir, path_c, resolved, sizeof(resolved));
                 size_t raw_len = 0;
                 char *raw = read_file(resolved, &raw_len);

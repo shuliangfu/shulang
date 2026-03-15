@@ -27,8 +27,10 @@ run() {
     if [ ! -f "tests/$script" ]; then return 0; fi
     chmod +x "tests/$script"
     if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-        if ! ./tests/$script; then
-            echo "run-all: $script failed in CI (exit $?); SKIP to keep running"
+        ./tests/$script
+        s=$?
+        if [ "$s" -ne 0 ]; then
+            echo "run-all: $script failed in CI (exit $s); SKIP to keep running"
             RUN_FAILED_COUNT=$((RUN_FAILED_COUNT + 1))
         fi
     else
