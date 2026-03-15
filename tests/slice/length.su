@@ -1,9 +1,27 @@
-// 测试 core.slice.len_i32：切片 .length 与 len_i32(s) 返回 usize
+// 测试 core.slice：len_i32/get_i32（[]i32）、len_u8/get_u8（[]u8）；边界内返回 some，越界返回 none
 import core.slice;
+import core.option;
 
 function main(): i32 {
   let a: [4]i32 = [10, 20, 30, 40];
   let s: []i32 = a;
   let n: usize = len_i32(s);
+  let o1: Option_i32 = get_i32(s, 1);
+  let o2: Option_i32 = get_i32(s, 10);
+  let v1: i32 = unwrap_or_i32(o1, 0);
+  let v2: i32 = unwrap_or_i32(o2, 99);
+  if (v1 != 20) { return 1; }
+  if (v2 != 99) { return 2; }
+  let b: [3]u8 = [5, 10, 15];
+  let su: []u8 = b;
+  if (len_u8(su) != 3) { return 3; }
+  let ou1: Option_u8 = get_u8(su, 0);
+  let ou2: Option_u8 = get_u8(su, 2);
+  let ou3: Option_u8 = get_u8(su, 10);
+  if (!is_some_u8(ou1) || unwrap_or_u8(ou1, 0) != 5) { return 4; }
+  if (!is_some_u8(ou2) || unwrap_or_u8(ou2, 0) != 15) { return 5; }
+  if (!is_none_u8(ou3)) { return 6; }
+  if (get_i32_unchecked(s, 0) != 10 || get_i32_unchecked(s, 3) != 40) { return 7; }
+  if (get_u8_unchecked(su, 1) != 10) { return 8; }
   return 0;
 }
