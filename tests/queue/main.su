@@ -1,0 +1,20 @@
+// 测试 std.queue：push_back、push_front、pop_back、pop_front、get、len、deinit
+import std.queue;
+
+function main(): i32 {
+  let q: Queue_i32 = queue_i32_new();
+  if (queue_i32_push_back(&q, 1) != 0) { return 1; }
+  if (queue_i32_push_back(&q, 2) != 0) { return 2; }
+  if (queue_i32_push_front(&q, 0) != 0) { return 3; }
+  if (queue_i32_len(q) != 3) { return 4; }
+  if (queue_i32_get(q, 0) != 0) { return 5; }
+  if (queue_i32_get(q, 1) != 1) { return 6; }
+  if (queue_i32_get(q, 2) != 2) { return 7; }
+  if (queue_i32_pop_front(&q) != 0) { return 8; }
+  if (queue_i32_pop_back(&q) != 2) { return 9; }
+  if (queue_i32_len(q) != 1) { return 10; }
+  if (queue_i32_pop_back(&q) != 1) { return 11; }
+  if (queue_i32_is_empty(q) != 1) { return 12; }
+  queue_i32_deinit(&q);
+  return 0;
+}
