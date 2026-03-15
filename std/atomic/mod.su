@@ -1,0 +1,36 @@
+// std.atomic — 原子操作（对标 Rust std::sync::atomic、Zig std.atomic）
+//
+// 【文件职责】load/store、compare_exchange、fetch_add/sub（i32/u32/i64/u64）；顺序一致性语义。
+// 【依赖】core；与 std/atomic/atomic.c 同属一模块。
+
+extern function atomic_load_i32_c(ptr: *i32): i32;
+extern function atomic_store_i32_c(ptr: *i32, val: i32): void;
+extern function atomic_compare_exchange_i32_c(ptr: *i32, expected: *i32, desired: i32): i32;
+extern function atomic_fetch_add_i32_c(ptr: *i32, delta: i32): i32;
+extern function atomic_fetch_sub_i32_c(ptr: *i32, delta: i32): i32;
+extern function atomic_load_u32_c(ptr: *u32): u32;
+extern function atomic_store_u32_c(ptr: *u32, val: u32): void;
+extern function atomic_compare_exchange_u32_c(ptr: *u32, expected: *u32, desired: u32): i32;
+extern function atomic_fetch_add_u32_c(ptr: *u32, delta: u32): u32;
+extern function atomic_load_i64_c(ptr: *i64): i64;
+extern function atomic_store_i64_c(ptr: *i64, val: i64): void;
+extern function atomic_load_u64_c(ptr: *u64): u64;
+extern function atomic_store_u64_c(ptr: *u64, val: u64): void;
+extern function atomic_fetch_add_i64_c(ptr: *i64, delta: i64): i64;
+
+function load_i32(ptr: *i32): i32 { return atomic_load_i32_c(ptr); }
+function store_i32(ptr: *i32, val: i32): void { atomic_store_i32_c(ptr, val); }
+function compare_exchange_i32(ptr: *i32, expected: *i32, desired: i32): i32 { return atomic_compare_exchange_i32_c(ptr, expected, desired); }
+function fetch_add_i32(ptr: *i32, delta: i32): i32 { return atomic_fetch_add_i32_c(ptr, delta); }
+function fetch_sub_i32(ptr: *i32, delta: i32): i32 { return atomic_fetch_sub_i32_c(ptr, delta); }
+
+function load_u32(ptr: *u32): u32 { return atomic_load_u32_c(ptr); }
+function store_u32(ptr: *u32, val: u32): void { atomic_store_u32_c(ptr, val); }
+function compare_exchange_u32(ptr: *u32, expected: *u32, desired: u32): i32 { return atomic_compare_exchange_u32_c(ptr, expected, desired); }
+function fetch_add_u32(ptr: *u32, delta: u32): u32 { return atomic_fetch_add_u32_c(ptr, delta); }
+
+function load_i64(ptr: *i64): i64 { return atomic_load_i64_c(ptr); }
+function store_i64(ptr: *i64, val: i64): void { atomic_store_i64_c(ptr, val); }
+function load_u64(ptr: *u64): u64 { return atomic_load_u64_c(ptr); }
+function store_u64(ptr: *u64, val: u64): void { atomic_store_u64_c(ptr, val); }
+function fetch_add_i64(ptr: *i64, delta: i64): i64 { return atomic_fetch_add_i64_c(ptr, delta); }
