@@ -1,7 +1,13 @@
-// 测试 core.debug.assert：条件为真时返回 0
+// 测试 core.debug：assert、debug_assert、assert_eq/assert_ne（i32/u32/bool）
 import core.debug;
 
 function main(): i32 {
   let ok: i32 = assert(true);
+  debug_assert(true);
+  assert_eq_i32(1, 1);
+  assert_ne_i32(1, 2);
+  assert_eq_u32(3, 3);
+  assert_ne_u32(3, 4);
+  assert_eq_bool(true, true);
   return ok;
 }
