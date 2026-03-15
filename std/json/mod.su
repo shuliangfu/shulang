@@ -1,0 +1,39 @@
+// std.json — JSON 最小解析与生成（对标 Zig std.json、Rust serde_json）
+//
+// 【文件职责】解析 number/null/bool/string；生成 number、null、bool、转义字符串。单遍、无 sscanf，性能优先。
+// 【API 对标】Zig parseFromSlice；Rust from_str / to_string。仅最小子集，无大依赖。
+
+extern function json_parse_number_c(ptr: *u8, len: i32, out_val: *f64, consumed: *i32): i32;
+extern function json_parse_null_c(ptr: *u8, len: i32, consumed: *i32): i32;
+extern function json_parse_bool_c(ptr: *u8, len: i32, out: *i32, consumed: *i32): i32;
+extern function json_parse_string_c(ptr: *u8, len: i32, out: *u8, out_cap: i32, consumed: *i32): i32;
+extern function json_escape_c(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32;
+extern function json_append_null_c(buf: *u8, buf_cap: i32): i32;
+extern function json_append_bool_c(buf: *u8, buf_cap: i32, val: i32): i32;
+extern function json_append_number_c(buf: *u8, buf_cap: i32, val: f64): i32;
+
+function parse_number(ptr: *u8, len: i32, out_val: *f64, consumed: *i32): i32 {
+  return json_parse_number_c(ptr, len, out_val, consumed);
+}
+function parse_null(ptr: *u8, len: i32, consumed: *i32): i32 {
+  return json_parse_null_c(ptr, len, consumed);
+}
+function parse_bool(ptr: *u8, len: i32, out: *i32, consumed: *i32): i32 {
+  return json_parse_bool_c(ptr, len, out, consumed);
+}
+/** 解析 JSON 字符串 "..."（含 \\ \\\" \\n \\r \\t \\uXXXX）；内容写入 out，返回内容长度，失败 -1。 */
+function parse_string(ptr: *u8, len: i32, out: *u8, out_cap: i32, consumed: *i32): i32 {
+  return json_parse_string_c(ptr, len, out, out_cap, consumed);
+}
+function escape_string(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32 {
+  return json_escape_c(ptr, len, buf, buf_cap);
+}
+function append_null(buf: *u8, buf_cap: i32): i32 {
+  return json_append_null_c(buf, buf_cap);
+}
+function append_bool(buf: *u8, buf_cap: i32, val: i32): i32 {
+  return json_append_bool_c(buf, buf_cap, val);
+}
+function append_number(buf: *u8, buf_cap: i32, val: f64): i32 {
+  return json_append_number_c(buf, buf_cap, val);
+}
