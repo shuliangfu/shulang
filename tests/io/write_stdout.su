@@ -1,0 +1,9 @@
+// 测试 std.io 高性能 Shu IO：write_stdout(ptr, len) 大块写 stdout
+import std.io;
+
+function main(): i32 {
+  let buf: [16]u8 = [72, 105, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let n: i32 = write_stdout(buf, 3);
+  if (n != 3) { return 1; }
+  return 0;
+}

@@ -1,0 +1,18 @@
+// 测试 std.io 零拷贝读：read_stdin_ptr()、read_ptr_len()
+// 需用管道喂入数据运行，例如：echo -n "AB" | ./run_read_ptr。校验返回指针非 0、长度≥1、首字节正确。
+import std.io;
+
+function main(): i32 {
+  let p: *u8 = read_stdin_ptr();
+  if (p == 0) {
+    return 1;
+  }
+  let len: i32 = read_ptr_len();
+  if (len <= 0) {
+    return 2;
+  }
+  if (p[0] != 65) {
+    return 3;
+  }
+  return 0;
+}

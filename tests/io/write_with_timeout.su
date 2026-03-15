@@ -1,0 +1,10 @@
+// 测试 std.io 带超时 API：write_with_timeout(ptr, len, 0) 等价于 write_stdout，0 表示无超时
+import std.io;
+
+function main(): i32 {
+  let buf: [16]u8 = [72, 105, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let n: i32 = write_with_timeout(buf, 3, 0);
+  if (n != 3) { return 1; }
+  if (handle_stdin() != 0 || handle_stdout() != 1) { return 2; }
+  return 0;
+}
