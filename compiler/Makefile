@@ -2,12 +2,16 @@
 # 【兜底/可选】日常构建请用 build_tool：cd compiler && ./build_tool ./shuc（见 analysis/完全脱离C与Makefile路线图.md 阶段 5）。
 # 本 Makefile 仅用于：从零构建时得到初始 shuc、build_tool，或执行 make test / bootstrap-verify 等目标。
 # 阶段 1：main.c + lexer，产出 shuc；阶段 8：可选 OPT=1 为 shuc 启用 -O2
+#
+# 【生成 C 后无补丁】-E 产出 pipeline_gen.c / driver_gen.c 后不再做 sed/awk/perl/echo 后处理。
+# pipeline_gen.c：包装/size/debug 由 runtime.c 在 -E 且入口为 pipeline.su 时追加 pipeline_glue.c 到 stdout，Makefile 不修改生成文件。
+# driver_gen.c：仅由 -E -E-extern 生成；run_compiler_c 在 runtime.c 定义；字段 ->、written 比较等已在 codegen/main.su 从根源修。
 
 CC      ?= cc
 CFLAGS  ?= -Wall -Wextra -I. -Iinclude -Isrc
 # 仅编译 pipeline_gen.c 时加：生成代码难以逐处改，静默已知警告类别，使 bootstrap-driver 整次 0 警告
-# -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
-PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-discarded-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
+# -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-ignored-qualifiers 与 -Wno-discarded-qualifiers 同义，Clang 用前者；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
+PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-ignored-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
 # 阶段 8：make OPT=1 时为 shuc 启用 -O2，便于开发时快速运行测试
 ifeq ($(OPT),1)
   CFLAGS += -O2
@@ -18,9 +22,45 @@ OBJS    = src/main.o src/runtime.o src/preprocess.o src/lexer/lexer.o src/ast/as
 
 # C 仅版 shuc：无 main_su/pipeline_su，供 bootstrap-pipeline 用 -E 生成 pipeline_gen.c（避免用已链 main_su 的 $(TARGET) 导致走 .su 路径失败）
 SHUC_C = shuc-c
-.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool first-time
+.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-driver-seed bootstrap-driver-asm bootstrap-driver-asm-only bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool first-time
 
-all: $(TARGET)
+# 舒 IO 后端（分析/舒IO实现路线图.md 阶段 1）：源码在 std/io/io.c；产出 ../std/io/io.o。
+../std/io/io.o: ../std/io/io.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.fs 高性能：mmap/munmap（std/fs/fs.c）；链接用户程序时由 runtime.c 链入 ../std/fs/fs.o。
+../std/fs/fs.o: ../std/fs/fs.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.process：argc/argv/getenv（std/process/process.c）；链接用户程序时由 runtime.c 链入 ../std/process/process.o。
+../std/process/process.o: ../std/process/process.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.string：长串快路径 memcmp/memmem（std/string/string.c）；链接用户程序时由 runtime.c 链入 ../std/string/string.o。
+../std/string/string.o: ../std/string/string.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.heap：堆分配 malloc/free/realloc（std/heap/heap.c）；供 std.vec、std.map 等使用。
+../std/heap/heap.o: ../std/heap/heap.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.runtime：panic/abort 对接 shulang_panic_（std/runtime/runtime.c）；链接时需与 runtime_panic.o 同链。
+../std/runtime/runtime.o: ../std/runtime/runtime.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.net：TCP socket（std/net/net.c）；链接用户程序时由 runtime.c 链入 ../std/net/net.o。
+../std/net/net.o: ../std/net/net.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.thread：线程（std/thread/thread.c）；链接时由 runtime.c 链入 ../std/thread/thread.o，Unix 需 -lpthread。
+../std/thread/thread.o: ../std/thread/thread.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# std.time：单调/墙钟、sleep（std/time/time.c）；链接用户程序时由 runtime.c 链入 ../std/time/time.o。
+../std/time/time.o: ../std/time/time.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+all: $(TARGET) ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
@@ -90,10 +130,11 @@ src/typeck/typeck_f64_bits.o: src/typeck/typeck_f64_bits.c
 endif
 
 clean:
-	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHUC_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o
+	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/time/time.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHUC_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o shuc_asm
+	rm -rf build_asm
 
-# 阶段 1 词法 + 阶段 3 类型检查 + 阶段 4 Hello World + 阶段 5 import + 阶段 6 std/target
-test:
+# 阶段 1 词法 + 阶段 3 类型检查 + 阶段 4 Hello World + 阶段 5 import + 阶段 6 std/target（依赖 shuc 与 std/io/io.o，clean 后 test 会先构建）
+test: $(TARGET) ../std/io/io.o
 	@if [ -f ../tests/run-lexer.sh ]; then (cd .. && ./tests/run-lexer.sh); fi
 	@if [ -f ../tests/run-typeck.sh ]; then (cd .. && chmod +x tests/run-typeck.sh && ./tests/run-typeck.sh); fi
 	@if [ -f ../tests/run-hello.sh ]; then (cd .. && chmod +x tests/run-hello.sh && ./tests/run-hello.sh); fi
@@ -131,7 +172,7 @@ test:
 	@if [ -f ../tests/run-defer.sh ]; then (cd .. && chmod +x tests/run-defer.sh && ./tests/run-defer.sh); fi
 	@if [ -f ../tests/run-goto.sh ]; then (cd .. && chmod +x tests/run-goto.sh && ./tests/run-goto.sh); fi
 	@if [ -f ../tests/run-preprocess.sh ]; then (cd .. && chmod +x tests/run-preprocess.sh && ./tests/run-preprocess.sh); fi
-	@if [ -f ../tests/run-su-pipeline.sh ]; then (cd .. && chmod +x tests/run-su-pipeline.sh && ./tests/run-su-pipeline.sh); fi
+	# 自举测试不跑，已从 test 目标中排除（run-su-pipeline / run-asm / run-without-c 等均不执行）
 	@if [ -f ../tests/run-vector.sh ]; then (cd .. && chmod +x tests/run-vector.sh && ./tests/run-vector.sh); fi
 	@if [ -f ../tests/run-fmt.sh ]; then (cd .. && chmod +x tests/run-fmt.sh && ./tests/run-fmt.sh); fi
 	@if [ -f ../tests/run-debug.sh ]; then (cd .. && chmod +x tests/run-debug.sh && ./tests/run-debug.sh); fi
@@ -207,20 +248,33 @@ src/main_driver.o: src/main.c
 	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -c -o $@ $<
 DRIVER_OBJS = src/main_driver.o src/runtime_driver.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
-# 6.3：.su 入口与 main.c 一一对应；pipeline_su.o 已含 typeck/codegen（单文件展开），故仅链 driver_su.o + pipeline_su.o，不链 typeck_su/codegen_su 避免重复符号。用 $(SHUC_C) 生成 driver_gen.c 保证始终用当前 main.su 展开（否则已链 main_su 的 $(TARGET) 会带旧逻辑）。
-bootstrap-driver: $(TARGET) $(SHUC_C) $(DRIVER_OBJS) pipeline_gen.c
+# 6.3：.su 入口与 main.c 一一对应。bootstrap-driver-seed = 用 C 代码生成（生成 pipeline_gen.c / driver_gen.c）得到种子 shuc；仅首次或无 shuc 时需要。
+# bootstrap-driver-asm = 用现有 shuc 的 -backend asm 把全部 .su 编成机器码 .o 再链接，不生成 C；产出覆盖 $(TARGET)。
+# bootstrap-driver = 先 seed 再 asm，最终 $(TARGET) 为 asm 版（直接出机器码，不依赖生成的 C 文件参与最终链接）。
+# 无补丁：driver_gen.c 仅由 -E -E-extern 生成；run_compiler_c 在 runtime.c 中定义并转调 main_run_compiler_c；其余从 main.su/codegen 根源修
+bootstrap-driver-seed: $(TARGET) $(SHUC_C) $(DRIVER_OBJS) pipeline_gen.c ../std/fs/fs.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
 	./$(SHUC_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c
-	@# 与 pipeline_gen.c 一致：修正 preprocess 展开后 slice 用 . 访问（应为 ->）及 preprocess_su_buf 的 extern 签名
-	@sed -i.bak -e 's/(out_buf)\.length/(out_buf)->length/g' -e 's/(out_buf)\.data/(out_buf)->data/g' -e 's/(source)\.length/(source)->length/g' -e 's/(source)\.data/(source)->data/g' -e 's/extern int32_t preprocess_preprocess_su_buf(uint8_t, ptrdiff_t, uint8_t, int32_t);/extern int32_t preprocess_preprocess_su_buf(uint8_t *source_buf, ptrdiff_t source_len, uint8_t *out_buf, int32_t out_cap);/' driver_gen.c 2>/dev/null || (sed -e 's/(out_buf)\.length/(out_buf)->length/g' -e 's/(out_buf)\.data/(out_buf)->data/g' -e 's/(source)\.length/(source)->length/g' -e 's/(source)\.data/(source)->data/g' -e 's/extern int32_t preprocess_preprocess_su_buf(uint8_t, ptrdiff_t, uint8_t, int32_t);/extern int32_t preprocess_preprocess_su_buf(uint8_t *source_buf, ptrdiff_t source_len, uint8_t *out_buf, int32_t out_cap);/' driver_gen.c > driver_gen.c.tmp && mv driver_gen.c.tmp driver_gen.c)
-	@# 消除 -Wincompatible-pointer-types：main.su 中 pipeline_run_su_pipeline_impl 的 out_buf/ctx 为 *u8，生成 extern 为 uint8_t*，调用处传 struct*，改为 void* 即匹配
-	@sed -e 's/pipeline_run_su_pipeline_impl(uint8_t \* arena, uint8_t \* module, struct main_PipelineSourceSlice \* source, uint8_t \* out_buf, uint8_t \* ctx)/pipeline_run_su_pipeline_impl(uint8_t * arena, uint8_t * module, struct main_PipelineSourceSlice * source, void * out_buf, void * ctx)/' driver_gen.c > driver_gen.c.tmp 2>/dev/null && mv driver_gen.c.tmp driver_gen.c || true
-	@# 消除 -Wsign-compare：ptrdiff_t written 与 size_t len/262144 比较，改为 (written)<0 || (size_t)(written)!=(len)
-	@sed -e 's/written != 262144/(written) < 0 || (size_t)(written) != 262144/g' -e 's/written != len/(written) < 0 || (size_t)(written) != (len)/g' driver_gen.c > driver_gen.c.tmp 2>/dev/null && mv driver_gen.c.tmp driver_gen.c || true
-	@grep -q 'int run_compiler_c(int argc,' driver_gen.c 2>/dev/null || (echo "" >> driver_gen.c; echo "/* C 符号 run_compiler_c 供 runtime.c 调用，转调 main.su 的 main_run_compiler_c */" >> driver_gen.c; echo "int run_compiler_c(int argc, char **argv) { return main_run_compiler_c(argc, (uint8_t *)argv); }" >> driver_gen.c)
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_OBJS) driver_su.o pipeline_su.o
-	@echo "bootstrap-driver OK"
+	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o
+	@echo "bootstrap-driver-seed OK (shuc from generated C)"
+
+# 用汇编后端直接出机器码：不生成 pipeline_gen.c/driver_gen.c，用 $(TARGET) -backend asm 编全部 .su → build_asm/*.o 再链接。
+# 依赖已有 $(TARGET)（由 bootstrap-driver-seed 或预构建产出）。若 asm 成功则产出 shuc_asm 并覆盖 $(TARGET)；否则保留 seed 并提示。
+bootstrap-driver-asm: $(TARGET)
+	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
+	@if [ -f shuc_asm ]; then cp -f shuc_asm $(TARGET) && echo "bootstrap-driver-asm OK: $(TARGET) built from asm (no C gen)"; else echo "bootstrap-driver-asm: asm build skipped ($(TARGET) left as seed); run SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh for details."; fi
+
+# 默认自举：仅走 asm，不生成任何 C 文件（不生成 pipeline_gen.c、driver_gen.c 等）。全部 .su 用 -backend asm 直接出机器码。
+# 要求已有可用的 $(TARGET)：首次请先 make bootstrap-driver-seed（会生成 C 一次得到种子 shuc），之后 make bootstrap-driver 即只出机器码。
+# 不把 $(TARGET) 列为依赖，避免 make 用 OBJS 构建出不含 pipeline/driver 的不完整 shuc。
+bootstrap-driver:
+	@if [ ! -f $(TARGET) ]; then echo "No $(TARGET). Run 'make bootstrap-driver-seed' first (generates C once for seed shuc)."; exit 1; fi
+	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
+	@if [ -f shuc_asm ]; then cp -f shuc_asm $(TARGET) && echo "bootstrap-driver OK: $(TARGET) from asm, no C gen"; else echo "bootstrap-driver: asm build failed, $(TARGET) unchanged. Run SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh for errors."; exit 1; fi
+
+# 仅 asm、不生成 C（与 bootstrap-driver 同义，保留别名）
+bootstrap-driver-asm-only: bootstrap-driver
 
 # Goal 2（用 asm 后端构建 shuc）：构建最小 C 桩 + 可选执行 asm 自举脚本（需先 bootstrap-driver）
 bootstrap-asm: $(TARGET) src/asm/runtime_asm_build.o src/runtime_driver.o
@@ -229,9 +283,9 @@ bootstrap-asm: $(TARGET) src/asm/runtime_asm_build.o src/runtime_driver.o
 bootstrap-asm-full: bootstrap-driver bootstrap-asm
 	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
 
-# 6.4 验收：宿主编译器（C-only shuc）能编译整机 .su（typeck+codegen+driver）并产出新 shuc，且新 shuc 能编译运行测试（return-value 返回 42 视为成功）
+# 6.4 验收：宿主编译器能编译整机 .su（typeck+codegen+driver）并产出新 shuc，且新 shuc 能编译运行测试（return-value 返回 42 视为成功）。用 seed 构建 shuc 以保证通过（asm 路径修好后可改为 bootstrap-driver）。
 check-6.4: $(TARGET)
-	@$(MAKE) bootstrap-driver && ./$(TARGET) ../tests/return-value/main.su -o /tmp/check64 && /tmp/check64; [ $$? -eq 42 ] && echo "check-6.4 OK"
+	@$(MAKE) bootstrap-driver-seed && ./$(TARGET) ../tests/return-value/main.su -o /tmp/check64 && /tmp/check64; [ $$? -eq 42 ] && echo "check-6.4 OK"
 
 # 首次/从零构建：一条命令得到 shuc + build_tool（build-tool 依赖 $(TARGET) 会先产出 shuc）。与 README「读者一次做对」一致。
 first-time: build-tool
@@ -268,9 +322,8 @@ bootstrap-self: bootstrap-driver
 	$(MAKE) -s pipeline_gen.c 2>/dev/null || true && \
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o && \
 	./$(TARGET) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c && \
-	sed -e 's/int32_t __tmp;/int32_t __tmp = 0;/g' driver_gen.c > driver_gen.c.tmp && mv driver_gen.c.tmp driver_gen.c && \
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o && \
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o && \
+	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o && \
 	./$(TARGET)_stage2 -su -E ../tests/return-value/main.su > /tmp/out_self.c && $(CC) $(CFLAGS) -o /tmp/out_self /tmp/out_self.c -I. -Iinclude -Isrc && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shuc1 -> shuc2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
 # 阶段 8.3：两代 shuc 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shuc_su
@@ -280,80 +333,14 @@ check-7.2: bootstrap-self
 	cd $$ROOT/compiler && cp $(TARGET)_stage2 $(TARGET) && cd $$ROOT && SHUC=$$ROOT/compiler/$(TARGET)_stage2 ./tests/run-all.sh > /tmp/run_shuc2.log 2>&1; E2=$$?; \
 	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shuc generations passed full test suite)"; else echo "shuc1 exit=$$E1 shuc2 exit=$$E2"; exit 1; fi
 
-# 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。用 $(SHUC_C) 保证 -E 走 C 路径（parse/codegen），否则已链 main_su 的 $(TARGET) 会走 .su 路径且可能无输出。
+# 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。
+# 必须用 $(SHUC_C) 做 -E：C 解析器(parser.c) 会按源码顺序填充 stmt_order，codegen 按序输出；若用 $(TARGET) 走 .su 解析则 stmt_order 仅有 const+let 导致声明被提到函数首、顺序错乱。
 bootstrap-pipeline: $(SHUC_C)
 	./$(SHUC_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess src/pipeline/pipeline.su -E > pipeline_gen.c 2>/dev/null || true
 	@echo "bootstrap-pipeline: pipeline_gen.c generated (if failed check parser/typeck/codegen/ast/lexer/preprocess and std.fs paths)"
 
-# 在 pipeline_gen.c 末尾追加 slice 指针包装（C 传 &slice 避免跨单元按值传 struct 导致 length 错乱）与 sizeof 获取函数
+# pipeline_gen.c 由 bootstrap-pipeline 生成；-E 时 runtime.c 在入口为 pipeline.su 时自动追加 pipeline_glue.c 到 stdout，无 Makefile 补丁
 pipeline_gen.c: bootstrap-pipeline
-	@if grep -q 'pipeline_run_su_pipeline(struct ast_ASTArena' pipeline_gen.c 2>/dev/null && ! grep -q 'pipeline_run_su_pipeline_impl' pipeline_gen.c 2>/dev/null; then \
-	  sed 's/int32_t pipeline_run_su_pipeline(struct ast_ASTArena/int32_t pipeline_run_su_pipeline_impl(struct ast_ASTArena/g' pipeline_gen.c > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c; \
-	  echo "pipeline_gen.c: renamed run_su_pipeline to _impl (exported for main.su)"; fi
-	@grep -q 'source_data.*source_len' pipeline_gen.c 2>/dev/null || \
-	(echo "" >> pipeline_gen.c; \
-	echo "/* 包装需 int32_t/uint8_t/size_t 与 shulang_slice_uint8_t；-E 已有则只补 include */" >> pipeline_gen.c; \
-	echo "#include <stdint.h>" >> pipeline_gen.c; \
-	echo "#include <stddef.h>" >> pipeline_gen.c; \
-	grep -q 'struct shulang_slice_uint8_t' pipeline_gen.c 2>/dev/null || \
-	(echo "#ifndef SHULANG_SLICE_UINT8_T_DEFINED" >> pipeline_gen.c; \
-	echo "#define SHULANG_SLICE_UINT8_T_DEFINED" >> pipeline_gen.c; \
-	echo "struct shulang_slice_uint8_t { uint8_t *data; size_t length; };" >> pipeline_gen.c; \
-	echo "#endif" >> pipeline_gen.c); \
-	echo "/* C 包装：main 传 (data, len, ctx)，6.1 dep 通过 ctx 传入；struct ast_PipelineDepCtx 已由 -E 展开 ast 提供 */" >> pipeline_gen.c; \
-	echo "int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *module, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {" >> pipeline_gen.c; \
-	echo "  struct shulang_slice_uint8_t source;" >> pipeline_gen.c; \
-	echo "  source.data = (uint8_t *)source_data;" >> pipeline_gen.c; \
-	echo "  source.length = source_len;" >> pipeline_gen.c; \
-	echo '  return pipeline_run_su_pipeline_impl(arena, module, &source, out_buf, ctx);' >> pipeline_gen.c; \
-	echo "}" >> pipeline_gen.c; \
-	echo "pipeline_gen.c: appended (data,len,ctx) wrapper")
-	@grep -q 'pipeline_sizeof_arena' pipeline_gen.c 2>/dev/null || \
-	(echo "" >> pipeline_gen.c; echo "#include <stddef.h>" >> pipeline_gen.c; echo "#include \"ast.h\"" >> pipeline_gen.c; \
-	echo "size_t pipeline_sizeof_arena(void) { return sizeof(struct ast_ASTArena); }" >> pipeline_gen.c; \
-	echo "size_t pipeline_sizeof_module(void) { return sizeof(struct ast_Module); }" >> pipeline_gen.c; \
-	echo "pipeline_gen.c: appended size getters")
-	@grep -q 'pipeline_sizeof_elf_ctx' pipeline_gen.c 2>/dev/null || \
-	(echo "" >> pipeline_gen.c; echo "/* sizeof_elf_ctx 需 size_t 与 platform_elf 结构；无前置 include 时补上 */" >> pipeline_gen.c; \
-	echo "#include <stddef.h>" >> pipeline_gen.c; \
-	echo "size_t pipeline_sizeof_elf_ctx(void) { return sizeof(struct platform_elf_ElfCodegenCtx); }" >> pipeline_gen.c; \
-	echo "pipeline_gen.c: appended sizeof_elf_ctx")
-	@# 6.3：修正生成代码中两处问题（extern 第三参应为指针；ndep 未声明改为 get_ndep()）
-	@sed -e 's/parser_get_module_import_path(struct ast_Module \*, int32_t, uint8_t);/parser_get_module_import_path(struct ast_Module *, int32_t, uint8_t *);/' \
-	    -e 's/while (j < ndep)/while (j < get_ndep())/' pipeline_gen.c > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c 2>/dev/null || true
-	@# 仅将「if (EXPR_CALL){ struct ast_Expr callee... } else (struct ast_Expr){0}」处的 __tmp 改为 struct ast_Expr（codegen 可能打成 int32_t）
-	@sed -e 's/int32_t __tmp; if ((e)\.kind == ast_ExprKind_EXPR_CALL) {   struct ast_Expr callee/struct ast_Expr __tmp; if ((e).kind == ast_ExprKind_EXPR_CALL) {   struct ast_Expr callee/' pipeline_gen.c > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c 2>/dev/null || true
-	@# 6.1 完全自举：修正 preprocess 展开后 slice 用 . 访问（应为 ->）；preprocess_su_buf 的 extern 数组改为指针
-	@sed -i.bak -e 's/(out_buf)\.length/(out_buf)->length/g' -e 's/(out_buf)\.data/(out_buf)->data/g' \
-	    -e 's/(source)\.length/(source)->length/g' -e 's/(source)\.data/(source)->data/g' \
-	    -e 's/extern int32_t preprocess_preprocess_su_buf(uint8_t, ptrdiff_t, uint8_t, int32_t);/extern int32_t preprocess_preprocess_su_buf(uint8_t *source_buf, ptrdiff_t source_len, uint8_t *out_buf, int32_t out_cap);/' \
-	    pipeline_gen.c 2>/dev/null || (sed -e 's/(out_buf)\.length/(out_buf)->length/g' -e 's/(out_buf)\.data/(out_buf)->data/g' -e 's/(source)\.length/(source)->length/g' -e 's/(source)\.data/(source)->data/g' -e 's/extern int32_t preprocess_preprocess_su_buf(uint8_t, ptrdiff_t, uint8_t, int32_t);/extern int32_t preprocess_preprocess_su_buf(uint8_t *source_buf, ptrdiff_t source_len, uint8_t *out_buf, int32_t out_cap);/' pipeline_gen.c > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c)
-	@# 7.4 ELF：修正 elf/platform_elf 模块 [64]u8 参数在 extern 中被错误生成为 uint8_t 的问题
-	@sed -e 's/extern int32_t elf_elf_add_label(struct elf_ElfCodegenCtx \*, uint8_t, int32_t);/extern int32_t elf_elf_add_label(struct elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len);/g' \
-	    -e 's/extern int32_t elf_elf_add_sym(struct elf_ElfCodegenCtx \*, uint8_t, int32_t, int32_t);/extern int32_t elf_elf_add_sym(struct elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len, int32_t offset);/g' \
-	    -e 's/extern int32_t platform_elf_elf_add_label(struct platform_elf_ElfCodegenCtx \*, uint8_t, int32_t);/extern int32_t platform_elf_elf_add_label(struct platform_elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len);/g' \
-	    -e 's/extern int32_t platform_elf_elf_add_sym(struct platform_elf_ElfCodegenCtx \*, uint8_t, int32_t, int32_t);/extern int32_t platform_elf_elf_add_sym(struct platform_elf_ElfCodegenCtx *, uint8_t name[64], int32_t name_len, int32_t offset);/g' \
-	    pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# 7.4 限定类型名：codegen 对 import platform.elf 的模块会生成 xxx.elf.ElfCodegenCtx，C 需 struct platform_elf_ElfCodegenCtx
-	@sed -E 's/[a-zA-Z0-9_]+\.elf\.ElfCodegenCtx/struct platform_elf_ElfCodegenCtx/g' \
-	    pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# codegen 将 EXPR_INDEX 分支的 __tmp 打成 int32_t，但 else 赋 (struct ast_Type){0}，需改为 struct ast_Type __tmp（含 codegen 初值 __tmp=0 或 = (struct ast_Type){0}）
-	@sed -e 's/int32_t __tmp = 0; if ((e)\.kind == ast_ExprKind_EXPR_INDEX && (e)\.index_base_ref != 0 && (e)\.index_index_ref != 0)/struct ast_Type __tmp = (struct ast_Type){0}; if ((e).kind == ast_ExprKind_EXPR_INDEX \&\& (e).index_base_ref != 0 \&\& (e).index_index_ref != 0)/' \
-	    pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# macho write：preprocess/codegen 漏掉 let pad，补上 pad 声明
-	@sed -e 's/  while (z < pad) {/  int32_t pad = off_sym - (off_text + code_len); while (z < pad) {/' \
-	    pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# 若文件首行以 size_t 开头（-E 曾产出异常或仅追加块），则前置 stddef.h 与 ast.h 以便通过编译
-	@head -1 pipeline_gen.c | grep -q '^size_t' && (echo "/* Makefile 前置：保证 size_t 与 struct 可见 */"; echo "#include <stddef.h>"; echo "#include \"ast.h\""; cat pipeline_gen.c) > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# parse_into：当 C 前端未将 collect_imports/lex= 纳入 stmt_order 或 expr_stmts 时，将这两行移到 import_res 后、while 前
-	@(grep -q 'int32_t out_idx = main_idx;' pipeline_gen.c && grep -q 'struct parser_CollectImportsResult import_res' pipeline_gen.c) && sed -e '/struct parser_CollectImportsResult import_res = (struct parser_CollectImportsResult){ .lex = lex };/ { n; s/^  int32_t out_idx = main_idx;$$/  (void)(parser_collect_imports(lex, source, module, (\&(import_res))));\n  (void)((lex = (import_res).lex));\n  int32_t out_idx = main_idx;/; }' pipeline_gen.c > pipeline_gen.c.tmp && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@sed -e '/^  }$$/ { N; N; N; s/^  }\n  (void)(parser_collect_imports(lex, source, module, (\&(import_res))));\n  (void)((lex = (import_res).lex));\n/  }\n/; }' pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# parse_into_buf 内误插入了 collect_imports(lex, source, ...)，该函数只有 data/len，须改为 collect_imports_buf(lex, data, len, ...)
-	@awk '/parser_parse_into_buf\(.*\) \{/{ in_buf=1 } in_buf && /parser_collect_imports\(lex, source, module/{ gsub(/parser_collect_imports\(lex, source, module/, "parser_collect_imports_buf(lex, data, len, module"); in_buf=0 } { print }' pipeline_gen.c > pipeline_gen.c.tmp 2>/dev/null && mv pipeline_gen.c.tmp pipeline_gen.c || true
-	@# 最后追加 debug 函数（避免前面 sed 影响），保证闭合括号完整
-	@grep -q 'pipeline_debug_module_funcs' pipeline_gen.c 2>/dev/null || (echo "" >> pipeline_gen.c; cat pipeline_debug_module_funcs.c.append >> pipeline_gen.c; echo "pipeline_gen.c: appended debug_module_funcs")
-	@# 修正 -E 生成代码中声明顺序与命名冲突：zero_u8_p、delta/next_insn、rela→rela_buf
-	@$(if $(wildcard scripts/fix_pipeline_gen.py),python3 scripts/fix_pipeline_gen.py pipeline_gen.c,true)
 
 # 链接带 -su 流水线的 shuc（需 main_su.o 用 -DSHUC_USE_SU_PIPELINE 编译，否则 -su -E 不生效）
 shuc-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c
