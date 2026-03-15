@@ -1,0 +1,36 @@
+// std.encoding — UTF-8/ASCII 编解码与校验（对标 Zig/Rust，性能压榨）
+//
+// 【文件职责】UTF-8 单遍校验/码点计数/rune 编解码；ASCII 分类与大小写。无堆分配，表驱动。
+// 【依赖】core；与 std/encoding/encoding.c 同属一模块。
+
+extern function encoding_utf8_valid_c(p: *u8, len: i32): i32;
+extern function encoding_utf8_len_chars_c(p: *u8, len: i32): i32;
+extern function encoding_utf8_encode_rune_c(r: u32, out: *u8): i32;
+extern function encoding_utf8_decode_rune_c(p: *u8, len: i32, out_r: *u32): i32;
+extern function encoding_ascii_is_alpha_c(c: u8): i32;
+extern function encoding_ascii_is_digit_c(c: u8): i32;
+extern function encoding_ascii_is_alnum_c(c: u8): i32;
+extern function encoding_ascii_is_lower_c(c: u8): i32;
+extern function encoding_ascii_is_upper_c(c: u8): i32;
+extern function encoding_ascii_to_lower_c(c: u8): u8;
+extern function encoding_ascii_to_upper_c(c: u8): u8;
+
+/** UTF-8 校验 ptr[0..len)；合法返回 1，非法返回 0。单遍、表驱动。 */
+function utf8_valid(ptr: *u8, len: i32): i32 { return encoding_utf8_valid_c(ptr, len); }
+
+/** UTF-8 码点个数；非法序列返回 -1。 */
+function utf8_len_chars(ptr: *u8, len: i32): i32 { return encoding_utf8_len_chars_c(ptr, len); }
+
+/** 将码点 r 编码到 out，返回写入字节数 1..4，非法 r 返回 0。 */
+function utf8_encode_rune(r: u32, out: *u8): i32 { return encoding_utf8_encode_rune_c(r, out); }
+
+/** 从 ptr 解码一个 rune 到 *out_r，返回消费字节数 1..4，非法返回 0。 */
+function utf8_decode_rune(ptr: *u8, len: i32, out_r: *u32): i32 { return encoding_utf8_decode_rune_c(ptr, len, out_r); }
+
+function ascii_is_alpha(c: u8): i32 { return encoding_ascii_is_alpha_c(c); }
+function ascii_is_digit(c: u8): i32 { return encoding_ascii_is_digit_c(c); }
+function ascii_is_alnum(c: u8): i32 { return encoding_ascii_is_alnum_c(c); }
+function ascii_is_lower(c: u8): i32 { return encoding_ascii_is_lower_c(c); }
+function ascii_is_upper(c: u8): i32 { return encoding_ascii_is_upper_c(c); }
+function ascii_to_lower(c: u8): u8 { return encoding_ascii_to_lower_c(c); }
+function ascii_to_upper(c: u8): u8 { return encoding_ascii_to_upper_c(c); }
