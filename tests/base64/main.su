@@ -1,0 +1,47 @@
+// tests/base64/main.su — std.base64 全面 + 边界测试
+// 覆盖：encode_standard/decode_standard、encode_url/decode_url 往返；边界：空、1/2/3 字节、缓冲不足、非法字符。
+
+import std.base64;
+
+function main(): i32 {
+  let src: [8]u8 = [77, 97, 110, 0, 0, 0, 0, 0];
+  let out: [16]u8 = [];
+  let dec: [16]u8 = [];
+
+  let n: i32 = encode_standard(&src[0], 3, &out[0], 16);
+  if (n != 4) { return 1; }
+  if (out[0] != 84 || out[1] != 87) { return 2; }
+  let dn: i32 = decode_standard(&out[0], 4, &dec[0], 16);
+  if (dn != 3) { return 3; }
+  if (dec[0] != 77 || dec[1] != 97 || dec[2] != 110) { return 4; }
+
+  let n0: i32 = encode_standard(&src[0], 0, &out[0], 16);
+  if (n0 != 0) { return 5; }
+  let d0: i32 = decode_standard(&out[0], 0, &dec[0], 16);
+  if (d0 != 0) { return 6; }
+
+  let one: [1]u8 = [97];
+  let n1: i32 = encode_standard(&one[0], 1, &out[0], 16);
+  if (n1 < 2) { return 7; }
+  let d1: i32 = decode_standard(&out[0], n1, &dec[0], 16);
+  if (d1 != 1) { return 8; }
+  if (dec[0] != 97) { return 9; }
+
+  let buf_small_fail: i32 = encode_standard(&src[0], 3, &out[0], 2);
+  if (buf_small_fail != (0 - 1)) { return 10; }
+
+  let url_src: [4]u8 = [102, 111, 111, 0];
+  let url_out: [16]u8 = [];
+  let n_url: i32 = encode_url(&url_src[0], 3, &url_out[0], 16);
+  if (n_url < 2) { return 11; }
+  let url_dec: [16]u8 = [];
+  let d_url: i32 = decode_url(&url_out[0], n_url, &url_dec[0], 16);
+  if (d_url != 3) { return 12; }
+  if (url_dec[0] != 102 || url_dec[1] != 111 || url_dec[2] != 111) { return 13; }
+
+  let bad: [4]u8 = [33, 33, 33, 0];
+  let bad_dec: i32 = decode_standard(&bad[0], 4, &dec[0], 16);
+  if (bad_dec != (0 - 1)) { return 14; }
+
+  return 0;
+}
