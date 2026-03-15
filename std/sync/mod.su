@@ -1,0 +1,39 @@
+// std.sync — 互斥锁与同步原语（对标 Rust std::sync::Mutex、Zig Thread.Mutex）
+//
+// 【文件职责】
+// 对外暴露 std.sync 的 Mutex API：mutex_new、mutex_lock、mutex_try_lock、mutex_unlock、mutex_free。
+// 互斥体句柄为不透明指针（*u8），与 std.thread 配合实现多线程互斥。RwLock/Once 见 P2 可选或 P3。
+//
+// 【所属模块/组件】
+// 标准库 std.sync；用户通过 import std.sync 使用。依赖 core；与 std/sync/sync.c 同属一模块。Unix 链接时需 -lpthread。
+
+extern function sync_mutex_new_c(): *u8;
+extern function sync_mutex_lock_c(m: *u8): i32;
+extern function sync_mutex_try_lock_c(m: *u8): i32;
+extern function sync_mutex_unlock_c(m: *u8): i32;
+extern function sync_mutex_free_c(m: *u8): void;
+
+/** 创建新的互斥体；成功返回句柄（不透明指针），失败返回 0。对标 Mutex::new()。 */
+function mutex_new(): *u8 {
+  return sync_mutex_new_c();
+}
+
+/** 加锁；阻塞直到获取。返回 0 成功，-1 失败（如 m 为 0）。获取后需在相同线程内调用 mutex_unlock。 */
+function mutex_lock(m: *u8): i32 {
+  return sync_mutex_lock_c(m);
+}
+
+/** 尝试加锁；不阻塞。返回 0 表示已获取，非 0 表示未获取（忙或 m 为 0）。 */
+function mutex_try_lock(m: *u8): i32 {
+  return sync_mutex_try_lock_c(m);
+}
+
+/** 解锁；必须在已持有锁的线程内调用。返回 0 成功，-1 失败。 */
+function mutex_unlock(m: *u8): i32 {
+  return sync_mutex_unlock_c(m);
+}
+
+/** 销毁并释放互斥体；调用后 m 不可再使用。不得在已加锁状态下调用（先 unlock 再 free）。 */
+function mutex_free(m: *u8): void {
+  sync_mutex_free_c(m);
+}
