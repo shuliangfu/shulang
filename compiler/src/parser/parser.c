@@ -989,6 +989,22 @@ static ASTExpr *parse_primary(Parser *p) {
         e->value.float_val = fval;
         return e;
     }
+    /* 类型关键字作函数名（如 std.random 的 u32()、u64()、bool()）；后接 ( 时解析为变量引用，由 parse_postfix 处理为函数调用 */
+    if ((t->kind == TOKEN_U32 || t->kind == TOKEN_U64 || t->kind == TOKEN_BOOL) && peek_next(p) && peek_next(p)->kind == TOKEN_LPAREN) {
+        int ident_line = t->line;
+        int ident_col = t->col;
+        const char *name = (t->kind == TOKEN_U32) ? "u32" : (t->kind == TOKEN_U64) ? "u64" : "bool";
+        advance(p);
+        ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
+        if (!e) {
+            fprintf(stderr, "parse: out of memory\n");
+            return NULL;
+        }
+        set_expr_loc_at(e, ident_line, ident_col);
+        e->kind = AST_EXPR_VAR;
+        e->value.var.name = strdup(name);
+        return e;
+    }
     if (t->kind != TOKEN_INT) {
         fprintf(stderr, "parse_primary: at %d:%d unexpected token kind=%d (expected INT/IDENT/...)\n", t->line, t->col, (int)t->kind);
         fail(p, "expected integer literal, float literal, identifier, 'true', 'false', 'if', 'break', 'continue', 'return', 'panic', 'match', or '('");
@@ -2876,12 +2892,18 @@ after_block:
 static ASTFunc *parse_one_function(Parser *p, int is_extern) {
     if (peek(p)->kind != TOKEN_FUNCTION) return NULL;
     advance(p);
-    /* 函数名允许 IDENT 或关键字 panic/abort 等（std.runtime 中 function panic(): void 合法） */
+    /* 函数名允许 IDENT 或关键字 panic/abort、或类型关键字 u32/u64/bool（std.random 中 function u32(): u32 等合法） */
     char *name = NULL;
     if (peek(p)->kind == TOKEN_IDENT) {
         name = strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len);
     } else if (peek(p)->kind == TOKEN_PANIC) {
         name = strdup("panic");
+    } else if (peek(p)->kind == TOKEN_U32) {
+        name = strdup("u32");
+    } else if (peek(p)->kind == TOKEN_U64) {
+        name = strdup("u64");
+    } else if (peek(p)->kind == TOKEN_BOOL) {
+        name = strdup("bool");
     } else {
         fail(p, "expected function name after 'function'");
         return NULL;
