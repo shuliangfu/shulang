@@ -1,0 +1,47 @@
+// std.hash — Hasher 抽象与 SipHash-2-4（对标 Zig std.hash、Rust std::hash::Hasher）
+//
+// 【文件职责】hash_start、hash_write_u32/u64/bytes、hash_finish、hash_free；单次 hash_bytes。
+// 【依赖】core；与 std/hash/hash.c 同属一模块。
+
+extern function hash_sip_new_c(): *u8;
+extern function hash_sip_write_u32_c(h: *u8, x: u32): void;
+extern function hash_sip_write_u64_c(h: *u8, x: u64): void;
+extern function hash_sip_write_bytes_c(h: *u8, ptr: *u8, len: i32): void;
+extern function hash_sip_finish_c(h: *u8): u64;
+extern function hash_sip_free_c(h: *u8): void;
+extern function hash_sip_bytes_c(ptr: *u8, len: i32): u64;
+
+/** 创建 Hasher 状态；失败返回 0。 */
+function hash_start(): *u8 {
+  return hash_sip_new_c();
+}
+
+/** 写入 u32（小端）。 */
+function hash_write_u32(h: *u8, x: u32): void {
+  hash_sip_write_u32_c(h, x);
+}
+
+/** 写入 u64（小端）。 */
+function hash_write_u64(h: *u8, x: u64): void {
+  hash_sip_write_u64_c(h, x);
+}
+
+/** 写入字节 ptr[0..len)。 */
+function hash_write_bytes(h: *u8, ptr: *u8, len: i32): void {
+  hash_sip_write_bytes_c(h, ptr, len);
+}
+
+/** 完成哈希，返回 u64；调用后 h 仍可继续写。 */
+function hash_finish(h: *u8): u64 {
+  return hash_sip_finish_c(h);
+}
+
+/** 释放 Hasher 状态。 */
+function hash_free(h: *u8): void {
+  hash_sip_free_c(h);
+}
+
+/** 单次对 ptr[0..len) 做 SipHash-2-4，返回 u64。 */
+function hash_bytes(ptr: *u8, len: i32): u64 {
+  return hash_sip_bytes_c(ptr, len);
+}
