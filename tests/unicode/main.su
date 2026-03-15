@@ -1,0 +1,10 @@
+// tests/unicode/main.su — std.unicode category、to_lower/to_upper
+import std.unicode;
+
+function main(): i32 {
+  if (category(65) != 1) { return 1; }
+  if (category(48) != 2) { return 2; }
+  if (to_lower(65) != 97) { return 3; }
+  if (to_upper(97) != 65) { return 4; }
+  return 0;
+}
