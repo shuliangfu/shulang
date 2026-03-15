@@ -1,0 +1,65 @@
+// tests/json/main.su — std.json 全面 + 边界测试
+// 覆盖：parse_null/parse_bool/parse_number/parse_string、append_null/append_bool/append_number、escape_string；边界：空输入、非法、缓冲不足。
+
+import std.json;
+
+function main(): i32 {
+  let consumed: i32 = 0;
+  let out_val: f64 = 0.0;
+  let out_bool: i32 = 0;
+  let buf: [128]u8 = [];
+  let out_str: [32]u8 = [];
+
+  if (parse_null(&buf[0], 0, &consumed) != 0) { return 1; }
+  let null_ok: [5]u8 = [110, 117, 108, 108, 0];
+  if (parse_null(&null_ok[0], 4, &consumed) != 1) { return 2; }
+  if (consumed != 4) { return 3; }
+
+  let true_ok: [5]u8 = [116, 114, 117, 101, 0];
+  if (parse_bool(&true_ok[0], 4, &out_bool, &consumed) != 1) { return 4; }
+  if (out_bool != 1 || consumed != 4) { return 5; }
+  let false_ok: [6]u8 = [102, 97, 108, 115, 101, 0];
+  if (parse_bool(&false_ok[0], 5, &out_bool, &consumed) != 1) { return 6; }
+  if (out_bool != 0 || consumed != 5) { return 7; }
+  if (parse_bool(&buf[0], 2, &out_bool, &consumed) != 0) { return 8; }
+
+  let num_int: [3]u8 = [49, 50, 0];
+  if (parse_number(&num_int[0], 2, &out_val, &consumed) != 0) { return 9; }
+  if (consumed != 2) { return 10; }
+  let num_neg: [5]u8 = [45, 49, 46, 53, 0];
+  if (parse_number(&num_neg[0], 4, &out_val, &consumed) != 0) { return 11; }
+  if (consumed != 4) { return 12; }
+  let num_zero: [2]u8 = [48, 0];
+  if (parse_number(&num_zero[0], 1, &out_val, &consumed) != 0) { return 13; }
+  if (consumed != 1) { return 14; }
+
+  let str_simple: [8]u8 = [34, 97, 98, 34, 0, 0, 0, 0];
+  let cons: i32 = 0;
+  let n_str: i32 = parse_string(&str_simple[0], 4, &out_str[0], 32, &cons);
+  if (n_str != 2) { return 15; }
+  if (out_str[0] != 97 || out_str[1] != 98) { return 16; }
+  if (cons != 4) { return 17; }
+
+  let n_null: i32 = append_null(&buf[0], 128);
+  if (n_null != 4) { return 18; }
+  if (buf[0] != 110 || buf[1] != 117 || buf[2] != 108 || buf[3] != 108) { return 19; }
+
+  let n_true: i32 = append_bool(&buf[0], 128, 1);
+  if (n_true != 4) { return 20; }
+  let n_false: i32 = append_bool(&buf[0], 128, 0);
+  if (n_false != 5) { return 21; }
+
+  let n_num: i32 = append_number(&buf[0], 128, 3.14);
+  if (n_num <= 0) { return 22; }
+  let n_num_int: i32 = append_number(&buf[0], 128, 0.0);
+  if (n_num_int <= 0) { return 23; }
+
+  let esc_in: [2]u8 = [34, 0];
+  let n_esc: i32 = escape_string(&esc_in[0], 1, &buf[0], 128);
+  if (n_esc < 0) { return 24; }
+  if (buf[0] != 34) { return 25; }
+  let esc_fail: i32 = escape_string(&esc_in[0], 1, &buf[0], 2);
+  if (esc_fail != (0 - 1)) { return 26; }
+
+  return 0;
+}
