@@ -1,11 +1,19 @@
-// 测试 core.types 的 size_of_* 与 core.debug.assert（通过 import 后直接调用）
+// 测试 core.types 全部 size_of_*、align_of_* 与 core.debug.assert（全覆盖）
 import core.types;
 import core.debug;
 
 function main(): i32 {
-  let s32: i32 = size_of_i32();
-  let sb: i32 = size_of_bool();
-  let ok1: i32 = assert(s32 == 4);
-  let ok2: i32 = assert(sb == 1);
-  return if (s32 != 4) { 1 } else if (sb != 1) { 2 } else { 0 }
+  if (size_of_i32() != 4) { return 1; }
+  if (size_of_bool() != 1 || size_of_u8() != 1) { return 2; }
+  if (size_of_u32() != 4 || size_of_u64() != 8 || size_of_i64() != 8) { return 3; }
+  if (size_of_usize() != 8 || size_of_isize() != 8) { return 4; }
+  if (size_of_f32() != 4 || size_of_f64() != 8) { return 5; }
+  if (size_of_pointer() != 8) { return 6; }
+  if (align_of_i32() != 4 || align_of_bool() != 1 || align_of_u8() != 1) { return 7; }
+  if (align_of_u32() != 4 || align_of_u64() != 8 || align_of_i64() != 8) { return 8; }
+  if (align_of_usize() != 8 || align_of_isize() != 8) { return 9; }
+  if (align_of_f32() != 4 || align_of_f64() != 8) { return 10; }
+  if (align_of_pointer() != 8) { return 11; }
+  let ok: i32 = assert(size_of_i32() == 4);
+  return ok;
 }
