@@ -12,8 +12,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#if defined(__linux__) || defined(__APPLE__)
+/* execinfo.h 为 glibc 扩展，Alpine/musl 等无此头文件；仅在有 execinfo 时使用。 */
+#if (defined(__linux__) && defined(__GLIBC__)) || defined(__APPLE__)
 #include <execinfo.h>
+#define HAVE_EXECINFO 1
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -25,7 +27,7 @@
  */
 int32_t backtrace_capture_c(uint8_t *buf, int32_t max_frames) {
     if (!buf || max_frames <= 0) return 0;
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(HAVE_EXECINFO)
     {
         void *arr[256];
         int n = backtrace(arr, max_frames > 256 ? 256 : (int)max_frames);

@@ -188,11 +188,17 @@ src/main_su.o: src/main.c
 
 PIPELINE_OBJS = src/main_su.o src/runtime_su.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
-# asm 后端 -o <exe> 时链接用：提供 shulang_panic_；Linux 用 .s（syscall exit 不链 libc），其它用 .c（调 abort 链 libc）
+# asm 后端 -o <exe> 时链接用：提供 shulang_panic_；Linux 有 .s 时用 .s（syscall exit 不链 libc），否则用 .c；其它平台用 .c
 UNAME_S := $(shell uname -s 2>/dev/null || echo Unknown)
+RUNTIME_PANIC_S := $(wildcard src/asm/runtime_panic_x86_64.s)
 ifeq ($(UNAME_S),Linux)
+ifneq (,$(RUNTIME_PANIC_S))
 runtime_panic.o: src/asm/runtime_panic_x86_64.s
 	$(CC) -c -o $@ $<
+else
+runtime_panic.o: src/asm/runtime_panic.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+endif
 else
 runtime_panic.o: src/asm/runtime_panic.c
 	$(CC) $(CFLAGS) -c -o $@ $<

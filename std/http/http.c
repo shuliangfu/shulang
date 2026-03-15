@@ -61,8 +61,9 @@ static int parse_http_url(const uint8_t *url, int32_t url_len,
       int plen = i - port_start;
       memcpy(port_buf, url + port_start, (size_t)plen);
       port_buf[plen] = '\0';
-    } else
+    } else {
       port_buf[0] = '8'; port_buf[1] = '0'; port_buf[2] = '\0';
+    }
   } else {
     port_buf[0] = '8'; port_buf[1] = '0'; port_buf[2] = '\0';
   }
