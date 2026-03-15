@@ -28,9 +28,7 @@ typedef struct { uint8_t *ptr; size_t len; size_t handle; } shu_batch_buf_t;
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/uio.h>
-#ifndef __kernel_timespec
-struct __kernel_timespec { long long tv_sec; long long tv_nsec; };
-#endif
+/* __kernel_timespec 由 liburing.h 所包含的 linux/time_types.h 提供，勿在此重复定义。 */
 /* 极致压榨：每线程一个 io_uring，无全局锁；固定 buffer + 固定 files（SQPOLL 用）。 */
 typedef struct {
     struct io_uring ring;
@@ -141,7 +139,7 @@ int32_t io_uring_accept(int listener_fd, unsigned timeout_ms) {
         if (io_uring_peek_batch_cqe(ring, cqe_ptrs, 1) < 1) return -1;
         cqe = cqe_ptrs[0];
     } else {
-        if (io_uring_submit(ring, 1) != 1) return -1;
+        if (io_uring_submit(ring) != 1) return -1;
         struct __kernel_timespec ts;
         ts.tv_sec = (long long)(timeout_ms / 1000u);
         ts.tv_nsec = (long long)((timeout_ms % 1000u) * 1000000u);
@@ -187,7 +185,7 @@ int32_t io_uring_connect(uint32_t addr_u32, uint32_t port_u32, unsigned timeout_
         if (io_uring_peek_batch_cqe(ring, cqe_ptrs, 1) < 1) { (void)close(fd); return -1; }
         cqe = cqe_ptrs[0];
     } else {
-        if (io_uring_submit(ring, 1) != 1) { (void)close(fd); return -1; }
+        if (io_uring_submit(ring) != 1) { (void)close(fd); return -1; }
         struct __kernel_timespec ts;
         ts.tv_sec = (long long)(timeout_ms / 1000u);
         ts.tv_nsec = (long long)((timeout_ms % 1000u) * 1000000u);
@@ -467,7 +465,7 @@ ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
                         return -1;
                     }
                 } else {
-                    if (io_uring_submit(ring, 1) == 1) {
+                    if (io_uring_submit(ring) == 1) {
                         int wait_ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
                         if (wait_ret == 0 && cqe) {
                             ptrdiff_t res = (ptrdiff_t)cqe->res;
@@ -588,7 +586,7 @@ ptrdiff_t io_write(int fd, const uint8_t *buf, size_t count, unsigned timeout_ms
                         return -1;
                     }
                 } else {
-                    if (io_uring_submit(ring, 1) == 1) {
+                    if (io_uring_submit(ring) == 1) {
                         int wait_ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
                         if (wait_ret == 0 && cqe) {
                             ptrdiff_t res = (ptrdiff_t)cqe->res;
@@ -1638,7 +1636,7 @@ ptrdiff_t io_read_fixed(int fd, unsigned buf_index, size_t offset, size_t len, u
                     }
                     sqe = io_uring_get_sqe(ring);
                     if (sqe) {
-                        io_uring_prep_read_fixed(sqe, fd, (void *)addr, (unsigned)len, (int)buf_index);
+                        io_uring_prep_read_fixed(sqe, fd, (void *)addr, (unsigned)len, (uint64_t)offset, (int)buf_index);
                         io_uring_sqe_set_data(sqe, (void *)(uintptr_t)fd);
                         if (timeout_ms == 0) {
                             if (io_uring_submit_and_wait(ring, 1) == 1) {
@@ -1651,7 +1649,7 @@ ptrdiff_t io_read_fixed(int fd, unsigned buf_index, size_t offset, size_t len, u
                                 return -1;
                             }
                         } else {
-                            if (io_uring_submit(ring, 1) == 1) {
+                            if (io_uring_submit(ring) == 1) {
                                 int wait_ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
                                 if (wait_ret == 0 && cqe) {
                                     ptrdiff_t res = (ptrdiff_t)cqe->res;
@@ -1725,7 +1723,7 @@ ptrdiff_t io_write_fixed(int fd, unsigned buf_index, size_t offset, size_t len, 
                     }
                     sqe = io_uring_get_sqe(ring);
                     if (sqe) {
-                        io_uring_prep_write_fixed(sqe, fd, (const void *)addr, (unsigned)len, (int)buf_index);
+                        io_uring_prep_write_fixed(sqe, fd, (const void *)addr, (unsigned)len, (uint64_t)offset, (int)buf_index);
                         io_uring_sqe_set_data(sqe, (void *)(uintptr_t)fd);
                         if (timeout_ms == 0) {
                             if (io_uring_submit_and_wait(ring, 1) == 1) {
@@ -1738,7 +1736,7 @@ ptrdiff_t io_write_fixed(int fd, unsigned buf_index, size_t offset, size_t len, 
                                 return -1;
                             }
                         } else {
-                            if (io_uring_submit(ring, 1) == 1) {
+                            if (io_uring_submit(ring) == 1) {
                                 int wait_ret = io_uring_wait_cqe_timeout(ring, &cqe, &ts);
                                 if (wait_ret == 0 && cqe) {
                                     ptrdiff_t res = (ptrdiff_t)cqe->res;
