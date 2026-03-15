@@ -297,6 +297,8 @@ allow(padding) struct PipelineDepCtx {
   use_coff_o: i32;
   /** typeck 用：当前检查的块 ref，供 EXPR_VAR 查 const/let 填 resolved_type_ref。0 表示未在块内。 */
   current_block_ref: i32;
+  /** typeck 用：当前检查的函数在 module.funcs 中的下标，供 EXPR_VAR 查形参填 resolved_type_ref。-1 表示未在函数内。 */
+  current_func_index: i32;
 }
 
 /** 池下标空值：所有 ref 字段用 0 表示“无” */
@@ -344,8 +346,12 @@ function ast_arena_block_alloc(arena: *ASTArena): i32 {
   return arena.num_blocks;
 }
 
-/** 按 ref 取 Type 池中节点（副本）；ref 须为 1..num_types。 */
+/** 按 ref 取 Type 池中节点（副本）；ref 须为 1..num_types。ref<=0 时返回默认 TYPE_I32，避免 C 生成码中 ref-1 越界触发 panic。 */
 function ast_arena_type_get(arena: *ASTArena, ref: i32): Type {
+  if (ref <= 0) {
+    let empty_name: [64]u8 = [];
+    return Type { kind: TypeKind.TYPE_I32, name: empty_name, name_len: 0, elem_type_ref: 0, array_size: 0 };
+  }
   return arena.types[ref - 1];
 }
 
