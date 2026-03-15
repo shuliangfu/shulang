@@ -1,0 +1,14 @@
+// std.tar — tar 归档读/写（P4 可选；占位）
+//
+// 【文件职责】read_header/write_header 占位；后续可基于 std.fs、std.io 实现。
+// 【依赖】std.fs、std.io；与 std/tar/tar.c 同属一模块。
+
+extern function tar_read_header_c(buf: *u8, len: i32, name_out: *u8, name_cap: i32, size_out: *i32): i32;
+extern function tar_write_header_c(buf: *u8, buf_cap: i32, name: *u8, name_len: i32, file_size: i32): i32;
+
+function read_header(buf: *u8, len: i32, name_out: *u8, name_cap: i32, size_out: *i32): i32 {
+  return tar_read_header_c(buf, len, name_out, name_cap, size_out);
+}
+function write_header(buf: *u8, buf_cap: i32, name: *u8, name_len: i32, file_size: i32): i32 {
+  return tar_write_header_c(buf, buf_cap, name, name_len, file_size);
+}
