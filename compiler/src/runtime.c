@@ -1277,6 +1277,11 @@ static ASTModule *load_one_import(const char *import_path, const char **lib_root
         fprintf(stderr, "shuc: failed to parse import '%s'\n", import_path);
         return NULL;
     }
+    if (dep->num_imports > 0 && !dep->import_paths) {
+        fprintf(stderr, "shuc: internal error: module has num_imports but import_paths is NULL\n");
+        ast_module_free(dep);
+        return NULL;
+    }
     /* 先递归加载该模块的 import，保证 typeck 时其 deps 已在 all_dep_mods 中 */
     for (int i = 0; i < dep->num_imports; i++) {
         ASTModule *sub = load_one_import(dep->import_paths[i], lib_roots, n_lib_roots, entry_dir, defines, ndefines,
@@ -1319,6 +1324,10 @@ static int resolve_and_load_imports(ASTModule *mod, const char **lib_roots, int 
     ASTModule **dep_mods, int *ndep_out,
     ASTModule **all_dep_mods, char **all_dep_paths, int *n_all_out, int max_deps) {
     int n_all = 0;
+    if (mod->num_imports > 0 && !mod->import_paths) {
+        fprintf(stderr, "shuc: internal error: entry module has num_imports but import_paths is NULL\n");
+        return -1;
+    }
     for (int i = 0; i < mod->num_imports && i < max_deps; i++) {
         ASTModule *m = load_one_import(mod->import_paths[i], lib_roots, n_lib_roots, entry_dir, defines, ndefines,
             all_dep_mods, all_dep_paths, &n_all, max_deps);
@@ -1508,7 +1517,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
             argv[i++] = (char *)io_o;
 #if defined(__linux__)
             argv[i++] = (char *)"-luring";
-            argv[i++] = (char *)"-lpthread";
+            argv[i++] = (char *)"-pthread";
 #endif
 #if defined(_WIN32) || defined(_WIN64)
             argv[i++] = (char *)"-lws2_32";
@@ -1578,7 +1587,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
 #endif
             argv[i++] = (char *)thread_o;
 #if defined(__linux__)
-            argv[i++] = (char *)"-lpthread";
+            argv[i++] = (char *)"-pthread";
 #endif
         }
         if (time_o && time_o[0]) {
@@ -1616,7 +1625,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
 #endif
             argv[i++] = (char *)sync_o;
 #if defined(__linux__)
-            argv[i++] = (char *)"-lpthread";
+            argv[i++] = (char *)"-pthread";
 #endif
         }
         if (encoding_o && encoding_o[0]) {
@@ -1661,7 +1670,7 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
 #endif
             argv[i++] = (char *)channel_o;
 #if defined(__linux__)
-            argv[i++] = (char *)"-lpthread";
+            argv[i++] = (char *)"-pthread";
 #endif
         }
         if (backtrace_o && backtrace_o[0]) {
@@ -1769,6 +1778,12 @@ static int invoke_cc(const char **c_paths, int n, const char *out_path, const ch
         /* 使用 std.compress 时末尾加 -lz，满足启用 zlib 的 compress.o 链接 */
         if (compress_o && compress_o[0])
             argv[i++] = (char *)"-lz";
+#if defined(__linux__) || defined(__APPLE__)
+        /* Unix 上 thread.o 使用 CPU_ZERO/CPU_SET（sched.h）；用 -pthread 让 cc 以正确顺序拉取 libpthread/libc，Debian/Docker 等需此方式解析符号 */
+        if ((thread_o && thread_o[0]) || (sync_o && sync_o[0]) || (channel_o && channel_o[0]))
+            argv[i++] = (char *)"-pthread";
+        argv[i++] = (char *)"-lc";
+#endif
         argv[i++] = NULL;
         argv[0] = (char *)"cc";
         execvp("cc", argv);
