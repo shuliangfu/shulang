@@ -1,8 +1,221 @@
-// std.path — 路径拼接、分解、规范化（自举前最小实现）
-// 自举前：提供最小可调用 API；路径操作后续扩展。
+// std.path — 路径拼接、分解、规范化（对标 Rust std::path::Path、Go path/filepath、Zig std.fs.path）
+//
+// 【文件职责】路径按 (ptr, len) 处理，不依赖结尾 NUL；提供 join/dirname/basename/extension/stem/is_absolute/sep/clean，供 std.fs 等使用。
+// 【对标】Rust: parent≈dirname、file_name≈basename、extension、file_stem、join、is_absolute；Go: Join、Dir、Base、Ext、Clean、IsAbs；Zig: join、dirname、basename、extension、sep、isAbsolute。
+// 【约定】POSIX 分隔符 '/'（47）；Windows 可后续扩展 sep 与 is_absolute。路径均不写 NUL，调用方自设 out[ret]=0。
+// 【性能】path_is_absolute、path_sep 为 O(1)。path_join/dirname/basename 单次 last_slash + 一次拷贝，路径通常很短，已接近最优。同时需要 extension 与 stem 时用 path_extension_and_stem 可少一次 last_slash 与 last_dot 扫描。
 
 // 占位函数，表示本模块已可 import。
 function placeholder(): i32 { return 0; }
 
-// 表示“空路径长度”占位（0），后续扩展为路径拼接与 len。
+/** 空路径长度 0；与 path_join 等配合使用。 */
 function path_empty_len(): i32 { return 0; }
+
+/** 当前平台路径分隔符（POSIX '/'=47；对标 Zig sep、Go filepath.Separator）。 */
+function path_sep(): u8 { return 47; }
+
+// 路径拼接：将 a[0..a_len-1] 与 b[0..b_len-1] 写入 out，中间按需加 '/'，不超过 out_max。返回写入长度，溢出返回 -1。
+function path_join(out: *u8, out_max: i32, a: *u8, a_len: i32, b: *u8, b_len: i32): i32 {
+  let need_slash: i32 = 0;
+  if (a_len > 0 && a[a_len - 1] != 47) { need_slash = 1; }
+  let total: i32 = a_len + need_slash + b_len;
+  if (total <= 0) { return 0; }
+  if (total > out_max) { return -1; }
+  let k: i32 = 0;
+  let ai: i32 = 0;
+  while (ai < a_len) {
+    out[k] = a[ai];
+    k = k + 1;
+    ai = ai + 1;
+  }
+  if (need_slash != 0) {
+    let sl: u8 = 47;
+    out[k] = sl;
+    k = k + 1;
+  }
+  let bi: i32 = 0;
+  while (bi < b_len) {
+    out[k] = b[bi];
+    k = k + 1;
+    bi = bi + 1;
+  }
+  return k;
+}
+
+// 找 path[0..path_len-1] 中最后一个 '/' 的下标，不存在返回 -1。
+function path_last_slash(path: *u8, path_len: i32): i32 {
+  let i: i32 = path_len - 1;
+  while (i >= 0) {
+    if (path[i] == 47) { return i; }
+    i = i - 1;
+  }
+  return -1;
+}
+
+// 目录部分：path 的最后一个 '/' 之前（不含该 '/'）。写入 out[0..out_max-1]，返回写入长度；无 slash 则写 0 字节返回 0。
+function path_dirname(path: *u8, path_len: i32, out: *u8, out_max: i32): i32 {
+  let last: i32 = path_last_slash(path, path_len);
+  if (last <= 0) { return 0; }
+  if (last > out_max) { return -1; }
+  let i: i32 = 0;
+  while (i < last && i < out_max) {
+    out[i] = path[i];
+    i = i + 1;
+  }
+  return i;
+}
+
+// 最后一段（basename）：path 的最后一个 '/' 之后到结尾。写入 out，返回写入长度；无 slash 则整段为 basename（对标 Go Base、Rust file_name、Zig basename）。
+function path_basename(path: *u8, path_len: i32, out: *u8, out_max: i32): i32 {
+  let last: i32 = path_last_slash(path, path_len);
+  let start: i32 = last + 1;
+  let seg_len: i32 = path_len - start;
+  if (seg_len <= 0) { return 0; }
+  if (seg_len > out_max) { return -1; }
+  let i: i32 = 0;
+  while (i < seg_len) {
+    out[i] = path[start + i];
+    i = i + 1;
+  }
+  return i;
+}
+
+/** 是否绝对路径（POSIX：首字节为 '/'；对标 Rust is_absolute、Go IsAbs、Zig isAbsolute）。返回 1 是，0 否。 */
+function path_is_absolute(path: *u8, path_len: i32): i32 {
+  if (path_len <= 0) { return 0; }
+  if (path[0] == 47) { return 1; }
+  return 0;
+}
+
+// 在 path[start..start+len) 中找最后一个 '.' 的下标（相对 start），不存在返回 -1。
+function path_last_dot(path: *u8, start: i32, len: i32): i32 {
+  let i: i32 = start + len - 1;
+  while (i >= start) {
+    if (path[i] == 46) { return i - start; }
+    i = i - 1;
+  }
+  return -1;
+}
+
+/** 扩展名（含点 '.'，如 ".txt"）；无扩展或隐藏文件（如 ".gitignore"）返回 0（对标 Rust extension、Go Ext、Zig extension）。写入 out，返回长度，溢出 -1。 */
+function path_extension(path: *u8, path_len: i32, out: *u8, out_max: i32): i32 {
+  let last_sl: i32 = path_last_slash(path, path_len);
+  let base_start: i32 = last_sl + 1;
+  let base_len: i32 = path_len - base_start;
+  if (base_len <= 0) { return 0; }
+  let dot_rel: i32 = path_last_dot(path, base_start, base_len);
+  if (dot_rel < 0) { return 0; }
+  if (dot_rel == 0) { return 0; }
+  if (dot_rel >= base_len - 1) { return 0; }
+  let ext_len: i32 = base_len - dot_rel;
+  if (ext_len > out_max) { return -1; }
+  let i: i32 = 0;
+  while (i < ext_len) {
+    out[i] = path[base_start + dot_rel + i];
+    i = i + 1;
+  }
+  return i;
+}
+
+/** 最后一段去掉扩展名（stem；对标 Rust file_stem、Zig 的 filename 无扩展）。写入 out，返回长度，溢出 -1。 */
+function path_stem(path: *u8, path_len: i32, out: *u8, out_max: i32): i32 {
+  let last_sl: i32 = path_last_slash(path, path_len);
+  let base_start: i32 = last_sl + 1;
+  let base_len: i32 = path_len - base_start;
+  if (base_len <= 0) { return 0; }
+  let dot_rel: i32 = path_last_dot(path, base_start, base_len);
+  let stem_len: i32 = base_len;
+  if (dot_rel >= 0 && dot_rel > 0 && dot_rel < base_len - 1) {
+    stem_len = dot_rel;
+  }
+  if (stem_len > out_max) { return -1; }
+  let i: i32 = 0;
+  while (i < stem_len) {
+    out[i] = path[base_start + i];
+    i = i + 1;
+  }
+  return i;
+}
+
+/** 一次扫描同时写出 extension 与 stem（一次 last_slash + 一次 last_dot，避免两次 path_extension+path_stem 的重复扫描）。成功时返回 (stem_len << 16) | (ext_len & 0xffff)，溢出返回 -1。调用方：stem_len = (ret >> 16) & 0xffff，ext_len = ret & 0xffff。 */
+function path_extension_and_stem(path: *u8, path_len: i32, ext_out: *u8, ext_max: i32, stem_out: *u8, stem_max: i32): i32 {
+  let last_sl: i32 = path_last_slash(path, path_len);
+  let base_start: i32 = last_sl + 1;
+  let base_len: i32 = path_len - base_start;
+  if (base_len <= 0) { return 0; }
+  let dot_rel: i32 = path_last_dot(path, base_start, base_len);
+  let stem_len: i32 = base_len;
+  let ext_len: i32 = 0;
+  if (dot_rel >= 0 && dot_rel > 0 && dot_rel < base_len - 1) {
+    stem_len = dot_rel;
+    ext_len = base_len - dot_rel;
+  }
+  if (stem_len > stem_max) { return -1; }
+  if (ext_len > ext_max) { return -1; }
+  let i: i32 = 0;
+  while (i < stem_len) {
+    stem_out[i] = path[base_start + i];
+    i = i + 1;
+  }
+  i = 0;
+  while (i < ext_len) {
+    ext_out[i] = path[base_start + dot_rel + i];
+    i = i + 1;
+  }
+  return (stem_len << 16) | (ext_len & 65535);
+}
+
+/** 规范化路径：合并连续 '/'、去掉 '.' 段、'..' 消掉前一段（对标 Go Clean、Zig 类似）。写入 out，返回长度，溢出 -1。根 "/" 保留；空或仅 "." 写出 0 长度。 */
+function path_clean(path: *u8, path_len: i32, out: *u8, out_max: i32): i32 {
+  if (path_len <= 0 || out_max <= 0) { return 0; }
+  let seg_starts: [64]i32 = []; // 每段在 out 中的起始下标（该段首字符位置）
+  let nseg: i32 = 0;
+  let out_len: i32 = 0;
+  let i: i32 = 0;
+  let at_start: i32 = 1;
+  let started_with_slash: i32 = 0;
+  while (i < path_len && out_len < out_max) {
+    if (path[i] == 47) {
+      if (at_start != 0 && out_len == 0) { started_with_slash = 1; }
+      if (at_start == 0) {
+        out[out_len] = 47;
+        out_len = out_len + 1;
+        if (nseg < 63) { seg_starts[nseg] = out_len; nseg = nseg + 1; }
+        at_start = 1;
+      }
+      i = i + 1;
+      continue;
+    }
+    at_start = 0;
+    let seg_begin: i32 = i;
+    while (i < path_len && path[i] != 47) { i = i + 1; }
+    let seg_len: i32 = i - seg_begin;
+    if (seg_len == 0) { continue; }
+    if (seg_len == 1 && path[seg_begin] == 46) { continue; }
+    if (seg_len == 2 && path[seg_begin] == 46 && path[seg_begin + 1] == 46) {
+      if (nseg > 0) {
+        out_len = seg_starts[nseg - 1] - 1;
+        if (out_len < 0) { out_len = 0; }
+        nseg = nseg - 1;
+      }
+      if (started_with_slash != 0 && out_len == 0 && out_max > 0) { out[0] = 47; out_len = 1; }
+      continue;
+    }
+    if (out_len > 0 && (out[out_len - 1] != 47)) {
+      if (out_len >= out_max) { return -1; }
+      out[out_len] = 47;
+      out_len = out_len + 1;
+    }
+    if (out_len == 0 && started_with_slash != 0) { out[0] = 47; out_len = 1; }
+    if (nseg < 63) { seg_starts[nseg] = out_len; nseg = nseg + 1; }
+    let k: i32 = 0;
+    while (k < seg_len && out_len < out_max) {
+      out[out_len] = path[seg_begin + k];
+      out_len = out_len + 1;
+      k = k + 1;
+    }
+    if (k < seg_len) { return -1; }
+  }
+  if (out_len > 1 && out[out_len - 1] == 47) { out_len = out_len - 1; }
+  return out_len;
+}
