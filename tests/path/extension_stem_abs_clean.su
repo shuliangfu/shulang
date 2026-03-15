@@ -1,0 +1,26 @@
+// 测试 std.path：path_extension、path_stem、path_is_absolute、path_sep、path_clean
+// 对标 Rust/Go/Zig 的 extension、stem、IsAbs、sep、Clean。
+import std.path;
+
+function main(): i32 {
+  if (path_sep() != 47) { return 1; }
+  let p_abs: [4]u8 = [47, 97, 98, 0];
+  if (path_is_absolute(&p_abs[0], 3) != 1) { return 2; }
+  let p_rel: [3]u8 = [97, 98, 0];
+  if (path_is_absolute(&p_rel[0], 2) != 0) { return 3; }
+  let file_txt: [13]u8 = [100, 105, 114, 47, 102, 105, 108, 101, 46, 116, 120, 116, 0];
+  let ext_buf: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let ext_len: i32 = path_extension(&file_txt[0], 12, &ext_buf[0], 8);
+  if (ext_len != 4) { return 4; }
+  if (ext_buf[0] != 46 || ext_buf[1] != 116 || ext_buf[2] != 120 || ext_buf[3] != 116) { return 5; }
+  let stem_buf: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let stem_len: i32 = path_stem(&file_txt[0], 12, &stem_buf[0], 8);
+  if (stem_len != 4) { return 6; }
+  if (stem_buf[0] != 102 || stem_buf[1] != 105 || stem_buf[2] != 108 || stem_buf[3] != 101) { return 7; }
+  let simple: [5]u8 = [47, 97, 47, 98, 0];
+  let clean_buf: [16]u8 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let clean_len: i32 = path_clean(&simple[0], 4, &clean_buf[0], 16);
+  if (clean_len != 4) { return 8; }
+  if (clean_buf[0] != 47 || clean_buf[1] != 97 || clean_buf[2] != 47 || clean_buf[3] != 98) { return 9; }
+  return 0;
+}

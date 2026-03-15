@@ -1,0 +1,18 @@
+// 测试 std.path：path_join 返回长度 8；path_basename/path_dirname 对字面 "dir/file" 返回 4 和 3
+import std.path;
+
+function main(): i32 {
+  let dir: [4]u8 = [100, 105, 114, 0];
+  let file: [5]u8 = [102, 105, 108, 101, 0];
+  let out: [32]u8 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let j: i32 = path_join(&out[0], 32, &dir[0], 3, &file[0], 4);
+  if (j != 8) { return 1; }
+  let path: [9]u8 = [100, 105, 114, 47, 102, 105, 108, 101, 0];
+  let base: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let blen: i32 = path_basename(&path[0], 8, &base[0], 8);
+  if (blen != 4) { return 3; }
+  let dout: [8]u8 = [0, 0, 0, 0, 0, 0, 0, 0];
+  let dlen: i32 = path_dirname(&path[0], 8, &dout[0], 8);
+  if (dlen != 3) { return 5; }
+  return 0;
+}
