@@ -1,0 +1,165 @@
+// std.set — 集合（对标 Rust std::collections::HashSet、Zig AutoSet/HashSet）
+//
+// 【文件职责】
+// Set_i32：仅存 key，无 value；new/with_capacity、insert、remove、contains、len、is_empty、clear、reserve、deinit。
+// 与 std.map 共享哈希实现，复用 std.heap 的 map_i32_i32_find_c（keys+occupied 线性探测）。
+//
+// 【依赖】std.heap（alloc_i32/alloc_u8、free_i32/free_u8、map_i32_i32_find_c）。
+
+import std.heap;
+
+/** 集合：keys/occupied 堆分配，cap 槽位，len 已用；调用方须在不用时 set_i32_deinit。 */
+allow(padding) struct Set_i32 {
+  keys: *i32;
+  occupied: *u8;
+  cap: i32;
+  len: i32;
+}
+
+/** 取 key 的槽位下标（0..cap-1）；仅用于内部。 */
+function set_i32_slot(s: Set_i32, key: i32): i32 {
+  let h: i32 = key % s.cap;
+  if (h < 0) { return h + s.cap; }
+  return h;
+}
+
+/** 查找 key 所在槽位；若存在返回槽位下标，否则返回 -1。复用 heap 的 map_i32_i32_find_c（仅用 keys/occupied）。 */
+function set_i32_find(s: Set_i32, key: i32): i32 {
+  return map_i32_i32_find_c(s.keys, s.occupied, s.cap, key);
+}
+
+/** 新建空 Set_i32（cap 0，ptr 均为 null）。 */
+function set_i32_new(): Set_i32 {
+  return Set_i32 { keys: 0, occupied: 0, cap: 0, len: 0 };
+}
+
+/** 预分配 capacity 个槽位；失败返回 -1，成功返回 0。 */
+function set_i32_with_capacity(s: *Set_i32, capacity: i32): i32 {
+  if (capacity <= 0) {
+    s.keys = 0;
+    s.occupied = 0;
+    s.cap = 0;
+    s.len = 0;
+    return 0;
+  }
+  let k: *i32 = alloc_i32(capacity);
+  let o: *u8 = alloc_u8(capacity);
+  if (k == 0 || o == 0) {
+    if (k != 0) { free_i32(k); }
+    if (o != 0) { free_u8(o); }
+    return -1;
+  }
+  let i: i32 = 0;
+  while (i < capacity) {
+    o[i] = 0;
+    i = i + 1;
+  }
+  s.keys = k;
+  s.occupied = o;
+  s.cap = capacity;
+  s.len = 0;
+  return 0;
+}
+
+/** 扩容为 new_cap 并 rehash 所有条目；失败返回 -1，成功返回 0。 */
+function set_i32_grow(s: *Set_i32, new_cap: i32): i32 {
+  if (new_cap <= s.cap) { return 0; }
+  let old_keys: *i32 = s.keys;
+  let old_occupied: *u8 = s.occupied;
+  let old_cap: i32 = s.cap;
+  if (set_i32_with_capacity(s, new_cap) != 0) { return -1; }
+  let i: i32 = 0;
+  while (i < old_cap) {
+    if (old_occupied[i] != 0) {
+      let _: i32 = set_i32_insert(s, old_keys[i]);
+      i = i + 1;
+    } else {
+      i = i + 1;
+    }
+  }
+  free_i32(old_keys);
+  free_u8(old_occupied);
+  return 0;
+}
+
+/** 确保可再放至少 1 条；负载因子 > 0.75 时扩容。失败返回 -1。 */
+function set_i32_reserve_one(s: *Set_i32): i32 {
+  if (s.cap <= 0) {
+    return set_i32_with_capacity(s, 8);
+  }
+  if (s.len + 1 <= s.cap * 3 / 4) { return 0; }
+  return set_i32_grow(s, s.cap * 2);
+}
+
+/** 插入 key；若已存在则无操作。成功返回 0，失败返回 -1。 */
+function set_i32_insert(s: *Set_i32, key: i32): i32 {
+  if (set_i32_reserve_one(s) != 0) { return -1; }
+  let start: i32 = set_i32_slot(*s, key);
+  let i: i32 = start;
+  loop {
+    if (s.occupied[i] == 0) {
+      s.keys[i] = key;
+      s.occupied[i] = 1;
+      s.len = s.len + 1;
+      return 0;
+    }
+    if (s.keys[i] == key) {
+      return 0;
+    }
+    i = i + 1;
+    if (i >= s.cap) { i = 0; }
+    if (i == start) {
+      if (set_i32_grow(s, s.cap * 2) != 0) { return -1; }
+      return set_i32_insert(s, key);
+    }
+  }
+  return -1;
+}
+
+/** 是否包含 key。返回 1 是，0 否。 */
+function set_i32_contains(s: Set_i32, key: i32): i32 {
+  if (set_i32_find(s, key) >= 0) { return 1; }
+  return 0;
+}
+
+/** 移除 key；若存在则移除并返回 1，否则返回 0。 */
+function set_i32_remove(s: *Set_i32, key: i32): i32 {
+  let idx: i32 = set_i32_find(*s, key);
+  if (idx < 0) { return 0; }
+  s.occupied[idx] = 0;
+  s.len = s.len - 1;
+  return 1;
+}
+
+/** 元素个数。 */
+function set_i32_len(s: Set_i32): i32 { return s.len; }
+
+/** 是否为空。返回 1 是，0 否。 */
+function set_i32_is_empty(s: Set_i32): i32 {
+  if (s.len <= 0) { return 1; }
+  return 0;
+}
+
+/** 清空所有元素，不释放内存。 */
+function set_i32_clear(s: *Set_i32): void {
+  let i: i32 = 0;
+  while (i < s.cap) {
+    s.occupied[i] = 0;
+    i = i + 1;
+  }
+  s.len = 0;
+}
+
+/** 确保容量至少 new_cap 个槽位；失败返回 -1。 */
+function set_i32_reserve(s: *Set_i32, new_cap: i32): i32 {
+  if (new_cap <= s.cap) { return 0; }
+  return set_i32_grow(s, new_cap);
+}
+
+/** 释放堆内存；调用后不可再使用。 */
+function set_i32_deinit(s: *Set_i32): void {
+  if (s.keys != 0) { free_i32(s.keys); s.keys = 0; }
+  if (s.occupied != 0) { free_u8(s.occupied); s.occupied = 0; }
+  s.cap = 0;
+  s.len = 0;
+}
