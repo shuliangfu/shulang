@@ -1,0 +1,23 @@
+// std.csv — CSV 解析与写回（RFC 4180，对标 Zig std.csv、Rust csv crate）
+//
+// 【文件职责】next_field（含引号字段）、unescape（""→"）、escape（引号包裹与双写）。
+// 【依赖】std.string、std.io；与 std/csv/csv.c 同属一模块。
+
+extern function csv_next_field_c(ptr: *u8, len: i32, offset: i32, out_start: *i32, out_len: *i32): i32;
+extern function csv_unescape_c(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32;
+extern function csv_escape_c(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32;
+
+/** 从 offset 起找下一字段（支持 RFC 4180 引号字段）；*out_start、*out_len 为内容范围；返回下一 offset。 */
+function next_field(ptr: *u8, len: i32, offset: i32, out_start: *i32, out_len: *i32): i32 {
+  return csv_next_field_c(ptr, len, offset, out_start, out_len);
+}
+
+/** 将引号字段 raw 内容中的 "" 转为 " 写入 buf；返回写入长度，失败 -1。 */
+function unescape(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32 {
+  return csv_unescape_c(ptr, len, buf, buf_cap);
+}
+
+/** 将字段转义为带引号的 CSV 单元写入 buf；返回写入长度，失败 -1。 */
+function escape(ptr: *u8, len: i32, buf: *u8, buf_cap: i32): i32 {
+  return csv_escape_c(ptr, len, buf, buf_cap);
+}
