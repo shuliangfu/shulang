@@ -1,0 +1,23 @@
+// std.dynlib — 动态加载 .so/.dll（对标 Zig std.DynLib、Rust libloading）
+//
+// 【文件职责】open(path)、sym(lib, name)、close(lib)。按需链接。
+// 【依赖】core；与 std/dynlib/dynlib.c 同属一模块。
+
+extern function dynlib_open_c(path: *u8): *u8;
+extern function dynlib_sym_c(lib: *u8, name: *u8): *u8;
+extern function dynlib_close_c(lib: *u8): void;
+
+/** 打开动态库 path（NUL 结尾）；失败返回 0。 */
+function open(path: *u8): *u8 {
+  return dynlib_open_c(path);
+}
+
+/** 取符号 name（NUL 结尾）；失败返回 0。 */
+function sym(lib: *u8, name: *u8): *u8 {
+  return dynlib_sym_c(lib, name);
+}
+
+/** 关闭动态库。 */
+function close(lib: *u8): void {
+  dynlib_close_c(lib);
+}
