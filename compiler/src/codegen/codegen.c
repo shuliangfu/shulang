@@ -5540,10 +5540,10 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             fprintf(out, "};\n");
         if (emitted_type_names && n_emitted_inout) emitted_type_add(sd->name, emitted_type_names, n_emitted_inout, max_emitted);
     }
-    /* 冷路径辅助：panic 分支标记 noreturn+cold；单文件时已在第一个库块中输出，此处仅多文件时输出 */
+    /* 冷路径辅助：panic 分支标记 noreturn+cold；单文件时已在第一个库块中输出，此处仅多文件时输出；非 static 以免被 inline 调用触发 C 警告 */
     if (!emitted_type_names) {
-        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) {\n");
         fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
         fprintf(out, "  abort();\n");
         fprintf(out, "}\n");
@@ -5758,8 +5758,8 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
     }
     /* 单文件时 panic 已在第一个库的 include 块中输出；仅多文件（无 emitted_type_names）时每库各自输出 panic */
     if (!emitted_type_names) {
-        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-        fprintf(out, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+        fprintf(out, "void shulang_panic_(int has_msg, int msg_val) {\n");
         fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
         fprintf(out, "  abort();\n");
         fprintf(out, "}\n");

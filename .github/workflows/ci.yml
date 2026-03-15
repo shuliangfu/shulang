@@ -135,6 +135,28 @@ jobs:
         env:
           CI: "1"
 
+  # 当 run-option 段错误时，用 ASan 构建并复现以获取崩溃位置（可选，不阻塞主流程）
+  linux-option-asan:
+    name: Linux (ASan repro run-option)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq liburing-dev zlib1g-dev libbrotli-dev
+      - name: Build compiler with ASan
+        run: |
+          make -C compiler clean
+          make -C compiler all \
+            CFLAGS="-Wall -Wextra -I. -Iinclude -Isrc -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+        env:
+          CC: cc
+      - name: Reproduce run-option (capture ASan output)
+        run: |
+          ulimit -s 16384 2>/dev/null || true
+          ./compiler/shuc -L . tests/option/main.su -o /tmp/shuc_option 2>&1 || true
+          echo "--- exit code above ---"
+
   docker-distro:
     name: Docker (${{ matrix.image }})
     runs-on: ubuntu-latest

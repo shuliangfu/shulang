@@ -2406,8 +2406,8 @@ int RUN_CC_FUNC(int argc, char **argv) {
             fprintf(stdout, "#include <stdlib.h>\n");
             fprintf(stdout, "#include <stdio.h>\n");
             fprintf(stdout, "#include <string.h>\n");
-            fprintf(stdout, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-            fprintf(stdout, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+            fprintf(stdout, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+            fprintf(stdout, "void shulang_panic_(int has_msg, int msg_val) {\n");
             fprintf(stdout, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
             fprintf(stdout, "  abort();\n");
             fprintf(stdout, "}\n");
@@ -2553,8 +2553,8 @@ int RUN_CC_FUNC(int argc, char **argv) {
             fprintf(cf, "#include <stdlib.h>\n");
             fprintf(cf, "#include <stdio.h>\n");
             fprintf(cf, "#include <string.h>\n"); /* memcpy for array copy (bootstrap parser.su) */
-            fprintf(cf, "static void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
-            fprintf(cf, "static void shulang_panic_(int has_msg, int msg_val) {\n");
+            fprintf(cf, "void shulang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));\n");
+            fprintf(cf, "void shulang_panic_(int has_msg, int msg_val) {\n");
             fprintf(cf, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
             fprintf(cf, "  abort();\n");
             fprintf(cf, "}\n");
