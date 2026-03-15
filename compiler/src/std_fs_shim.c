@@ -1,6 +1,6 @@
 /**
  * std_fs_shim.c — 提供 std_fs_fs_* 符号供 -E-extern 生成的 pipeline/driver 链接。
- * 实现为调用 libc open/read/write/close。
+ * 实现为调用 libc open/read/write/close。open 使用三参数 (path, flags, mode)。
  */
 
 #include <stdint.h>
@@ -9,18 +9,29 @@
 #ifdef _WIN32
 #include <io.h>
 #include <fcntl.h>
-#define open(path, flags) _open((path), _O_RDONLY)
+#include <sys/stat.h>
+#define open(path, flags, mode) _open((path), (flags), (mode))
 #define read(fd, buf, count) _read((fd), (buf), (unsigned)(count))
 #define write(fd, buf, count) _write((fd), (buf), (unsigned)(count))
 #define close(fd) _close(fd)
 #else
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 int32_t std_fs_fs_open_read(uint8_t *path) {
   if (!path) return -1;
-  return (int32_t)open((char *)path, 0);
+  return (int32_t)open((char *)path, 0, 0);
+}
+
+int32_t std_fs_fs_open_write(uint8_t *path) {
+  if (!path) return -1;
+#ifdef _WIN32
+  return (int32_t)_open((char *)path, _O_WRONLY | _O_CREAT | _O_TRUNC, _S_IREAD | _S_IWRITE);
+#else
+  return (int32_t)open((char *)path, O_WRONLY | O_CREAT | O_TRUNC, (mode_t)0644);
+#endif
 }
 
 int32_t std_fs_fs_close(int32_t fd) {
