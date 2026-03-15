@@ -1318,6 +1318,24 @@ static ASTExpr *parse_unary(Parser *p) {
         e->value.unary.operand = inner;
         return e;
     }
+    /* 一元 * 解引用：*expr，操作数须为指针类型（如 map_i32_i32_slot(*m, key)） */
+    if (k == TOKEN_STAR) {
+        int unary_line = peek(p)->line;
+        int unary_col = peek(p)->col;
+        advance(p);
+        ASTExpr *inner = parse_unary(p);
+        if (!inner) return NULL;
+        ASTExpr *e = (ASTExpr *)calloc(1, sizeof(ASTExpr));
+        if (!e) {
+            ast_expr_free(inner);
+            fprintf(stderr, "parse: out of memory\n");
+            return NULL;
+        }
+        set_expr_loc_at(e, unary_line, unary_col);
+        e->kind = AST_EXPR_DEREF;
+        e->value.unary.operand = inner;
+        return e;
+    }
     if (k == TOKEN_MINUS || k == TOKEN_TILDE || k == TOKEN_BANG) {
         int unary_line = peek(p)->line;
         int unary_col = peek(p)->col;
@@ -2280,8 +2298,9 @@ static int parse_one_const_or_let(Parser *p, ASTBlock *b) {
     if (peek(p)->kind == TOKEN_LET) {
         if (b->num_lets >= MAX_LET_DECLS) { fail(p, "too many let declarations"); ast_block_free(b); return -1; }
         advance(p);
-        if (peek(p)->kind != TOKEN_IDENT) { fail(p, "expected identifier after let"); ast_block_free(b); return -1; }
-        char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident) ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL;
+        /* let 后允许 IDENT 或 _（占位符，如 let _: i32 = ...） */
+        if (peek(p)->kind != TOKEN_IDENT && peek(p)->kind != TOKEN_UNDERSCORE) { fail(p, "expected identifier after let"); ast_block_free(b); return -1; }
+        char *name = (peek(p)->kind == TOKEN_UNDERSCORE) ? strdup("_") : ((peek(p)->ident_len > 0 && peek(p)->value.ident) ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL);
         advance(p);
         if (!name) { ast_block_free(b); return -1; }
         if (peek(p)->kind != TOKEN_COLON) { free(name); fail(p, "expected ':' and type in let"); ast_block_free(b); return -1; }
@@ -2335,13 +2354,90 @@ static ASTBlock *parse_block(Parser *p, int allow_while, int consume_rbrace) {
         free(b);
         return NULL;
     }
-    {
-        int r;
-        while ((r = parse_one_const_or_let(p, b)) == 1) ;
-        if (r == -1) return NULL;
-        b->num_early_lets = b->num_lets;  /* codegen 用：块开头 let 数量，之后 expr/while/for 再出现的 let 为 late */
+    /* 先进入 stmt 主循环，保证 stmt_order 严格按源码顺序（从块首 token 起 const/let/expr/while/for 交错）。遇 while/for 时从循环内 goto 到 parse_while_start/parse_for_start。 */
+    b->num_early_lets = 0;
+    if (consume_rbrace && peek(p)->kind == TOKEN_RBRACE) {
+        b->final_expr = NULL;
+    } else {
+        int seen_expr = 0;
+        for (;;) {
+next_stmt:
+            if (peek(p)->kind == TOKEN_RBRACE)
+                break;
+            {
+                int r = parse_one_const_or_let(p, b);
+                if (r == 1) {
+                    if (!seen_expr) b->num_early_lets = b->num_lets;
+                    continue;
+                }
+                if (r == -1) return NULL;
+            }
+            if (allow_while && (peek(p)->kind == TOKEN_WHILE || peek(p)->kind == TOKEN_LOOP)) goto parse_while_start;
+            if (allow_while && peek(p)->kind == TOKEN_FOR) goto parse_for_start;
+            if (peek(p)->kind == TOKEN_DEFER) goto parse_defer_start;
+            if (peek(p)->kind == TOKEN_IDENT && peek_next(p)->kind == TOKEN_COLON) goto parse_label_start;
+            ASTExpr *e = parse_expr(p);
+            if (!e) {
+                ast_block_free(b);
+                return NULL;
+            }
+            if (peek(p)->kind == TOKEN_SEMICOLON) {
+                if (expr_ends_with_brace(e)) {
+                    advance(p);
+                    b->final_expr = e;
+                    break;
+                }
+                if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
+                    ast_expr_free(e);
+                    ast_block_free(b);
+                    fail(p, "too many expression statements");
+                    return NULL;
+                }
+                if (!b->expr_stmts) {
+                    b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
+                    if (!b->expr_stmts) {
+                        ast_expr_free(e);
+                        ast_block_free(b);
+                        fprintf(stderr, "parse: out of memory\n");
+                        return NULL;
+                    }
+                }
+                b->expr_stmts[b->num_expr_stmts++] = e;
+                push_stmt_order(b, 2, b->num_expr_stmts - 1);
+                seen_expr = 1;
+                advance(p);
+            } else {
+                if (expr_ends_with_brace(e) && peek(p)->kind != TOKEN_RBRACE) {
+                    if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
+                        ast_expr_free(e);
+                        ast_block_free(b);
+                        fail(p, "too many expression statements");
+                        return NULL;
+                    }
+                    if (!b->expr_stmts) {
+                        b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
+                        if (!b->expr_stmts) {
+                            ast_expr_free(e);
+                            ast_block_free(b);
+                            fprintf(stderr, "parse: out of memory\n");
+                            return NULL;
+                        }
+                    }
+                    b->expr_stmts[b->num_expr_stmts++] = e;
+                    push_stmt_order(b, 2, b->num_expr_stmts - 1);
+                    seen_expr = 1;
+                    continue;
+                }
+                b->final_expr = e;
+                break;
+            }
+        }
+        if (!allow_while)
+            while (peek(p)->kind == TOKEN_SEMICOLON)
+                advance(p);
+        goto after_block;
     }
-    /* 可选：解析单条 while/for，保证 stmt_order 与源码顺序一致（与下方 for(;;) 内 expr 交错）；遇 while/for 时从 for(;;) 跳转至此，解析一条后 goto next_stmt */
+    /* 仅当从 for(;;) 内 goto 到达：解析单条 while/for，解析后 goto next_stmt */
 parse_while_start:
     if (allow_while) {
         if (peek(p)->kind == TOKEN_WHILE || peek(p)->kind == TOKEN_LOOP) {
@@ -2463,13 +2559,12 @@ parse_for_start:
                     return NULL;
                 }
                 advance(p);
-                if (peek(p)->kind != TOKEN_IDENT) {
+                if (peek(p)->kind != TOKEN_IDENT && peek(p)->kind != TOKEN_UNDERSCORE) {
                     fail(p, "expected identifier after let in for init");
                     ast_block_free(b);
                     return NULL;
                 }
-                char *name = (peek(p)->ident_len > 0 && peek(p)->value.ident)
-                    ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL;
+                char *name = (peek(p)->kind == TOKEN_UNDERSCORE) ? strdup("_") : ((peek(p)->ident_len > 0 && peek(p)->value.ident) ? strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len) : NULL);
                 advance(p);
                 if (!name) { ast_block_free(b); return NULL; }
                 if (peek(p)->kind != TOKEN_COLON) {
@@ -2608,7 +2703,8 @@ parse_for_start:
             push_stmt_order(b, 4, b->num_for_loops - 1);
             goto next_stmt;
         }
-    /* 解析 defer { block }*：块退出时逆序执行 */
+    /* 解析 defer { block }*：块退出时逆序执行；从 for(;;) 内 goto 到达 */
+parse_defer_start:
     while (peek(p)->kind == TOKEN_DEFER) {
         if (b->num_defers >= MAX_DEFERS) {
             fail(p, "too many defer blocks");
@@ -2649,7 +2745,9 @@ parse_for_start:
         }
         b->defer_blocks[b->num_defers++] = db;
     }
-    /* 解析 ( [label:] (goto id;|return expr;) )*，然后 final_expr */
+    goto next_stmt;
+    /* 解析 ( [label:] (goto id;|return expr;) )*；从 for(;;) 内 goto 到达 */
+parse_label_start:
     while (1) {
         char *label = NULL;
         if (peek(p)->kind == TOKEN_IDENT && peek_next(p)->kind == TOKEN_COLON) {
@@ -2753,82 +2851,8 @@ parse_for_start:
         if (label) free(label);
         break;
     }
-    /* 解析 (expr;)* 与可选的最终表达式；当块以 } 结尾时无 final_expr（文档 01：块为 { stmt; stmt; ... expr }）。块中部允许 const/let。 */
-    if (consume_rbrace && peek(p)->kind == TOKEN_RBRACE) {
-        b->final_expr = NULL;
-    } else {
-        for (;;) {
-next_stmt:
-            if (peek(p)->kind == TOKEN_RBRACE)
-                break;
-            {
-                int r = parse_one_const_or_let(p, b);
-                if (r == 1) continue;
-                if (r == -1) return NULL;
-            }
-            if (allow_while && (peek(p)->kind == TOKEN_WHILE || peek(p)->kind == TOKEN_LOOP)) goto parse_while_start;
-            if (allow_while && peek(p)->kind == TOKEN_FOR) goto parse_for_start;
-            ASTExpr *e = parse_expr(p);
-            if (!e) {
-                ast_block_free(b);
-                return NULL;
-            }
-            if (peek(p)->kind == TOKEN_SEMICOLON) {
-                /* } 后分号可选；以 } 结尾的表达式后若有分号则消费后视为块尾 final_expr */
-                if (expr_ends_with_brace(e)) {
-                    advance(p);
-                    b->final_expr = e;
-                    break;
-                }
-                if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
-                    ast_expr_free(e);
-                    ast_block_free(b);
-                    fail(p, "too many expression statements");
-                    return NULL;
-                }
-                if (!b->expr_stmts) {
-                    b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
-                    if (!b->expr_stmts) {
-                        ast_expr_free(e);
-                        ast_block_free(b);
-                        fprintf(stderr, "parse: out of memory\n");
-                        return NULL;
-                    }
-                }
-                b->expr_stmts[b->num_expr_stmts++] = e;
-                push_stmt_order(b, 2, b->num_expr_stmts - 1);
-                advance(p);
-            } else {
-                /* 无分号：以 } 结尾且下一 token 为 } 时视为块尾 final_expr；否则视为表达式语句并继续（便于 if { } return ... 不写 };） */
-                if (expr_ends_with_brace(e) && peek(p)->kind != TOKEN_RBRACE) {
-                    if (b->num_expr_stmts >= MAX_EXPR_STMTS) {
-                        ast_expr_free(e);
-                        ast_block_free(b);
-                        fail(p, "too many expression statements");
-                        return NULL;
-                    }
-                    if (!b->expr_stmts) {
-                        b->expr_stmts = (ASTExpr **)malloc((size_t)MAX_EXPR_STMTS * sizeof(ASTExpr *));
-                        if (!b->expr_stmts) {
-                            ast_expr_free(e);
-                            ast_block_free(b);
-                            fprintf(stderr, "parse: out of memory\n");
-                            return NULL;
-                        }
-                    }
-                    b->expr_stmts[b->num_expr_stmts++] = e;
-                    push_stmt_order(b, 2, b->num_expr_stmts - 1);
-                    continue;
-                }
-                b->final_expr = e;
-                break;
-            }
-        }
-        /* allow_while 为 0 时（如 for 体）：允许 final_expr 后带分号，与常见写法一致；循环消费避免漏消费 */
-        if (!allow_while)
-            while (peek(p)->kind == TOKEN_SEMICOLON)
-                advance(p);
-    }
+    goto next_stmt;
+after_block:
     if (consume_rbrace && peek(p)->kind != TOKEN_RBRACE) {
         ast_block_free(b);
         fail(p, "expected '}'");
@@ -2852,11 +2876,16 @@ next_stmt:
 static ASTFunc *parse_one_function(Parser *p, int is_extern) {
     if (peek(p)->kind != TOKEN_FUNCTION) return NULL;
     advance(p);
-    if (peek(p)->kind != TOKEN_IDENT) {
+    /* 函数名允许 IDENT 或关键字 panic/abort 等（std.runtime 中 function panic(): void 合法） */
+    char *name = NULL;
+    if (peek(p)->kind == TOKEN_IDENT) {
+        name = strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len);
+    } else if (peek(p)->kind == TOKEN_PANIC) {
+        name = strdup("panic");
+    } else {
         fail(p, "expected function name after 'function'");
         return NULL;
     }
-    char *name = strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len);
     if (!name) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
@@ -3239,13 +3268,29 @@ int parse(Lexer *lex, ASTModule **out) {
         impl_list[nimpls++] = impl;
     }
 
-    /* [ extern? function | struct | enum ]*；允许 struct/enum 与 function 交错（如 backend.su）。 */
+    /* [ extern? function | allow(padding)? struct | enum ]*；允许 struct/enum 与 function 交错（如 backend.su、parser.su）。 */
     ASTFunc *func_list[AST_MODULE_MAX_FUNCS];
     int nfuncs = 0;
     while (peek(&prs)->kind == TOKEN_EXTERN || peek(&prs)->kind == TOKEN_FUNCTION
-           || peek(&prs)->kind == TOKEN_STRUCT || peek(&prs)->kind == TOKEN_ENUM) {
+           || peek(&prs)->kind == TOKEN_STRUCT || peek(&prs)->kind == TOKEN_ENUM
+           || (peek(&prs)->kind == TOKEN_IDENT && is_ident_str(&prs, "allow", 5))) {
+        int allow_padding = 0;
+        if (peek(&prs)->kind == TOKEN_IDENT && is_ident_str(&prs, "allow", 5)) {
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_LPAREN) goto cleanup_funcs_fail;
+            advance(&prs);
+            if (!is_ident_str(&prs, "padding", 7)) goto cleanup_funcs_fail;
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_RPAREN) goto cleanup_funcs_fail;
+            advance(&prs);
+            allow_padding = 1;
+            if (peek(&prs)->kind != TOKEN_STRUCT) {
+                fail(&prs, "expected 'struct' after allow(padding)");
+                goto cleanup_funcs_fail;
+            }
+        }
         if (peek(&prs)->kind == TOKEN_STRUCT) {
-            ASTStructDef *s = parse_one_struct(&prs, 0);
+            ASTStructDef *s = parse_one_struct(&prs, allow_padding);
             if (!s) goto cleanup_funcs_fail;
             if (nstructs >= MAX_STRUCTS) {
                 ast_struct_def_free(s);
