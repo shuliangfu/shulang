@@ -29,8 +29,7 @@ run() {
     if [ ! -f "tests/$script" ]; then return 0; fi
     chmod +x "tests/$script"
     if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
-        ./tests/$script
-        s=$?
+        s=0; ./tests/$script || s=$?
         if [ "$s" -ne 0 ]; then
             local msg="*** run-all FAILED: $script (exit $s) ***"
             echo "$msg"
