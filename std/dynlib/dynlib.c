@@ -17,9 +17,9 @@ typedef HMODULE dynlib_handle_t;
 typedef void *dynlib_handle_t;
 #endif
 
-/** 打开动态库 path（NUL 结尾）；失败返回 0。返回不透明句柄。 */
+/** 打开动态库 path（NUL 结尾）；失败返回 0。返回不透明句柄。path 为 NULL 或空字符串时返回 0，避免 Linux 上 dlopen("") 返回主程序句柄导致测试/行为不一致。 */
 void *dynlib_open_c(const uint8_t *path) {
-  if (!path) return NULL;
+  if (!path || !path[0]) return NULL;
 #if defined(_WIN32) || defined(_WIN64)
   return (void *)LoadLibraryA((const char *)path);
 #else
