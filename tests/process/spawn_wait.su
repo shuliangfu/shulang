@@ -5,18 +5,23 @@
 // 【覆盖 API】spawn_simple(program: *u8): i32、waitpid(pid: i32): i32。
 // 【预期结果】退出码 0 表示通过；1 表示 spawn_simple 失败；2 表示 waitpid 得到的 status≠0。Windows 上无 true，run-process.sh 会 SKIP。
 // 【运行方式】./tests/run-process.sh
-import std.process;
+//
+// 支持三种导入方式（本文件用第 2 种演示）：
+//   1) import std.process;           — 整模块，spawn_simple / waitpid / getenv 等直接可用
+//   2) const process = import std.process;  — 绑定模块名，用 process.getenv / process.spawn_simple 等
+//   3) const { getenv } = import std.process;  — 仅引入 getenv，其它名不可用
+const process = import std.process;
 
 function run_true(path: *u8): i32 {
-  let pid: i32 = spawn_simple(path);
+  let pid: i32 = process.spawn_simple(path);
   if (pid <= 0) { return -1; }
-  return waitpid(pid);
+  return process.waitpid(pid);
 }
 
 /** 通过环境变量 OSTYPE 判断是否为 macOS（值为 "darwin"）；未设置或非 darwin 返回 false。 */
 function is_darwin(): bool {
   let key: [8]u8 = [79, 83, 84, 89, 80, 69, 0, 0];
-  let val: *u8 = getenv(&key[0]);
+  let val: *u8 = process.getenv(&key[0]);
   if (val == 0) { return false; }
   return val[0] == 100 && val[1] == 97 && val[2] == 114 && val[3] == 119 && val[4] == 105 && val[5] == 110;
 }

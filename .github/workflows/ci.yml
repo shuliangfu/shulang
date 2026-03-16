@@ -80,7 +80,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Install dependencies (brotli for std/compress .br)
-        run: brew install brotli
+        run: brew list brotli >/dev/null 2>&1 || brew install brotli
       - name: Show job env (debug)
         run: |
           echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"

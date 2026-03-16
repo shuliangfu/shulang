@@ -1,0 +1,11 @@
+// 测试第 3 种导入方式：const { zzz } = import std.xxx；仅引入列出名，直接调用。
+//
+// 【文件职责】验证「const { print_str } = import std.io」后可直接调用 print_str，其它 std.io 符号不可见。
+// 【运行方式】./tests/run-import.sh（脚本会编译并运行，期望 stdout 含 "Hello World"）。
+const { print_str } = import std.io;
+
+function main(): i32 {
+  let msg: [12]u8 = [72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100, 10];
+  let n: i32 = print_str(&msg[0], 12 as usize);
+  return if (n >= 0) { 0 } else { 1 };
+}
