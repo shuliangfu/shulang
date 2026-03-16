@@ -367,11 +367,30 @@ typedef struct ASTMonoInstance {
 /** 模块内单态化实例最大数量（codegen 为每个实例生成一个 C 函数） */
 #define AST_MODULE_MAX_MONO_INSTANCES 64
 
+/** 顶层 let 最大数量（与 parser MAX_TOP_LEVEL_LETS 一致） */
+#define AST_MODULE_MAX_TOP_LEVEL_LETS 32
+
+/** 单条 import 的种类：0=整模块导入(import path;)，1=模块绑定(const x = import path;)，2=按名选取(const { a,b } = import path;) */
+#define AST_IMPORT_KIND_WHOLE   0
+#define AST_IMPORT_KIND_BINDING 1
+#define AST_IMPORT_KIND_SELECT  2
+
 /** 模块/程序：阶段 5 支持顶层 import；阶段 4–5 支持顶层 struct；§7 支持顶层 enum；多函数 + 函数调用；7.1 泛型；7.2 trait/impl。 */
 typedef struct ASTModule {
     /** import 路径列表，如 "core.types"；由 parser 分配，ast_module_free 释放 */
     char **import_paths;
     int num_imports;       /**< import_paths 有效长度 */
+    /** 与 import_paths 一一对应：0=整模块，1=const x = import path，2=const { a,b } = import path；由 parser 分配，ast_module_free 释放 */
+    int *import_kinds;
+    /** import_kinds[i]==AST_IMPORT_KIND_BINDING 时为绑定名(如 "process")，否则 NULL；由 parser 分配，ast_module_free 释放 */
+    char **import_binding_names;
+    /** import_kinds[i]==AST_IMPORT_KIND_SELECT 时为选取名数组(如 ["getenv"])，否则 NULL；由 ast_module_free 释放 */
+    char ***import_select_names;
+    /** import_kinds[i]==AST_IMPORT_KIND_SELECT 时为选取名个数 */
+    int *import_select_counts;
+    /** 顶层 let 声明（let name: Type = expr;），与 const/import 同级；由 parser 分配，ast_module_free 释放 */
+    ASTLetDecl *top_level_lets;
+    int num_top_level_lets;
     ASTStructDef **struct_defs; /**< 顶层结构体定义指针数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组 */
     int num_structs;
     ASTEnumDef **enum_defs;     /**< 顶层枚举定义指针数组，可为 NULL；由 ast_module_free 逐项释放后 free 本数组 */
