@@ -1,9 +1,10 @@
 // 测试 std.fs：fs_mmap_ro、fs_munmap（极速读大文件）
-// 先写一个临时文件再 mmap 只读，检查首字节后 munmap。
+// 先写工作区内临时文件再 mmap 只读，避免 CI 上 /tmp 行为差异导致失败。
 import std.fs;
 
 function main(): i32 {
-  let path: [16]u8 = [47, 116, 109, 112, 47, 109, 102, 115, 0, 0, 0, 0, 0, 0, 0, 0];
+  // 路径 "tests/fs/.mmap_ro_tmp"（相对 run-fs.sh 的 cwd 即 repo 根）
+  let path: [32]u8 = [116,101,115,116,115,47,102,115,47,46,109,109,97,112,95,114,111,46,116,109,112,0,0,0,0,0,0,0,0,0,0,0];
   let fd: i32 = fs_open_write(&path[0]);
   if (fd < 0) { return 1; }
   let buf: [4]u8 = [88, 89, 90, 10];
