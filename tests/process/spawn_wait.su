@@ -1,7 +1,7 @@
 // 测试 std.process：spawn_simple(program)、waitpid(pid)
 //
 // 【文件职责】本文件为 std.process 子进程创建与等待的回归测试。
-// 【测试目的】确认 spawn_simple 与 waitpid 得到退出码 0。先试 /bin/true（Alpine/Linux），若子进程退出 127（exec 失败）再试 /usr/bin/true（macOS）。
+// 【测试目的】确认 spawn_simple 与 waitpid 得到退出码 0。macOS 用 /usr/bin/true，否则用 /bin/true（Alpine/Linux）。
 // 【覆盖 API】spawn_simple(program: *u8): i32、waitpid(pid: i32): i32。
 // 【预期结果】退出码 0 表示通过；1 表示 spawn_simple 失败；2 表示 waitpid 得到的 status≠0。Windows 上无 true，run-process.sh 会 SKIP。
 // 【运行方式】./tests/run-process.sh
@@ -13,16 +13,25 @@ function run_true(path: *u8): i32 {
   return waitpid(pid);
 }
 
+/** 通过环境变量 OSTYPE 判断是否为 macOS（值为 "darwin"）；未设置或非 darwin 返回 false。 */
+function is_darwin(): bool {
+  let key: [8]u8 = [79, 83, 84, 89, 80, 69, 0, 0];
+  let val: *u8 = getenv(&key[0]);
+  if (val == 0) { return false; }
+  return val[0] == 100 && val[1] == 97 && val[2] == 114 && val[3] == 119 && val[4] == 105 && val[5] == 110;
+}
+
 function main(): i32 {
-  // "/bin/true" NUL
+  let usr_true: [20]u8 = [47, 117, 115, 114, 47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
   let bin_true: [16]u8 = [47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
-  let status: i32 = run_true(&bin_true[0]);
-  if (status == 0) { return 0; }
-  if (status == 127) {
-    // macOS 常见为 /usr/bin/true，execve("/bin/true") 失败时退 127
-    let usr_true: [20]u8 = [47, 117, 115, 114, 47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
+  let status: i32 = 0;
+  if (is_darwin()) {
     status = run_true(&usr_true[0]);
-    if (status == 0) { return 0; }
+    if (status == 127) { status = run_true(&bin_true[0]); }
+  } else {
+    status = run_true(&bin_true[0]);
+    if (status == 127) { status = run_true(&usr_true[0]); }
   }
+  if (status == 0) { return 0; }
   return 2;
 }
