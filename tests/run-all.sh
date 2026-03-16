@@ -21,6 +21,7 @@ if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
 fi
 
 # CI 下单个脚本失败时打印 SKIP 并继续，但统计失败数；结束时若有失败则报错并 exit 1，不再误报 all tests OK
+# 失败时用醒目前缀和 stdout+stderr 双打，便于在截断的 CI 日志里快速定位
 RUN_FAILED_COUNT=0
 RUN_FAILED_SCRIPTS=""
 run() {
@@ -31,7 +32,9 @@ run() {
         ./tests/$script
         s=$?
         if [ "$s" -ne 0 ]; then
-            echo "run-all: $script failed in CI (exit $s); SKIP to keep running"
+            local msg="*** run-all FAILED: $script (exit $s) ***"
+            echo "$msg"
+            echo "$msg" >&2
             RUN_FAILED_COUNT=$((RUN_FAILED_COUNT + 1))
             RUN_FAILED_SCRIPTS="$RUN_FAILED_SCRIPTS $script"
         fi
@@ -140,8 +143,9 @@ run run-abi-layout.sh
 
 if [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${CI:-}" ]; then
     if [ "$RUN_FAILED_COUNT" -gt 0 ]; then
-        echo "run-all: $RUN_FAILED_COUNT test(s) failed (buffer overflow / abort / segfault etc.); not OK" >&2
-        echo "run-all: failed scripts:$RUN_FAILED_SCRIPTS" >&2
+        echo ""
+        echo "run-all: $RUN_FAILED_COUNT test(s) failed; failed scripts:$RUN_FAILED_SCRIPTS"
+        echo "run-all: $RUN_FAILED_COUNT test(s) failed; failed scripts:$RUN_FAILED_SCRIPTS" >&2
         exit 1
     fi
 fi
