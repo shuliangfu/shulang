@@ -12,7 +12,7 @@
 #   7. chdir.su    — chdir(".")、getcwd 前后一致
 #   8. self_exe_path.su — self_exe_path 成功且 buf 有效
 #   8b. zerocopy.su — getcwd_ptr/getcwd_cached_len、self_exe_path_ptr/self_exe_path_cached_len 零拷贝
-#   9. spawn_wait.su — spawn_simple("/usr/bin/true")、waitpid(pid)==0（Windows 无此路径则 SKIP）
+#   9. spawn_wait.su — spawn_simple("/bin/true")、waitpid(pid)==0（Windows 无此路径则 SKIP；Alpine 仅有 /bin/true）
 #  10. exec_fail.su — exec_simple("/nonexistent") 返回 -1
 # 【运行方式】在仓库根目录执行 ./tests/run-process.sh；可选环境变量 SHUC 指定编译器路径。
 # 【约定】编译使用 compiler/shuc -L .；失败时打印用例名与原因并 exit 1；spawn_wait 在 Windows 上失败时仅打印 SKIP 不失败整脚本。

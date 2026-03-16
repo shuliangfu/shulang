@@ -1,15 +1,15 @@
 // 测试 std.process：spawn_simple(program)、waitpid(pid)
 //
 // 【文件职责】本文件为 std.process 子进程创建与等待的回归测试。
-// 【测试目的】确认 spawn_simple("/usr/bin/true") 返回子进程 pid>0，waitpid(pid) 返回该进程退出码 0（true 成功退出）。
+// 【测试目的】确认 spawn_simple("/bin/true") 返回子进程 pid>0，waitpid(pid) 返回该进程退出码 0（true 成功退出）。用 /bin/true 以兼容 Alpine（仅有 /bin/true）与常见 Linux。
 // 【覆盖 API】spawn_simple(program: *u8): i32、waitpid(pid: i32): i32。
-// 【预期结果】退出码 0 表示通过；1 表示 spawn_simple 失败（pid≤0）；2 表示 waitpid 得到的 status≠0。Windows 上无 /usr/bin/true，run-process.sh 会 SKIP 本用例。
+// 【预期结果】退出码 0 表示通过；1 表示 spawn_simple 失败（pid≤0）；2 表示 waitpid 得到的 status≠0。Windows 上无 /bin/true，run-process.sh 会 SKIP 本用例。
 // 【运行方式】./tests/run-process.sh
 import std.process;
 
 function main(): i32 {
-  // "/usr/bin/true" NUL
-  let program: [20]u8 = [47, 117, 115, 114, 47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
+  // "/bin/true" NUL
+  let program: [16]u8 = [47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
   let pid: i32 = spawn_simple(&program[0]);
   if (pid <= 0) {
     return 1;
