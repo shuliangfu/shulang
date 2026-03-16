@@ -3550,6 +3550,8 @@ int driver_run_su_emit_c(void) {
     if (!input_path) return 1;
 #ifdef SHUC_USE_SU_PIPELINE
     {
+        /* 关闭 stdout 缓冲，避免重定向或管道下输出被截断（平台差异见 analysis/下一步开发分析.md §4.4） */
+        (void)setvbuf(stdout, NULL, _IONBF, 0);
         size_t raw_src_len = 0;
         char *raw_src = read_file(input_path, &raw_src_len);
         if (!raw_src) {
