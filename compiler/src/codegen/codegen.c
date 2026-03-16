@@ -4587,6 +4587,8 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
         fprintf(out, "int main(int argc, char **argv) {\n");
         fprintf(out, "  shulang_process_argc = argc;\n");
         fprintf(out, "  shulang_process_argv = argv;\n");
+        if (codegen_current_module && codegen_current_module->num_top_level_lets > 0)
+            fprintf(out, "  init_globals();\n");
         if (codegen_func_body(f->body, m, out, f) != 0)
             return -1;
         fprintf(out, "}\n");
@@ -5431,6 +5433,11 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             if (m->funcs[i] && m->funcs[i]->body)
                 collect_import_calls_from_block(m->funcs[i]->body, imp_paths, imp_funcs, &nimp,
                     gen_paths, gen_funcs, gen_type_args, gen_n, &gen_count);
+        /* 顶层 let 的 init 中可能调用 import 函数，一并收集以生成 extern */
+        for (int i = 0; i < m->num_top_level_lets && m->top_level_lets; i++)
+            if (m->top_level_lets[i].init)
+                collect_import_calls_from_expr(m->top_level_lets[i].init, imp_paths, imp_funcs, &nimp,
+                    gen_paths, gen_funcs, gen_type_args, gen_n, &gen_count);
         /* 入口使用 []T 时 extern 会引用 struct shulang_slice_*，须先输出 slice 结构体定义 */
         for (int i = 0; i < nimp; i++) {
             const struct ASTFunc *f = imp_funcs[i];
@@ -5564,6 +5571,38 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
         fprintf(out, "static inline void shulang_panic_(int has_msg, int msg_val) {\n");
         fprintf(out, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
         fprintf(out, "  abort();\n");
+        fprintf(out, "}\n");
+    }
+    /* 顶层 let：生成文件作用域静态变量，以及 init_globals() 在 main 开头调用以完成初始化 */
+    if (m->num_top_level_lets > 0 && m->top_level_lets) {
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            const char *name = m->top_level_lets[i].name ? m->top_level_lets[i].name : "";
+            const struct ASTType *ty = m->top_level_lets[i].type;
+            const struct ASTType *ety = codegen_emit_type(ty);
+            if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type)
+                fprintf(out, "static %s * %s;\n", c_type_str(ety->elem_type), name);
+            else if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
+                fprintf(out, "static %s %s;\n", c_type_str(ety), name);
+            else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
+                fprintf(out, "static ");
+                emit_local_array_decl(ety, name, "", out);
+                fprintf(out, ";\n");
+            } else if (ety && ety->kind == AST_TYPE_SLICE && ety->elem_type) {
+                ensure_slice_struct(ety, out);
+                fprintf(out, "static %s %s;\n", c_type_str(ety), name);
+            } else
+                fprintf(out, "static %s %s;\n", ety ? c_type_str(ety) : "int32_t", name);
+        }
+        fprintf(out, "static void init_globals(void) {\n");
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            const char *name = m->top_level_lets[i].name ? m->top_level_lets[i].name : "";
+            const struct ASTType *ty = m->top_level_lets[i].type;
+            const struct ASTExpr *init = m->top_level_lets[i].init;
+            fprintf(out, "  %s = ", name);
+            if (codegen_init(ty, init, out, NULL) != 0)
+                (void)codegen_expr(init, out); /* 回退：按普通表达式输出 */
+            fprintf(out, ";\n");
+        }
         fprintf(out, "}\n");
     }
     /* 入口模块内函数前向声明：满足 C 要求（任意顺序调用须先声明后定义）；对所有有体的非 main、非 extern、非泛型函数均声明，避免 DCE 未收集到的同模块 callee 导致 C undeclared */
