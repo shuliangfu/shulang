@@ -1664,6 +1664,8 @@ static ASTExpr *parse_expr(Parser *p) {
 
 /** 最大 import 数量 */
 #define MAX_IMPORTS 32
+/** 顶层 let 最大数量 */
+#define MAX_TOP_LEVEL_LETS 32
 /** 顶层最大 struct 定义数 */
 #define MAX_STRUCTS 16
 /** 顶层最大 enum 定义数 */
@@ -3112,6 +3114,12 @@ int parse(Lexer *lex, ASTModule **out) {
     }
     mod->import_paths = NULL;
     mod->num_imports = 0;
+    mod->import_kinds = NULL;
+    mod->import_binding_names = NULL;
+    mod->import_select_names = NULL;
+    mod->import_select_counts = NULL;
+    mod->top_level_lets = NULL;
+    mod->num_top_level_lets = 0;
     mod->struct_defs = NULL;
     mod->num_structs = 0;
     mod->enum_defs = NULL;
@@ -3126,33 +3134,318 @@ int parse(Lexer *lex, ASTModule **out) {
     mod->mono_instances = NULL;
     mod->num_mono_instances = 0;
 
-    /* [ import path ; ]* */
+    /* [ import path ; | const IDENT = import path ; | const { IDENT, ... } = import path ; ]* */
     char *import_list[MAX_IMPORTS];
+    int kind_list[MAX_IMPORTS];
+    char *binding_list[MAX_IMPORTS];
+    char **select_names_list[MAX_IMPORTS];
+    int select_count_list[MAX_IMPORTS];
     int nimports = 0;
-    while (peek(&prs)->kind == TOKEN_IMPORT) {
-        advance(&prs);
-        char *path = parse_import_path(&prs);
-        if (!path) {
+#define FREE_IMPORT_AUX do { \
+        for (int _ii = 0; _ii < nimports; _ii++) { \
+            if (kind_list[_ii] == AST_IMPORT_KIND_BINDING && binding_list[_ii]) free(binding_list[_ii]); \
+            if (kind_list[_ii] == AST_IMPORT_KIND_SELECT && select_names_list[_ii]) { \
+                for (int _jj = 0; _jj < select_count_list[_ii]; _jj++) if (select_names_list[_ii][_jj]) free(select_names_list[_ii][_jj]); \
+                free(select_names_list[_ii]); \
+            } \
+        } \
+    } while (0)
+    while (1) {
+        if (peek(&prs)->kind == TOKEN_IMPORT) {
+            advance(&prs);
+            char *path = parse_import_path(&prs);
+            if (!path) {
+                while (nimports--) free(import_list[nimports]);
+                FREE_IMPORT_AUX;
+                free(mod);
+                return -1;
+            }
+            if (peek(&prs)->kind != TOKEN_SEMICOLON) {
+                free(path);
+                fail(&prs, "expected ';' after import path");
+                while (nimports--) free(import_list[nimports]);
+                FREE_IMPORT_AUX;
+                free(mod);
+                return -1;
+            }
+            advance(&prs);
+            if (nimports >= MAX_IMPORTS) {
+                free(path);
+                fail(&prs, "too many imports");
+                while (nimports--) free(import_list[nimports]);
+                FREE_IMPORT_AUX;
+                free(mod);
+                return -1;
+            }
+            import_list[nimports] = path;
+            kind_list[nimports] = AST_IMPORT_KIND_WHOLE;
+            binding_list[nimports] = NULL;
+            select_names_list[nimports] = NULL;
+            select_count_list[nimports] = 0;
+            nimports++;
+        } else if (peek(&prs)->kind == TOKEN_CONST) {
+            advance(&prs);
+            if (peek(&prs)->kind == TOKEN_IDENT && peek_next(&prs)->kind == TOKEN_ASSIGN && peek_next_next(&prs)->kind == TOKEN_IMPORT) {
+                /* const IDENT = import path ; */
+                char *name = (peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
+                    ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len) : NULL;
+                if (!name) {
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs); advance(&prs); advance(&prs); /* IDENT = import */
+                char *path = parse_import_path(&prs);
+                if (!path) {
+                    free(name);
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                if (peek(&prs)->kind != TOKEN_SEMICOLON) {
+                    free(name); free(path);
+                    fail(&prs, "expected ';' after const x = import path");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs);
+                if (nimports >= MAX_IMPORTS) {
+                    free(name); free(path);
+                    fail(&prs, "too many imports");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                import_list[nimports] = path;
+                kind_list[nimports] = AST_IMPORT_KIND_BINDING;
+                binding_list[nimports] = name;
+                select_names_list[nimports] = NULL;
+                select_count_list[nimports] = 0;
+                nimports++;
+            } else if (peek(&prs)->kind == TOKEN_LBRACE) {
+                /* const { IDENT, ... } = import path ; */
+                advance(&prs);
+                char *sel_names[32];
+                int nsel = 0;
+                for (;;) {
+                    if (peek(&prs)->kind != TOKEN_IDENT && peek(&prs)->kind != TOKEN_I32) {
+                        fail(&prs, "expected identifier in const { ... } = import");
+                        while (nsel--) free(sel_names[nsel]);
+                        while (nimports--) free(import_list[nimports]);
+                        FREE_IMPORT_AUX;
+                        free(mod);
+                        return -1;
+                    }
+                    char *n = (peek(&prs)->kind == TOKEN_IDENT && peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
+                        ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len)
+                        : (peek(&prs)->kind == TOKEN_I32 ? strdup("i32") : NULL);
+                    if (!n || nsel >= 32) {
+                        if (n) free(n);
+                        while (nsel--) free(sel_names[nsel]);
+                        while (nimports--) free(import_list[nimports]);
+                        FREE_IMPORT_AUX;
+                        free(mod);
+                        return -1;
+                    }
+                    sel_names[nsel++] = n;
+                    advance(&prs);
+                    if (peek(&prs)->kind == TOKEN_COMMA) { advance(&prs); continue; }
+                    if (peek(&prs)->kind == TOKEN_RBRACE) break;
+                    fail(&prs, "expected ',' or '}' in const { ... } = import");
+                    while (nsel--) free(sel_names[nsel]);
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs);
+                if (peek(&prs)->kind != TOKEN_ASSIGN) {
+                    while (nsel--) free(sel_names[nsel]);
+                    fail(&prs, "expected '=' after const { ... }");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs);
+                if (peek(&prs)->kind != TOKEN_IMPORT) {
+                    while (nsel--) free(sel_names[nsel]);
+                    fail(&prs, "expected import after const { ... } =");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs);
+                char *path = parse_import_path(&prs);
+                if (!path) {
+                    while (nsel--) free(sel_names[nsel]);
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                if (peek(&prs)->kind != TOKEN_SEMICOLON) {
+                    free(path);
+                    while (nsel--) free(sel_names[nsel]);
+                    fail(&prs, "expected ';' after const { ... } = import path");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs);
+                if (nimports >= MAX_IMPORTS) {
+                    free(path);
+                    while (nsel--) free(sel_names[nsel]);
+                    fail(&prs, "too many imports");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                char **sarr = (char **)malloc((size_t)nsel * sizeof(char *));
+                if (!sarr) {
+                    free(path);
+                    while (nsel--) free(sel_names[nsel]);
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    fprintf(stderr, "parse: out of memory\n");
+                    return -1;
+                }
+                for (int i = 0; i < nsel; i++) sarr[i] = sel_names[i];
+                import_list[nimports] = path;
+                kind_list[nimports] = AST_IMPORT_KIND_SELECT;
+                binding_list[nimports] = NULL;
+                select_names_list[nimports] = sarr;
+                select_count_list[nimports] = nsel;
+                nimports++;
+            } else {
+                fail(&prs, "expected import path, const x = import path, or const { ... } = import path");
+                while (nimports--) free(import_list[nimports]);
+                FREE_IMPORT_AUX;
+                free(mod);
+                return -1;
+            }
+        } else
+            break;
+    }
+#undef FREE_IMPORT_AUX
+
+    /* [ let IDENT : Type = expr ; ]* 顶层 let（与 import 同级，在 enum/struct 前） */
+    ASTLetDecl toplevel_let_list[MAX_TOP_LEVEL_LETS];
+    int ntoplets = 0;
+#define FREE_TOPLEVEL_LETS do { \
+        for (int _ti = 0; _ti < ntoplets; _ti++) { \
+            if (toplevel_let_list[_ti].name) free((void *)toplevel_let_list[_ti].name); \
+            if (toplevel_let_list[_ti].type) ast_type_free(toplevel_let_list[_ti].type); \
+            if (toplevel_let_list[_ti].init) ast_expr_free(toplevel_let_list[_ti].init); \
+        } \
+    } while (0)
+    while (peek(&prs)->kind == TOKEN_LET) {
+        if (ntoplets >= MAX_TOP_LEVEL_LETS) {
+            fail(&prs, "too many top-level let declarations");
             while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        advance(&prs);
+        if (peek(&prs)->kind != TOKEN_IDENT && peek(&prs)->kind != TOKEN_UNDERSCORE) {
+            fail(&prs, "expected identifier after let");
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        char *let_name = (peek(&prs)->kind == TOKEN_UNDERSCORE) ? strdup("_") : ((peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
+            ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len) : NULL);
+        if (!let_name) {
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        advance(&prs);
+        if (peek(&prs)->kind != TOKEN_COLON) {
+            free(let_name);
+            fail(&prs, "expected ':' and type in top-level let");
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        advance(&prs);
+        ASTType *let_type = parse_type_name(&prs);
+        if (!let_type) {
+            free(let_name);
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        if (peek(&prs)->kind != TOKEN_ASSIGN) {
+            free(let_name);
+            ast_type_free(let_type);
+            fail(&prs, "expected '=' in top-level let");
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
+            free(mod);
+            return -1;
+        }
+        advance(&prs);
+        ASTExpr *let_init = parse_expr(&prs);
+        if (!let_init) {
+            free(let_name);
+            ast_type_free(let_type);
+            while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
             free(mod);
             return -1;
         }
         if (peek(&prs)->kind != TOKEN_SEMICOLON) {
-            free(path);
-            fail(&prs, "expected ';' after import path");
+            free(let_name);
+            ast_type_free(let_type);
+            ast_expr_free(let_init);
+            fail(&prs, "expected ';' after top-level let");
             while (nimports--) free(import_list[nimports]);
+            FREE_TOPLEVEL_LETS;
             free(mod);
             return -1;
         }
         advance(&prs);
-        if (nimports >= MAX_IMPORTS) {
-            free(path);
-            fail(&prs, "too many imports");
+        toplevel_let_list[ntoplets].name = let_name;
+        toplevel_let_list[ntoplets].type = let_type;
+        toplevel_let_list[ntoplets].init = let_init;
+        ntoplets++;
+    }
+#undef FREE_TOPLEVEL_LETS
+
+    /* 将顶层 let 拷贝到 mod，后续错误路径仅需 free(mod)，由 ast_module_free 释放 */
+    if (ntoplets > 0) {
+        mod->top_level_lets = (ASTLetDecl *)malloc((size_t)ntoplets * sizeof(ASTLetDecl));
+        if (!mod->top_level_lets) {
+            for (int _ti = 0; _ti < ntoplets; _ti++) {
+                if (toplevel_let_list[_ti].name) free((void *)toplevel_let_list[_ti].name);
+                if (toplevel_let_list[_ti].type) ast_type_free(toplevel_let_list[_ti].type);
+                if (toplevel_let_list[_ti].init) ast_expr_free(toplevel_let_list[_ti].init);
+            }
             while (nimports--) free(import_list[nimports]);
             free(mod);
+            fprintf(stderr, "parse: out of memory\n");
             return -1;
         }
-        import_list[nimports++] = path;
+        for (int i = 0; i < ntoplets; i++) {
+            mod->top_level_lets[i].name = toplevel_let_list[i].name;
+            mod->top_level_lets[i].type = toplevel_let_list[i].type;
+            mod->top_level_lets[i].init = toplevel_let_list[i].init;
+        }
+        mod->num_top_level_lets = ntoplets;
     }
 
     /* [ enum Name { A, B, C } ]*（§7.4 无负载枚举）；允许在 struct 前，便于 struct 字段引用 enum 类型 */
@@ -3613,11 +3906,27 @@ cleanup_funcs_fail:
         mod->num_impl_blocks = nimpls;
     }
 
-    /* 拷贝 import 列表到 mod */
+    /* 拷贝 import 列表及 kind/binding/select 到 mod */
     if (nimports > 0) {
         mod->import_paths = (char **)malloc((size_t)nimports * sizeof(char *));
-        if (!mod->import_paths) {
-            while (nimports--) free(import_list[nimports]);
+        mod->import_kinds = (int *)malloc((size_t)nimports * sizeof(int));
+        mod->import_binding_names = (char **)malloc((size_t)nimports * sizeof(char *));
+        mod->import_select_names = (char ***)malloc((size_t)nimports * sizeof(char **));
+        mod->import_select_counts = (int *)malloc((size_t)nimports * sizeof(int));
+        if (!mod->import_paths || !mod->import_kinds || !mod->import_binding_names || !mod->import_select_names || !mod->import_select_counts) {
+            if (mod->import_paths) free(mod->import_paths);
+            if (mod->import_kinds) free(mod->import_kinds);
+            if (mod->import_binding_names) free(mod->import_binding_names);
+            if (mod->import_select_names) free(mod->import_select_names);
+            if (mod->import_select_counts) free(mod->import_select_counts);
+            for (int fi = 0; fi < nimports; fi++) {
+                free(import_list[fi]);
+                if (kind_list[fi] == AST_IMPORT_KIND_BINDING && binding_list[fi]) free(binding_list[fi]);
+                if (kind_list[fi] == AST_IMPORT_KIND_SELECT && select_names_list[fi]) {
+                    for (int fj = 0; fj < select_count_list[fi]; fj++) if (select_names_list[fi][fj]) free(select_names_list[fi][fj]);
+                    free(select_names_list[fi]);
+                }
+            }
             if (mod->struct_defs) {
                 for (int i = 0; i < mod->num_structs; i++) ast_struct_def_free(mod->struct_defs[i]);
                 free(mod->struct_defs);
@@ -3652,8 +3961,13 @@ cleanup_funcs_fail:
             fprintf(stderr, "parse: out of memory\n");
             return -1;
         }
-        for (int i = 0; i < nimports; i++)
+        for (int i = 0; i < nimports; i++) {
             mod->import_paths[i] = import_list[i];
+            mod->import_kinds[i] = kind_list[i];
+            mod->import_binding_names[i] = binding_list[i];
+            mod->import_select_names[i] = select_names_list[i];
+            mod->import_select_counts[i] = select_count_list[i];
+        }
         mod->num_imports = nimports;
     }
 
