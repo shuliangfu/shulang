@@ -68,6 +68,7 @@ run run-multi-file-generic.sh
 # 表达式与控制流
 run run-binary-expr.sh
 run run-let-const.sh
+run run-toplevel-let.sh
 run run-bool.sh
 run run-if-expr.sh
 run run-ternary.sh
