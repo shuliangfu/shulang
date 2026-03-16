@@ -46,6 +46,19 @@ static struct ASTType static_type_ptr_u8 = { AST_TYPE_PTR, NULL, &static_type_u8
 static struct ASTModule **typeck_dep_mods;
 static int typeck_num_deps;
 
+/** 判断第 j 个 import 是否导出符号 name：WHOLE 导出全部，BINDING 不导出（仅绑定名为模块引用），SELECT 仅导出列表中的名。 */
+static int import_exports_name(const struct ASTModule *m, int j, const char *name) {
+    if (!m || !name || j < 0 || j >= m->num_imports) return 0;
+    if (!m->import_kinds) return 1; /* 旧 AST 无 import_kinds，视为整模块 */
+    if (m->import_kinds[j] == AST_IMPORT_KIND_WHOLE) return 1;
+    if (m->import_kinds[j] == AST_IMPORT_KIND_BINDING) return 0;
+    if (m->import_kinds[j] == AST_IMPORT_KIND_SELECT && m->import_select_names && m->import_select_counts) {
+        for (int k = 0; k < m->import_select_counts[j]; k++)
+            if (m->import_select_names[j][k] && strcmp(m->import_select_names[j][k], name) == 0) return 1;
+    }
+    return 0;
+}
+
 /** 全面自举：仅填 resolved_type，不做语义检查；.su 用访问器遍历 AST 并做检查（重写实现）。 */
 static int typeck_fill_only;
 
@@ -1410,7 +1423,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     call_path_buf[call_path_len] = '\0';
                     const char *fn_name = e->value.call.callee->value.field_access.field_name;
                     for (int j = 0; j < m->num_imports && j < typeck_num_deps; j++) {
-                        if (!m->import_paths[j] || strcmp(m->import_paths[j], call_path_buf) != 0) continue;
+                        if (!m->import_paths[j] || !import_path_matches(m->import_paths[j], call_path_buf)) continue; /* 支持短名/绑定名匹配 */
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
@@ -1439,6 +1452,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 }
                 if (!func && typeck_dep_mods && typeck_num_deps > 0) {
                     for (int j = 0; j < typeck_num_deps; j++) {
+                        if (!import_exports_name(m, j, callee_name)) continue; /* SELECT 仅导出列表中的名；BINDING 不导出 */
                         struct ASTModule *dm = typeck_dep_mods[j];
                         if (!dm || !dm->funcs) continue;
                         for (int i = 0; i < dm->num_funcs; i++) {
@@ -1628,7 +1642,8 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 if (meth_path_len >= 0) {
                     meth_path_buf[meth_path_len] = '\0';
                     for (int j = 0; j < m->num_imports && j < typeck_num_deps; j++) {
-                        if (!m->import_paths[j] || strcmp(m->import_paths[j], meth_path_buf) != 0) continue;
+                        /* 支持短名匹配：process.getenv 中 "process" 匹配 import_paths[j]=="std.process"（最后一段） */
+                        if (!m->import_paths[j] || !import_path_matches(m->import_paths[j], meth_path_buf)) continue;
                         struct ASTModule *dm = typeck_dep_mods[j];
                     if (!dm || !dm->funcs) continue;
                     for (int i = 0; i < dm->num_funcs; i++) {
@@ -2287,6 +2302,33 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
     typeck_dep_mods = dep_mods;
     typeck_num_deps = num_deps;
 
+    /* 顶层 let：按顺序 typeck 每个 init（作用域为前面的顶层 let + import 符号），并校验 init 类型与声明类型一致 */
+    if (m->top_level_lets && m->num_top_level_lets > 0) {
+        const char *tl_names[MAX_SYMTAB];
+        int tl_type_kinds[MAX_SYMTAB];
+        const char *tl_type_names[MAX_SYMTAB];
+        const struct ASTType *tl_type_ptrs[MAX_SYMTAB];
+        int tl_n = 0;
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            if (tl_n >= MAX_SYMTAB) {
+                fprintf(stderr, "typeck error: too many top-level lets\n");
+                return -1;
+            }
+            if (typeck_expr_sym(m->top_level_lets[i].init, tl_names, tl_type_kinds, tl_type_names, tl_n, tl_type_ptrs, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+                return -1;
+            if (m->top_level_lets[i].type && m->top_level_lets[i].init->resolved_type
+                && !type_equal(m->top_level_lets[i].type, m->top_level_lets[i].init->resolved_type)) {
+                fprintf(stderr, "typeck error: top-level let init type mismatch\n");
+                return -1;
+            }
+            tl_names[tl_n] = m->top_level_lets[i].name;
+            tl_type_kinds[tl_n] = m->top_level_lets[i].type ? m->top_level_lets[i].type->kind : AST_TYPE_I32;
+            tl_type_names[tl_n] = (m->top_level_lets[i].type && m->top_level_lets[i].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[i].type->name : NULL;
+            tl_type_ptrs[tl_n] = m->top_level_lets[i].type;
+            tl_n++;
+        }
+    }
+
     /* 库模块也需对每个函数体做 typeck，以便设置 resolved_type 等供 codegen 使用（如结构体字面量内数组字面量类型） */
     if (!m->main_func) {
         for (int i = 0; i < m->num_funcs; i++) {
@@ -2297,12 +2339,20 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             int type_kinds[MAX_SYMTAB];
             const char *type_names[MAX_SYMTAB];
             const struct ASTType *type_ptrs[MAX_SYMTAB];
-            int n = (f->num_params < MAX_SYMTAB) ? f->num_params : 0;
-            for (int j = 0; j < n; j++) {
-                names[j] = f->params[j].name;
-                type_kinds[j] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
-                type_names[j] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
-                type_ptrs[j] = f->params[j].type;
+            int n = 0;
+            for (int j = 0; j < f->num_params && n < MAX_SYMTAB; j++) {
+                names[n] = f->params[j].name;
+                type_kinds[n] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
+                type_names[n] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
+                type_ptrs[n] = f->params[j].type;
+                n++;
+            }
+            for (int t = 0; m->top_level_lets && t < m->num_top_level_lets && n < MAX_SYMTAB; t++) {
+                names[n] = m->top_level_lets[t].name;
+                type_kinds[n] = m->top_level_lets[t].type ? m->top_level_lets[t].type->kind : AST_TYPE_I32;
+                type_names[n] = (m->top_level_lets[t].type && m->top_level_lets[t].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[t].type->name : NULL;
+                type_ptrs[n] = m->top_level_lets[t].type;
+                n++;
             }
             if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
                 return -1;
@@ -2370,12 +2420,20 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
                 int type_kinds[MAX_SYMTAB];
                 const char *type_names[MAX_SYMTAB];
                 const struct ASTType *type_ptrs[MAX_SYMTAB];
-                int n = (f->num_params < MAX_SYMTAB) ? f->num_params : 0;
-                for (int i = 0; i < n; i++) {
-                    names[i] = f->params[i].name;
-                    type_kinds[i] = f->params[i].type ? f->params[i].type->kind : AST_TYPE_I32;
-                    type_names[i] = (f->params[i].type && f->params[i].type->kind == AST_TYPE_NAMED) ? f->params[i].type->name : NULL;
-                    type_ptrs[i] = f->params[i].type;
+                int n = 0;
+                for (int i = 0; i < f->num_params && n < MAX_SYMTAB; i++) {
+                    names[n] = f->params[i].name;
+                    type_kinds[n] = f->params[i].type ? f->params[i].type->kind : AST_TYPE_I32;
+                    type_names[n] = (f->params[i].type && f->params[i].type->kind == AST_TYPE_NAMED) ? f->params[i].type->name : NULL;
+                    type_ptrs[n] = f->params[i].type;
+                    n++;
+                }
+                for (int t = 0; m->top_level_lets && t < m->num_top_level_lets && n < MAX_SYMTAB; t++) {
+                    names[n] = m->top_level_lets[t].name;
+                    type_kinds[n] = m->top_level_lets[t].type ? m->top_level_lets[t].type->kind : AST_TYPE_I32;
+                    type_names[n] = (m->top_level_lets[t].type && m->top_level_lets[t].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[t].type->name : NULL;
+                    type_ptrs[n] = m->top_level_lets[t].type;
+                    n++;
                 }
                 if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
                     return -1;
@@ -2387,7 +2445,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         }
     }
 
-    /* 对每个非泛型函数做体块类型检查；泛型函数体在对单态化实例检查时再做。 */
+    /* 对每个非泛型函数做体块类型检查；泛型函数体在对单态化实例检查时再做。初始作用域 = 形参 + 顶层 let。 */
     for (int i = 0; i < m->num_funcs; i++) {
         const struct ASTFunc *f = m->funcs[i];
         if (!f->body) continue;
@@ -2396,12 +2454,20 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         int type_kinds[MAX_SYMTAB];
         const char *type_names[MAX_SYMTAB];
         const struct ASTType *type_ptrs[MAX_SYMTAB];
-        int n = (f->num_params < MAX_SYMTAB) ? f->num_params : 0;
-        for (int j = 0; j < n; j++) {
-            names[j] = f->params[j].name;
-            type_kinds[j] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
-            type_names[j] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
-            type_ptrs[j] = f->params[j].type;
+        int n = 0;
+        for (int j = 0; j < f->num_params && n < MAX_SYMTAB; j++) {
+            names[n] = f->params[j].name;
+            type_kinds[n] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
+            type_names[n] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
+            type_ptrs[n] = f->params[j].type;
+            n++;
+        }
+        for (int t = 0; m->top_level_lets && t < m->num_top_level_lets && n < MAX_SYMTAB; t++) {
+            names[n] = m->top_level_lets[t].name;
+            type_kinds[n] = m->top_level_lets[t].type ? m->top_level_lets[t].type->kind : AST_TYPE_I32;
+            type_names[n] = (m->top_level_lets[t].type && m->top_level_lets[t].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[t].type->name : NULL;
+            type_ptrs[n] = m->top_level_lets[t].type;
+            n++;
         }
         if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
             return -1;
@@ -2420,12 +2486,20 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         int type_kinds[MAX_SYMTAB];
         const char *type_names[MAX_SYMTAB];
         const struct ASTType *type_ptrs[MAX_SYMTAB];
-        int n = (f->num_params < MAX_SYMTAB) ? f->num_params : 0;
-        for (int j = 0; j < n; j++) {
-            names[j] = f->params[j].name;
-            type_ptrs[j] = get_substituted_return_type(f->params[j].type, f->generic_param_names, type_args, num_type_args);
-            type_kinds[j] = type_ptrs[j] ? type_ptrs[j]->kind : AST_TYPE_I32;
-            type_names[j] = (type_ptrs[j] && type_ptrs[j]->kind == AST_TYPE_NAMED) ? type_ptrs[j]->name : NULL;
+        int n = 0;
+        for (int j = 0; j < f->num_params && n < MAX_SYMTAB; j++) {
+            names[n] = f->params[j].name;
+            type_ptrs[n] = get_substituted_return_type(f->params[j].type, f->generic_param_names, type_args, num_type_args);
+            type_kinds[n] = type_ptrs[n] ? type_ptrs[n]->kind : AST_TYPE_I32;
+            type_names[n] = (type_ptrs[n] && type_ptrs[n]->kind == AST_TYPE_NAMED) ? type_ptrs[n]->name : NULL;
+            n++;
+        }
+        for (int t = 0; m->top_level_lets && t < m->num_top_level_lets && n < MAX_SYMTAB; t++) {
+            names[n] = m->top_level_lets[t].name;
+            type_kinds[n] = m->top_level_lets[t].type ? m->top_level_lets[t].type->kind : AST_TYPE_I32;
+            type_names[n] = (m->top_level_lets[t].type && m->top_level_lets[t].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[t].type->name : NULL;
+            type_ptrs[n] = m->top_level_lets[t].type;
+            n++;
         }
         const struct ASTType *mono_ret = get_substituted_return_type(f->return_type, f->generic_param_names, type_args, num_type_args);
         if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, mono_ret) != 0)
