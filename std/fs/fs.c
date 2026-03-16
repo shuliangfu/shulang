@@ -309,16 +309,34 @@ int64_t fs_writev_buf_c(int32_t fd, const fs_iovec_buf_t *bufs, int n) {
 #endif
 /* posix_fadvise 仅 Linux 提供；macOS/FreeBSD 无此 API，fadvise 包装在 Linux 外为 no-op。 */
 
-/** 只读 mmap 整个文件；path 为 NUL 结尾。返回映射首地址，*out_size 为文件字节数；失败返回 NULL。调用方用毕须 fs_munmap(ptr, *out_size)。madvise(MADV_SEQUENTIAL) 提示内核顺序访问以压榨吞吐。 */
+/** 只读 mmap 整个文件；path 为 NUL 结尾。返回映射首地址，*out_size 为文件字节数；失败返回 NULL。调用方用毕须 fs_munmap(ptr, *out_size)。madvise(MADV_SEQUENTIAL) 提示内核顺序访问以压榨吞吐。macOS 上刚 fsync 后立即 open 有时失败或 st_size==0，重试最多 3 次（50/100/150ms）以兼容 CI。 */
 void *fs_mmap_ro_c(uint8_t *path, size_t *out_size) {
     if (!path || !out_size) return NULL;
     *out_size = 0;
-    int fd = open((const char *)path, O_RDONLY, 0);
-    if (fd < 0) return NULL;
+    int fd = -1;
+    size_t len = 0;
     struct stat st;
-    if (fstat(fd, &st) != 0) { (void)close(fd); return NULL; }
-    size_t len = (size_t)st.st_size;
-    if (len == 0) { (void)close(fd); *out_size = 0; return NULL; }
+#if defined(__APPLE__)
+    for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) usleep(50000 * (unsigned)retry);
+        fd = open((const char *)path, O_RDONLY, 0);
+        if (fd < 0 && errno == 13) fd = open((const char *)path, O_RDWR, 0);
+        if (fd < 0) continue;
+        if (fstat(fd, &st) != 0) { (void)close(fd); fd = -1; continue; }
+        len = (size_t)st.st_size;
+        if (len > 0) break;
+        (void)close(fd);
+        fd = -1;
+    }
+#else
+    fd = open((const char *)path, O_RDONLY, 0);
+    if (fd >= 0 && fstat(fd, &st) == 0) len = (size_t)st.st_size;
+#endif
+    if (fd < 0 || len == 0) {
+        if (fd >= 0) (void)close(fd);
+        *out_size = 0;
+        return NULL;
+    }
     void *p = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
     (void)close(fd);
     if (p == MAP_FAILED) return NULL;
@@ -494,6 +512,16 @@ int32_t fs_fallocate_c(int32_t fd, int64_t offset, int64_t len) {
     (void)len;
     return 0;
 #endif
+}
+
+/** 写打开 path（不存在则创建、存在则截断）；临时 umask(0) 并 fchmod 0644，确保后续 mmap_ro 等读打开不遇 EACCES。 */
+int32_t fs_open_write_c(uint8_t *path) {
+    if (!path) return -1;
+    mode_t old = umask(0);
+    int fd = open((const char *)path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    (void)umask(old);
+    if (fd >= 0) (void)fchmod(fd, 0644);
+    return fd >= 0 ? (int32_t)fd : -1;
 }
 
 /** 追加写打开 path（不存在则创建）；失败返回 -1。 */

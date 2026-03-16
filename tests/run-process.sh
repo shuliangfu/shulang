@@ -31,12 +31,15 @@ run_one() {
     return 1
   fi
   local exitcode=0
-  $exe >/dev/null 2>&1 || exitcode=$?
-  rm -f "$exe"
+  $exe >/dev/null 2>/tmp/shuc_process_err || exitcode=$?
   if [ "$exitcode" -ne 0 ]; then
     echo "process test $name: expected exit 0, got $exitcode"
+    echo "--- $name stderr (diagnostic) ---"
+    cat /tmp/shuc_process_err 2>/dev/null || true
+    rm -f "$exe" /tmp/shuc_process_err
     return 1
   fi
+  rm -f "$exe" /tmp/shuc_process_err
   return 0
 }
 
@@ -70,12 +73,12 @@ run_one "self_exe_path" "tests/process/self_exe_path.su" || exit 1
 # 8b. 零拷贝 getcwd_ptr / self_exe_path_ptr
 run_one "zerocopy" "tests/process/zerocopy.su" || exit 1
 
-# 9. spawn_simple + waitpid（/bin/true；Windows 无此路径则跳过）
+# 9. spawn_simple + waitpid（/bin/true 或 /usr/bin/true；Windows 无此路径则跳过）
 if run_one "spawn_wait" "tests/process/spawn_wait.su"; then
   :
 else
   case "$(uname -s 2>/dev/null)" in
-    MINGW*|MSYS*|CYGWIN*|*Windows*) echo "process test spawn_wait: SKIP (no /bin/true on Windows)"; ;;
+    MINGW*|MSYS*|CYGWIN*|*Windows*) echo "process test spawn_wait: SKIP (no true on Windows)"; ;;
     *) echo "process test spawn_wait: FAIL"; exit 1; ;;
   esac
 fi

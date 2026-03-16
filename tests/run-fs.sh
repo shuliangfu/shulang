@@ -14,16 +14,15 @@ exitcode=0; /tmp/shuc_fs_wr >/dev/null 2>&1 || exitcode=$?
 
 rm -f tests/fs/.mmap_ro_tmp
 ./compiler/shuc -L . tests/fs/mmap_ro.su -o /tmp/shuc_fs_mmap 2>&1
-exitcode=0; /tmp/shuc_fs_mmap >/dev/null 2>&1 || exitcode=$?
-rm -f tests/fs/.mmap_ro_tmp
+exitcode=0; /tmp/shuc_fs_mmap >/dev/null 2>/tmp/shuc_fs_mmap_err || exitcode=$?
 if [ "$exitcode" -ne 0 ]; then
-  if [ "$(uname -s)" = "Darwin" ] && [ "$exitcode" -eq 3 ]; then
-    echo "fs: skip mmap_ro on macOS (mmap returns NULL in CI)"
-  else
-    echo "expected exit 0 (fs_mmap_ro/fs_munmap), got $exitcode"
-    exit 1
-  fi
+  echo "expected exit 0 (fs_mmap_ro/fs_munmap), got $exitcode"
+  echo "--- mmap_ro stderr (diagnostic) ---"
+  cat /tmp/shuc_fs_mmap_err 2>/dev/null || true
+  rm -f tests/fs/.mmap_ro_tmp /tmp/shuc_fs_mmap_err
+  exit 1
 fi
+rm -f tests/fs/.mmap_ro_tmp /tmp/shuc_fs_mmap_err
 
 ./compiler/shuc -L . tests/fs/readv_writev_buf.su -o /tmp/shuc_fs_rwbuf 2>&1
 exitcode=0; /tmp/shuc_fs_rwbuf >/dev/null 2>&1 || exitcode=$?

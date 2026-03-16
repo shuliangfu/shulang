@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
@@ -320,6 +321,11 @@ int32_t process_self_exe_path_cached_len_c(void) {
     return process_exe_cache_len;
 }
 
+#if !defined(_WIN32) && !defined(_WIN64)
+/** 空 SIGCHLD handler，用于 spawn 前临时替换 SIG_IGN，使子进程可被 waitpid 回收（SIG_IGN 时系统会自动回收，waitpid 得 ECHILD）。 */
+static void process_nop_sigchld(int sig) { (void)sig; }
+#endif
+
 /**
  * 创建子进程执行 program，参数为 argv（argv 为 char* 数组，以 NULL 结尾）。
  * 使用当前环境与当前工作目录。返回子进程 pid（>0），失败返回 -1。
@@ -358,12 +364,20 @@ int32_t process_spawn_c(uint8_t *program, uint8_t *argv_ptr) {
     }
 #else
     {
+        /* 若当前为 SIG_IGN，子进程会被系统自动回收，waitpid 会得 ECHILD。临时改为空 handler，使子进程不被自动回收、可被 waitpid 回收；fork 后在父进程恢复。 */
+        void (*saved_sigchld)(int) = signal(SIGCHLD, process_nop_sigchld);
+        if (saved_sigchld == SIG_ERR) saved_sigchld = SIG_DFL;
         pid_t pid = fork();
-        if (pid < 0) return -1;
+        if (pid < 0) {
+            signal(SIGCHLD, saved_sigchld);
+            return -1;
+        }
         if (pid == 0) {
+            signal(SIGCHLD, saved_sigchld);
             execve((const char *)program, (char *const *)argv, environ);
             _exit(127);
         }
+        signal(SIGCHLD, saved_sigchld);
         return (int32_t)pid;
     }
 #endif
