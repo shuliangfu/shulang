@@ -304,12 +304,48 @@ void ast_impl_block_free(ASTImplBlock *impl) {
  */
 void ast_module_free(ASTModule *m) {
     if (!m) return;
+    int num_imports = m->num_imports;
     if (m->import_paths) {
-        for (int i = 0; i < m->num_imports; i++)
+        for (int i = 0; i < num_imports; i++)
             if (m->import_paths[i]) free(m->import_paths[i]);
         free(m->import_paths);
         m->import_paths = NULL;
         m->num_imports = 0;
+    }
+    if (m->import_kinds) {
+        free(m->import_kinds);
+        m->import_kinds = NULL;
+    }
+    if (m->import_binding_names) {
+        for (int i = 0; i < num_imports; i++)
+            if (m->import_binding_names[i]) free((void *)m->import_binding_names[i]);
+        free(m->import_binding_names);
+        m->import_binding_names = NULL;
+    }
+    if (m->import_select_names && m->import_select_counts) {
+        for (int i = 0; i < num_imports; i++) {
+            if (m->import_select_names[i]) {
+                for (int j = 0; j < m->import_select_counts[i]; j++)
+                    if (m->import_select_names[i][j]) free(m->import_select_names[i][j]);
+                free(m->import_select_names[i]);
+            }
+        }
+        free(m->import_select_names);
+        m->import_select_names = NULL;
+    }
+    if (m->import_select_counts) {
+        free(m->import_select_counts);
+        m->import_select_counts = NULL;
+    }
+    if (m->top_level_lets) {
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            if (m->top_level_lets[i].name) free((void *)m->top_level_lets[i].name);
+            if (m->top_level_lets[i].type) ast_type_free(m->top_level_lets[i].type);
+            if (m->top_level_lets[i].init) ast_expr_free(m->top_level_lets[i].init);
+        }
+        free(m->top_level_lets);
+        m->top_level_lets = NULL;
+        m->num_top_level_lets = 0;
     }
     if (m->struct_defs) {
         for (int i = 0; i < m->num_structs; i++)
