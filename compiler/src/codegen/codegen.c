@@ -4597,7 +4597,7 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
         fprintf(out, "static inline ");
     else if (codegen_library_prefix && codegen_library_import_path && !f->is_extern
         && (strcmp(codegen_library_import_path, "core.option") == 0 || strcmp(codegen_library_import_path, "core.result") == 0))
-        fprintf(out, "inline ");
+        fprintf(out, "static inline ");
     else if (codegen_library_prefix && codegen_library_import_path && f->name && !f->is_extern
         && (strcmp(codegen_library_import_path, "core.types") == 0 || strcmp(codegen_library_import_path, "core.mem") == 0)
         && (strncmp(f->name, "size_of_", 8) == 0 || strncmp(f->name, "align_of_", 9) == 0))
@@ -5803,7 +5803,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         char fwd_name[256];
         library_prefixed_name(f->name, fwd_name, sizeof(fwd_name));
         if (codegen_library_import_path && !f->is_extern && (strcmp(codegen_library_import_path, "core.option") == 0 || strcmp(codegen_library_import_path, "core.result") == 0))
-            fprintf(out, "inline ");
+            fprintf(out, "static inline ");
         fprintf(out, "%s %s(", c_type_str(f->return_type), fwd_name);
         for (int j = 0; j < f->num_params; j++) {
             if (j) fprintf(out, ", ");
