@@ -641,6 +641,8 @@ static void collect_import_calls_from_expr(const struct ASTExpr *e, const char *
             collect_import_calls_from_block(e->value.block, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             break;
         case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             collect_import_calls_from_expr(e->value.binop.left, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             collect_import_calls_from_expr(e->value.binop.right, paths, funcs, n, gen_paths, gen_funcs, gen_type_args, gen_n, gen_count);
             break;
@@ -728,6 +730,8 @@ next_call: ;
             collect_lib_dep_calls_from_block(e->value.block, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
         case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             collect_lib_dep_calls_from_expr(e->value.binop.left, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             collect_lib_dep_calls_from_expr(e->value.binop.right, lib_dep_mods, lib_dep_paths, n_lib_dep, paths_out, funcs_out, n_out, max_out);
             break;
@@ -1944,10 +1948,10 @@ static int is_integer_type(const struct ASTType *ty) {
 }
 
 /**
- * 赋值左端为 FIELD_ACCESS(INDEX(base, idx), field) 时，生成可赋值的 C，避免 (cond?panic:base[idx]).field=z 在 C 中非左值。
- * 生成 (idx 越界 ? (shulang_panic_(1,0), 0) : ((base)[idx].field = right, 0))。成功返回 0，否则 -1。
+ * 赋值左端为 FIELD_ACCESS(INDEX(base, idx), field) 时，生成可赋值的 C；assign_op 为 "=" 或 "+=" 等。
+ * 生成 (idx 越界 ? (shulang_panic_(1,0), 0) : ((base)[idx].field assign_op right, 0))。成功返回 0，否则 -1。
  */
-static int codegen_assign_field_index_lvalue(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right) {
+static int codegen_assign_field_index_lvalue_op(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right, const char *assign_op) {
     if (!left || left->kind != AST_EXPR_FIELD_ACCESS) return -1;
     const struct ASTExpr *base = left->value.field_access.base;
     const char *field = left->value.field_access.field_name;
@@ -1966,17 +1970,19 @@ static int codegen_assign_field_index_lvalue(FILE *out, const struct ASTExpr *le
     if (codegen_expr(arr, out) != 0) return -1;
     fprintf(out, ")[");
     if (codegen_expr(idx, out) != 0) return -1;
-    fprintf(out, "].%s = ", field);
+    fprintf(out, "].%s %s ", field, assign_op);
     if (codegen_expr(right, out) != 0) return -1;
     fprintf(out, ", 0))");
     return 0;
 }
+static int codegen_assign_field_index_lvalue(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right) {
+    return codegen_assign_field_index_lvalue_op(out, left, right, "=");
+}
 
 /**
- * 赋值左端为带边界检查的 INDEX 时，生成可赋值的 C 表达式，避免 (cond ? (panic(), x) : y) = z 在 C 中非左值。
- * 生成 (cond ? (shulang_panic_(1,0), 0) : (base[idx] = right, 0))。成功返回 0，非 INDEX 或无可做返回 -1。
+ * 赋值左端为带边界检查的 INDEX 时，生成可赋值的 C；assign_op 为 "=" 或 "+=" 等。成功返回 0，非 INDEX 或无可做返回 -1。
  */
-static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right) {
+static int codegen_assign_index_lvalue_op(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right, const char *assign_op) {
     if (!left || left->kind != AST_EXPR_INDEX) return -1;
     const struct ASTExpr *base = left->value.index.base;
     const struct ASTExpr *idx = left->value.index.index_expr;
@@ -1995,7 +2001,7 @@ static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, co
         if (codegen_expr(base, out) != 0) return -1;
         fprintf(out, "%sdata[", da);
         if (codegen_expr(idx, out) != 0) return -1;
-        fprintf(out, "] = ");
+        fprintf(out, "] %s ", assign_op);
         if (codegen_expr(right, out) != 0) return -1;
         fprintf(out, ", 0))");
         return 0;
@@ -2010,12 +2016,15 @@ static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, co
         if (codegen_expr(base, out) != 0) return -1;
         fprintf(out, ")[");
         if (codegen_expr(idx, out) != 0) return -1;
-        fprintf(out, "] = ");
+        fprintf(out, "] %s ", assign_op);
         if (codegen_expr(right, out) != 0) return -1;
         fprintf(out, ", 0))");
         return 0;
     }
     return -1;
+}
+static int codegen_assign_index_lvalue(FILE *out, const struct ASTExpr *left, const struct ASTExpr *right) {
+    return codegen_assign_index_lvalue_op(out, left, right, "=");
 }
 
 /**
@@ -2322,6 +2331,38 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             fprintf(out, ")");
             return 0;
 #endif
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN: {
+            const char *op = "=";
+            switch (e->kind) {
+                case AST_EXPR_ADD_ASSIGN: op = "+="; break;
+                case AST_EXPR_SUB_ASSIGN: op = "-="; break;
+                case AST_EXPR_MUL_ASSIGN: op = "*="; break;
+                case AST_EXPR_DIV_ASSIGN: op = "/="; break;
+                case AST_EXPR_MOD_ASSIGN: op = "%="; break;
+                case AST_EXPR_BITAND_ASSIGN: op = "&="; break;
+                case AST_EXPR_BITOR_ASSIGN: op = "|="; break;
+                case AST_EXPR_BITXOR_ASSIGN: op = "^="; break;
+                case AST_EXPR_SHL_ASSIGN: op = "<<="; break;
+                case AST_EXPR_SHR_ASSIGN: op = ">>="; break;
+                default: break;
+            }
+            /* 复合赋值：与 ASSIGN 相同可做 field/index 特例时用 op 版本，否则 (left op right) */
+            fprintf(out, "(");
+            if (codegen_assign_field_index_lvalue_op(out, e->value.binop.left, e->value.binop.right, op) == 0) {
+                fprintf(out, ")");
+                return 0;
+            }
+            if (codegen_assign_index_lvalue_op(out, e->value.binop.left, e->value.binop.right, op) == 0) {
+                fprintf(out, ")");
+                return 0;
+            }
+            if (codegen_expr(e->value.binop.left, out) != 0) return -1;
+            fprintf(out, " %s ", op);
+            if (codegen_expr(e->value.binop.right, out) != 0) return -1;
+            fprintf(out, ")");
+            return 0;
+        }
         case AST_EXPR_EQ:
 #ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " == "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
@@ -4857,6 +4898,8 @@ static void dce_collect_from_expr(const struct ASTExpr *e, struct ASTModule *ent
         case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
         case AST_EXPR_LOGAND: case AST_EXPR_LOGOR:
         case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             dce_collect_from_expr(e->value.binop.left, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
             dce_collect_from_expr(e->value.binop.right, entry, dep_mods, ndep, worklist, n_wl, max_wl, in_wl, used_mono, used_mono_rows);
             break;
@@ -4917,6 +4960,8 @@ static int expr_references_func(const struct ASTExpr *e, const struct ASTFunc *f
         case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
         case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
         case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             if (expr_references_func(e->value.binop.left, func) || expr_references_func(e->value.binop.right, func)) return 1;
             break;
         case AST_EXPR_NEG: case AST_EXPR_BITNOT: case AST_EXPR_LOGNOT: case AST_EXPR_PANIC: case AST_EXPR_ADDR_OF: case AST_EXPR_DEREF:
@@ -4970,6 +5015,8 @@ static void collect_var_names_from_expr(const struct ASTExpr *e, const char **ou
         case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
         case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
         case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             collect_var_names_from_expr(e->value.binop.left, out, n, max);
             collect_var_names_from_expr(e->value.binop.right, out, n, max);
             break;
@@ -5260,6 +5307,8 @@ static void collect_type_from_expr(const struct ASTExpr *e, const char **out, in
         case AST_EXPR_SHL: case AST_EXPR_SHR: case AST_EXPR_BITAND: case AST_EXPR_BITOR: case AST_EXPR_BITXOR:
         case AST_EXPR_EQ: case AST_EXPR_NE: case AST_EXPR_LT: case AST_EXPR_LE: case AST_EXPR_GT: case AST_EXPR_GE:
         case AST_EXPR_LOGAND: case AST_EXPR_LOGOR: case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             collect_type_from_expr(e->value.binop.left, out, n, max);
             collect_type_from_expr(e->value.binop.right, out, n, max);
             break;

@@ -44,6 +44,8 @@ void ast_expr_free(ASTExpr *e) {
             ast_block_free(e->value.block);
             break;
         case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             ast_expr_free(e->value.binop.left);
             ast_expr_free(e->value.binop.right);
             break;

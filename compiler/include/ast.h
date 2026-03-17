@@ -76,6 +76,16 @@ typedef enum ASTExprKind {
     AST_EXPR_BLOCK,  /**< 块表达式：{ const/let; stmts; expr }，用于 if 的 then/else 体（可含 let/return） */
     AST_EXPR_TERNARY,/**< cond ? then_expr : else_expr（三元运算符） */
     AST_EXPR_ASSIGN,  /**< 赋值表达式 left = right（如 for 的 step）；复用 value.binop：left 为左值，right 为右值 */
+    AST_EXPR_ADD_ASSIGN,  /**< += 复合赋值；复用 value.binop */
+    AST_EXPR_SUB_ASSIGN,  /**< -= 复合赋值 */
+    AST_EXPR_MUL_ASSIGN,  /**< *= 复合赋值 */
+    AST_EXPR_DIV_ASSIGN,  /**< /= 复合赋值 */
+    AST_EXPR_MOD_ASSIGN,  /**< %= 复合赋值 */
+    AST_EXPR_BITAND_ASSIGN,/**< &= 复合赋值 */
+    AST_EXPR_BITOR_ASSIGN, /**< |= 复合赋值 */
+    AST_EXPR_BITXOR_ASSIGN,/**< ^= 复合赋值 */
+    AST_EXPR_SHL_ASSIGN,  /**< <<= 复合赋值 */
+    AST_EXPR_SHR_ASSIGN,  /**< >>= 复合赋值 */
     AST_EXPR_BREAK,   /**< break（仅允许在循环体内） */
     AST_EXPR_CONTINUE,/**< continue（仅允许在循环体内） */
     AST_EXPR_RETURN,  /**< return expr（显式返回，仅允许在函数体内） */

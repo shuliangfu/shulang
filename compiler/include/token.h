@@ -81,6 +81,16 @@ typedef enum TokenKind {
     TOKEN_CARET,    /**< ^ 按位异或 */
     TOKEN_LSHIFT,   /**< << 左移 */
     TOKEN_RSHIFT,   /**< >> 右移 */
+    TOKEN_PLUS_EQ,  /**< += 复合赋值 */
+    TOKEN_MINUS_EQ, /**< -= 复合赋值 */
+    TOKEN_STAR_EQ,  /**< *= 复合赋值 */
+    TOKEN_SLASH_EQ, /**< /= 复合赋值 */
+    TOKEN_PERCENT_EQ,/**< %= 复合赋值 */
+    TOKEN_AMP_EQ,   /**< &= 复合赋值 */
+    TOKEN_PIPE_EQ,  /**< |= 复合赋值 */
+    TOKEN_CARET_EQ, /**< ^= 复合赋值 */
+    TOKEN_LSHIFT_EQ,/**< <<= 复合赋值 */
+    TOKEN_RSHIFT_EQ,/**< >>= 复合赋值 */
     TOKEN_TILDE,    /**< ~ 按位取反（一元） */
     TOKEN_ASSIGN,   /**< = 赋值/初始化（单字符，非 ==） */
     TOKEN_EQ,       /**< == 等于 */

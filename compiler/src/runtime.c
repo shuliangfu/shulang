@@ -1521,6 +1521,16 @@ static const char *token_kind_str(TokenKind k) {
         case TOKEN_CARET:  return "CARET";
         case TOKEN_LSHIFT: return "LSHIFT";
         case TOKEN_RSHIFT: return "RSHIFT";
+        case TOKEN_PLUS_EQ:   return "PLUS_EQ";
+        case TOKEN_MINUS_EQ:  return "MINUS_EQ";
+        case TOKEN_STAR_EQ:   return "STAR_EQ";
+        case TOKEN_SLASH_EQ:  return "SLASH_EQ";
+        case TOKEN_PERCENT_EQ: return "PERCENT_EQ";
+        case TOKEN_AMP_EQ:    return "AMP_EQ";
+        case TOKEN_PIPE_EQ:   return "PIPE_EQ";
+        case TOKEN_CARET_EQ:  return "CARET_EQ";
+        case TOKEN_LSHIFT_EQ: return "LSHIFT_EQ";
+        case TOKEN_RSHIFT_EQ: return "RSHIFT_EQ";
         case TOKEN_TILDE:  return "TILDE";
         case TOKEN_EQ:     return "EQ";
         case TOKEN_NE:     return "NE";

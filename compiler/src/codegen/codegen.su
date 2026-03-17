@@ -491,6 +491,80 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
     }
     return append_byte(out, 41);
   }
+  /* 复合赋值 +=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=：生成 ( left op right ) */
+  if (e.kind == ExprKind.EXPR_ADD_ASSIGN || e.kind == ExprKind.EXPR_SUB_ASSIGN || e.kind == ExprKind.EXPR_MUL_ASSIGN || e.kind == ExprKind.EXPR_DIV_ASSIGN || e.kind == ExprKind.EXPR_MOD_ASSIGN
+      || e.kind == ExprKind.EXPR_BITAND_ASSIGN || e.kind == ExprKind.EXPR_BITOR_ASSIGN || e.kind == ExprKind.EXPR_BITXOR_ASSIGN || e.kind == ExprKind.EXPR_SHL_ASSIGN || e.kind == ExprKind.EXPR_SHR_ASSIGN) {
+    let op_buf: [8]u8 = [32, 43, 61, 32, 0, 0, 0, 0];
+    let op_len: i32 = 4;
+    if (e.kind == ExprKind.EXPR_ADD_ASSIGN) {
+      op_buf[1] = 43;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_SUB_ASSIGN) {
+      op_buf[1] = 45;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_MUL_ASSIGN) {
+      op_buf[1] = 42;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_DIV_ASSIGN) {
+      op_buf[1] = 47;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_MOD_ASSIGN) {
+      op_buf[1] = 37;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_BITAND_ASSIGN) {
+      op_buf[1] = 38;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_BITOR_ASSIGN) {
+      op_buf[1] = 124;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_BITXOR_ASSIGN) {
+      op_buf[1] = 94;
+      op_buf[2] = 61;
+      op_len = 4;
+    }
+    if (e.kind == ExprKind.EXPR_SHL_ASSIGN) {
+      op_buf[1] = 60;
+      op_buf[2] = 60;
+      op_buf[3] = 61;
+      op_buf[4] = 32;
+      op_len = 5;
+    }
+    if (e.kind == ExprKind.EXPR_SHR_ASSIGN) {
+      op_buf[1] = 62;
+      op_buf[2] = 62;
+      op_buf[3] = 61;
+      op_buf[4] = 32;
+      op_len = 5;
+    }
+    if (append_byte(out, 40) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
+      return -1;
+    }
+    /* op_buf 为 [8]u8，统一用 emit_bytes_8 按 op_len 写出（3 或 5 字节），避免 [4]u8 与 [8]u8 类型不匹配 */
+    if (emit_bytes_8(out, op_buf, op_len) != 0) {
+      return -1;
+    }
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
+      return -1;
+    }
+    return append_byte(out, 41);
+  }
   if (e.kind == ExprKind.EXPR_NEG) {
     let pre: [3]u8 = [45, 40, 0];
     if (emit_bytes_3(out, pre, 2) != 0) {

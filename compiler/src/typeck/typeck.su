@@ -397,7 +397,7 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
         ast_arena_expr_set(arena, expr_ref, e);
       } else if (b.num_expr_stmts == 1 && b.expr_stmt_refs[0] > 0 && b.expr_stmt_refs[0] <= arena.num_exprs) {
         let st: Expr = ast_arena_expr_get(arena, b.expr_stmt_refs[0]);
-        if (st.kind == ExprKind.EXPR_ASSIGN && !ref_is_null(st.binop_right_ref)) {
+        if ((st.kind == ExprKind.EXPR_ASSIGN || st.kind == ExprKind.EXPR_ADD_ASSIGN || st.kind == ExprKind.EXPR_SUB_ASSIGN || st.kind == ExprKind.EXPR_MUL_ASSIGN || st.kind == ExprKind.EXPR_DIV_ASSIGN || st.kind == ExprKind.EXPR_MOD_ASSIGN || st.kind == ExprKind.EXPR_BITAND_ASSIGN || st.kind == ExprKind.EXPR_BITOR_ASSIGN || st.kind == ExprKind.EXPR_BITXOR_ASSIGN || st.kind == ExprKind.EXPR_SHL_ASSIGN || st.kind == ExprKind.EXPR_SHR_ASSIGN) && !ref_is_null(st.binop_right_ref)) {
           e.resolved_type_ref = expr_type_ref(arena, st.binop_right_ref);
           ast_arena_expr_set(arena, expr_ref, e);
         }
@@ -405,7 +405,7 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
     }
     return 0;
   }
-  if (e.kind == ExprKind.EXPR_ASSIGN) {
+  if (e.kind == ExprKind.EXPR_ASSIGN || e.kind == ExprKind.EXPR_ADD_ASSIGN || e.kind == ExprKind.EXPR_SUB_ASSIGN || e.kind == ExprKind.EXPR_MUL_ASSIGN || e.kind == ExprKind.EXPR_DIV_ASSIGN || e.kind == ExprKind.EXPR_MOD_ASSIGN || e.kind == ExprKind.EXPR_BITAND_ASSIGN || e.kind == ExprKind.EXPR_BITOR_ASSIGN || e.kind == ExprKind.EXPR_BITXOR_ASSIGN || e.kind == ExprKind.EXPR_SHL_ASSIGN || e.kind == ExprKind.EXPR_SHR_ASSIGN) {
     let left_ref: i32 = e.binop_left_ref;
     let right_ref: i32 = e.binop_right_ref;
     if (!ref_is_null(left_ref) && !ref_is_null(right_ref)) {

@@ -63,6 +63,9 @@ static int import_exports_name(const struct ASTModule *m, int j, const char *nam
 /** 全面自举：仅填 resolved_type，不做语义检查；.su 用访问器遍历 AST 并做检查（重写实现）。 */
 static int typeck_fill_only;
 
+/** 前向声明：判断表达式是否为赋值或复合赋值（供 typeck 与 typeck_su 访问器使用）。 */
+static int expr_is_assign_or_compound(const struct ASTExpr *e);
+
 /** 前向声明：typeck_block 在文件后部定义，供 AST_EXPR_BLOCK 的 typeck 调用。 */
 static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     const int *parent_type_kinds, const char **parent_type_names, const struct ASTType **parent_type_ptrs, int parent_n,
@@ -547,6 +550,8 @@ static int is_const_expr(const struct ASTExpr *e, const char **names, int n) {
         case AST_EXPR_IF:
         case AST_EXPR_TERNARY:
         case AST_EXPR_ASSIGN:
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN:
             return 0;  /* if/三元/赋值 表达式非常量 */
         default:
             return 0;
@@ -1037,7 +1042,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             if (typeck_block(b, names, type_kinds, type_names, type_ptrs, n, NULL, 0, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m, NULL) != 0) return -1;
             if (b->final_expr && b->final_expr->kind != AST_EXPR_RETURN) {
                 /* 若 final_expr 为赋值，用 RHS 类型作为块类型（如 else { __tmp = (struct ast_Type){0} } 取 ast.Type），便于 if 表达式 __tmp 推断 */
-                if (b->final_expr->kind == AST_EXPR_ASSIGN && b->final_expr->value.binop.right && b->final_expr->value.binop.right->resolved_type)
+                if (expr_is_assign_or_compound(b->final_expr) && b->final_expr->value.binop.right && b->final_expr->value.binop.right->resolved_type)
                     ((struct ASTExpr *)e)->resolved_type = b->final_expr->value.binop.right->resolved_type;
                 else
                     ((struct ASTExpr *)e)->resolved_type = b->final_expr->resolved_type;
@@ -1047,7 +1052,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 ((struct ASTExpr *)e)->resolved_type = b->labeled_stmts[0].u.return_expr->resolved_type;
             /* 块仅含一条赋值语句且无 final_expr 时（如 else { __tmp = (struct ast_Type){0} }），用赋值 RHS 类型作为块类型，供 if 表达式取 else 分支 struct 类型 */
             else if (!b->final_expr && b->expr_stmts && b->num_expr_stmts == 1
-                && b->expr_stmts[0]->kind == AST_EXPR_ASSIGN && b->expr_stmts[0]->value.binop.right
+                && expr_is_assign_or_compound(b->expr_stmts[0]) && b->expr_stmts[0]->value.binop.right
                 && b->expr_stmts[0]->value.binop.right->resolved_type)
                 ((struct ASTExpr *)e)->resolved_type = b->expr_stmts[0]->value.binop.right->resolved_type;
             return 0;
@@ -1105,6 +1110,33 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     type_to_string_buf(lt, ebuf, sizeof(ebuf));
                     type_to_string_buf(rt, fbuf, sizeof(fbuf));
                     TYPECK_ERR(e, "assignment type mismatch: expected %s, found %s", ebuf, fbuf);
+                    return -1;
+                }
+            }
+            ((struct ASTExpr *)e)->resolved_type = lt;
+            return 0;
+        }
+        /* 复合赋值 left op= right：与 ASSIGN 类似，左值类型与右值（或 left op right 结果）一致，表达式类型为左值类型 */
+        case AST_EXPR_ADD_ASSIGN: case AST_EXPR_SUB_ASSIGN: case AST_EXPR_MUL_ASSIGN: case AST_EXPR_DIV_ASSIGN: case AST_EXPR_MOD_ASSIGN:
+        case AST_EXPR_BITAND_ASSIGN: case AST_EXPR_BITOR_ASSIGN: case AST_EXPR_BITXOR_ASSIGN: case AST_EXPR_SHL_ASSIGN: case AST_EXPR_SHR_ASSIGN: {
+            if (typeck_expr_sym(e->value.binop.left, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            if (typeck_expr_sym(e->value.binop.right, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
+            const struct ASTType *lt = e->value.binop.left->resolved_type;
+            const struct ASTType *rt = e->value.binop.right->resolved_type;
+            if (!rt && lt)
+                ((struct ASTExpr *)e->value.binop.right)->resolved_type = lt;
+            rt = e->value.binop.right->resolved_type;
+            if (!lt || !rt || !type_equal(lt, rt)) {
+                int allow_u8_lit = 0;
+                if (lt && lt->kind == AST_TYPE_U8 && e->value.binop.right->kind == AST_EXPR_LIT) {
+                    int v = e->value.binop.right->value.int_val;
+                    if (v >= 0 && v <= 255) { allow_u8_lit = 1; ((struct ASTExpr *)e->value.binop.right)->resolved_type = lt; }
+                }
+                if (!allow_u8_lit && !typeck_fill_only) {
+                    char ebuf[80], fbuf[80];
+                    type_to_string_buf(lt, ebuf, sizeof(ebuf));
+                    type_to_string_buf(rt, fbuf, sizeof(fbuf));
+                    TYPECK_ERR(e, "compound assignment type mismatch: expected %s, found %s", ebuf, fbuf);
                     return -1;
                 }
             }
@@ -2168,14 +2200,20 @@ int typeck_su_expr_kind_if(void) { return AST_EXPR_IF; }
 int typeck_su_expr_kind_ternary(void) { return AST_EXPR_TERNARY; }
 int typeck_su_expr_kind_block(void) { return AST_EXPR_BLOCK; }
 int typeck_su_expr_kind_assign(void) { return AST_EXPR_ASSIGN; }
+static int expr_is_assign_or_compound(const struct ASTExpr *e) {
+    return e && (e->kind == AST_EXPR_ASSIGN || e->kind == AST_EXPR_ADD_ASSIGN || e->kind == AST_EXPR_SUB_ASSIGN
+        || e->kind == AST_EXPR_MUL_ASSIGN || e->kind == AST_EXPR_DIV_ASSIGN || e->kind == AST_EXPR_MOD_ASSIGN
+        || e->kind == AST_EXPR_BITAND_ASSIGN || e->kind == AST_EXPR_BITOR_ASSIGN || e->kind == AST_EXPR_BITXOR_ASSIGN
+        || e->kind == AST_EXPR_SHL_ASSIGN || e->kind == AST_EXPR_SHR_ASSIGN);
+}
 void *typeck_su_expr_assign_left(const void *expr) {
     const struct ASTExpr *e = (const struct ASTExpr *)expr;
-    if (!e || e->kind != AST_EXPR_ASSIGN) return NULL;
+    if (!expr_is_assign_or_compound(e)) return NULL;
     return (void *)e->value.binop.left;
 }
 void *typeck_su_expr_assign_right(const void *expr) {
     const struct ASTExpr *e = (const struct ASTExpr *)expr;
-    if (!e || e->kind != AST_EXPR_ASSIGN) return NULL;
+    if (!expr_is_assign_or_compound(e)) return NULL;
     return (void *)e->value.binop.right;
 }
 int typeck_su_types_equal(const void *expr_a, const void *expr_b) {

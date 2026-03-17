@@ -601,32 +601,58 @@ void lexer_next(Lexer *l, Token *out) {
         case ':': out->kind = TOKEN_COLON; break;
         case '.': out->kind = TOKEN_DOT; break;
         case ';': out->kind = TOKEN_SEMICOLON; break;
-        case '+': out->kind = TOKEN_PLUS; break;
+        case '+':
+            if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_PLUS_EQ; }
+            else { out->kind = TOKEN_PLUS; }
+            break;
         case '-':
             if (lexer_peek(l) == '>') { lexer_advance(l); out->kind = TOKEN_ARROW; }
+            else if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_MINUS_EQ; }
             else { out->kind = TOKEN_MINUS; } /* 二元减 */
             break;
-        case '*': out->kind = TOKEN_STAR; break;   /* 二元乘 */
-        case '/': out->kind = TOKEN_SLASH; break;  /* 二元除（// 已在 while 中跳过） */
-        case '%': out->kind = TOKEN_PERCENT; break; /* 取模 */
-        case '^': out->kind = TOKEN_CARET; break;   /* 按位异或 */
+        case '*':
+            if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_STAR_EQ; }
+            else { out->kind = TOKEN_STAR; }   /* 二元乘 */
+            break;
+        case '/':
+            if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_SLASH_EQ; }
+            else { out->kind = TOKEN_SLASH; }  /* 二元除（// 已在 while 中跳过） */
+            break;
+        case '%':
+            if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_PERCENT_EQ; }
+            else { out->kind = TOKEN_PERCENT; } /* 取模 */
+            break;
+        case '^':
+            if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_CARET_EQ; }
+            else { out->kind = TOKEN_CARET; }   /* 按位异或 */
+            break;
         case '~': out->kind = TOKEN_TILDE; break;   /* 按位取反 */
         case '&':
             if (lexer_peek(l) == '&') { lexer_advance(l); out->kind = TOKEN_AMPAMP; }
+            else if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_AMP_EQ; }
             else { out->kind = TOKEN_AMP; }
             break;
         case '|':
             if (lexer_peek(l) == '|') { lexer_advance(l); out->kind = TOKEN_PIPEPIPE; }
+            else if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_PIPE_EQ; }
             else { out->kind = TOKEN_PIPE; }
             break;
         case '<':
             if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_LE; }
-            else if (lexer_peek(l) == '<') { lexer_advance(l); out->kind = TOKEN_LSHIFT; }
+            else if (lexer_peek(l) == '<') {
+                lexer_advance(l);
+                if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_LSHIFT_EQ; }
+                else { out->kind = TOKEN_LSHIFT; }
+            }
             else { out->kind = TOKEN_LT; }
             break;
         case '>':
             if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_GE; }
-            else if (lexer_peek(l) == '>') { lexer_advance(l); out->kind = TOKEN_RSHIFT; }
+            else if (lexer_peek(l) == '>') {
+                lexer_advance(l);
+                if (lexer_peek(l) == '=') { lexer_advance(l); out->kind = TOKEN_RSHIFT_EQ; }
+                else { out->kind = TOKEN_RSHIFT; }
+            }
             else { out->kind = TOKEN_GT; }
             break;
         case '!':

@@ -1629,34 +1629,62 @@ static int expr_is_lvalue(const ASTExpr *e) {
     }
 }
 
+/** 复合赋值 token 到 AST 节点 kind 的映射；用于 parse_assign。 */
+static ASTExprKind compound_assign_token_to_kind(TokenKind k) {
+    switch (k) {
+        case TOKEN_PLUS_EQ:   return AST_EXPR_ADD_ASSIGN;
+        case TOKEN_MINUS_EQ:  return AST_EXPR_SUB_ASSIGN;
+        case TOKEN_STAR_EQ:   return AST_EXPR_MUL_ASSIGN;
+        case TOKEN_SLASH_EQ:  return AST_EXPR_DIV_ASSIGN;
+        case TOKEN_PERCENT_EQ: return AST_EXPR_MOD_ASSIGN;
+        case TOKEN_AMP_EQ:    return AST_EXPR_BITAND_ASSIGN;
+        case TOKEN_PIPE_EQ:   return AST_EXPR_BITOR_ASSIGN;
+        case TOKEN_CARET_EQ:  return AST_EXPR_BITXOR_ASSIGN;
+        case TOKEN_LSHIFT_EQ: return AST_EXPR_SHL_ASSIGN;
+        case TOKEN_RSHIFT_EQ: return AST_EXPR_SHR_ASSIGN;
+        default:              return AST_EXPR_ASSIGN;
+    }
+}
+
+/** 判断是否为复合赋值 token。 */
+static int is_compound_assign_token(TokenKind k) {
+    return k == TOKEN_PLUS_EQ || k == TOKEN_MINUS_EQ || k == TOKEN_STAR_EQ || k == TOKEN_SLASH_EQ
+        || k == TOKEN_PERCENT_EQ || k == TOKEN_AMP_EQ || k == TOKEN_PIPE_EQ || k == TOKEN_CARET_EQ
+        || k == TOKEN_LSHIFT_EQ || k == TOKEN_RSHIFT_EQ;
+}
+
 /**
- * 赋值层：ternary ( '=' assign )?，右结合；仅当左侧为左值时才接受 =。
- * 用于 for 的 step（如 i = i + 1）及将来可能的赋值表达式。
+ * 赋值层：ternary ( ( '=' | '+=' | '-=' | ... ) assign )?，右结合；仅当左侧为左值时才接受 = 或 op=。
+ * 用于 for 的 step（如 i += 1、i = i + 1）及赋值表达式。
  */
 static ASTExpr *parse_assign(Parser *p) {
     ASTExpr *left = parse_ternary(p);
     if (!left) return NULL;
-    if (peek(p)->kind != TOKEN_ASSIGN || !expr_is_lvalue(left))
-        return left;
-    advance(p);
-    /* 右侧用 parse_ternary 以便含加减等（如 n = n + i）；a = b = c 时右侧会再遇 = 由 parse_assign 解析为 b = c */
-    ASTExpr *right = parse_ternary(p);
-    if (!right) {
-        ast_expr_free(left);
-        return NULL;
+    TokenKind t = peek(p)->kind;
+    if (t == TOKEN_ASSIGN || is_compound_assign_token(t)) {
+        if (!expr_is_lvalue(left))
+            return left;
+        advance(p);
+        /* 右侧用 parse_ternary 以便含加减等；a = b = c 时右侧会再遇 = 由 parse_assign 解析为 b = c */
+        ASTExpr *right = parse_ternary(p);
+        if (!right) {
+            ast_expr_free(left);
+            return NULL;
+        }
+        ASTExpr *e = (ASTExpr *)malloc(sizeof(ASTExpr));
+        if (!e) {
+            ast_expr_free(left);
+            ast_expr_free(right);
+            fprintf(stderr, "parse: out of memory\n");
+            return NULL;
+        }
+        e->kind = (t == TOKEN_ASSIGN) ? AST_EXPR_ASSIGN : compound_assign_token_to_kind(t);
+        e->resolved_type = NULL;
+        e->value.binop.left = left;
+        e->value.binop.right = right;
+        return e;
     }
-    ASTExpr *e = (ASTExpr *)malloc(sizeof(ASTExpr));
-    if (!e) {
-        ast_expr_free(left);
-        ast_expr_free(right);
-        fprintf(stderr, "parse: out of memory\n");
-        return NULL;
-    }
-    e->kind = AST_EXPR_ASSIGN;
-    e->resolved_type = NULL;
-    e->value.binop.left = left;
-    e->value.binop.right = right;
-    return e;
+    return left;
 }
 
 /**
