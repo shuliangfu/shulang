@@ -1,6 +1,6 @@
 # Shulang CI: multi-platform build and C test suite only
 # Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
-# Build: shuc (C compiler). Test: run-all.sh (full run-*.sh suite with compiler/shuc). No bootstrap / shuc_su / run-all-su.sh; run those locally when needed.
+# Build: shu (C compiler). Test: run-all.sh (full run-*.sh suite with compiler/shu). No bootstrap / shu_su / run-all-su.sh; run those locally when needed.
 
 name: CI
 
@@ -29,14 +29,14 @@ jobs:
           uname -a
           pwd && ls -la
           which cc make 2>/dev/null || true
-      - name: Build compiler (shuc)
+      - name: Build compiler (shu)
         run: make -C compiler OPT=1 all
         env:
           CC: cc
-      - name: Verify compiler/shuc was built
+      - name: Verify compiler/shu was built
         run: |
-          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
-            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+          if [ ! -f compiler/shu ] || [ ! -x compiler/shu ]; then
+            echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
       - name: Run full test suite (run-all.sh)
@@ -55,14 +55,14 @@ jobs:
         run: |
           echo "Runner OS: $RUNNER_OS | Linux ARM64"
           uname -a && pwd && which cc make 2>/dev/null || true
-      - name: Build compiler (shuc)
+      - name: Build compiler (shu)
         run: make -C compiler OPT=1 all
         env:
           CC: cc
-      - name: Verify compiler/shuc was built
+      - name: Verify compiler/shu was built
         run: |
-          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
-            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+          if [ ! -f compiler/shu ] || [ ! -x compiler/shu ]; then
+            echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
       - name: Run full test suite (run-all.sh)
@@ -85,14 +85,14 @@ jobs:
         run: |
           echo "Runner OS: $RUNNER_OS | ${{ matrix.os }}"
           uname -a && pwd && which cc make 2>/dev/null || true
-      - name: Build compiler (shuc)
+      - name: Build compiler (shu)
         run: make -C compiler OPT=1 all
         env:
           CC: cc
-      - name: Verify compiler/shuc was built
+      - name: Verify compiler/shu was built
         run: |
-          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
-            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+          if [ ! -f compiler/shu ] || [ ! -x compiler/shu ]; then
+            echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
       - name: Run full test suite (run-all.sh)
@@ -116,15 +116,15 @@ jobs:
           msystem: MSYS
           update: true
           install: make gcc diffutils python3 sed gawk zlib-devel brotli
-      - name: Build compiler (shuc)
+      - name: Build compiler (shu)
         run: make -C compiler OPT=1 all
         shell: msys2 {0}
         env:
           CC: gcc
-      - name: Verify compiler/shuc was built
+      - name: Verify compiler/shu was built
         run: |
-          if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
-            echo "::error::compiler/shuc not found or not executable (Build compiler step did not produce it)"
+          if [ ! -f compiler/shu ] || [ ! -x compiler/shu ]; then
+            echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
         shell: msys2 {0}
@@ -136,7 +136,7 @@ jobs:
           CI: "1"
 
   # 当 run-option 段错误时，用 ASan 构建并复现以获取崩溃位置（可选，不阻塞主流程）
-  # 仅 shuc 用 ASan 编译；std/*.o 用普通 CFLAGS，避免链接生成的 option 二进制时出现未定义 __asan_* 符号
+  # 仅 shu 用 ASan 编译；std/*.o 用普通 CFLAGS，避免链接生成的 option 二进制时出现未定义 __asan_* 符号
   linux-option-asan:
     name: Linux (ASan repro run-option)
     runs-on: ubuntu-22.04
@@ -145,7 +145,7 @@ jobs:
         uses: actions/checkout@v5
       - name: Install dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq liburing-dev zlib1g-dev libbrotli-dev
-      - name: Build std .o and shuc (no ASan)
+      - name: Build std .o and shu (no ASan)
         run: make -C compiler clean && make -C compiler all
         env:
           CC: cc
@@ -161,7 +161,7 @@ jobs:
       - name: Reproduce run-option (capture ASan output)
         run: |
           ulimit -s 16384 2>/dev/null || true
-          ./compiler/shuc -L . tests/option/main.su -o /tmp/shuc_option 2>&1 || true
+          ./compiler/shu -L . tests/option/main.su -o /tmp/shu_option 2>&1 || true
           echo "--- exit code above ---"
 
   docker-distro:
