@@ -7,8 +7,8 @@
  * 重要约定：与 compiler/docs/语法子集-阶段1与2.md 词法一致；value.ident 指向源码片段不拷贝，生命周期由调用方保证；IDENT/I32 须配合 ident_len 使用。阶段 7 将增加 TOKEN_LANGLE/TOKEN_RANGLE。
  */
 
-#ifndef SHUC_TOKEN_H
-#define SHUC_TOKEN_H
+#ifndef SHU_TOKEN_H
+#define SHU_TOKEN_H
 
 /** Token 类型枚举 */
 typedef enum TokenKind {
@@ -110,4 +110,4 @@ typedef struct Token {
     int ident_len;
 } Token;
 
-#endif /* SHUC_TOKEN_H */
+#endif /* SHU_TOKEN_H */
