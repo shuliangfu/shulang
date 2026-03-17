@@ -13,7 +13,7 @@
 #include <string.h>
 #include <limits.h>
 #include <stdint.h>
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
 /** .su 侧整数字面量格式化入口：向 out（FILE* 不透明）逐字节输出 val 的十进制表示；由 codegen.su 实现。 */
 extern int32_t codegen_codegen_su_format_int_lit(uint8_t *out, int32_t val);
 /** .su 侧布尔字面量输出：向 out 输出 '0' 或 '1'（val 非 0 为 1）；由 codegen.su 实现。 */
@@ -390,6 +390,12 @@ static struct ASTModule **codegen_dep_mods;
 static const char **codegen_dep_paths;
 static int codegen_ndep;
 
+void codegen_set_dep_slots_for_su_pipeline(struct ASTModule **mods, const char **paths, int n) {
+    codegen_dep_mods = (n > 0 && mods && paths) ? mods : NULL;
+    codegen_dep_paths = (n > 0 && mods && paths) ? paths : NULL;
+    codegen_ndep = (n > 0 && mods && paths) ? n : 0;
+}
+
 /** .su 侧 FIELD_ACCESS：是否为枚举变体输出路径（Type.Variant 或库模块枚举），非 0 时 .su 转调 emit_field_access_enum_variant_full。需在 codegen_library_prefix 等声明之后。 */
 int32_t codegen_su_field_access_is_enum_variant(uint8_t *expr) {
     const struct ASTExpr *e = (const struct ASTExpr *)expr;
@@ -528,6 +534,25 @@ static void import_path_to_c_prefix(const char *import_path, char *buf, size_t s
         buf[off++] = (char)(*s == '.' ? '_' : *s);
     if (off + 1 < size) buf[off++] = '_';
     buf[off] = '\0';
+}
+
+/** .su 用：将 import 路径转为 C 前缀写入 buf（如 "std.io.driver" -> "std_io_driver_"），供 codegen.su 生成跨 dep 调用时加前缀。 */
+void codegen_su_import_path_to_c_prefix(const char *path, char *buf, size_t len) {
+    import_path_to_c_prefix(path ? path : "", buf, len);
+}
+
+/** .su 用：返回 1 当 path 为 "std.io.core"，此时 codegen 不为其函数名加前缀，使生成符号为 shu_io_register 等，与 prepend 的 #define std_io_core_* 一致。 */
+int codegen_su_path_is_std_io_core(const char *path) {
+    return (path && strcmp(path, "std.io.core") == 0) ? 1 : 0;
+}
+
+/** .su 用：当调用 std.io.core 的 register/submit_read/submit_write 且实参为 1 或 2 个（parser 用形参名占位）时返回 1，codegen 生成 xxx_buf 包装调用。 */
+int codegen_su_use_buf_wrapper(const uint8_t *name, int32_t name_len, int32_t num_args) {
+    if (!name || name_len <= 0) return 0;
+    if (num_args == 1 && name_len == 17 && memcmp(name, "shu_io_register", 17) == 0) return 1;
+    if (num_args == 2 && name_len == 19 && memcmp(name, "shu_io_submit_read", 19) == 0) return 1;
+    if (num_args == 2 && name_len == 20 && memcmp(name, "shu_io_submit_write", 20) == 0) return 1;
+    return 0;
 }
 
 #define MAX_IMPORT_DECLS 32
@@ -1989,7 +2014,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
     if (!e || !out) return -1;
     /* CTFE 最小集：仅当表达式类型为标量（整型/布尔/浮点）时才用 const_folded_val；struct 等类型不能当整数输出，否则会生成 return -1094795586 等错误 */
     if (e->const_folded_valid && expr_type_is_foldable_scalar(e)) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_format_int_lit((uint8_t *)out, (int32_t)e->const_folded_val) != 0) return -1;
         return 0;
 #else
@@ -1999,7 +2024,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
     }
     switch (e->kind) {
         case AST_EXPR_LIT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             /* 整数字面量输出由 .su 侧 codegen_su_format_int_lit 实现（自举 codegen 首块迁入）。 */
             if (codegen_codegen_su_format_int_lit((uint8_t *)out, (int32_t)e->value.int_val) != 0) return -1;
             return 0;
@@ -2008,7 +2033,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_FLOAT_LIT: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             int is_f32 = (e->resolved_type && e->resolved_type->kind == AST_TYPE_F32) ? 1 : 0;
             if (codegen_codegen_su_emit_float_lit((uint8_t *)out, (uint8_t *)&e->value.float_val, is_f32) != 0) return -1;
             return 0;
@@ -2024,7 +2049,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_BOOL_LIT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             /* 布尔字面量输出由 .su 侧 codegen_su_format_bool_lit 实现。 */
             if (codegen_codegen_su_format_bool_lit((uint8_t *)out, e->value.int_val ? 1 : 0) != 0) return -1;
             return 0;
@@ -2034,11 +2059,23 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_VAR: {
             const char *name = e->value.var.name ? e->value.var.name : "";
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             /* 变量名输出由 .su 侧 codegen_su_emit_c_string 逐字节实现。 */
             if (codegen_codegen_su_emit_c_string((uint8_t *)out, (uint8_t *)name, (int32_t)strlen(name)) != 0) return -1;
             return 0;
 #else
+            /* 库模块 -E 时顶层 let/const 已带前缀输出，此处引用须一致 */
+            if (codegen_library_prefix && *codegen_library_prefix && codegen_library_module && codegen_current_module == codegen_library_module
+                && codegen_current_module->top_level_lets) {
+                for (int i = 0; i < codegen_current_module->num_top_level_lets; i++) {
+                    if (codegen_current_module->top_level_lets[i].name && strcmp(codegen_current_module->top_level_lets[i].name, name) == 0) {
+                        char buf[256];
+                        library_prefixed_name(name, buf, sizeof(buf));
+                        fprintf(out, "%s", buf);
+                        return 0;
+                    }
+                }
+            }
             fprintf(out, "%s", name);
             return 0;
 #endif
@@ -2081,7 +2118,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
                 n = snprintf(enum_buf, sizeof(enum_buf), "%s_%s", en, vn);
         enum_emit:
             if (n <= 0 || (size_t)n >= sizeof(enum_buf)) n = 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_c_string((uint8_t *)out, (uint8_t *)enum_buf, (int32_t)n) != 0) return -1;
             return 0;
 #else
@@ -2092,7 +2129,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         case AST_EXPR_ADD: {
             if (codegen_vector_binop(e, "+", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " + "; int nl = codegen_su_expr_needs_compare_parens((uint8_t *)l); int nr = codegen_su_expr_needs_compare_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
 #else
             { int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR); int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " + "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
@@ -2101,7 +2138,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         case AST_EXPR_SUB: {
             if (codegen_vector_binop(e, "-", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " - "; int nl = codegen_su_expr_needs_compare_parens((uint8_t *)l); int nr = codegen_su_expr_needs_compare_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
 #else
             { int need_l = (l->kind >= AST_EXPR_EQ && l->kind <= AST_EXPR_LOGOR); int need_r = (r->kind >= AST_EXPR_EQ && r->kind <= AST_EXPR_LOGOR); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " - "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
@@ -2110,7 +2147,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         case AST_EXPR_MUL: {
             if (codegen_vector_binop(e, "*", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " * "; int nl = codegen_su_expr_needs_addsub_parens((uint8_t *)l); int nr = codegen_su_expr_needs_addsub_parens((uint8_t *)r); if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, (uint8_t *)op, 3, nl, nr) != 0) return -1; return 0; }
 #else
             { int need_l = (l->kind == AST_EXPR_ADD || l->kind == AST_EXPR_SUB); int need_r = (r->kind == AST_EXPR_ADD || r->kind == AST_EXPR_SUB); if (need_l) fprintf(out, "("); if (codegen_expr(l, out) != 0) return -1; if (need_l) fprintf(out, ")"); fprintf(out, " * "); if (need_r) fprintf(out, "("); if (codegen_expr(r, out) != 0) return -1; if (need_r) fprintf(out, ")"); return 0; }
@@ -2119,7 +2156,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         case AST_EXPR_DIV: {
             if (codegen_vector_binop(e, "/", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { int is_int = (e->resolved_type && is_integer_type(e->resolved_type)) ? 1 : 0; if (codegen_codegen_su_emit_div_expr((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, is_int) != 0) return -1; return 0; }
 #else
             /* 整数除零：运行时检查，除数为 0 时 panic（UB 收窄为定义行为，见 UB与未定义行为.md） */
@@ -2160,7 +2197,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         case AST_EXPR_MOD: {
             if (codegen_vector_binop(e, "%%", out) == 0) return 0;
             const struct ASTExpr *l = e->value.binop.left, *r = e->value.binop.right;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { int is_int = (e->resolved_type && is_integer_type(e->resolved_type)) ? 1 : 0; if (codegen_codegen_su_emit_mod_expr((uint8_t *)out, (uint8_t *)l, (uint8_t *)r, is_int) != 0) return -1; return 0; }
 #else
             /* 整数取模零：运行时检查（UB 收窄为定义行为） */
@@ -2184,7 +2221,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         }
         case AST_EXPR_SHL:
             if (codegen_vector_binop(e, "<<", out) == 0) return 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " << "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2194,7 +2231,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_SHR:
             if (codegen_vector_binop(e, ">>", out) == 0) return 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " >> "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2204,7 +2241,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_BITAND:
             if (codegen_vector_binop(e, "&", out) == 0) return 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " & "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2214,7 +2251,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_BITOR:
             if (codegen_vector_binop(e, "|", out) == 0) return 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " | "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2224,7 +2261,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_BITXOR:
             if (codegen_vector_binop(e, "^", out) == 0) return 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " ^ "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2233,7 +2270,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_ASSIGN:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_assign((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right) != 0) return -1;
             return 0;
 #else
@@ -2254,7 +2291,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_EQ:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " == "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2263,7 +2300,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_NE:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " != "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2272,7 +2309,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_LT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " < "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2281,7 +2318,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_LE:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " <= "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2290,7 +2327,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_GT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " > "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 3, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2299,7 +2336,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_GE:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " >= "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2308,7 +2345,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_LOGAND:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " && "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2317,7 +2354,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_LOGOR:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char op[] = " || "; if (codegen_codegen_su_emit_binop((uint8_t *)out, (uint8_t *)e->value.binop.left, (uint8_t *)e->value.binop.right, (uint8_t *)op, 4, 0, 0) != 0) return -1; return 0; }
 #else
             if (codegen_expr(e->value.binop.left, out) != 0) return -1;
@@ -2326,7 +2363,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_NEG:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char pre[] = "(-"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
 #else
             fprintf(out, "(-");
@@ -2335,7 +2372,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_BITNOT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char pre[] = "(~"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
 #else
             fprintf(out, "(~");
@@ -2344,7 +2381,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_LOGNOT:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char pre[] = "(!"; if (codegen_codegen_su_emit_unary((uint8_t *)out, (uint8_t *)e->value.unary.operand, (uint8_t *)pre, 2) != 0) return -1; return 0; }
 #else
             fprintf(out, "(!");
@@ -2398,7 +2435,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
         }
         case AST_EXPR_IF: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_if_expr((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -2728,7 +2765,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         }
         case AST_EXPR_TERNARY: {
             /* cond ? then : else → C 三元运算符 */
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             { static const char q[] = " ? ", c[] = " : "; fprintf(out, "("); if (codegen_codegen_su_emit_ternary_inner((uint8_t *)out, (uint8_t *)e->value.if_expr.cond, (uint8_t *)e->value.if_expr.then_expr, (uint8_t *)e->value.if_expr.else_expr, (uint8_t *)q, 3, (uint8_t *)c, 3) != 0) return -1; fprintf(out, ")"); return 0; }
 #else
             fprintf(out, "(");
@@ -2742,7 +2779,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_PANIC:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_panic((uint8_t *)out, e->value.unary.operand ? 1 : 0, (uint8_t *)e->value.unary.operand) != 0) return -1;
             return 0;
 #else
@@ -2758,7 +2795,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         case AST_EXPR_FIELD_ACCESS:
             /* 统一由 .su 入口分发：枚举变体转调 C 的 emit_field_access_enum_variant_full，结构体字段由 .su 输出 (base).field */
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_field_access_expr((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -2826,7 +2863,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
             return 0;
 #endif
         case AST_EXPR_STRUCT_LIT: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             /* 直接调 C 的 full 实现，避免 .su 再 extern 回 C；.su 主路径走 emit_expr 占位。 */
             if (codegen_su_emit_struct_lit_full((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
@@ -2836,7 +2873,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_ARRAY_LIT: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             /* 直接调 C 的 full 实现，避免 .su 再 extern 回 C；.su 主路径走 emit_expr 占位。 */
             if (codegen_su_emit_array_lit_full((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
@@ -2881,7 +2918,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_INDEX: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_index((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -2963,7 +3000,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
         }
         case AST_EXPR_CALL: {
             /* 统一由 .su 入口 codegen_su_emit_call_expr 分发：import_path / library_same / library_dep / mono 转调 C 的 full，否则 fallback callee(args)。 */
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_call_expr((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -2991,7 +3028,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_METHOD_CALL: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_method_call((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -3023,7 +3060,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_MATCH: {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_match((uint8_t *)out, (uint8_t *)e) != 0) return -1;
             return 0;
 #else
@@ -3089,7 +3126,7 @@ static int codegen_expr(const struct ASTExpr *e, FILE *out) {
 #endif
         }
         case AST_EXPR_BLOCK:
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_block_expr((uint8_t *)out, (uint8_t *)e->value.block) != 0) return -1;
             return 0;
 #else
@@ -3394,7 +3431,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     collect_var_names_from_block(b, used_buf, &n_used, MAX_BLOCK_USED_VARS);
     /* 有 stmt_order 时一律按源码顺序输出 const/let/expr/loop/for，保证 skip_whitespace 等「while; continue」与 copy_onefunc_into「let; while; expr」顺序正确。 */
     int use_stmt_order = (b->num_stmt_order > 0) ? 1 : 0;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
     if (b->num_stmt_order > 0 && use_stmt_order) {
         if (codegen_codegen_su_emit_block_stmt_order((uint8_t *)out, (uint8_t *)b, indent, cast_return_to_int) != 0) return -1;
     } else {
@@ -3507,7 +3544,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     } else {
 #endif
         /* 无 stmt_order：原逻辑 — const → early lets → expr/loops → late lets */
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_block_const_decls((uint8_t *)out, (uint8_t *)b, indent) != 0) return -1;
         int n_early = (b->num_early_lets > 0 && b->num_early_lets <= b->num_lets) ? b->num_early_lets : b->num_lets;
         if (codegen_codegen_su_emit_block_let_decls_range((uint8_t *)out, (uint8_t *)b, indent, 0, (int32_t)n_early) != 0) return -1;
@@ -3575,7 +3612,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
         if (reorder_safe) {
             for (int i = 0; i < b->num_expr_stmts; i++) {
                 const struct ASTExpr *st = b->expr_stmts[i];
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                 if (st->kind == AST_EXPR_CONTINUE) { if (codegen_codegen_su_emit_continue_stmt((uint8_t *)out, indent) != 0) return -1; }
                 else if (st->kind == AST_EXPR_BREAK) { if (codegen_codegen_su_emit_break_stmt((uint8_t *)out, indent) != 0) return -1; }
                 else if (st->kind == AST_EXPR_RETURN) { if (st->value.unary.operand) { if (codegen_codegen_su_emit_return_expr((uint8_t *)out, indent, (uint8_t *)st->value.unary.operand) != 0) return -1; } else { if (codegen_codegen_su_emit_return_no_val((uint8_t *)out, indent) != 0) return -1; } }
@@ -3587,7 +3624,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                 else { fprintf(out, "%s(void)(", pad); if (codegen_expr(st, out) != 0) return -1; fprintf(out, ");\n"); }
 #endif
             }
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_block_let_decls_range((uint8_t *)out, (uint8_t *)b, indent, (int32_t)b->num_early_lets, (int32_t)b->num_lets) != 0) return -1;
 #else
             for (int i = b->num_early_lets; i < b->num_lets; i++) {
@@ -3624,7 +3661,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
         } else {
             for (int i = 0; i < b->num_expr_stmts; i++) {
                 const struct ASTExpr *st = b->expr_stmts[i];
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                 if (st->kind == AST_EXPR_CONTINUE) { if (codegen_codegen_su_emit_continue_stmt((uint8_t *)out, indent) != 0) return -1; }
                 else if (st->kind == AST_EXPR_BREAK) { if (codegen_codegen_su_emit_break_stmt((uint8_t *)out, indent) != 0) return -1; }
                 else if (st->kind == AST_EXPR_RETURN) { if (st->value.unary.operand) { if (codegen_codegen_su_emit_return_expr((uint8_t *)out, indent, (uint8_t *)st->value.unary.operand) != 0) return -1; } else { if (codegen_codegen_su_emit_return_no_val((uint8_t *)out, indent) != 0) return -1; } }
@@ -3637,7 +3674,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
 #endif
             }
             for (int i = 0; i < b->num_loops; i++) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                 if (codegen_codegen_su_emit_one_while_loop((uint8_t *)out, (uint8_t *)b->loops[i].cond, (uint8_t *)b->loops[i].body, indent, cast_return_to_int) != 0) return -1;
 #else
                 fprintf(out, "%swhile (", pad);
@@ -3648,7 +3685,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
 #endif
             }
             for (int i = 0; i < b->num_for_loops; i++) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                 if (codegen_codegen_su_emit_one_for_loop((uint8_t *)out,
                     (uint8_t *)b->for_loops[i].init, (uint8_t *)b->for_loops[i].cond, (uint8_t *)b->for_loops[i].step,
                     (uint8_t *)b->for_loops[i].body, indent, cast_return_to_int) != 0) return -1;
@@ -3664,7 +3701,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
                 fprintf(out, "%s}\n", pad);
 #endif
             }
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (b->num_early_lets > 0 && b->num_early_lets < b->num_lets)
                 if (codegen_codegen_su_emit_block_let_decls_range((uint8_t *)out, (uint8_t *)b, indent, (int32_t)b->num_early_lets, (int32_t)b->num_lets) != 0) return -1;
 #else
@@ -3705,14 +3742,14 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     }
     for (int i = 0; i < b->num_labeled_stmts; i++) {
         if (b->labeled_stmts[i].label) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_label((uint8_t *)out, indent, (uint8_t *)b->labeled_stmts[i].label, (int32_t)strlen(b->labeled_stmts[i].label)) != 0) return -1;
 #else
             fprintf(out, "%s%s:\n", pad, b->labeled_stmts[i].label);
 #endif
         }
         if (b->labeled_stmts[i].kind == AST_STMT_GOTO) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, indent) != 0) return -1;
             if (codegen_codegen_su_emit_goto((uint8_t *)out, indent, (uint8_t *)b->labeled_stmts[i].u.goto_target, (int32_t)strlen(b->labeled_stmts[i].u.goto_target)) != 0) return -1;
 #else
@@ -3720,7 +3757,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
             fprintf(out, "%sgoto %s;\n", pad, b->labeled_stmts[i].u.goto_target);
 #endif
         } else {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, indent) != 0) return -1;
 #else
             if (codegen_run_defers(out, b, indent) != 0) return -1;
@@ -3753,14 +3790,14 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
             }
         }
     }
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
     if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, indent) != 0) return -1;
 #else
     if (codegen_run_defers(out, b, indent) != 0) return -1;
 #endif
     if (!b->final_expr) return 0;  /* 块以 return/goto 结尾，无需 final_expr */
     if (b->final_expr->kind == AST_EXPR_BREAK) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_break_stmt((uint8_t *)out, indent) != 0) return -1;
 #else
         fprintf(out, "%sbreak;\n", pad);
@@ -3768,7 +3805,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
         return 0;
     }
     if (b->final_expr->kind == AST_EXPR_CONTINUE) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_continue_stmt((uint8_t *)out, indent) != 0) return -1;
 #else
         fprintf(out, "%scontinue;\n", pad);
@@ -3778,7 +3815,7 @@ static int codegen_block_body(const struct ASTBlock *b, int indent, FILE *out, i
     if (b->final_expr->kind == AST_EXPR_RETURN) {
         const struct ASTExpr *op = b->final_expr->value.unary.operand;
         if (!op) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_return_no_val((uint8_t *)out, indent) != 0) return -1;
 #else
             fprintf(out, "%sreturn;\n", pad);
@@ -4291,7 +4328,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
         fprintf(out, ";\n");
     }
     if (use_cleanup) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_cleanup_decl_exit_kind((uint8_t *)out, 2) != 0) return -1;
         if (codegen_codegen_su_emit_cleanup_decl_ret_val((uint8_t *)out, 2, (uint8_t *)ret_ctype, (int32_t)strlen(ret_ctype)) != 0) return -1;
 #else
@@ -4300,7 +4337,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
 #endif
     }
     for (int i = 0; i < b->num_loops; i++) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_one_while_loop((uint8_t *)out, (uint8_t *)b->loops[i].cond, (uint8_t *)b->loops[i].body, 2, cast_return_to_int) != 0) return -1;
 #else
         fprintf(out, "%swhile (", pad);
@@ -4311,7 +4348,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
 #endif
     }
     for (int i = 0; i < b->num_for_loops; i++) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_one_for_loop((uint8_t *)out,
             (uint8_t *)b->for_loops[i].init, (uint8_t *)b->for_loops[i].cond, (uint8_t *)b->for_loops[i].step,
             (uint8_t *)b->for_loops[i].body, 2, cast_return_to_int) != 0) return -1;
@@ -4338,7 +4375,7 @@ static int codegen_func_body(const struct ASTBlock *b, const struct ASTModule *m
 func_body_after_block:
     for (int i = 0; i < b->num_labeled_stmts; i++) {
         if (b->labeled_stmts[i].label) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_label((uint8_t *)out, 2, (uint8_t *)b->labeled_stmts[i].label, (int32_t)strlen(b->labeled_stmts[i].label)) != 0) return -1;
 #else
             fprintf(out, "%s%s:\n", pad, b->labeled_stmts[i].label);
@@ -4346,7 +4383,7 @@ func_body_after_block:
         }
         if (b->labeled_stmts[i].kind == AST_STMT_GOTO) {
             if (codegen_run_defers(out, b, 2) != 0) return -1;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
             if (codegen_codegen_su_emit_goto((uint8_t *)out, 2, (uint8_t *)b->labeled_stmts[i].u.goto_target, (int32_t)strlen(b->labeled_stmts[i].u.goto_target)) != 0) return -1;
 #else
             fprintf(out, "%sgoto %s;\n", pad, b->labeled_stmts[i].u.goto_target);
@@ -4355,13 +4392,13 @@ func_body_after_block:
             const struct ASTExpr *ret_e = b->labeled_stmts[i].u.return_expr;
                 if (!ret_e) {
                 if (use_cleanup) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                     if (codegen_codegen_su_emit_exit_kind_goto_cleanup((uint8_t *)out, 2) != 0) return -1;
 #else
                     fprintf(out, "%sshulang_exit_kind = 1; goto shulang_cleanup;\n", pad);
 #endif
                 } else {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                     if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, 2) != 0) return -1;
 #else
                     if (codegen_run_defers(out, b, 2) != 0) return -1;
@@ -4379,7 +4416,7 @@ func_body_after_block:
                     fprintf(out, ") {\n");
                     fprintf(out, "%s  ", pad);
                     if (codegen_expr(ret_e->value.if_expr.then_expr, out) != 0) return -1;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                     fprintf(out, ";\n");
                     if (codegen_codegen_su_emit_ret_val_zero_exit_goto_cleanup((uint8_t *)out, 2) != 0) return -1;
                     fprintf(out, "%s} else {\n", pad);
@@ -4398,7 +4435,7 @@ func_body_after_block:
                 } else if (ret_e && ret_e->kind == AST_EXPR_PANIC) {
                     fprintf(out, "%s", pad);
                     if (codegen_expr(ret_e, out) != 0) return -1;
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                     fprintf(out, ";\n");
                     if (codegen_codegen_su_emit_ret_val_zero_exit_goto_cleanup((uint8_t *)out, 2) != 0) return -1;
 #else
@@ -4408,14 +4445,14 @@ func_body_after_block:
                     if (cast_return_to_int) fprintf(out, "%sshulang_ret_val = (int)(", pad); else fprintf(out, "%sshulang_ret_val = ", pad);
                     if (codegen_expr(ret_e, out) != 0) return -1;
                     fprintf(out, cast_return_to_int ? ");\n" : ";\n");
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                     if (codegen_codegen_su_emit_exit_kind_goto_cleanup((uint8_t *)out, 2) != 0) return -1;
 #else
                     fprintf(out, "%sshulang_exit_kind = 1; goto shulang_cleanup;\n", pad);
 #endif
                 }
             } else {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
                 if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, 2) != 0) return -1;
 #else
                 if (codegen_run_defers(out, b, 2) != 0) return -1;
@@ -4446,7 +4483,7 @@ func_body_after_block:
     if (!used_block_body_order) {
     for (int i = 0; i < b->num_expr_stmts; i++) {
         const struct ASTExpr *st = b->expr_stmts[i];
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (st->kind == AST_EXPR_CONTINUE) { if (codegen_codegen_su_emit_continue_stmt((uint8_t *)out, 2) != 0) return -1; }
         else if (st->kind == AST_EXPR_BREAK) { if (codegen_codegen_su_emit_break_stmt((uint8_t *)out, 2) != 0) return -1; }
         else if (st->kind == AST_EXPR_RETURN) { if (st->value.unary.operand) { if (codegen_codegen_su_emit_return_expr((uint8_t *)out, 2, (uint8_t *)st->value.unary.operand) != 0) return -1; } else { if (codegen_codegen_su_emit_return_no_val((uint8_t *)out, 2) != 0) return -1; } }
@@ -4472,13 +4509,13 @@ func_body_after_block:
 #endif
     }
     if (use_cleanup) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_goto_shulang_cleanup((uint8_t *)out, 2) != 0) return -1;
 #else
         fprintf(out, "%sgoto shulang_cleanup;\n", pad);
 #endif
     } else {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, 2) != 0) return -1;
 #else
         if (codegen_run_defers(out, b, 2) != 0) return -1;
@@ -4486,7 +4523,7 @@ func_body_after_block:
     }
     }  /* end if (!used_block_body_order): expr_stmts + goto/run_defers */
     if (use_cleanup) {
-#ifdef SHUC_USE_SU_CODEGEN
+#ifdef SHU_USE_SU_CODEGEN
         if (codegen_codegen_su_emit_shulang_cleanup_label((uint8_t *)out, 2) != 0) return -1;
         if (codegen_codegen_su_run_defers((uint8_t *)out, (uint8_t *)b, 2) != 0) return -1;
         if (codegen_codegen_su_emit_if_exit_kind_return_ret_val((uint8_t *)out, 2) != 0) return -1;
@@ -5573,37 +5610,65 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
         fprintf(out, "  abort();\n");
         fprintf(out, "}\n");
     }
-    /* 顶层 let：生成文件作用域静态变量，以及 init_globals() 在 main 开头调用以完成初始化 */
+    /* 顶层 let/const：let 生成 static 变量 + init_globals() 赋值；const 生成 static const 并带初始化式 */
     if (m->num_top_level_lets > 0 && m->top_level_lets) {
         for (int i = 0; i < m->num_top_level_lets; i++) {
             const char *name = m->top_level_lets[i].name ? m->top_level_lets[i].name : "";
             const struct ASTType *ty = m->top_level_lets[i].type;
-            const struct ASTType *ety = codegen_emit_type(ty);
-            if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type)
-                fprintf(out, "static %s * %s;\n", c_type_str(ety->elem_type), name);
-            else if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
-                fprintf(out, "static %s %s;\n", c_type_str(ety), name);
-            else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
-                fprintf(out, "static ");
-                emit_local_array_decl(ety, name, "", out);
-                fprintf(out, ";\n");
-            } else if (ety && ety->kind == AST_TYPE_SLICE && ety->elem_type) {
-                ensure_slice_struct(ety, out);
-                fprintf(out, "static %s %s;\n", c_type_str(ety), name);
-            } else
-                fprintf(out, "static %s %s;\n", ety ? c_type_str(ety) : "int32_t", name);
-        }
-        fprintf(out, "static void init_globals(void) {\n");
-        for (int i = 0; i < m->num_top_level_lets; i++) {
-            const char *name = m->top_level_lets[i].name ? m->top_level_lets[i].name : "";
-            const struct ASTType *ty = m->top_level_lets[i].type;
             const struct ASTExpr *init = m->top_level_lets[i].init;
-            fprintf(out, "  %s = ", name);
-            if (codegen_init(ty, init, out, NULL) != 0)
-                (void)codegen_expr(init, out); /* 回退：按普通表达式输出 */
-            fprintf(out, ";\n");
+            const struct ASTType *ety = codegen_emit_type(ty);
+            if (m->top_level_lets[i].is_const) {
+                /* const：一行 static const T name = init; */
+                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type)
+                    fprintf(out, "static const %s * %s = ", c_type_str(ety->elem_type), name);
+                else if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
+                    fprintf(out, "static const %s %s = ", c_type_str(ety), name);
+                else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
+                    fprintf(out, "static const ");
+                    emit_local_array_decl(ety, name, "", out);
+                    fprintf(out, "= ");
+                } else if (ety && ety->kind == AST_TYPE_SLICE && ety->elem_type) {
+                    ensure_slice_struct(ety, out);
+                    fprintf(out, "static const %s %s = ", c_type_str(ety), name);
+                } else
+                    fprintf(out, "static const %s %s = ", ety ? c_type_str(ety) : "int32_t", name);
+                if (codegen_init(ty, init, out, NULL) != 0)
+                    (void)codegen_expr(init, out);
+                fprintf(out, ";\n");
+            } else {
+                if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type)
+                    fprintf(out, "static %s * %s;\n", c_type_str(ety->elem_type), name);
+                else if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
+                    fprintf(out, "static %s %s;\n", c_type_str(ety), name);
+                else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
+                    fprintf(out, "static ");
+                    emit_local_array_decl(ety, name, "", out);
+                    fprintf(out, ";\n");
+                } else if (ety && ety->kind == AST_TYPE_SLICE && ety->elem_type) {
+                    ensure_slice_struct(ety, out);
+                    fprintf(out, "static %s %s;\n", c_type_str(ety), name);
+                } else
+                    fprintf(out, "static %s %s;\n", ety ? c_type_str(ety) : "int32_t", name);
+            }
         }
-        fprintf(out, "}\n");
+        /* init_globals：仅对 let（非 const）生成赋值 */
+        int any_let = 0;
+        for (int i = 0; i < m->num_top_level_lets; i++)
+            if (!m->top_level_lets[i].is_const) { any_let = 1; break; }
+        if (any_let) {
+            fprintf(out, "static void init_globals(void) {\n");
+            for (int i = 0; i < m->num_top_level_lets; i++) {
+                if (m->top_level_lets[i].is_const) continue;
+                const char *name = m->top_level_lets[i].name ? m->top_level_lets[i].name : "";
+                const struct ASTType *ty = m->top_level_lets[i].type;
+                const struct ASTExpr *init = m->top_level_lets[i].init;
+                fprintf(out, "  %s = ", name);
+                if (codegen_init(ty, init, out, NULL) != 0)
+                    (void)codegen_expr(init, out); /* 回退：按普通表达式输出 */
+                fprintf(out, ";\n");
+            }
+            fprintf(out, "}\n");
+        }
     }
     /* 入口模块内函数前向声明：满足 C 要求（任意顺序调用须先声明后定义）；对所有有体的非 main、非 extern、非泛型函数均声明，避免 DCE 未收集到的同模块 callee 导致 C undeclared */
     for (int i = 0; i < m->num_funcs && m->funcs; i++) {
@@ -5710,6 +5775,34 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         fprintf(out, "#include <stdlib.h>\n");
         fprintf(out, "#include <stdio.h>\n");
         fprintf(out, "#include <string.h>\n"); /* memcpy 用于数组拷贝 */
+    }
+
+    /* 库模块顶层 let/const：带前缀的 static [const] T name = init;，供单文件 -E 时引用（如 lsp.su 的 LSP_BODY_CAP） */
+    if (m->num_top_level_lets > 0 && m->top_level_lets) {
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            char pname[256];
+            library_prefixed_name(m->top_level_lets[i].name ? m->top_level_lets[i].name : "", pname, sizeof(pname));
+            const struct ASTType *ty = m->top_level_lets[i].type;
+            const struct ASTExpr *init = m->top_level_lets[i].init;
+            const struct ASTType *ety = codegen_emit_type(ty);
+            const char *qual = m->top_level_lets[i].is_const ? "static const " : "static ";
+            if (ety && ety->kind == AST_TYPE_PTR && ety->elem_type)
+                fprintf(out, "%s%s * %s = ", qual, c_type_str(ety->elem_type), pname);
+            else if (ety && ety->kind == AST_TYPE_NAMED && ety->name)
+                fprintf(out, "%s%s %s = ", qual, c_type_str(ety), pname);
+            else if (ety && ety->kind == AST_TYPE_ARRAY && ety->elem_type) {
+                fprintf(out, "%s", qual);
+                emit_local_array_decl(ety, pname, "", out);
+                fprintf(out, "= ");
+            } else if (ety && ety->kind == AST_TYPE_SLICE && ety->elem_type) {
+                ensure_slice_struct(ety, out);
+                fprintf(out, "%s%s %s = ", qual, c_type_str(ety), pname);
+            } else
+                fprintf(out, "%s%s %s = ", qual, ety ? c_type_str(ety) : "int32_t", pname);
+            if (codegen_init(ty, init, out, NULL) != 0)
+                (void)codegen_expr(init, out);
+            fprintf(out, ";\n");
+        }
     }
 
     /* 本库函数签名若含 []T，须最先输出 slice 结构体定义，否则后续 extern/前向声明中的 struct shulang_slice_* 为不完整类型导致 C 报错 */
