@@ -7,8 +7,8 @@
  * 重要约定：阶段 3 最小子集仅校验「有 main 则返回 i32、体为整数字面量」；库模块（无 main）直接通过。类型错误时向 stderr 输出并返回 -1。
  */
 
-#ifndef SHUC_TYPECK_H
-#define SHUC_TYPECK_H
+#ifndef SHU_TYPECK_H
+#define SHU_TYPECK_H
 
 struct ASTModule;
 
@@ -21,6 +21,12 @@ struct ASTModule;
  * 副作用与约定：只读 m 与 dep_mods；会写 m 中 CALL 节点的 resolved_import_path、resolved_callee_func。
  */
 int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps, struct ASTModule **all_dep_mods, int n_all_deps);
+
+/**
+ * 仅对模块中指定下标的函数做体块类型检查（布局与顶层 let 仍会执行）；用于 LSP definition/hover 懒 typeck。
+ * only_func_index >= 0 且 < m->num_funcs 时只 typeck 该函数；否则无操作返回 0。
+ */
+int typeck_one_function(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps, struct ASTModule **all_dep_mods, int n_all_deps, int only_func_index);
 
 /**
  * 以下为 .su typeck 入口使用的 AST 查询 API（全面自举：typeck 逻辑迁入 .su）。
@@ -89,4 +95,4 @@ void *typeck_su_impl_block_func(const void *mod, int k, int j);
 int typeck_float64_bits_lo(double d);
 int typeck_float64_bits_hi(double d);
 
-#endif /* SHUC_TYPECK_H */
+#endif /* SHU_TYPECK_H */
