@@ -5,11 +5,11 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
 # 正例：return 0; 带分号应能编译
-./compiler/shuc tests/parser/semicolon_required.su -o /tmp/shuc_parser_ok 2>&1 || { echo "parser: semicolon_required.su (with semicolon) should compile"; exit 1; }
-/tmp/shuc_parser_ok || { echo "parser: semicolon_required binary should exit 0"; exit 1; }
+./compiler/shu tests/parser/semicolon_required.su -o /tmp/shu_parser_ok 2>&1 || { echo "parser: semicolon_required.su (with semicolon) should compile"; exit 1; }
+/tmp/shu_parser_ok || { echo "parser: semicolon_required binary should exit 0"; exit 1; }
 
 # 负例：return 后无分号应报 parse error
-if ./compiler/shuc tests/parser/semicolon_missing.su -o /tmp/shuc_parser_fail 2>&1 | grep -q "expected ';' after return"; then
+if ./compiler/shu tests/parser/semicolon_missing.su -o /tmp/shu_parser_fail 2>&1 | grep -q "expected ';' after return"; then
   : # 预期报错
 else
   echo "parser: expected parse error for missing semicolon after return"
@@ -17,7 +17,7 @@ else
 fi
 
 # 负例：if 后缺少 '(' 应报 parse error
-if ./compiler/shuc tests/parser/if_missing_paren.su -o /tmp/shuc_parser_fail2 2>&1 | grep -q "expected '(' after 'if'"; then
+if ./compiler/shu tests/parser/if_missing_paren.su -o /tmp/shu_parser_fail2 2>&1 | grep -q "expected '(' after 'if'"; then
   : # 预期报错
 else
   echo "parser: expected parse error for if missing paren"
