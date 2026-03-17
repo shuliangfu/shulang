@@ -18,49 +18,49 @@ run_timeout() {
   fi
 }
 
-# 显式构建 shuc_su（不再 2>/dev/null 吞错），便于 CI 看到 bootstrap-pipeline / shuc-su-pipeline 失败原因
+# 显式构建 shu_su（不再 2>/dev/null 吞错），便于 CI 看到 bootstrap-pipeline / shu-su-pipeline 失败原因
 make_ret=0
-run_timeout 120 bash -c 'make -C compiler bootstrap-pipeline && make -C compiler shuc-su-pipeline' || make_ret=$?
+run_timeout 120 bash -c 'make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline' || make_ret=$?
 if [ "$make_ret" -eq 124 ]; then
-  echo "run-su-multi-file SKIP (make shuc-su-pipeline timed out after 120s)"
+  echo "run-su-multi-file SKIP (make shu-su-pipeline timed out after 120s)"
   exit 0
 fi
 if [ "$make_ret" -ne 0 ]; then
-  echo "run-su-multi-file: make bootstrap-pipeline or shuc-su-pipeline failed (exit $make_ret); shuc_su may be missing"
+  echo "run-su-multi-file: make bootstrap-pipeline or shu-su-pipeline failed (exit $make_ret); shu_su may be missing"
 fi
-if [ -x compiler/shuc_su ]; then
-  SU_SHUC=compiler/shuc_su
-  echo "run-su-multi-file: using compiler/shuc_su (-su -E supported)"
-elif [ -x compiler/shuc ]; then
-  SU_SHUC=compiler/shuc
-  echo "run-su-multi-file: using compiler/shuc (shuc_su not built; -su -E may not be supported)"
+if [ -x compiler/shu_su ]; then
+  SU_SHU=compiler/shu_su
+  echo "run-su-multi-file: using compiler/shu_su (-su -E supported)"
+elif [ -x compiler/shu ]; then
+  SU_SHU=compiler/shu
+  echo "run-su-multi-file: using compiler/shu (shu_su not built; -su -E may not be supported)"
 else
-  echo "compiler/shuc_su or compiler/shuc not found"
+  echo "compiler/shu_su or compiler/shu not found"
   exit 1
 fi
-# 自举两代对比（SHUC=shuc_stage1/2）时 -su -E 多文件路径尚有 bug(139)，暂跳过以免阻塞 check-7.2
-if [ -n "${SHUC:-}" ]; then echo "run-su-multi-file SKIP (SHUC set, -su -E multi-file known issue)"; exit 0; fi
+# 自举两代对比（SHU=shu_stage1/2）时 -su -E 多文件路径尚有 bug(139)，暂跳过以免阻塞 check-7.2
+if [ -n "${SHU:-}" ]; then echo "run-su-multi-file SKIP (SHU set, -su -E multi-file known issue)"; exit 0; fi
 
 # 标准输出进 $out，stderr 进 $err，失败时打印 stderr 以便 CI 看到 -su -E 诊断（如 out_buf.len、前 16 字节 hex）
 out=$(mktemp)
 err=$(mktemp)
 ec=0
-run_timeout 60 "$SU_SHUC" -su -E tests/multi-file/main.su > "$out" 2>"$err" || ec=$?
+run_timeout 60 "$SU_SHU" -su -E tests/multi-file/main.su > "$out" 2>"$err" || ec=$?
 [ "$ec" -eq 142 ] && ec=124
 _show_stderr() { echo "--- stderr ---"; cat "$err" 2>/dev/null || true; rm -f "$err"; }
 if [ "$ec" -eq 124 ]; then
   rm -f "$out"
   _show_stderr
-  echo "run-su-multi-file SKIP (shuc_su -su -E timed out after 60s)"
+  echo "run-su-multi-file SKIP (shu_su -su -E timed out after 60s)"
   exit 0
 fi
 if [ "$ec" -ne 0 ]; then
-  if [ "$SU_SHUC" = "compiler/shuc" ]; then
+  if [ "$SU_SHU" = "compiler/shu" ]; then
     rm -f "$out" "$err"
-    echo "run-su-multi-file SKIP (shuc does not support -su -E; use build_tool for full shuc)"
+    echo "run-su-multi-file SKIP (shu does not support -su -E; use build_tool for full shu)"
     exit 0
   fi
-  echo "run-su-multi-file: $SU_SHUC -su -E tests/multi-file/main.su failed (exit $ec)"
+  echo "run-su-multi-file: $SU_SHU -su -E tests/multi-file/main.su failed (exit $ec)"
   cat "$out" 2>/dev/null || true
   _show_stderr
   rm -f "$out"
