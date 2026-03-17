@@ -218,8 +218,8 @@ char *preprocess_c_fallback(const char *source, size_t source_len, const char **
     return out;
 }
 
-/** 对外接口：默认构建（仅链 preprocess.o）时由此提供；SU 构建（-DSHUC_USE_SU_PREPROCESS）时由 runtime.c 提供。 */
-#ifndef SHUC_USE_SU_PREPROCESS
+/** 对外接口：默认构建（仅链 preprocess.o）时由此提供；SU 构建（-DSHU_USE_SU_PREPROCESS）时由 runtime.c 提供。 */
+#ifndef SHU_USE_SU_PREPROCESS
 char *preprocess(const char *source, size_t source_len, const char **defines, int ndefines, size_t *out_length) {
     return preprocess_c_fallback(source, source_len, defines, ndefines, out_length);
 }
