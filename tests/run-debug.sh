@@ -6,8 +6,8 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
 _run_debug() {
-  ./compiler/shuc -L . tests/debug/main.su -o /tmp/shuc_debug 2>&1
-  exitcode=0; /tmp/shuc_debug >/dev/null 2>&1 || exitcode=$?
+  ./compiler/shu -L . tests/debug/main.su -o /tmp/shu_debug 2>&1
+  exitcode=0; /tmp/shu_debug >/dev/null 2>&1 || exitcode=$?
   [ "$exitcode" -ne 0 ] && { echo "expected exit 0 (assert(true)), got $exitcode"; return 1; }
   echo "debug test OK"
   return 0
