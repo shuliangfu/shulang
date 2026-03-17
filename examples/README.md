@@ -7,6 +7,6 @@
   - Hello World
   - 使用 core / std 的简单示例
   - 嵌入式最小可运行示例（若支持 freestanding）
-- **使用**：手动用 `shuc examples/hello.su` 编译，或由 `make test` 顺带覆盖。
+- **使用**：手动用 `shu examples/hello.su` 编译，或由 `make test` 顺带覆盖。
 
 建议 M1/M2 起就加少量示例，便于验证「能编译、能跑」。
