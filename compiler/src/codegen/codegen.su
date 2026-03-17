@@ -9,6 +9,17 @@ import ast;
 /** C 侧：base 为指针或 slice 时返回 1（仅 pointer-based AST 时有效）；ref-based 路径用 field_access_base_is_pointer_ref 从 arena 取类型。 */
 extern function codegen_su_field_access_base_is_pointer(expr: *u8): i32;
 
+/** C 侧：将当前 dep 路径转为 C 前缀写入 buf（如 "std.io.driver" -> "std_io_driver_"），供库模块函数名加前缀避免与 C 关键字冲突。 */
+extern function driver_get_current_dep_prefix_for_codegen(buf: *u8, len: i32): void;
+/** 当前 dep 路径是否为 std.io.core（与 ctx.dep_paths 互补，确保 core 不加前缀）。 */
+extern function driver_current_dep_path_is_std_io_core(): i32;
+/** 是否对此次 core 调用使用 _buf 包装名（1 参 register / 2 参 submit_read|submit_write）。 */
+extern function codegen_su_use_buf_wrapper(name: *u8, name_len: i32, num_args: i32): i32;
+/** C 侧：将任意 import 路径转为 C 前缀写入 buf，供生成跨 dep 调用时加前缀。 */
+extern function codegen_su_import_path_to_c_prefix(path: *u8, buf: *u8, len: i32): void;
+/** C 侧：path 为 "std.io.core" 时返回 1，此时不为其函数加前缀，生成 shu_io_register 等以匹配 #define std_io_core_*。 */
+extern function codegen_su_path_is_std_io_core(path: *u8): i32;
+
 /** 从 arena 判断 base 表达式（base_ref）类型是否为指针或 slice，用于字段访问输出 ->（ref-based AST 时 resolved_type_ref 有效，source/out_buf 等形参由 typeck 已填）。 */
 function field_access_base_is_pointer_ref(arena: *ASTArena, base_ref: i32): i32 {
   if (ref_is_null(base_ref) || base_ref <= 0 || base_ref > arena.num_exprs) {
@@ -21,6 +32,30 @@ function field_access_base_is_pointer_ref(arena: *ASTArena, base_ref: i32): i32 
   let ty: Type = ast_arena_type_get(arena, base.resolved_type_ref);
   if (ty.kind == TypeKind.TYPE_PTR || ty.kind == TypeKind.TYPE_SLICE) {
     return 1;
+  }
+  return 0;
+}
+
+/** 回退：base 为形参名 source 或 out_buf 时视为 slice，字段访问输出 ->（preprocess/driver 等 slice 形参在 typeck 未填类型时仍能生成正确 C）。 */
+function field_access_base_is_slice_param_name(arena: *ASTArena, base_ref: i32): i32 {
+  if (ref_is_null(base_ref) || base_ref <= 0 || base_ref > arena.num_exprs) {
+    return 0;
+  }
+  let base: Expr = ast_arena_expr_get(arena, base_ref);
+  if (base.kind != ExprKind.EXPR_VAR || base.var_name_len <= 0) {
+    return 0;
+  }
+  /* "source" 6 字节：115,111,117,114,99,101 */
+  if (base.var_name_len == 6) {
+    if (base.var_name[0] == 115 && base.var_name[1] == 111 && base.var_name[2] == 117 && base.var_name[3] == 114 && base.var_name[4] == 99 && base.var_name[5] == 101) {
+      return 1;
+    }
+  }
+  /* "out_buf" 7 字节：111,117,116,95,98,117,102 */
+  if (base.var_name_len == 7) {
+    if (base.var_name[0] == 111 && base.var_name[1] == 117 && base.var_name[2] == 116 && base.var_name[3] == 95 && base.var_name[4] == 98 && base.var_name[5] == 117 && base.var_name[6] == 102) {
+      return 1;
+    }
   }
   return 0;
 }
@@ -63,6 +98,18 @@ function append_byte(out: *CodegenOutBuf, b: i32): i32 {
 }
 
 /** 将 buf[0..len-1] 逐字节追加到 out（纯 .su）。按缓冲区尺寸重载，避免 [N]u8 与 [64]u8 类型不匹配。 */
+/** 从 ptr[0..len-1] 逐字节追加到 out，用于库前缀等变长内容。 */
+function emit_bytes_from_ptr(out: *CodegenOutBuf, ptr: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i < len) {
+    if (append_byte_u8(out, ptr[i]) != 0) {
+      return -1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
 function emit_bytes_64(out: *CodegenOutBuf, buf: [64]u8, len: i32): i32 {
   let i: i32 = 0;
   while (i < len) {
@@ -270,25 +317,54 @@ function emit_type_kind(out: *CodegenOutBuf, kind: TypeKind): i32 {
     let s: [5]u8 = [118, 111, 105, 100, 0];
     return emit_bytes_5(out, s, 4);
   }
+  if (kind == TypeKind.TYPE_USIZE) {
+    let s: [7]u8 = [115, 105, 122, 101, 95, 116, 0];
+    return emit_bytes_7(out, s, 6);
+  }
+  if (kind == TypeKind.TYPE_ISIZE) {
+    let s: [8]u8 = [115, 115, 105, 122, 101, 95, 116, 0];
+    return emit_bytes_8(out, s, 7);
+  }
   return -1;
 }
 
-/** 写类型到 out（从 arena 取 Type，仅处理内建与简单 NAMED）。 */
+/** 写类型到 out（从 arena 取 Type，仅处理内建与简单 NAMED、PTR）。 */
 function emit_type(arena: *ASTArena, out: *CodegenOutBuf, type_ref: i32): i32 {
   if (ref_is_null(type_ref)) {
-    return -1;
+    let s: [8]u8 = [105, 110, 116, 51, 50, 95, 116, 0];
+    return emit_bytes_8(out, s, 7);
   }
   let t: Type = ast_arena_type_get(arena, type_ref);
+  if (t.kind == TypeKind.TYPE_PTR && !ref_is_null(t.elem_type_ref)) {
+    if (emit_type(arena, out, t.elem_type_ref) != 0) {
+      return -1;
+    }
+    if (append_byte(out, 32) != 0) {
+      return -1;
+    }
+    return append_byte(out, 42);
+  }
   if (t.kind == TypeKind.TYPE_NAMED && t.name_len > 0) {
     return emit_bytes_64(out, t.name, t.name_len);
+  }
+  /* C 中数组形参退化为指针，输出 elem_type * 以便 extern/定义一致，避免 build 对 preprocess_su_buf 签名的补丁 */
+  if (t.kind == TypeKind.TYPE_ARRAY && !ref_is_null(t.elem_type_ref)) {
+    if (emit_type(arena, out, t.elem_type_ref) != 0) {
+      return -1;
+    }
+    if (append_byte(out, 32) != 0) {
+      return -1;
+    }
+    return append_byte(out, 42);
   }
   return emit_type_kind(out, t.kind);
 }
 
 /**
  * 写表达式到 out；仅支持当前 .su AST 中已用到的节点（LIT、VAR、二元、一元、BLOCK、RETURN 等）。
+ * ctx 非空且 ndep>0 时，EXPR_CALL 会解析跨 dep 调用并输出 dep 的 C 前缀。
  */
-function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
+function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *PipelineDepCtx): i32 {
   if (ref_is_null(expr_ref)) {
     return 0;
   }
@@ -313,7 +389,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (emit_bytes_9(out, op, 7) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.unary_operand_ref) && emit_expr(arena, out, e.unary_operand_ref) != 0) {
+    if (!ref_is_null(e.unary_operand_ref) && emit_expr(arena, out, e.unary_operand_ref, ctx) != 0) {
       return -1;
     }
     return 0;
@@ -323,7 +399,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (emit_bytes_4(out, open, 3) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.block_ref) && emit_block(arena, out, e.block_ref, 2) != 0) {
+    if (!ref_is_null(e.block_ref) && emit_block(arena, out, e.block_ref, 2, ctx) != 0) {
       return -1;
     }
     let tail: [8]u8 = [32, 125, 41, 0, 0, 0, 0, 0];
@@ -333,14 +409,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 43, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -349,14 +425,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 45, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -365,14 +441,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 61, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -382,7 +458,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (emit_bytes_3(out, pre, 2) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.unary_operand_ref) != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -391,28 +467,106 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_cond_ref) && emit_expr(arena, out, e.if_cond_ref) != 0) {
+    if (!ref_is_null(e.if_cond_ref) && emit_expr(arena, out, e.if_cond_ref, ctx) != 0) {
       return -1;
     }
     let q: [4]u8 = [32, 63, 32, 0];
     if (emit_bytes_4(out, q, 3) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_then_ref) && emit_expr(arena, out, e.if_then_ref) != 0) {
+    if (!ref_is_null(e.if_then_ref) && emit_expr(arena, out, e.if_then_ref, ctx) != 0) {
       return -1;
     }
     let colon: [4]u8 = [32, 58, 32, 0];
     if (emit_bytes_4(out, colon, 3) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_else_ref) && emit_expr(arena, out, e.if_else_ref) != 0) {
+    if (!ref_is_null(e.if_else_ref) && emit_expr(arena, out, e.if_else_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
   }
-  /* 阶段 5：函数调用 callee(arg0, arg1, ...)；多文件时由 typeck 解析跨模块。 */
+  /* 阶段 5：函数调用 callee(arg0, arg1, ...)；跨 dep 时加 dep 的 C 前缀（如 std_io_driver_）。 */
   if (e.kind == ExprKind.EXPR_CALL) {
-    if (!ref_is_null(e.call_callee_ref) && emit_expr(arena, out, e.call_callee_ref) != 0) {
+    let callee_ref: i32 = e.call_callee_ref;
+    if (!ref_is_null(callee_ref) && callee_ref > 0 && callee_ref <= arena.num_exprs && ctx != 0 as *PipelineDepCtx && ctx.ndep > 0) {
+      let callee: Expr = ast_arena_expr_get(arena, callee_ref);
+      if (callee.kind == ExprKind.EXPR_VAR && callee.var_name_len > 0) {
+        let j: i32 = 0;
+        while (j < ctx.ndep && j < 32) {
+          let dep_mod: *Module = ctx.dep_modules[j];
+          let dep_arena: *ASTArena = ctx.dep_arenas[j];
+          if (dep_mod != 0 as *Module && dep_arena != 0 as *ASTArena && dep_mod.num_funcs > 0) {
+            let fi: i32 = 0;
+            while (fi < dep_mod.num_funcs && fi < 256) {
+              let func_ref: i32 = dep_mod.func_refs[fi];
+              if (ref_is_null(func_ref) || func_ref <= 0 || func_ref > dep_arena.num_funcs) {
+                fi = fi + 1;
+                continue;
+              }
+              let df: Func = ast_arena_func_get(dep_arena, func_ref);
+              if (df.name_len == callee.var_name_len) {
+                let eq: bool = true;
+                let k: i32 = 0;
+                while (k < callee.var_name_len && k < 64) {
+                  if (callee.var_name[k] != df.name[k]) {
+                    eq = false;
+                    break;
+                  }
+                  k = k + 1;
+                }
+                if (eq && ctx.dep_paths[j] != 0 as *u8) {
+                  let pre_buf: [128]u8 = [];
+                  codegen_su_import_path_to_c_prefix(ctx.dep_paths[j], &pre_buf[0], 128);
+                  let pre_len: i32 = 0;
+                  while (pre_len < 128 && pre_buf[pre_len] != 0) {
+                    pre_len = pre_len + 1;
+                  }
+                  if (pre_len > 0 && emit_bytes_from_ptr(out, &pre_buf[0], pre_len) != 0) {
+                    return -1;
+                  }
+                  if (emit_bytes_64(out, callee.var_name, callee.var_name_len) != 0) {
+                    return -1;
+                  }
+                  if (codegen_su_path_is_std_io_core(ctx.dep_paths[j]) != 0 && codegen_su_use_buf_wrapper(&callee.var_name[0], callee.var_name_len, e.call_num_args) != 0) {
+                    let suf_buf: [8]u8 = [95, 98, 117, 102, 0, 0, 0, 0];
+                    if (emit_bytes_from_ptr(out, &suf_buf[0], 4) != 0) {
+                      return -1;
+                    }
+                  }
+                  if (append_byte(out, 40) != 0) {
+                    return -1;
+                  }
+                  let ai: i32 = 0;
+                  while (ai < e.call_num_args) {
+                    if (ai >= 16) {
+                      break;
+                    }
+                    if (ai > 0) {
+                      let comma: [3]u8 = [44, 32, 0];
+                      if (emit_bytes_3(out, comma, 2) != 0) {
+                        return -1;
+                      }
+                    }
+                    if (!ref_is_null(e.call_arg_refs[ai]) && emit_expr(arena, out, e.call_arg_refs[ai], ctx) != 0) {
+                      return -1;
+                    }
+                    ai = ai + 1;
+                  }
+                  if (append_byte(out, 41) != 0) {
+                    return -1;
+                  }
+                  return 0;
+                }
+              }
+              fi = fi + 1;
+            }
+          }
+          j = j + 1;
+        }
+      }
+    }
+    if (!ref_is_null(e.call_callee_ref) && emit_expr(arena, out, e.call_callee_ref, ctx) != 0) {
       return -1;
     }
     if (append_byte(out, 40) != 0) {
@@ -429,7 +583,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
           return -1;
         }
       }
-      if (!ref_is_null(e.call_arg_refs[ai]) && emit_expr(arena, out, e.call_arg_refs[ai]) != 0) {
+      if (!ref_is_null(e.call_arg_refs[ai]) && emit_expr(arena, out, e.call_arg_refs[ai], ctx) != 0) {
         return -1;
       }
       ai = ai + 1;
@@ -454,14 +608,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 42, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -470,14 +624,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 47, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -486,14 +640,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 37, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -503,14 +657,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 61, 61, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -519,14 +673,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 33, 61, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -535,14 +689,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 60, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -551,14 +705,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 60, 61, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -567,14 +721,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 62, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -583,14 +737,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 62, 61, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -599,14 +753,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [5]u8 = [32, 38, 38, 32, 0];
     if (emit_bytes_5(out, op, 4) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -615,14 +769,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [5]u8 = [32, 124, 124, 32, 0];
     if (emit_bytes_5(out, op, 4) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -631,14 +785,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 60, 60, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -647,14 +801,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 62, 62, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -663,14 +817,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 38, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -679,14 +833,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 124, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -695,14 +849,14 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_left_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_left_ref, ctx) != 0) {
       return -1;
     }
     let op: [4]u8 = [32, 94, 32, 0];
     if (emit_bytes_4(out, op, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.binop_right_ref) != 0) {
+    if (emit_expr(arena, out, e.binop_right_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -713,7 +867,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (emit_bytes_3(out, pre, 2) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.unary_operand_ref) != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -723,7 +877,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (emit_bytes_3(out, pre, 2) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, e.unary_operand_ref) != 0) {
+    if (emit_expr(arena, out, e.unary_operand_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -733,21 +887,21 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_cond_ref) && emit_expr(arena, out, e.if_cond_ref) != 0) {
+    if (!ref_is_null(e.if_cond_ref) && emit_expr(arena, out, e.if_cond_ref, ctx) != 0) {
       return -1;
     }
     let q: [4]u8 = [32, 63, 32, 0];
     if (emit_bytes_4(out, q, 3) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_then_ref) && emit_expr(arena, out, e.if_then_ref) != 0) {
+    if (!ref_is_null(e.if_then_ref) && emit_expr(arena, out, e.if_then_ref, ctx) != 0) {
       return -1;
     }
     let colon: [4]u8 = [32, 58, 32, 0];
     if (emit_bytes_4(out, colon, 3) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.if_else_ref) && emit_expr(arena, out, e.if_else_ref) != 0) {
+    if (!ref_is_null(e.if_else_ref) && emit_expr(arena, out, e.if_else_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 41);
@@ -757,7 +911,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.index_base_ref) && emit_expr(arena, out, e.index_base_ref) != 0) {
+    if (!ref_is_null(e.index_base_ref) && emit_expr(arena, out, e.index_base_ref, ctx) != 0) {
       return -1;
     }
     if (append_byte(out, 41) != 0) {
@@ -772,7 +926,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 91) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.index_index_ref) && emit_expr(arena, out, e.index_index_ref) != 0) {
+    if (!ref_is_null(e.index_index_ref) && emit_expr(arena, out, e.index_index_ref, ctx) != 0) {
       return -1;
     }
     return append_byte(out, 93);
@@ -786,11 +940,11 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.field_access_base_ref) && emit_expr(arena, out, e.field_access_base_ref) != 0) {
+    if (!ref_is_null(e.field_access_base_ref) && emit_expr(arena, out, e.field_access_base_ref, ctx) != 0) {
       return -1;
     }
-    /* base 为指针或 slice 时输出 ->，否则输出 .；用 arena+resolved_type_ref 判断（ref-based AST 下 source/out_buf 等由 typeck 已填），避免 (source).length 导致 C 编译错误 */
-    if (field_access_base_is_pointer_ref(arena, e.field_access_base_ref) != 0) {
+    /* base 为指针或 slice 时输出 ->，否则输出 .；类型由 arena+resolved_type_ref 判断；无类型时回退为形参名 source/out_buf 用 ->，从源头避免 (source).length 补丁 */
+    if (field_access_base_is_pointer_ref(arena, e.field_access_base_ref) != 0 || field_access_base_is_slice_param_name(arena, e.field_access_base_ref) != 0) {
       let arrow: [3]u8 = [45, 62, 0];
       if (emit_bytes_3(out, arrow, 2) != 0) {
         return -1;
@@ -829,7 +983,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
       if (append_byte(out, 44) != 0) {
         return -1;
       }
-      if (emit_expr(arena, out, e.unary_operand_ref) != 0) {
+      if (emit_expr(arena, out, e.unary_operand_ref, ctx) != 0) {
         return -1;
       }
     }
@@ -847,7 +1001,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (append_byte(out, 40) != 0) {
       return -1;
     }
-    if (!ref_is_null(e.method_call_base_ref) && emit_expr(arena, out, e.method_call_base_ref) != 0) {
+    if (!ref_is_null(e.method_call_base_ref) && emit_expr(arena, out, e.method_call_base_ref, ctx) != 0) {
       return -1;
     }
     let dot: [2]u8 = [46, 0];
@@ -871,7 +1025,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
           return -1;
         }
       }
-      if (!ref_is_null(e.method_call_arg_refs[mi]) && emit_expr(arena, out, e.method_call_arg_refs[mi]) != 0) {
+      if (!ref_is_null(e.method_call_arg_refs[mi]) && emit_expr(arena, out, e.method_call_arg_refs[mi], ctx) != 0) {
         return -1;
       }
       mi = mi + 1;
@@ -886,7 +1040,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
     if (e.match_num_arms <= 0) {
       return append_byte(out, 48);
     }
-    if (!ref_is_null(e.match_arm_result_refs[0]) && emit_expr(arena, out, e.match_arm_result_refs[0]) != 0) {
+    if (!ref_is_null(e.match_arm_result_refs[0]) && emit_expr(arena, out, e.match_arm_result_refs[0], ctx) != 0) {
       return -1;
     }
     return 0;
@@ -929,7 +1083,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
       if (emit_bytes_4(out, eq, 3) != 0) {
         return -1;
       }
-      if (!ref_is_null(e.struct_lit_init_refs[fi]) && emit_expr(arena, out, e.struct_lit_init_refs[fi]) != 0) {
+      if (!ref_is_null(e.struct_lit_init_refs[fi]) && emit_expr(arena, out, e.struct_lit_init_refs[fi], ctx) != 0) {
         return -1;
       }
       fi = fi + 1;
@@ -1009,7 +1163,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
           return -1;
         }
       }
-      if (!ref_is_null(e.array_lit_elem_refs[ai]) && emit_expr(arena, out, e.array_lit_elem_refs[ai]) != 0) {
+      if (!ref_is_null(e.array_lit_elem_refs[ai]) && emit_expr(arena, out, e.array_lit_elem_refs[ai], ctx) != 0) {
         return -1;
       }
       ai = ai + 1;
@@ -1044,7 +1198,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32): i32 {
  * 写块体到 out：const/let 声明、while/for、表达式语句、最终表达式。
  * 当 num_stmt_order > 0 时按 stmt_order 源码顺序输出，保证 let/if/return 等顺序正确，避免递归或提前 return 等错误。
  */
-function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, indent: i32): i32 {
+function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, indent: i32, ctx: *PipelineDepCtx): i32 {
   if (ref_is_null(block_ref)) {
     return 0;
   }
@@ -1077,7 +1231,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_bytes_4(out, eq, 3) != 0) {
             return -1;
           }
-          if (emit_expr(arena, out, cd.init_ref) != 0) {
+          if (emit_expr(arena, out, cd.init_ref, ctx) != 0) {
             return -1;
           }
           let sc: [3]u8 = [59, 10, 0];
@@ -1104,7 +1258,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_bytes_4(out, eq, 3) != 0) {
             return -1;
           }
-          if (emit_expr(arena, out, ld.init_ref) != 0) {
+          if (emit_expr(arena, out, ld.init_ref, ctx) != 0) {
             return -1;
           }
           let sc: [3]u8 = [59, 10, 0];
@@ -1121,7 +1275,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_bytes_9(out, v, 7) != 0) {
             return -1;
           }
-          if (emit_expr(arena, out, b.expr_stmt_refs[idx]) != 0) {
+          if (emit_expr(arena, out, b.expr_stmt_refs[idx], ctx) != 0) {
             return -1;
           }
           let sc: [4]u8 = [41, 59, 10, 0];
@@ -1139,14 +1293,14 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_bytes_8(out, wh, 7) != 0) {
             return -1;
           }
-          if (emit_expr(arena, out, w.cond_ref) != 0) {
+          if (emit_expr(arena, out, w.cond_ref, ctx) != 0) {
             return -1;
           }
           let paren: [5]u8 = [41, 32, 123, 10, 0];
           if (emit_bytes_5(out, paren, 4) != 0) {
             return -1;
           }
-          if (emit_block(arena, out, w.body_ref, indent + 2) != 0) {
+          if (emit_block(arena, out, w.body_ref, indent + 2, ctx) != 0) {
             return -1;
           }
           if (emit_indent(out, indent) != 0) {
@@ -1168,7 +1322,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
             return -1;
           }
           if (!ref_is_null(fl.init_ref)) {
-            if (emit_expr(arena, out, fl.init_ref) != 0) {
+            if (emit_expr(arena, out, fl.init_ref, ctx) != 0) {
               return -1;
             }
           }
@@ -1177,7 +1331,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
             return -1;
           }
           if (!ref_is_null(fl.cond_ref)) {
-            if (emit_expr(arena, out, fl.cond_ref) != 0) {
+            if (emit_expr(arena, out, fl.cond_ref, ctx) != 0) {
               return -1;
             }
           }
@@ -1186,7 +1340,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
             return -1;
           }
           if (!ref_is_null(fl.step_ref)) {
-            if (emit_expr(arena, out, fl.step_ref) != 0) {
+            if (emit_expr(arena, out, fl.step_ref, ctx) != 0) {
               return -1;
             }
           }
@@ -1194,7 +1348,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_bytes_5(out, paren, 4) != 0) {
             return -1;
           }
-          if (!ref_is_null(fl.body_ref) && emit_block(arena, out, fl.body_ref, indent + 2) != 0) {
+          if (!ref_is_null(fl.body_ref) && emit_block(arena, out, fl.body_ref, indent + 2, ctx) != 0) {
             return -1;
           }
           if (emit_indent(out, indent) != 0) {
@@ -1216,7 +1370,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
       if (emit_bytes_8(out, ret, 7) != 0) {
         return -1;
       }
-      if (emit_expr(arena, out, b.final_expr_ref) != 0) {
+      if (emit_expr(arena, out, b.final_expr_ref, ctx) != 0) {
         return -1;
       }
       let sc: [4]u8 = [59, 10, 0, 0];
@@ -1250,7 +1404,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_4(out, eq, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, cd.init_ref) != 0) {
+    if (emit_expr(arena, out, cd.init_ref, ctx) != 0) {
       return -1;
     }
     let sc: [3]u8 = [59, 10, 0];
@@ -1281,7 +1435,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_4(out, eq, 3) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, ld.init_ref) != 0) {
+    if (emit_expr(arena, out, ld.init_ref, ctx) != 0) {
       return -1;
     }
     let sc: [3]u8 = [59, 10, 0];
@@ -1303,7 +1457,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_9(out, v, 7) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, b.expr_stmt_refs[i]) != 0) {
+    if (emit_expr(arena, out, b.expr_stmt_refs[i], ctx) != 0) {
       return -1;
     }
     let sc: [4]u8 = [41, 59, 10, 0];
@@ -1325,14 +1479,14 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_8(out, wh, 7) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, w.cond_ref) != 0) {
+    if (emit_expr(arena, out, w.cond_ref, ctx) != 0) {
       return -1;
     }
     let paren: [5]u8 = [41, 32, 123, 10, 0];
     if (emit_bytes_5(out, paren, 4) != 0) {
       return -1;
     }
-    if (emit_block(arena, out, w.body_ref, indent + 2) != 0) {
+    if (emit_block(arena, out, w.body_ref, indent + 2, ctx) != 0) {
       return -1;
     }
     if (emit_indent(out, indent) != 0) {
@@ -1358,7 +1512,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
       return -1;
     }
     if (!ref_is_null(fl.init_ref)) {
-      if (emit_expr(arena, out, fl.init_ref) != 0) {
+      if (emit_expr(arena, out, fl.init_ref, ctx) != 0) {
         return -1;
       }
     }
@@ -1367,7 +1521,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
       return -1;
     }
     if (!ref_is_null(fl.cond_ref)) {
-      if (emit_expr(arena, out, fl.cond_ref) != 0) {
+      if (emit_expr(arena, out, fl.cond_ref, ctx) != 0) {
         return -1;
       }
     }
@@ -1376,7 +1530,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
       return -1;
     }
     if (!ref_is_null(fl.step_ref)) {
-      if (emit_expr(arena, out, fl.step_ref) != 0) {
+      if (emit_expr(arena, out, fl.step_ref, ctx) != 0) {
         return -1;
       }
     }
@@ -1384,7 +1538,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_5(out, paren, 4) != 0) {
       return -1;
     }
-    if (!ref_is_null(fl.body_ref) && emit_block(arena, out, fl.body_ref, indent + 2) != 0) {
+    if (!ref_is_null(fl.body_ref) && emit_block(arena, out, fl.body_ref, indent + 2, ctx) != 0) {
       return -1;
     }
     if (emit_indent(out, indent) != 0) {
@@ -1405,7 +1559,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_bytes_8(out, ret, 7) != 0) {
       return -1;
     }
-    if (emit_expr(arena, out, b.final_expr_ref) != 0) {
+    if (emit_expr(arena, out, b.final_expr_ref, ctx) != 0) {
       return -1;
     }
     let sc: [4]u8 = [59, 10, 0, 0];
@@ -1419,22 +1573,27 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
 /**
  * 写单个函数到 out：返回类型 + 名称 + (参数) + { 体 }。
  */
-function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: bool): i32 {
+function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: bool, prefix: *u8, prefix_len: i32, ctx: *PipelineDepCtx): i32 {
   if (emit_type(arena, out, f.return_type_ref) != 0) {
     return -1;
   }
   if (append_byte(out, 32) != 0) {
     return -1;
   }
-  /* 仅当函数名确为 "main"(4 字节) 时输出 C 符号 "main"，避免库模块首函数被误命名为 main 导致链接冲突 */
+  /* 仅当函数名确为 "main"(4 字节) 时输出 C 符号 "main"，避免库模块首函数被误命名为 main 导致链接冲突；库模块加 prefix 避免与 C 关键字（如 register）冲突。 */
   let main_name: [4]u8 = [109, 97, 105, 110];
   let name_is_main: bool = (f.name_len == 4 && f.name[0] == 109 && f.name[1] == 97 && f.name[2] == 105 && f.name[3] == 110);
   if (is_entry && name_is_main) {
     if (emit_bytes_4(out, main_name, 4) != 0) {
       return -1;
     }
-  } else if (emit_bytes_64(out, f.name, f.name_len) != 0) {
-    return -1;
+  } else {
+    if (prefix_len > 0 && emit_bytes_from_ptr(out, prefix, prefix_len) != 0) {
+      return -1;
+    }
+    if (emit_bytes_64(out, f.name, f.name_len) != 0) {
+      return -1;
+    }
   }
   let lpar: [2]u8 = [40, 0];
   if (emit_bytes_2(out, lpar, 1) != 0) {
@@ -1479,7 +1638,7 @@ function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: boo
     return -1;
   }
   if (!ref_is_null(f.body_ref)) {
-    if (emit_block(arena, out, f.body_ref, 2) != 0) {
+    if (emit_block(arena, out, f.body_ref, 2, ctx) != 0) {
       return -1;
     }
   }
@@ -1519,10 +1678,30 @@ function codegen_su_ast_emit_header(out: *CodegenOutBuf): i32 {
 /**
  * 将 Module 生成 C 源码写入 out。
  * 先写 #include <stdint.h> 等头，再写各函数定义。
- * 头文件在循环首轮 i==0 时写入，避免 C 代码生成将「先写头」重排到 while/return 之后。
+ * ctx 供跨 dep 调用时解析 C 符号前缀。
+ * dep_index >= 0 表示当前为第 dep_index 个 dep，用 ctx.dep_paths[dep_index] 算 C 前缀；-1 表示主模块。
  * 返回 0 成功，-1 失败。
  */
-function codegen_su_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf): i32 {
+function codegen_su_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf, ctx: *PipelineDepCtx, dep_index: i32): i32 {
+  /* 库模块（dep）时用 dep_index 取路径算 C 前缀，用于函数名加前缀避免与 C 关键字冲突 */
+  let prefix_buf: [128]u8 = [];
+  let prefix_len: i32 = 0;
+  if (dep_index >= 0 && dep_index < 32 && ctx != 0 as *PipelineDepCtx && ctx.dep_paths[dep_index] != 0 as *u8) {
+    /* std.io.core 不加前缀，生成 shu_io_register 等符号，与 prepend 的 #define std_io_core_* 一致。 */
+    if (codegen_su_path_is_std_io_core(ctx.dep_paths[dep_index]) == 0) {
+      codegen_su_import_path_to_c_prefix(ctx.dep_paths[dep_index], &prefix_buf[0], 128);
+      while (prefix_len < 128 && prefix_buf[prefix_len] != 0) {
+        prefix_len = prefix_len + 1;
+      }
+    }
+  }
+  /* std.io.core 已在上方保持 prefix_len=0；若 ctx.dep_paths 不可靠则用 driver 当前路径再判一次，避免 fallback 覆盖。 */
+  if (prefix_len == 0 && (dep_index < 0 || (codegen_su_path_is_std_io_core(ctx != 0 as *PipelineDepCtx && dep_index >= 0 && dep_index < 32 ? ctx.dep_paths[dep_index] : 0 as *u8) == 0 && driver_current_dep_path_is_std_io_core() == 0))) {
+    driver_get_current_dep_prefix_for_codegen(&prefix_buf[0], 128);
+    while (prefix_len < 128 && prefix_buf[prefix_len] != 0) {
+      prefix_len = prefix_len + 1;
+    }
+  }
   let i: i32 = 0;
   while (i < module.num_funcs) {
     if (i == 0 && codegen_su_ast_emit_header(out) != 0) {
@@ -1534,7 +1713,7 @@ function codegen_su_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf):
     let f: Func = module.funcs[i];
     /* 入口函数（main_idx）或单函数时输出 main；多函数时仅 main_idx 对应函数输出 main */
     let is_entry: bool = (i == module.main_func_index) || (module.num_funcs == 1);
-    if (emit_func(arena, out, f, is_entry) != 0) {
+    if (emit_func(arena, out, f, is_entry, &prefix_buf[0], prefix_len, ctx) != 0) {
       return -1;
     }
     i = i + 1;
