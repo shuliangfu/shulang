@@ -1,0 +1,4 @@
+/** LSP 测试用：合法 .su 源码，用于 didOpen + diagnostics 等请求。 */
+function main(): i32 {
+  return 0;
+}

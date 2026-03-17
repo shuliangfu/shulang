@@ -1,0 +1,5 @@
+/** LSP 测试用：含类型错误的 .su，用于校验 diagnostics 返回错误。 */
+function main(): i32 {
+  let x: bool = 42;
+  return 0;
+}
