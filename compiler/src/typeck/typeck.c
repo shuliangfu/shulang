@@ -9,6 +9,7 @@
 
 #include "typeck/typeck.h"
 #include "ast.h"
+#include "lsp/lsp_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -307,12 +308,15 @@ static void type_to_string_buf(const struct ASTType *ty, char *buf, size_t size)
         (void)snprintf(buf, size, "?");
 }
 
-/** 若表达式节点有源码位置则输出 " at line:col"，然后换行；用于面包屑错误。 */
+/** 若表达式节点有源码位置则输出 " at line:col"，然后换行；非 LSP 模式下由 lsp_diag_report_typeck 替代。 */
 static void typeck_err_loc(const struct ASTExpr *e) {
+    if (lsp_diag_enabled) return;
     if (e && (e->line > 0 || e->col > 0))
         fprintf(stderr, " at %d:%d", e->line, e->col);
     fprintf(stderr, "\n");
 }
+#define TYPECK_ERR(e, fmt, ...) do { lsp_diag_report_typeck((e)->line, (e)->col, fmt, ##__VA_ARGS__); } while(0)
+#define TYPECK_ERR_AT(line, col, fmt, ...) do { lsp_diag_report_typeck(line, col, fmt, ##__VA_ARGS__); } while(0)
 
 /**
  * 在枚举定义中按变体名查找 0-based 序号；用于 match 枚举分支（§7.4）。
@@ -421,7 +425,7 @@ static int compute_struct_layouts(struct ASTStructDef **struct_defs, int num_str
                 sd->field_offsets[i] = current_offset;
                 int fsize = type_size_of(fty, struct_defs, num_structs, enum_defs, num_enums);
                 if (fsize <= 0) {
-                    fprintf(stderr, "typeck error: struct '%s' field '%s' has unknown or invalid type size\n",
+                    TYPECK_ERR_AT(0, 0, "struct '%s' field '%s' has unknown or invalid type size",
                         sd->name ? sd->name : "?", sd->fields[i].name ? sd->fields[i].name : "?");
                     return -1;
                 }
@@ -439,7 +443,7 @@ static int compute_struct_layouts(struct ASTStructDef **struct_defs, int num_str
             int gap = (A - (current_offset % A)) % A;
             /* Zero-Padding 强制校验（§11.1）：存在隐式 padding 且未标记 allow(padding) 则报错 */
             if (gap > 0 && !sd->allow_padding) {
-                fprintf(stderr, "typeck error: struct '%s' has %d byte(s) implicit padding before field '%s'; add explicit padding field or allow(padding)\n",
+                TYPECK_ERR_AT(0, 0, "struct '%s' has %d byte(s) implicit padding before field '%s'; add explicit padding field or allow(padding)",
                     sd->name ? sd->name : "?", gap, sd->fields[i].name ? sd->fields[i].name : "?");
                 return -1;
             }
@@ -447,8 +451,8 @@ static int compute_struct_layouts(struct ASTStructDef **struct_defs, int num_str
             sd->field_offsets[i] = current_offset;
             int fsize = type_size_of(fty, struct_defs, num_structs, enum_defs, num_enums);
             if (fsize <= 0) {
-                fprintf(stderr, "typeck error: struct '%s' field '%s' has unknown or invalid type size\n",
-                    sd->name ? sd->name : "?", sd->fields[i].name ? sd->fields[i].name : "?");
+                TYPECK_ERR_AT(0, 0, "struct '%s' field '%s' has unknown or invalid type size",
+                        sd->name ? sd->name : "?", sd->fields[i].name ? sd->fields[i].name : "?");
                 return -1;
             }
             current_offset += fsize;
@@ -458,7 +462,7 @@ static int compute_struct_layouts(struct ASTStructDef **struct_defs, int num_str
         if (max_align > 0 && (current_offset % max_align) != 0) {
             int end_pad = max_align - (current_offset % max_align);
             if (end_pad > 0 && !sd->allow_padding) {
-                fprintf(stderr, "typeck error: struct '%s' has %d byte(s) implicit trailing padding; add explicit padding field or allow(padding)\n",
+                TYPECK_ERR_AT(0, 0, "struct '%s' has %d byte(s) implicit trailing padding; add explicit padding field or allow(padding)",
                     sd->name ? sd->name : "?", end_pad);
                 return -1;
             }
@@ -778,8 +782,7 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
                     *out_elem_type = type_ptrs[i]->elem_type;
                 return 0;
             }
-        fprintf(stderr, "typeck error: get_expr_type variable '%.*s' not in scope\n", name ? (int)strlen(name) : 0, name ? name : "?");
-        typeck_err_loc((struct ASTExpr *)e);
+        TYPECK_ERR((struct ASTExpr *)e, "get_expr_type variable '%.*s' not in scope", name ? (int)strlen(name) : 0, name ? name : "?");
         return -1;
     }
     if (e->kind == AST_EXPR_FIELD_ACCESS) {
@@ -845,13 +848,11 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
         if (base_kind == AST_TYPE_PTR && !base_elem && e->value.index.base->resolved_type && e->value.index.base->resolved_type->kind == AST_TYPE_PTR)
             base_elem = e->value.index.base->resolved_type->elem_type;
         if (base_kind != AST_TYPE_ARRAY && base_kind != AST_TYPE_SLICE && base_kind != AST_TYPE_PTR) {
-                fprintf(stderr, "typeck error: subscript base must be array, slice or pointer type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "subscript base must be array, slice or pointer type");
                 return -1;
         }
         if (!base_elem) {
-                fprintf(stderr, "typeck error: subscript base must be array, slice or pointer type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "subscript base must be array, slice or pointer type");
                 return -1;
         }
         *out_kind = base_elem->kind;
@@ -869,8 +870,7 @@ static int get_expr_type(const struct ASTExpr *e, const char **names, const int 
             *out_elem_type = ty->elem_type;
         return 0;
     }
-    fprintf(stderr, "typeck error: get_expr_type unhandled expression kind %d\n", (int)e->kind);
-    typeck_err_loc((struct ASTExpr *)e);
+    TYPECK_ERR((struct ASTExpr *)e, "get_expr_type unhandled expression kind %d", (int)e->kind);
     return -1;
 }
 
@@ -888,23 +888,20 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
         case AST_EXPR_ENUM_VARIANT: {
             const struct ASTEnumDef *ed = find_enum_def(enum_defs, num_enums, e->value.enum_variant.enum_name);
             if (!ed) {
-                fprintf(stderr, "typeck error: unknown enum type '%s'", e->value.enum_variant.enum_name ? e->value.enum_variant.enum_name : "?");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "unknown enum type '%s'", e->value.enum_variant.enum_name ? e->value.enum_variant.enum_name : "?");
                 return -1;
             }
             const char *v = e->value.enum_variant.variant_name;
             for (int i = 0; i < ed->num_variants; i++)
                 if (ed->variant_names[i] && v && strcmp(ed->variant_names[i], v) == 0) return 0;
-            fprintf(stderr, "typeck error: enum '%s' has no variant '%s'", ed->name ? ed->name : "?", v ? v : "?");
-            typeck_err_loc(e);
+            TYPECK_ERR(e, "enum '%s' has no variant '%s'", ed->name ? ed->name : "?", v ? v : "?");
             return -1;
         }
         case AST_EXPR_BREAK:
         case AST_EXPR_CONTINUE:
             if (!inside_loop) {
-                fprintf(stderr, "typeck error: '%s' only allowed inside a loop",
+                TYPECK_ERR(e, "'%s' only allowed inside a loop",
                     e->kind == AST_EXPR_BREAK ? "break" : "continue");
-                typeck_err_loc(e);
                 return -1;
             }
             return 0;
@@ -944,8 +941,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     if (import_path_has_prefix(m->import_paths[j], name)) return 0;
                 }
             }
-            fprintf(stderr, "typeck error: undefined name '%s'", name ? name : "");
-            typeck_err_loc(e);
+            TYPECK_ERR(e, "undefined name '%s'", name ? name : "");
             return -1;
         }
         case AST_EXPR_ADD: case AST_EXPR_SUB: case AST_EXPR_MUL: case AST_EXPR_DIV:
@@ -988,8 +984,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             const struct ASTType *op_ty = e->value.unary.operand->resolved_type;
             if (!op_ty || op_ty->kind != AST_TYPE_PTR || !op_ty->elem_type) {
                 if (!typeck_fill_only) {
-                    fprintf(stderr, "typeck error: dereference operand must be pointer type");
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "dereference operand must be pointer type");
                     return -1;
                 }
                 return 0;
@@ -1006,8 +1001,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             if (typeck_expr_sym(cond_if, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
             if (!expr_produces_bool(cond_if, names, type_kinds, n)) {
                 if (!typeck_fill_only) {
-                    fprintf(stderr, "typeck error: if condition must be bool (no implicit int-to-bool)");
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "if condition must be bool (no implicit int-to-bool)");
                     return -1;
                 }
             }
@@ -1026,8 +1020,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         char ebuf[80], fbuf[80];
                         type_to_string_buf(ty_t, ebuf, sizeof(ebuf));
                         type_to_string_buf(ty_e, fbuf, sizeof(fbuf));
-                        fprintf(stderr, "typeck error: if-expr branches must have the same type when both are struct: then %s, else %s", ebuf, fbuf);
-                        typeck_err_loc(e);
+                        TYPECK_ERR(e, "if-expr branches must have the same type when both are struct: then %s, else %s", ebuf, fbuf);
                     }
                     return -1;
                 }
@@ -1065,8 +1058,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             if (typeck_expr_sym(cond_ter, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
             if (!expr_produces_bool(cond_ter, names, type_kinds, n)) {
                 if (!typeck_fill_only) {
-                    fprintf(stderr, "typeck error: ternary condition must be bool (no implicit int-to-bool)");
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "ternary condition must be bool (no implicit int-to-bool)");
                     return -1;
                 }
             }
@@ -1079,8 +1071,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     char ebuf[80], fbuf[80];
                     type_to_string_buf(e->value.if_expr.then_expr->resolved_type, ebuf, sizeof(ebuf));
                     type_to_string_buf(e->value.if_expr.else_expr->resolved_type, fbuf, sizeof(fbuf));
-                    fprintf(stderr, "typeck error: ternary branches must have the same type: expected %s, found %s", ebuf, fbuf);
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "ternary branches must have the same type: expected %s, found %s", ebuf, fbuf);
                 }
                 return -1;
             }
@@ -1113,8 +1104,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     char ebuf[80], fbuf[80];
                     type_to_string_buf(lt, ebuf, sizeof(ebuf));
                     type_to_string_buf(rt, fbuf, sizeof(fbuf));
-                    fprintf(stderr, "typeck error: assignment type mismatch: expected %s, found %s", ebuf, fbuf);
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "assignment type mismatch: expected %s, found %s", ebuf, fbuf);
                     return -1;
                 }
             }
@@ -1130,8 +1120,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             int match_kind;
             const char *match_name = NULL;
             if (get_expr_type(e->value.match_expr.matched_expr, names, type_kinds, type_names, n, type_ptrs, struct_defs, num_structs, enum_defs, num_enums, &match_kind, &match_name, NULL) != 0) {
-                fprintf(stderr, "typeck error: match expression has no determinable type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "match expression has no determinable type");
                 return -1;
             }
             const struct ASTEnumDef *match_enum = (match_kind == AST_TYPE_NAMED && match_name) ? find_enum_def(enum_defs, num_enums, match_name) : NULL;
@@ -1139,18 +1128,16 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 ASTMatchArm *arm = &e->value.match_expr.arms[i];
                 if (arm->is_enum_variant) {
                     if (!match_enum) {
-                        fprintf(stderr, "typeck error: enum variant pattern requires matched expression to be an enum type");
-                        typeck_err_loc(e);
+                        TYPECK_ERR(e, "enum variant pattern requires matched expression to be an enum type");
                         return -1;
                     }
                     if (!arm->enum_name || strcmp(arm->enum_name, match_name) != 0) {
-                        fprintf(stderr, "typeck error: match arm enum type must match matched expression type");
-                        typeck_err_loc(e);
+                        TYPECK_ERR(e, "match arm enum type must match matched expression type");
                         return -1;
                     }
                     int idx = enum_variant_index(match_enum, arm->variant_name);
                     if (idx < 0) {
-                        fprintf(stderr, "typeck error: enum '%s' has no variant '%s'\n", arm->enum_name, arm->variant_name ? arm->variant_name : "");
+                        TYPECK_ERR_AT(arm->result ? arm->result->line : 0, arm->result ? arm->result->col : 0, "enum '%s' has no variant '%s'", arm->enum_name, arm->variant_name ? arm->variant_name : "");
                         return -1;
                     }
                     arm->variant_index = idx;
@@ -1205,7 +1192,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         ((struct ASTExpr *)e)->value.field_access.is_enum_variant = 1;
                         return 0;
                     }
-                    fprintf(stderr, "typeck error: enum '%s' has no variant '%s'\n", type_name, vname ? vname : "");
+                    TYPECK_ERR_AT(e->line, e->col, "enum '%s' has no variant '%s'", type_name, vname ? vname : "");
                     return -1;
                 }
             }
@@ -1245,8 +1232,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             int base_kind;
             const char *base_name = NULL;
             if (get_expr_type(e->value.field_access.base, names, type_kinds, type_names, n, type_ptrs, struct_defs, num_structs, enum_defs, num_enums, &base_kind, &base_name, NULL) != 0) {
-                fprintf(stderr, "typeck error: field access base has no struct or slice type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "field access base has no struct or slice type");
                 return -1;
             }
             /* 切片 []T 支持 .length（usize）与 .data（*elem_type；C 侧 struct 为 data/length） */
@@ -1259,8 +1245,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 }
                 if (field && strcmp(field, "data") == 0) {
                     if (!base_type || base_type->kind != AST_TYPE_SLICE || !base_type->elem_type) {
-                        fprintf(stderr, "typeck error: slice .data requires resolved slice type");
-                        typeck_err_loc(e);
+                        TYPECK_ERR(e, "slice .data requires resolved slice type");
                         return -1;
                     }
                     /* 当前仅支持 []u8.data → *u8；其它 elem_type 可后续扩展 static_type_ptr_* */
@@ -1268,12 +1253,10 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         ((struct ASTExpr *)e)->resolved_type = &static_type_ptr_u8;
                         return 0;
                     }
-                    fprintf(stderr, "typeck error: slice .data currently only supported for []u8");
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "slice .data currently only supported for []u8");
                     return -1;
                 }
-                fprintf(stderr, "typeck error: slice only has fields 'length' and 'data'");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "slice only has fields 'length' and 'data'");
                 return -1;
             }
             /* 自举：允许指针到结构体 p.field，按 pointee 结构体查字段（如 arena: *ASTArena 时 arena.num_types） */
@@ -1290,14 +1273,12 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     }
             }
             if (base_kind != AST_TYPE_NAMED || !base_name) {
-                fprintf(stderr, "typeck error: field access requires struct type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "field access requires struct type");
                 return -1;
             }
             const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, base_name);
             if (!sd) {
-                fprintf(stderr, "typeck error: unknown struct type '%s'", base_name);
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "unknown struct type '%s'", base_name);
                 return -1;
             }
             const char *field = e->value.field_access.field_name;
@@ -1308,27 +1289,23 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     ((struct ASTExpr *)e)->value.field_access.field_offset = sd->field_offsets[i];
                     return 0;
                 }
-            fprintf(stderr, "typeck error: struct '%s' has no field '%s'", base_name, field ? field : "");
-            typeck_err_loc(e);
+            TYPECK_ERR(e, "struct '%s' has no field '%s'", base_name, field ? field : "");
             return -1;
         }
         case AST_EXPR_STRUCT_LIT: {
             const struct ASTStructDef *sd = find_struct_def_with_deps(struct_defs, num_structs, e->value.struct_lit.struct_name);
             if (!sd) {
-                fprintf(stderr, "typeck error: unknown struct type '%s'", e->value.struct_lit.struct_name ? e->value.struct_lit.struct_name : "");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "unknown struct type '%s'", e->value.struct_lit.struct_name ? e->value.struct_lit.struct_name : "");
                 return -1;
             }
             if (e->value.struct_lit.num_fields != sd->num_fields) {
-                fprintf(stderr, "typeck error: struct literal field count mismatch for '%s'", sd->name);
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "struct literal field count mismatch for '%s'", sd->name);
                 return -1;
             }
             for (int i = 0; i < sd->num_fields; i++) {
                 if (!e->value.struct_lit.field_names[i] || !sd->fields[i].name ||
                     strcmp(e->value.struct_lit.field_names[i], sd->fields[i].name) != 0) {
-                    fprintf(stderr, "typeck error: struct literal field name mismatch at %d", i);
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "struct literal field name mismatch at %d", i);
                     return -1;
                 }
                 if (typeck_expr_sym(e->value.struct_lit.inits[i], names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -1365,13 +1342,11 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             int base_kind;
             const char *base_name = NULL;
             if (get_expr_type(e->value.index.base, names, type_kinds, type_names, n, type_ptrs, struct_defs, num_structs, enum_defs, num_enums, &base_kind, &base_name, NULL) != 0) {
-                fprintf(stderr, "typeck error: subscript base must be array, slice or pointer");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "subscript base must be array, slice or pointer");
                 return -1;
             }
             if (base_kind != AST_TYPE_ARRAY && base_kind != AST_TYPE_SLICE && base_kind != AST_TYPE_PTR) {
-                fprintf(stderr, "typeck error: subscript base must be array, slice or pointer type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "subscript base must be array, slice or pointer type");
                 return -1;
             }
             ((struct ASTExpr *)e)->value.index.base_is_slice = (base_kind == AST_TYPE_SLICE);
@@ -1469,12 +1444,10 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             if (!func) {
                 if (e->value.call.callee->kind != AST_EXPR_VAR && e->value.call.callee->kind != AST_EXPR_FIELD_ACCESS) {
-                    fprintf(stderr, "typeck error: call callee must be a function name");
-                    typeck_err_loc(e);
+                    TYPECK_ERR(e, "call callee must be a function name");
                     return -1;
                 }
-                fprintf(stderr, "typeck error: unknown function '%s'", callee_name ? callee_name : "");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "unknown function '%s'", callee_name ? callee_name : "");
                 return -1;
             }
             /* 本模块与 import 调用均登记 resolved_callee_func，供阶段 8.1 DCE 可达性分析使用 */
@@ -1484,11 +1457,11 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             /* 泛型调用 f<Type>(args)：要求函数为泛型、类型实参个数一致，登记单态化实例并做代入后类型检查 */
             if (e->value.call.num_type_args > 0) {
                 if (func->num_generic_params == 0) {
-                    fprintf(stderr, "typeck error: function '%s' is not generic but type arguments were provided\n", callee_name ? callee_name : "");
+                    TYPECK_ERR(e, "function '%s' is not generic but type arguments were provided", callee_name ? callee_name : "");
                     return -1;
                 }
                 if (e->value.call.num_type_args != func->num_generic_params) {
-                    fprintf(stderr, "typeck error: generic function '%s' expects %d type arguments, got %d\n",
+                    TYPECK_ERR(e, "generic function '%s' expects %d type arguments, got %d",
                         callee_name, func->num_generic_params, e->value.call.num_type_args);
                     return -1;
                 }
@@ -1510,13 +1483,13 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     }
                     if (!found) {
                         if (mod->num_mono_instances >= AST_MODULE_MAX_MONO_INSTANCES) {
-                            fprintf(stderr, "typeck error: too many generic instances\n");
+                            TYPECK_ERR(e, "too many generic instances");
                             return -1;
                         }
                         ASTMonoInstance *new_list = (ASTMonoInstance *)realloc(mod->mono_instances,
                             (size_t)(mod->num_mono_instances + 1) * sizeof(ASTMonoInstance));
                         if (!new_list) {
-                            fprintf(stderr, "typeck error: out of memory for mono instances\n");
+                            TYPECK_ERR(e, "out of memory for mono instances");
                             return -1;
                         }
                         mod->mono_instances = new_list;
@@ -1527,9 +1500,8 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     }
                 }
                 if (e->value.call.num_args != func->num_params) {
-                    fprintf(stderr, "typeck error: function '%s' expects %d arguments, got %d",
+                    TYPECK_ERR(e, "function '%s' expects %d arguments, got %d",
                         callee_name, func->num_params, e->value.call.num_args);
-                    typeck_err_loc(e);
                     return -1;
                 }
                 for (int i = 0; i < e->value.call.num_args; i++) {
@@ -1543,9 +1515,8 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         char ebuf[80], fbuf[80];
                         type_to_string_buf(exp_ty ? exp_ty : param_type, ebuf, sizeof(ebuf));
                         type_to_string_buf(arg_type, fbuf, sizeof(fbuf));
-                        fprintf(stderr, "typeck error: argument %d of '%s' type mismatch: expected %s, found %s",
+                        TYPECK_ERR(e->value.call.args[i], "argument %d of '%s' type mismatch: expected %s, found %s",
                             i + 1, callee_name ? callee_name : "", ebuf, fbuf);
-                        typeck_err_loc(e->value.call.args[i]);
                         return -1;
                     }
                 }
@@ -1556,12 +1527,11 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             }
             /* 非泛型调用：不允许调用泛型函数而不提供类型实参 */
             if (func->num_generic_params > 0) {
-                fprintf(stderr, "typeck error: generic function '%s' requires type arguments (e.g. %s<Type>(...))", callee_name ? callee_name : "", callee_name ? callee_name : "");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "generic function '%s' requires type arguments (e.g. %s<Type>(...))", callee_name ? callee_name : "", callee_name ? callee_name : "");
                 return -1;
             }
             if (e->value.call.num_args != func->num_params) {
-                fprintf(stderr, "typeck error: function '%s' expects %d arguments, got %d\n",
+                TYPECK_ERR(e, "function '%s' expects %d arguments, got %d",
                     callee_name, func->num_params, e->value.call.num_args);
                 return -1;
             }
@@ -1620,9 +1590,8 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                     char ebuf[80], fbuf[80];
                     type_to_string_buf(param_type, ebuf, sizeof(ebuf));
                     type_to_string_buf(arg_type, fbuf, sizeof(fbuf));
-                    fprintf(stderr, "typeck error: argument %d of '%s' type mismatch: expected %s, found %s",
+                    TYPECK_ERR(e->value.call.args[i], "argument %d of '%s' type mismatch: expected %s, found %s",
                         i + 1, callee_name ? callee_name : "", ebuf, fbuf);
-                    typeck_err_loc(e->value.call.args[i]);
                     return -1;
                 }
             }
@@ -1651,7 +1620,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                         if (dm->funcs[i]->name && strcmp(dm->funcs[i]->name, method_name) == 0) {
                             struct ASTFunc *func = dm->funcs[i];
                             if (e->value.method_call.num_args != func->num_params) {
-                                fprintf(stderr, "typeck error: function '%s' expects %d arguments, got %d\n",
+                                TYPECK_ERR(e, "function '%s' expects %d arguments, got %d",
                                     method_name, func->num_params, e->value.method_call.num_args);
                                 typeck_err_loc(e);
                                 return -1;
@@ -1679,8 +1648,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                                     arg_type = param_type;
                                 }
                                 if (!arg_type || !param_type || !type_equal(arg_type, param_type)) {
-                                    fprintf(stderr, "typeck error: argument %d of '%s' type mismatch", ai + 1, method_name ? method_name : "");
-                                    typeck_err_loc(e->value.method_call.args[ai]);
+                                    TYPECK_ERR(e->value.method_call.args[ai], "argument %d of '%s' type mismatch", ai + 1, method_name ? method_name : "");
                                     return -1;
                                 }
                             }
@@ -1695,8 +1663,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 }
             }
             if (!base_ty) {
-                fprintf(stderr, "typeck error: method call base has no type");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "method call base has no type");
                 return -1;
             }
             const char *type_str = type_to_name_string(base_ty);
@@ -1714,14 +1681,13 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 }
             }
             if (!impl_func) {
-                fprintf(stderr, "typeck error: no impl for type '%s' with method '%s'", type_str ? type_str : "?", method_name ? method_name : "?");
-                typeck_err_loc(e);
+                TYPECK_ERR(e, "no impl for type '%s' with method '%s'", type_str ? type_str : "?", method_name ? method_name : "?");
                 return -1;
             }
             /* impl 方法首参为 self，实参仅对应 params[1..] */
             int num_params_no_self = impl_func->num_params - 1;
             if (e->value.method_call.num_args != num_params_no_self) {
-                fprintf(stderr, "typeck error: method '%s' expects %d arguments, got %d\n",
+                TYPECK_ERR(e, "method '%s' expects %d arguments, got %d",
                     method_name, num_params_no_self, e->value.method_call.num_args);
                 return -1;
             }
@@ -1730,8 +1696,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
                 const struct ASTType *arg_type = e->value.method_call.args[i]->resolved_type;
                 const struct ASTType *param_type = impl_func->params[i + 1].type;
                 if (!arg_type || !param_type || !type_equal(arg_type, param_type)) {
-                    fprintf(stderr, "typeck error: argument %d of method '%s' type mismatch", i + 1, method_name ? method_name : "");
-                    typeck_err_loc(e->value.method_call.args[i]);
+                    TYPECK_ERR(e->value.method_call.args[i], "argument %d of method '%s' type mismatch", i + 1, method_name ? method_name : "");
                     return -1;
                 }
             }
@@ -1740,8 +1705,7 @@ static int typeck_expr_sym(const struct ASTExpr *e, const char **names,
             return 0;
         }
         default:
-            fprintf(stderr, "typeck error: unsupported expression kind");
-            typeck_err_loc(e);
+            TYPECK_ERR(e, "unsupported expression kind");
             return -1;
     }
 }
@@ -1795,11 +1759,11 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     int n_consts = 0;
     for (int i = 0; i < b->num_consts; i++) {
         if (n >= MAX_SYMTAB) {
-            fprintf(stderr, "typeck error: too many declarations\n");
+            TYPECK_ERR_AT(0, 0, "too many declarations");
             return -1;
         }
         if (!is_const_expr(b->const_decls[i].init, names, n_consts)) {
-            fprintf(stderr, "typeck error: const init must be constant expression\n");
+            TYPECK_ERR_AT(0, 0, "const init must be constant expression");
             return -1;
         }
         if (typeck_expr_sym(b->const_decls[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -1811,7 +1775,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             int narr = b->const_decls[i].init->value.array_lit.num_elems;
             int decl_size = b->const_decls[i].type->array_size;
             if (narr > decl_size) {
-                fprintf(stderr, "typeck error: array literal length exceeds declaration size\n");
+                TYPECK_ERR_AT(0, 0, "array literal length exceeds declaration size");
                 return -1;
             }
             /* 将数组字面量 resolved_type 设为声明类型，供 codegen 生成 { e1,... } 或 { 0 }，C 对未写元素零初始化 */
@@ -1820,7 +1784,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
         if (b->const_decls[i].type && b->const_decls[i].type->kind == AST_TYPE_VECTOR &&
             b->const_decls[i].init && b->const_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             if (b->const_decls[i].init->value.array_lit.num_elems != b->const_decls[i].type->array_size) {
-                fprintf(stderr, "typeck error: vector literal length must match vector lanes\n");
+                TYPECK_ERR_AT(0, 0, "vector literal length must match vector lanes");
                 return -1;
             }
         }
@@ -1833,7 +1797,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 !b->const_decls[i].type->elem_type ||
                 type_ptrs[j]->elem_type->kind != b->const_decls[i].type->elem_type->kind ||
                 (type_ptrs[j]->elem_type->kind == AST_TYPE_NAMED && (!type_ptrs[j]->elem_type->name || !b->const_decls[i].type->elem_type->name || strcmp(type_ptrs[j]->elem_type->name, b->const_decls[i].type->elem_type->name) != 0))) {
-                fprintf(stderr, "typeck error: slice init must be array variable with matching element type\n");
+                TYPECK_ERR_AT(0, 0, "slice init must be array variable with matching element type");
                 return -1;
             }
         }
@@ -1845,7 +1809,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             else if (init->kind == AST_EXPR_LIT && init->value.int_val == 0)
                 ;
             else if (init->kind == AST_EXPR_LIT && init->value.int_val != 0) {
-                fprintf(stderr, "typeck error: f32/f64 init must be float literal or integer 0\n");
+                TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal or integer 0");
                 return -1;
             }
             else if (init->resolved_type && (init->resolved_type->kind == AST_TYPE_I32 || init->resolved_type->kind == AST_TYPE_F32 || init->resolved_type->kind == AST_TYPE_F64))
@@ -1856,12 +1820,12 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 for (int k = 0; k < n && v; k++)
                     if (names[k] && strcmp(names[k], v) == 0 && (type_kinds[k] == AST_TYPE_I32 || type_kinds[k] == AST_TYPE_F32 || type_kinds[k] == AST_TYPE_F64)) { allow = 1; break; }
                 if (!allow) {
-                    fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                    TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal, integer 0, or numeric expression");
                     return -1;
                 }
             }
             else {
-                fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal, integer 0, or numeric expression");
                 return -1;
             }
         }
@@ -1873,7 +1837,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     }
     for (int i = 0; i < b->num_lets; i++) {
         if (n >= MAX_SYMTAB) {
-            fprintf(stderr, "typeck error: too many declarations\n");
+            TYPECK_ERR_AT(0, 0, "too many declarations");
             return -1;
         }
         if (typeck_expr_sym(b->let_decls[i].init, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -1884,7 +1848,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             int narr = b->let_decls[i].init->value.array_lit.num_elems;
             int decl_size = b->let_decls[i].type->array_size;
             if (narr > decl_size) {
-                fprintf(stderr, "typeck error: array literal length exceeds declaration size\n");
+                TYPECK_ERR_AT(0, 0, "array literal length exceeds declaration size");
                 return -1;
             }
             /* 将数组字面量 resolved_type 设为声明类型，供 codegen 生成 { e1,... } 或 { 0 }，C 对未写元素零初始化 */
@@ -1894,7 +1858,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
         if (b->let_decls[i].type && b->let_decls[i].type->kind == AST_TYPE_VECTOR &&
             b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             if (b->let_decls[i].init->value.array_lit.num_elems != b->let_decls[i].type->array_size) {
-                fprintf(stderr, "typeck error: vector literal length must match vector lanes\n");
+                TYPECK_ERR_AT(0, 0, "vector literal length must match vector lanes");
                 return -1;
             }
         }
@@ -1908,7 +1872,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 !b->let_decls[i].type->elem_type ||
                 type_ptrs[j]->elem_type->kind != b->let_decls[i].type->elem_type->kind ||
                 (type_ptrs[j]->elem_type->kind == AST_TYPE_NAMED && (!type_ptrs[j]->elem_type->name || !b->let_decls[i].type->elem_type->name || strcmp(type_ptrs[j]->elem_type->name, b->let_decls[i].type->elem_type->name) != 0))) {
-                fprintf(stderr, "typeck error: slice init must be array variable with matching element type\n");
+                TYPECK_ERR_AT(0, 0, "slice init must be array variable with matching element type");
                 return -1;
             }
         }
@@ -1920,7 +1884,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             else if (init->kind == AST_EXPR_LIT && init->value.int_val == 0)
                 ;
             else if (init->kind == AST_EXPR_LIT && init->value.int_val != 0) {
-                fprintf(stderr, "typeck error: f32/f64 init must be float literal or integer 0\n");
+                TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal or integer 0");
                 return -1;
             }
             else if (init->resolved_type && (init->resolved_type->kind == AST_TYPE_I32 || init->resolved_type->kind == AST_TYPE_F32 || init->resolved_type->kind == AST_TYPE_F64))
@@ -1931,12 +1895,12 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
                 for (int k = 0; k < n && v; k++)
                     if (names[k] && strcmp(names[k], v) == 0 && (type_kinds[k] == AST_TYPE_I32 || type_kinds[k] == AST_TYPE_F32 || type_kinds[k] == AST_TYPE_F64)) { allow = 1; break; }
                 if (!allow) {
-                    fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                    TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal, integer 0, or numeric expression");
                     return -1;
                 }
             }
             else {
-                fprintf(stderr, "typeck error: f32/f64 init must be float literal, integer 0, or numeric expression\n");
+                TYPECK_ERR_AT(0, 0, "f32/f64 init must be float literal, integer 0, or numeric expression");
                 return -1;
             }
         }
@@ -1951,7 +1915,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
         fold_expr((struct ASTExpr *)cond_while, names, const_values, n_consts, const_start, parent_n_consts);
         if (!expr_produces_bool(cond_while, names, type_kinds, n)) {
             if (!typeck_fill_only) {
-                fprintf(stderr, "typeck error: while condition must be bool (no implicit int-to-bool)\n");
+                TYPECK_ERR_AT(0, 0, "while condition must be bool (no implicit int-to-bool)");
                 return -1;
             }
         }
@@ -1966,7 +1930,7 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             fold_expr((struct ASTExpr *)cond_for, names, const_values, n_consts, const_start, parent_n_consts);
             if (!expr_produces_bool(cond_for, names, type_kinds, n)) {
                 if (!typeck_fill_only) {
-                    fprintf(stderr, "typeck error: for condition must be bool (no implicit int-to-bool)\n");
+                    TYPECK_ERR_AT(0, 0, "for condition must be bool (no implicit int-to-bool)");
                     return -1;
                 }
             }
@@ -2018,12 +1982,12 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             if (!b->labeled_stmts[i].u.return_expr) {
                 /* func_return_type 为 NULL 表示块表达式上下文（如 if 体），允许 return; */
                 if (func_return_type && func_return_type->kind != AST_TYPE_VOID) {
-                    fprintf(stderr, "typeck error: return; only allowed in void function\n");
+                    TYPECK_ERR_AT(0, 0, "return; only allowed in void function");
                     return -1;
                 }
             } else {
                 if (func_return_type && func_return_type->kind == AST_TYPE_VOID) {
-                    fprintf(stderr, "typeck error: void function cannot return a value\n");
+                    TYPECK_ERR_AT(0, 0, "void function cannot return a value");
                     return -1;
                 }
                 if (typeck_expr_sym(b->labeled_stmts[i].u.return_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -2037,11 +2001,11 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
     if (!b->final_expr) return 0;
     if (b->final_expr->kind == AST_EXPR_RETURN && !b->final_expr->value.unary.operand) {
         if (func_return_type && func_return_type->kind != AST_TYPE_VOID) {
-            fprintf(stderr, "typeck error: return; only allowed in void function\n");
+            TYPECK_ERR_AT(0, 0, "return; only allowed in void function");
             return -1;
         }
     } else if (b->final_expr->kind == AST_EXPR_RETURN && b->final_expr->value.unary.operand && func_return_type && func_return_type->kind == AST_TYPE_VOID) {
-        fprintf(stderr, "typeck error: void function cannot return a value\n");
+        TYPECK_ERR_AT(0, 0, "void function cannot return a value");
         return -1;
     }
     if (typeck_expr_sym(b->final_expr, names, type_kinds, type_names, n, type_ptrs, inside_loop, struct_defs, num_structs, enum_defs, num_enums, m) != 0) return -1;
@@ -2274,11 +2238,93 @@ void *typeck_su_impl_block_func(const void *mod, int k, int j) {
 }
 
 /**
+ * 仅对 mod->funcs[only_func_index] 做体块 typeck（布局与顶层 let 先做）；用于 LSP 懒 typeck。
+ */
+int typeck_one_function(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps, struct ASTModule **all_dep_mods, int n_all_deps, int only_func_index) {
+    if (!m || only_func_index < 0 || only_func_index >= m->num_funcs) return 0;
+    const struct ASTFunc *f = m->funcs[only_func_index];
+    if (!f->body || f->num_generic_params > 0) return 0;
+    struct ASTModule **layout_deps = (all_dep_mods && n_all_deps > 0) ? all_dep_mods : dep_mods;
+    int layout_ndeps = (all_dep_mods && n_all_deps > 0) ? n_all_deps : num_deps;
+    typeck_dep_mods = layout_deps;
+    typeck_num_deps = layout_ndeps;
+    if (layout_deps && layout_ndeps > 0) {
+        for (int j = 0; j < layout_ndeps; j++) {
+            if (!layout_deps[j]) continue;
+            if (layout_deps[j]->struct_defs && layout_deps[j]->num_structs > 0 &&
+                compute_struct_layouts(layout_deps[j]->struct_defs, layout_deps[j]->num_structs, layout_deps[j]->enum_defs, layout_deps[j]->num_enums) != 0)
+                return -1;
+        }
+    }
+    if (m->struct_defs && m->num_structs > 0 && compute_struct_layouts(m->struct_defs, m->num_structs, m->enum_defs, m->num_enums) != 0)
+        return -1;
+    typeck_dep_mods = dep_mods;
+    typeck_num_deps = num_deps;
+    if (m->top_level_lets && m->num_top_level_lets > 0) {
+        const char *tl_names[MAX_SYMTAB];
+        int tl_type_kinds[MAX_SYMTAB];
+        const char *tl_type_names[MAX_SYMTAB];
+        const struct ASTType *tl_type_ptrs[MAX_SYMTAB];
+        int tl_n = 0;
+        for (int i = 0; i < m->num_top_level_lets; i++) {
+            if (tl_n >= MAX_SYMTAB) return -1;
+            if (typeck_expr_sym(m->top_level_lets[i].init, tl_names, tl_type_kinds, tl_type_names, tl_n, tl_type_ptrs, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
+                return -1;
+            if (m->top_level_lets[i].type && m->top_level_lets[i].init->resolved_type
+                && !type_equal(m->top_level_lets[i].type, m->top_level_lets[i].init->resolved_type))
+                return -1;
+            tl_names[tl_n] = m->top_level_lets[i].name;
+            tl_type_kinds[tl_n] = m->top_level_lets[i].type ? m->top_level_lets[i].type->kind : AST_TYPE_I32;
+            tl_type_names[tl_n] = (m->top_level_lets[i].type && m->top_level_lets[i].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[i].type->name : NULL;
+            tl_type_ptrs[tl_n] = m->top_level_lets[i].type;
+            tl_n++;
+        }
+        const char *names[MAX_SYMTAB];
+        int type_kinds[MAX_SYMTAB];
+        const char *type_names[MAX_SYMTAB];
+        const struct ASTType *type_ptrs[MAX_SYMTAB];
+        int n = 0;
+        for (int j = 0; j < f->num_params && n < MAX_SYMTAB; j++) {
+            names[n] = f->params[j].name;
+            type_kinds[n] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
+            type_names[n] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
+            type_ptrs[n] = f->params[j].type;
+            n++;
+        }
+        for (int t = 0; t < m->num_top_level_lets && n < MAX_SYMTAB; t++) {
+            names[n] = m->top_level_lets[t].name;
+            type_kinds[n] = m->top_level_lets[t].type ? m->top_level_lets[t].type->kind : AST_TYPE_I32;
+            type_names[n] = (m->top_level_lets[t].type && m->top_level_lets[t].type->kind == AST_TYPE_NAMED) ? m->top_level_lets[t].type->name : NULL;
+            type_ptrs[n] = m->top_level_lets[t].type;
+            n++;
+        }
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
+            return -1;
+    } else {
+        const char *names[MAX_SYMTAB];
+        int type_kinds[MAX_SYMTAB];
+        const char *type_names[MAX_SYMTAB];
+        const struct ASTType *type_ptrs[MAX_SYMTAB];
+        int n = 0;
+        for (int j = 0; j < f->num_params && n < MAX_SYMTAB; j++) {
+            names[n] = f->params[j].name;
+            type_kinds[n] = f->params[j].type ? f->params[j].type->kind : AST_TYPE_I32;
+            type_names[n] = (f->params[j].type && f->params[j].type->kind == AST_TYPE_NAMED) ? f->params[j].type->name : NULL;
+            type_ptrs[n] = f->params[j].type;
+            n++;
+        }
+        if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/**
  * 对模块做类型检查；功能、参数、返回值见 typeck.h 声明处注释。
  */
 int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps, struct ASTModule **all_dep_mods, int n_all_deps) {
     if (!m) {
-        fprintf(stderr, "typeck error: null module\n");
+        TYPECK_ERR_AT(0, 0, "null module");
         return -1;
     }
     /* 布局阶段使用全部传递依赖（若有），以便依赖内结构体引用其他依赖类型时能解析（如 parser 的 OneFuncResult.next_lex: Lexer） */
@@ -2311,14 +2357,14 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         int tl_n = 0;
         for (int i = 0; i < m->num_top_level_lets; i++) {
             if (tl_n >= MAX_SYMTAB) {
-                fprintf(stderr, "typeck error: too many top-level lets\n");
+                TYPECK_ERR_AT(0, 0, "too many top-level lets");
                 return -1;
             }
             if (typeck_expr_sym(m->top_level_lets[i].init, tl_names, tl_type_kinds, tl_type_names, tl_n, tl_type_ptrs, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m) != 0)
                 return -1;
             if (m->top_level_lets[i].type && m->top_level_lets[i].init->resolved_type
                 && !type_equal(m->top_level_lets[i].type, m->top_level_lets[i].init->resolved_type)) {
-                fprintf(stderr, "typeck error: top-level let init type mismatch\n");
+                TYPECK_ERR_AT(0, 0, "top-level let init type mismatch");
                 return -1;
             }
             tl_names[tl_n] = m->top_level_lets[i].name;
@@ -2360,27 +2406,27 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         return 0;
     }
 
-#ifndef SHUC_USE_SU_TYPECK
+#ifndef SHU_USE_SU_TYPECK
     /* 未使用 .su typeck 入口时，在此做 main 校验；使用 .su 时由 typeck.su 在调用 typeck_module 前完成。 */
     if (!m->main_func->return_type ||
         (m->main_func->return_type->kind != AST_TYPE_I32 && m->main_func->return_type->kind != AST_TYPE_I64)) {
-        fprintf(stderr, "typeck error: main must return i32 or i64\n");
+        TYPECK_ERR_AT(0, 0, "main must return i32 or i64");
         return -1;
     }
     if (m->main_func->is_extern) {
-        fprintf(stderr, "typeck error: main cannot be extern\n");
+        TYPECK_ERR_AT(0, 0, "main cannot be extern");
         return -1;
     }
     if (!m->main_func->body) {
-        fprintf(stderr, "typeck error: main must have a body (block)\n");
+        TYPECK_ERR_AT(0, 0, "main must have a body (block)");
         return -1;
     }
     if (block_has_implicit_return(m->main_func->body)) {
-        fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
+        TYPECK_ERR_AT(0, 0, "return value must use explicit return statement (e.g. return 0;)");
         return -1;
     }
     if (m->main_func->num_generic_params > 0) {
-        fprintf(stderr, "typeck error: main cannot be generic\n");
+        TYPECK_ERR_AT(0, 0, "main cannot be generic");
         return -1;
     }
 #endif
@@ -2391,7 +2437,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
             const struct ASTImplBlock *impl = m->impl_blocks[k];
             const struct ASTTraitDef *trait = find_trait_def(m->trait_defs, m->num_traits, impl->trait_name);
             if (!trait) {
-                fprintf(stderr, "typeck error: impl for unknown trait '%s'\n", impl->trait_name ? impl->trait_name : "");
+                TYPECK_ERR_AT(0, 0, "impl for unknown trait '%s'", impl->trait_name ? impl->trait_name : "");
                 return -1;
             }
             for (int i = 0; i < trait->num_methods; i++) {
@@ -2400,12 +2446,12 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
                 for (int j = 0; j < impl->num_funcs; j++)
                     if (impl->funcs[j]->name && meth && strcmp(impl->funcs[j]->name, meth) == 0) { impl_func = impl->funcs[j]; break; }
                 if (!impl_func) {
-                    fprintf(stderr, "typeck error: impl '%s' for '%s' missing method '%s'\n",
+                    TYPECK_ERR_AT(0, 0, "impl '%s' for '%s' missing method '%s'",
                         impl->trait_name ? impl->trait_name : "", impl->type_name ? impl->type_name : "", meth ? meth : "");
                     return -1;
                 }
                 if (!impl_func->return_type || !trait->methods[i].return_type || !type_equal(impl_func->return_type, trait->methods[i].return_type)) {
-                    fprintf(stderr, "typeck error: impl method '%s' return type mismatch\n", meth ? meth : "");
+                    TYPECK_ERR_AT(0, 0, "impl method '%s' return type mismatch", meth ? meth : "");
                     return -1;
                 }
             }
@@ -2438,7 +2484,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
                 if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
                     return -1;
                 if (f->return_type && f->return_type->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
-                    fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
+                    TYPECK_ERR_AT(0, 0, "return value must use explicit return statement (e.g. return 0;)");
                     return -1;
                 }
             }
@@ -2472,7 +2518,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, f->return_type) != 0)
             return -1;
         if (f->return_type && f->return_type->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
-            fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
+            TYPECK_ERR_AT(0, 0, "return value must use explicit return statement (e.g. return 0;)");
             return -1;
         }
     }
@@ -2505,7 +2551,7 @@ int typeck_module(struct ASTModule *m, struct ASTModule **dep_mods, int num_deps
         if (typeck_block(f->body, names, type_kinds, type_names, type_ptrs, n, NULL, 0, 0, m->struct_defs, m->num_structs, m->enum_defs, m->num_enums, m, mono_ret) != 0)
             return -1;
         if (mono_ret && mono_ret->kind != AST_TYPE_VOID && block_has_implicit_return(f->body)) {
-            fprintf(stderr, "typeck error: return value must use explicit return statement (e.g. return 0;)\n");
+            TYPECK_ERR_AT(0, 0, "return value must use explicit return statement (e.g. return 0;)");
             return -1;
         }
     }
