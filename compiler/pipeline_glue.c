@@ -1,8 +1,8 @@
 /**
- * pipeline_glue.c — 与 -E 产出的 pipeline_gen.c 一起参与编译的 C 胶水代码。
+ * pipeline_glue.c — 与 -E 产出的 pipeline_gen.c 同属一个翻译单元的 C 胶水代码。
  *
- * 用法：由 Makefile 在生成 pipeline_gen.c 后追加到其末尾（cat pipeline_glue.c >> pipeline_gen.c），
- * 与 -E 产出同属一个翻译单元，故可直接使用上方已定义的 ast_* / codegen_* / platform_elf_* 等类型。
+ * 用法：pipeline_gen.c 末尾有 #include "pipeline_glue.c"（由 runtime.c -E 或 build_patch 追加），
+ * 编译 pipeline_gen.c 时由 cc 在同一 TU 内包含本文件，故可直接使用上方已定义的 ast_* / codegen_* 等类型。
  * 不单独编译；无补丁、无 sed，所有逻辑在此源文件内从根源提供。
  */
 
@@ -10,10 +10,18 @@
 #include <stdint.h>
 #include <stddef.h>
 
-/* C 包装：以 (data, len) 形式调用 pipeline，内部组 slice 后调 impl；供需要此签名的 C 调用方使用。 */
+/** 从 (data, len) 构造 slice，供 parser.su 内 parse_into_buf 调 parse_one_function_impl 时使用。 */
+struct shulang_slice_uint8_t parser_slice_from_buf(uint8_t *data, int32_t len) {
+  struct shulang_slice_uint8_t s;
+  s.data = data;
+  s.length = (size_t)(len >= 0 ? len : 0);
+  return s;
+}
+
+/* C 包装：以 (data, len) 形式调用 pipeline，内部组 slice 后调 impl；形参顺序 (module, arena) 与 runtime.c 调用及 _impl 一致。 */
 extern int32_t pipeline_run_su_pipeline_impl(struct ast_Module *module, struct ast_ASTArena *arena, struct shulang_slice_uint8_t *source, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx);
 
-int32_t pipeline_run_su_pipeline(struct ast_ASTArena *arena, struct ast_Module *module, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {
+int32_t pipeline_run_su_pipeline(struct ast_Module *module, struct ast_ASTArena *arena, const uint8_t *source_data, size_t source_len, struct codegen_CodegenOutBuf *out_buf, struct ast_PipelineDepCtx *ctx) {
   struct shulang_slice_uint8_t source;
   source.data = (uint8_t *)source_data;
   source.length = source_len;
@@ -34,4 +42,34 @@ void pipeline_debug_module_funcs(void *m) {
     int len = (int)mod->funcs[i].name_len;
     fprintf(stderr, "[DEBUG] module func[%d] name_len=%d name=%.*s\n", i, len, len > 0 && len <= 64 ? len : 0, mod->funcs[i].name);
   }
+}
+
+/** 诊断：解析 entry 后打印 main 的 body_ref；日常构建关闭，排查 main 空体时取消下方注释。由 pipeline.su 在 parse 后 / codegen 前调用。 */
+void driver_diagnostic_entry_module(struct ast_Module *mod, struct ast_ASTArena *a) {
+  (void)a;
+  (void)mod;
+  /* if (mod->main_func_index >= 0 && mod->main_func_index < mod->num_funcs) {
+    int32_t br = mod->funcs[mod->main_func_index].body_ref;
+    fprintf(stderr, "[diag] entry num_funcs=%d main_idx=%d body_ref=%d\n",
+            (int)mod->num_funcs, (int)mod->main_func_index, (int)br);
+  } else {
+    fprintf(stderr, "[diag] entry num_funcs=%d main_idx=%d (invalid)\n",
+            (int)mod->num_funcs, (int)mod->main_func_index);
+  } */
+}
+
+/** 诊断：解析后打印 main 对应 body block 的 num_stmt_order（C 侧调用）；日常构建保留实现不调用，排查时在 runtime.c 恢复调用。 */
+void driver_diagnostic_entry_block_after_parse(void *mod, void *arena) {
+  struct ast_Module *m = (struct ast_Module *)mod;
+  struct ast_ASTArena *a = (struct ast_ASTArena *)arena;
+  if (!m || !a || m->main_func_index < 0 || m->main_func_index >= m->num_funcs)
+    return;
+  int32_t br = m->funcs[m->main_func_index].body_ref;
+  if (br <= 0 || br > a->num_blocks)
+    return;
+  (void)br;
+  (void)a;
+  /* struct ast_Block b = ast_ast_arena_block_get(a, br);
+  fprintf(stderr, "[diag] after_parse body_ref=%d num_blocks=%d block.num_stmt_order=%d\n",
+          (int)br, (int)a->num_blocks, (int)b.num_stmt_order); */
 }
