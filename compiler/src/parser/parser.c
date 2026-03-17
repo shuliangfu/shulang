@@ -9,6 +9,7 @@
 
 #include "parser/parser.h"
 #include "lexer/lexer.h"
+#include "lsp/lsp_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,10 +88,14 @@ static int is_ident_str(Parser *p, const char *str, size_t len) {
 
 /**
  * 向 stderr 输出 "parse error at line:col: msg" 并返回 -1；用于统一错误处理。
- * 参数：p 解析器状态（用于取当前 Token 位置）；msg 错误描述字符串。返回值：-1。副作用：写 stderr。
+ * LSP 模式（lsp_diag_enabled）下改为写入诊断收集器，不写 stderr。
  */
 static int fail(Parser *p, const char *msg) {
     const Token *t = peek(p);
+    if (lsp_diag_enabled) {
+        lsp_diag_add(t->line, t->col, 1, msg);
+        return -1;
+    }
     fprintf(stderr, "parse error at %d:%d: %s\n", t->line, t->col, msg);
     return -1;
 }
@@ -2896,16 +2901,27 @@ static ASTFunc *parse_one_function(Parser *p, int is_extern) {
     advance(p);
     /* 函数名允许 IDENT 或关键字 panic/abort、或类型关键字 u32/u64/bool（std.random 中 function u32(): u32 等合法） */
     char *name = NULL;
+    int name_line = 0, name_col = 0; /* LSP 用：函数名所在位置 */
     if (peek(p)->kind == TOKEN_IDENT) {
         name = strndup(peek(p)->value.ident, (size_t)peek(p)->ident_len);
+        name_line = peek(p)->line;
+        name_col = peek(p)->col;
     } else if (peek(p)->kind == TOKEN_PANIC) {
         name = strdup("panic");
+        name_line = peek(p)->line;
+        name_col = peek(p)->col;
     } else if (peek(p)->kind == TOKEN_U32) {
         name = strdup("u32");
+        name_line = peek(p)->line;
+        name_col = peek(p)->col;
     } else if (peek(p)->kind == TOKEN_U64) {
         name = strdup("u64");
+        name_line = peek(p)->line;
+        name_col = peek(p)->col;
     } else if (peek(p)->kind == TOKEN_BOOL) {
         name = strdup("bool");
+        name_line = peek(p)->line;
+        name_col = peek(p)->col;
     } else {
         fail(p, "expected function name after 'function'");
         return NULL;
@@ -3086,6 +3102,8 @@ static ASTFunc *parse_one_function(Parser *p, int is_extern) {
         fprintf(stderr, "parse: out of memory\n");
         return NULL;
     }
+    func->line = name_line;
+    func->col = name_col;
     func->name = name;
     func->generic_param_names = gp_names;
     func->num_generic_params = n_gp;
@@ -3184,9 +3202,9 @@ int parse(Lexer *lex, ASTModule **out) {
             select_count_list[nimports] = 0;
             nimports++;
         } else if (peek(&prs)->kind == TOKEN_CONST) {
-            advance(&prs);
-            if (peek(&prs)->kind == TOKEN_IDENT && peek_next(&prs)->kind == TOKEN_ASSIGN && peek_next_next(&prs)->kind == TOKEN_IMPORT) {
-                /* const IDENT = import path ; */
+            /* 仅当确定为 const x = import 或 const { } = import 时才 consume const，否则 break 交给后续顶层循环处理普通 const */
+            if (peek_next(&prs)->kind == TOKEN_IDENT && peek_next_next(&prs)->kind == TOKEN_ASSIGN) {
+                advance(&prs); /* const */
                 char *name = (peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
                     ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len) : NULL;
                 if (!name) {
@@ -3194,7 +3212,16 @@ int parse(Lexer *lex, ASTModule **out) {
                     free(mod);
                     return -1;
                 }
-                advance(&prs); advance(&prs); advance(&prs); /* IDENT = import */
+                advance(&prs); advance(&prs); /* IDENT = */
+                if (peek(&prs)->kind != TOKEN_IMPORT) {
+                    free(name);
+                    fail(&prs, "expected const x = import path");
+                    while (nimports--) free(import_list[nimports]);
+                    FREE_IMPORT_AUX;
+                    free(mod);
+                    return -1;
+                }
+                advance(&prs); /* import */
                 char *path = parse_import_path(&prs);
                 if (!path) {
                     free(name);
@@ -3226,9 +3253,9 @@ int parse(Lexer *lex, ASTModule **out) {
                 select_names_list[nimports] = NULL;
                 select_count_list[nimports] = 0;
                 nimports++;
-            } else if (peek(&prs)->kind == TOKEN_LBRACE) {
+                } else if (peek_next(&prs)->kind == TOKEN_LBRACE) {
                 /* const { IDENT, ... } = import path ; */
-                advance(&prs);
+                advance(&prs); advance(&prs); /* const { */
                 char *sel_names[32];
                 int nsel = 0;
                 for (;;) {
@@ -3325,15 +3352,12 @@ int parse(Lexer *lex, ASTModule **out) {
                 select_names_list[nimports] = sarr;
                 select_count_list[nimports] = nsel;
                 nimports++;
-            } else {
-                fail(&prs, "expected import path, const x = import path, or const { ... } = import path");
-                while (nimports--) free(import_list[nimports]);
-                FREE_IMPORT_AUX;
-                free(mod);
-                return -1;
-            }
-        } else
-            break;
+                } else {
+                /* 普通 const（如 const X: Type = expr;），不 consume，交给后续顶层循环 */
+                break;
+                }
+            } else
+                break;
     }
 #undef FREE_IMPORT_AUX
 
@@ -3444,6 +3468,7 @@ int parse(Lexer *lex, ASTModule **out) {
             mod->top_level_lets[i].name = toplevel_let_list[i].name;
             mod->top_level_lets[i].type = toplevel_let_list[i].type;
             mod->top_level_lets[i].init = toplevel_let_list[i].init;
+            mod->top_level_lets[i].is_const = 0;
         }
         mod->num_top_level_lets = ntoplets;
     }
@@ -3583,12 +3608,137 @@ int parse(Lexer *lex, ASTModule **out) {
         impl_list[nimpls++] = impl;
     }
 
-    /* [ extern? function | allow(padding)? struct | enum ]*；允许 struct/enum 与 function 交错（如 backend.su、parser.su）。 */
+    /* [ extern? function | allow(padding)? struct | enum | let ]*；允许 struct/enum/function 与顶层 let 任意交错。 */
     ASTFunc *func_list[AST_MODULE_MAX_FUNCS];
     int nfuncs = 0;
     while (peek(&prs)->kind == TOKEN_EXTERN || peek(&prs)->kind == TOKEN_FUNCTION
            || peek(&prs)->kind == TOKEN_STRUCT || peek(&prs)->kind == TOKEN_ENUM
+           || peek(&prs)->kind == TOKEN_LET || peek(&prs)->kind == TOKEN_CONST
            || (peek(&prs)->kind == TOKEN_IDENT && is_ident_str(&prs, "allow", 5))) {
+        /* 顶层 let：与 function/struct/enum 同级，可任意顺序出现 */
+        if (peek(&prs)->kind == TOKEN_LET) {
+            if (mod->num_top_level_lets >= MAX_TOP_LEVEL_LETS) {
+                fail(&prs, "too many top-level let declarations");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_IDENT && peek(&prs)->kind != TOKEN_UNDERSCORE) {
+                fail(&prs, "expected identifier after let");
+                goto cleanup_funcs_fail;
+            }
+            char *let_name = (peek(&prs)->kind == TOKEN_UNDERSCORE) ? strdup("_") : ((peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
+                ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len) : NULL);
+            if (!let_name) goto cleanup_funcs_fail;
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_COLON) {
+                free(let_name);
+                fail(&prs, "expected ':' and type in top-level let");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTType *let_type = parse_type_name(&prs);
+            if (!let_type) {
+                free(let_name);
+                goto cleanup_funcs_fail;
+            }
+            if (peek(&prs)->kind != TOKEN_ASSIGN) {
+                free(let_name);
+                ast_type_free(let_type);
+                fail(&prs, "expected '=' in top-level let");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTExpr *let_init = parse_expr(&prs);
+            if (!let_init) {
+                free(let_name);
+                ast_type_free(let_type);
+                goto cleanup_funcs_fail;
+            }
+            if (peek(&prs)->kind != TOKEN_SEMICOLON) {
+                free(let_name);
+                ast_type_free(let_type);
+                ast_expr_free(let_init);
+                fail(&prs, "expected ';' after top-level let");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTLetDecl *new_lets = (ASTLetDecl *)realloc(mod->top_level_lets, (size_t)(mod->num_top_level_lets + 1) * sizeof(ASTLetDecl));
+            if (!new_lets) {
+                free(let_name);
+                ast_type_free(let_type);
+                ast_expr_free(let_init);
+                goto cleanup_funcs_fail;
+            }
+            mod->top_level_lets = new_lets;
+            mod->top_level_lets[mod->num_top_level_lets].name = let_name;
+            mod->top_level_lets[mod->num_top_level_lets].type = let_type;
+            mod->top_level_lets[mod->num_top_level_lets].init = let_init;
+            mod->top_level_lets[mod->num_top_level_lets].is_const = 0;
+            mod->num_top_level_lets++;
+            continue;
+        }
+        /* 顶层 const：const IDENT : Type = expr ;，与 let 同级，可任意顺序 */
+        if (peek(&prs)->kind == TOKEN_CONST) {
+            if (mod->num_top_level_lets >= MAX_TOP_LEVEL_LETS) {
+                fail(&prs, "too many top-level const declarations");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_IDENT && peek(&prs)->kind != TOKEN_UNDERSCORE) {
+                fail(&prs, "expected identifier after const");
+                goto cleanup_funcs_fail;
+            }
+            char *const_name = (peek(&prs)->kind == TOKEN_UNDERSCORE) ? strdup("_") : ((peek(&prs)->ident_len > 0 && peek(&prs)->value.ident)
+                ? strndup(peek(&prs)->value.ident, (size_t)peek(&prs)->ident_len) : NULL);
+            if (!const_name) goto cleanup_funcs_fail;
+            advance(&prs);
+            if (peek(&prs)->kind != TOKEN_COLON) {
+                free(const_name);
+                fail(&prs, "expected ':' and type in top-level const");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTType *const_type = parse_type_name(&prs);
+            if (!const_type) {
+                free(const_name);
+                goto cleanup_funcs_fail;
+            }
+            if (peek(&prs)->kind != TOKEN_ASSIGN) {
+                free(const_name);
+                ast_type_free(const_type);
+                fail(&prs, "expected '=' in top-level const");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTExpr *const_init = parse_expr(&prs);
+            if (!const_init) {
+                free(const_name);
+                ast_type_free(const_type);
+                goto cleanup_funcs_fail;
+            }
+            if (peek(&prs)->kind != TOKEN_SEMICOLON) {
+                free(const_name);
+                ast_type_free(const_type);
+                ast_expr_free(const_init);
+                fail(&prs, "expected ';' after top-level const");
+                goto cleanup_funcs_fail;
+            }
+            advance(&prs);
+            ASTLetDecl *new_const_lets = (ASTLetDecl *)realloc(mod->top_level_lets, (size_t)(mod->num_top_level_lets + 1) * sizeof(ASTLetDecl));
+            if (!new_const_lets) {
+                free(const_name);
+                ast_type_free(const_type);
+                ast_expr_free(const_init);
+                goto cleanup_funcs_fail;
+            }
+            mod->top_level_lets = new_const_lets;
+            mod->top_level_lets[mod->num_top_level_lets].name = const_name;
+            mod->top_level_lets[mod->num_top_level_lets].type = const_type;
+            mod->top_level_lets[mod->num_top_level_lets].init = const_init;
+            mod->top_level_lets[mod->num_top_level_lets].is_const = 1;
+            mod->num_top_level_lets++;
+            continue;
+        }
         int allow_padding = 0;
         if (peek(&prs)->kind == TOKEN_IDENT && is_ident_str(&prs, "allow", 5)) {
             advance(&prs);
