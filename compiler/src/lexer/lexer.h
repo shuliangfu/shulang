@@ -7,8 +7,8 @@
  * 重要约定：源码字符串 source 在 lexer 使用期间不得被修改或释放；Token 的 value.ident 指向 source 内片段，调用方在消费 Token 前不得 free source。
  */
 
-#ifndef SHUC_LEXER_H
-#define SHUC_LEXER_H
+#ifndef SHU_LEXER_H
+#define SHU_LEXER_H
 
 #include "token.h"
 
@@ -45,4 +45,4 @@ void lexer_next(Lexer *l, Token *out);
  */
 void lexer_free(Lexer *l);
 
-#endif /* SHUC_LEXER_H */
+#endif /* SHU_LEXER_H */
