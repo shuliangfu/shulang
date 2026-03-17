@@ -4,7 +4,7 @@
 //
 // 为何仍保留少量 C 原语（见下方 extern）：
 // - driver_get_argv_i：argv 在 C 里是 char**，.su 只有 *u8，无法在 .su 里安全地「从 argv 取第 i 个指针」再读字符串，故必须由 C 提供。
-// - run_compiler_c：已迁 .su（本文件内桩实现 return 1）；C 在 SHUC_USE_SU_DRIVER 下不定义，由 driver_gen.c 的 run_compiler_c 包装转调 main_run_compiler_c。
+// - run_compiler_c：已迁 .su（本文件内桩实现 return 1）；C 在 SHU_USE_SU_DRIVER 下不定义，由 driver_gen.c 的 run_compiler_c 包装转调 main_run_compiler_c。
 // - run_compiler_su_path：简化路径（单文件、无 -o）已在 .su 实现（run_compiler_su_path_impl + driver_argv_parse_su_path）；复杂路径（-o/import）仍 extern C。
 // - pipeline_run_su_pipeline_impl：实现位于 pipeline.su→pipeline_gen.c，main.su 仅 extern 调用，无法迁入 .su。
 
@@ -12,6 +12,7 @@ import ast;
 import codegen;
 import preprocess;
 import std.fs;
+import lsp;
 
 /** -su -E 解析结果：路径与 -L 库根、是否用 asm 后端、目标架构，由 driver_argv_parse_su / driver_argv_parse_su_path 填充。 */
 struct DriverSuEmitState {
@@ -63,7 +64,7 @@ extern function pipeline_run_su_pipeline_impl(module: *u8, arena: *u8, source: *
 
 /** C 侧完整编译实现：解析 -o/-L/-O、读文件、pipeline、cc 生成可执行文件。供 r==1/r==2 时（如带 -o）从 .su 路径转调。 */
 extern function driver_run_compiler_full(argc: i32, argv: *u8): i32;
-/** 原 C 侧完整编译实现（-o/import 等复杂路径）；现转调 C 的 driver_run_compiler_full，使带 -o 的 shuc 能产出可执行文件。 */
+/** 原 C 侧完整编译实现（-o/import 等复杂路径）；现转调 C 的 driver_run_compiler_full，使带 -o 的 shu 能产出可执行文件。 */
 function run_compiler_c_impl(argc: i32, argv: *u8): i32 {
   return driver_run_compiler_full(argc, argv);
 }
@@ -122,6 +123,17 @@ function eq_asm(buf: *u8, len: i32): i32 {
     return 0;
   }
   if (buf[0] == 97 && buf[1] == 115 && buf[2] == 109) {
+    return 1;
+  }
+  return 0;
+}
+
+/** 比较 buf 与 "--lsp"（5 字节）；LSP 模式入口。 */
+function eq_minus_lsp(buf: *u8, len: i32): i32 {
+  if (len < 5) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 45 && buf[2] == 108 && buf[3] == 115 && buf[4] == 112) {
     return 1;
   }
   return 0;
@@ -396,7 +408,10 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
     use_macho_o: 0,
     use_coff_o: 0,
     current_block_ref: 0,
-    current_func_index: -1
+    current_func_index: -1,
+    dep_paths: [],
+    skip_codegen_dep_0: 0,
+    entry_already_parsed: 0
   };
   let last_slash: i32 = -1;
   k = 0;
@@ -492,8 +507,18 @@ function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
 /**
  * 程序入口：与 main.c 的 main() 对应；C 的 main() 仅做 return main_entry(argc, argv)。
  * 6.2：-su -E 的解析与执行全部在 .su；非 -su -E 时由 run_compiler_su_path_impl 优先走 .su 简化路径。
+ * LSP：若任一参数为 --lsp 则进入 LSP 主循环（lsp.lsp_main），不再走编译。
  */
 function entry(argc: i32, argv: *u8): i32 {
+  let arg_buf: [64]u8 = [];
+  let i: i32 = 1;
+  while (i < argc) {
+    let len: i32 = driver_get_argv_i(argc, argv, i, arg_buf, 64);
+    if (len >= 0 && eq_minus_lsp(arg_buf, len) != 0) {
+      return lsp_main();
+    }
+    i = i + 1;
+  }
   let state: DriverSuEmitState = DriverSuEmitState { path_buf: [], path_len: 0, n_lib_roots: 0, lib_root_bufs: [], lib_root_lens: [], use_asm_backend: 0, target_arch: 0, out_path_buf: [], out_path_len: 0 };
   if (driver_argv_parse_su(argc, argv, &state) != 0) {
     /* -su -E：走 C 的 driver_run_su_emit_c，支持多文件（deps+main）；.su 的 driver_run_su_emit_su 仅单文件无 import。 */
