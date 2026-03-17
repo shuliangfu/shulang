@@ -1,7 +1,7 @@
 # Shulang 编译器（compiler）构建
-# 【兜底/可选】日常构建请用 build_tool：cd compiler && ./build_tool ./shuc（见 analysis/完全脱离C与Makefile路线图.md 阶段 5）。
-# 本 Makefile 仅用于：从零构建时得到初始 shuc、build_tool，或执行 make test / bootstrap-verify 等目标。
-# 阶段 1：main.c + lexer，产出 shuc；阶段 8：可选 OPT=1 为 shuc 启用 -O2
+# 【兜底/可选】日常构建请用 build_tool：cd compiler && ./build_tool ./shu（见 analysis/完全脱离C与Makefile路线图.md 阶段 5）。
+# 本 Makefile 仅用于：从零构建时得到初始 shu、build_tool，或执行 make test / bootstrap-verify 等目标。
+# 阶段 1：main.c + lexer，产出 shu；阶段 8：可选 OPT=1 为 shu 启用 -O2
 #
 # 【生成 C 后无补丁】-E 产出 pipeline_gen.c / driver_gen.c 后不再做 sed/awk/perl/echo 后处理。
 # pipeline_gen.c：包装/size/debug 由 runtime.c 在 -E 且入口为 pipeline.su 时追加 pipeline_glue.c 到 stdout，Makefile 不修改生成文件。
@@ -12,16 +12,16 @@ CFLAGS  ?= -Wall -Wextra -I. -Iinclude -Isrc
 # 仅编译 pipeline_gen.c 时加：生成代码难以逐处改，静默已知警告类别，使 bootstrap-driver 整次 0 警告
 # -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-ignored-qualifiers 与 -Wno-discarded-qualifiers 同义，Clang 用前者；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
 PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-ignored-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
-# 阶段 8：make OPT=1 时为 shuc 启用 -O2，便于开发时快速运行测试
+# 阶段 8：make OPT=1 时为 shu 启用 -O2，便于开发时快速运行测试
 ifeq ($(OPT),1)
   CFLAGS += -O2
 endif
-TARGET  = shuc
+TARGET  = shu
 SRCS    = src/main.c src/runtime.c src/preprocess.c src/lexer/lexer.c src/ast/ast.c src/parser/parser.c src/typeck/typeck.c src/codegen/codegen.c
-OBJS    = src/main.o src/runtime.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
+OBJS    = src/main.o src/runtime.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o src/lsp/lsp_diag.o
 
-# C 仅版 shuc：无 main_su/pipeline_su，供 bootstrap-pipeline 用 -E 生成 pipeline_gen.c（避免用已链 main_su 的 $(TARGET) 导致走 .su 路径失败）
-SHUC_C = shuc-c
+# C 仅版 shu：无 main_su/pipeline_su，供 bootstrap-pipeline 用 -E 生成 pipeline_gen.c（避免用已链 main_su 的 $(TARGET) 导致走 .su 路径失败）
+SHU_C = shu-c
 .PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-driver-seed bootstrap-driver-asm bootstrap-driver-asm-only bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool first-time
 
 # 舒 IO 后端（分析/舒IO实现路线图.md 阶段 1）：源码在 std/io/io.c；产出 ../std/io/io.o。
@@ -141,7 +141,7 @@ compress-o-zlib: ../std/compress/compress.c
 ../std/tar/tar.o: ../std/tar/tar.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# 测试与 shuc 链接 std 时依赖的 .o：所有 std 模块 + runtime_panic.o；make test 前必须先有这些文件
+# 测试与 shu 链接 std 时依赖的 .o：所有 std 模块 + runtime_panic.o；make test 前必须先有这些文件
 STD_AND_PANIC_O = ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o ../std/random/random.o ../std/env/env.o ../std/sync/sync.o ../std/encoding/encoding.o ../std/base64/base64.o ../std/crypto/crypto.o ../std/log/log.o ../std/atomic/atomic.o ../std/channel/channel.o ../std/backtrace/backtrace.o ../std/hash/hash.o ../std/math/math.o ../std/sort/sort.o ../std/ffi/ffi.o ../std/json/json.o ../std/csv/csv.o ../std/regex/regex.o ../std/compress/compress.o ../std/unicode/unicode.o ../std/dynlib/dynlib.o ../std/http/http.o ../std/tar/tar.o ../std/test/test.o runtime_panic.o
 
 all: $(TARGET) $(STD_AND_PANIC_O)
@@ -149,7 +149,7 @@ all: $(TARGET) $(STD_AND_PANIC_O)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-$(SHUC_C): $(OBJS)
+$(SHU_C): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 src/main.o: src/main.c
@@ -159,10 +159,10 @@ src/main.o: src/main.c
 src/runtime.o: src/runtime.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 src/runtime_driver.o: src/runtime.c
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -c -o $@ $<
-# shuc_su 用：仅 -DSHUC_USE_SU_PIPELINE，提供 asm_codegen_ast、pipeline_parse_into_buf、main_entry（弱符号）等
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -c -o $@ $<
+# shu_su 用：仅 -DSHU_USE_SU_PIPELINE，提供 asm_codegen_ast、pipeline_parse_into_buf、main_entry（弱符号）等
 src/runtime_su.o: src/runtime.c
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_PIPELINE -c -o $@ $<
+	$(CC) $(CFLAGS) -DSHU_USE_SU_PIPELINE -c -o $@ $<
 
 src/preprocess.o: src/preprocess.c src/preprocess.h
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -182,9 +182,9 @@ src/typeck/typeck.o: src/typeck/typeck.c src/typeck/typeck.h include/ast.h
 src/codegen/codegen.o: src/codegen/codegen.c src/codegen/codegen.h include/ast.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# shuc_su 使用带 -DSHUC_USE_SU_PIPELINE 编译的 main，否则 #ifdef 块不会生效
+# shu_su 使用带 -DSHU_USE_SU_PIPELINE 编译的 main，否则 #ifdef 块不会生效
 src/main_su.o: src/main.c
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_PIPELINE -c -o $@ $<
+	$(CC) $(CFLAGS) -DSHU_USE_SU_PIPELINE -c -o $@ $<
 
 PIPELINE_OBJS = src/main_su.o src/runtime_su.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
@@ -204,7 +204,7 @@ runtime_panic.o: src/asm/runtime_panic.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 endif
 
-# 无 C 自举：crt0 提供 _start 与 driver_get_argv_i（仅 Linux x86_64）；链接 asm 版 shuc 时用本 .o 替代 main.o / runtime_asm_build.o
+# 无 C 自举：crt0 提供 _start 与 driver_get_argv_i（仅 Linux x86_64）；链接 asm 版 shu 时用本 .o 替代 main.o / runtime_asm_build.o
 ifeq ($(UNAME_S),Linux)
 src/asm/crt0_x86_64.o: src/asm/crt0_x86_64.s
 	$(CC) -c -o $@ $<
@@ -220,10 +220,10 @@ src/typeck/typeck_f64_bits.o: src/typeck/typeck_f64_bits.c
 endif
 
 clean:
-	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o ../std/random/random.o ../std/env/env.o ../std/sync/sync.o ../std/encoding/encoding.o ../std/base64/base64.o ../std/crypto/crypto.o ../std/log/log.o ../std/atomic/atomic.o ../std/channel/channel.o ../std/backtrace/backtrace.o ../std/hash/hash.o ../std/math/math.o ../std/sort/sort.o ../std/ffi/ffi.o ../std/json/json.o ../std/csv/csv.o ../std/regex/regex.o ../std/compress/compress.o ../std/unicode/unicode.o ../std/dynlib/dynlib.o ../std/http/http.o ../std/tar/tar.o ../std/test/test.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHUC_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o shuc_asm
+	rm -f $(OBJS) src/main_driver.o src/runtime_driver.o src/runtime_su.o src/main_su.o ../std/io/io.o ../std/fs/fs.o ../std/process/process.o ../std/string/string.o ../std/heap/heap.o ../std/runtime/runtime.o ../std/net/net.o ../std/thread/thread.o ../std/time/time.o ../std/random/random.o ../std/env/env.o ../std/sync/sync.o ../std/encoding/encoding.o ../std/base64/base64.o ../std/crypto/crypto.o ../std/log/log.o ../std/atomic/atomic.o ../std/channel/channel.o ../std/backtrace/backtrace.o ../std/hash/hash.o ../std/math/math.o ../std/sort/sort.o ../std/ffi/ffi.o ../std/json/json.o ../std/csv/csv.o ../std/regex/regex.o ../std/compress/compress.o ../std/unicode/unicode.o ../std/dynlib/dynlib.o ../std/http/http.o ../std/tar/tar.o ../std/test/test.o src/asm/runtime_asm_build.o src/asm/crt0_x86_64.o src/typeck/typeck_f64_bits.o $(TARGET) $(SHU_C) $(TARGET)_stage1 $(TARGET)_stage2 $(TARGET)_su $(TARGET)_su_stage2 typeck_gen.c typeck_su.o codegen_gen.c codegen_su.o parser_gen.c parser_su.o driver_gen.c driver_su.o pipeline_gen.c pipeline_su.o typeck_su_su.c typeck_su_su.o codegen_su_su.c codegen_su_su.o build_gen.c build_runner_gen.c build_runtime_su_gen.c build_tool.o build_runner.o build_runtime.o build_runtime_su.o build_tool runtime_panic.o shu_asm
 	rm -rf build_asm
 
-# 阶段 1 词法 + 阶段 3 类型检查 + …；依赖 shuc 与全部 std .o、runtime_panic.o，clean 后 test 会先构建再跑脚本
+# 阶段 1 词法 + 阶段 3 类型检查 + …；依赖 shu 与全部 std .o、runtime_panic.o，clean 后 test 会先构建再跑脚本
 test: $(TARGET) $(STD_AND_PANIC_O)
 	@if [ -f ../tests/run-lexer.sh ]; then (cd .. && ./tests/run-lexer.sh); fi
 	@if [ -f ../tests/run-typeck.sh ]; then (cd .. && chmod +x tests/run-typeck.sh && ./tests/run-typeck.sh); fi
@@ -281,27 +281,28 @@ test: $(TARGET) $(STD_AND_PANIC_O)
 	@if [ -f ../tests/run-io-driver.sh ]; then (cd .. && chmod +x tests/run-io-driver.sh && ./tests/run-io-driver.sh); fi
 	@if [ -f ../tests/run-ub.sh ]; then (cd .. && chmod +x tests/run-ub.sh && ./tests/run-ub.sh); fi
 	@if [ -f ../tests/run-abi-layout.sh ]; then (cd .. && chmod +x tests/run-abi-layout.sh && ./tests/run-abi-layout.sh); fi
+	@if [ -f ../tests/run-lsp.sh ]; then (cd .. && chmod +x tests/run-lsp.sh && ./tests/run-lsp.sh); fi
 
-# 自举 9.1：用 shuc 编译 token 模块（库）+ token_standalone.su（入口），验证 .su 前端数据定义可由宿主编译
+# 自举 9.1：用 shu 编译 token 模块（库）+ token_standalone.su（入口），验证 .su 前端数据定义可由宿主编译
 bootstrap-token: $(TARGET)
-	./$(TARGET) -L src/lexer src/lexer/token_standalone.su -o /tmp/shuc_token_test && /tmp/shuc_token_test && echo "bootstrap-token OK"
+	./$(TARGET) -L src/lexer src/lexer/token_standalone.su -o /tmp/shu_token_test && /tmp/shu_token_test && echo "bootstrap-token OK"
 
-# 自举 9.1：用 shuc 编译 lexer.su（入口，import token），验证多文件 + 跨模块 enum 可编译链接
+# 自举 9.1：用 shu 编译 lexer.su（入口，import token），验证多文件 + 跨模块 enum 可编译链接
 bootstrap-lexer: $(TARGET)
-	./$(TARGET) -L src/lexer src/lexer/lexer.su -o /tmp/shuc_lexer_test && /tmp/shuc_lexer_test && echo "bootstrap-lexer OK"
+	./$(TARGET) -L src/lexer src/lexer/lexer.su -o /tmp/shu_lexer_test && /tmp/shu_lexer_test && echo "bootstrap-lexer OK"
 
-# 自举 9.1：用 shuc 编译 parser.su（import lexer + token + ast + std.fs），解析 function main(): i32 { return 0; } 并验证；-L .. 供 std.fs，-L src/lexer 供 token，-L src/ast 供 ast
+# 自举 9.1：用 shu 编译 parser.su（import lexer + token + ast + std.fs），解析 function main(): i32 { return 0; } 并验证；-L .. 供 std.fs，-L src/lexer 供 token，-L src/ast 供 ast
 bootstrap-parser: $(TARGET)
-	rm -f /tmp/shu_parse_test.su && ./$(TARGET) -L .. -L src/lexer -L src/ast src/parser/parser.su -o /tmp/shuc_parser_test && /tmp/shuc_parser_test && echo "bootstrap-parser OK"
+	rm -f /tmp/shu_parse_test.su && ./$(TARGET) -L .. -L src/lexer -L src/ast src/parser/parser.su -o /tmp/shu_parser_test && /tmp/shu_parser_test && echo "bootstrap-parser OK"
 
-# 9.1 联调：.su 前端能处理示例 .su 并与 C 版结果一致；写示例（NUL 结尾）到 /tmp/shu_parse_test.su，跑 .su 解析器与 shuc 对比，二者均 parse OK 则通过
+# 9.1 联调：.su 前端能处理示例 .su 并与 C 版结果一致；写示例（NUL 结尾）到 /tmp/shu_parse_test.su，跑 .su 解析器与 shu 对比，二者均 parse OK 则通过
 bootstrap-parse-file: $(TARGET) bootstrap-parser
 	@printf 'function main(): i32 { return 0; }\0' > /tmp/shu_parse_test.su && \
-	/tmp/shuc_parser_test && echo "su parser: parse OK" && \
+	/tmp/shu_parser_test && echo "su parser: parse OK" && \
 	(out=$$(./$(TARGET) -L .. /tmp/shu_parse_test.su 2>&1); echo "$$out" | grep -q "parse OK") && echo "C parser: parse OK" && \
 	echo "bootstrap-parse-file OK"
 
-# 迁移到 .su：由 parser.su 生成 parser_gen.c 并编出 parser_su.o，供后续「仅链 .su 版 parser/typeck/codegen」使用（当前 pipeline_gen.c 已内联 .su 逻辑，此处先建产线）
+# 迁移到 .su：由 parser.su 生成 parser_gen.c 并编出 parser_su.o，供后续「仅链 .su 版 parser/typeck/codegen」使用（pipeline_gen.c 已内联 parser，bootstrap-driver-seed 不链 parser_su.o）。
 parser_gen.c: $(TARGET) src/parser/parser.su
 	./$(TARGET) -L .. -L src/lexer -L src/ast src/parser/parser.su -E > parser_gen.c
 	@echo "parser_gen.c: from parser.su"
@@ -317,76 +318,91 @@ typeck_su.o: $(TARGET) src/typeck/typeck.su
 codegen_su.o: $(TARGET) src/codegen/codegen.su
 	./$(TARGET) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck src/codegen/codegen.su -E > codegen_gen.c && $(CC) $(CFLAGS) -c codegen_gen.c -o codegen_su.o
 
-# 6.1：.su typeck 入口与 C AST 对接；用 C-only shuc 编译 typeck.su 生成 typeck_gen.c，再链接进 shuc，使 typeck 由 .su 入口转调 C
+# 6.1：.su typeck 入口与 C AST 对接；用 C-only shu 编译 typeck.su 生成 typeck_gen.c，再链接进 shu，使 typeck 由 .su 入口转调 C
 bootstrap-typeck: $(TARGET)
 	./$(TARGET) src/typeck/typeck.su -E > typeck_gen.c
 	$(CC) $(CFLAGS) -c typeck_gen.c -o typeck_su.o
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_TYPECK -o $(TARGET) $(OBJS) typeck_su.o
+	$(CC) $(CFLAGS) -DSHU_USE_SU_TYPECK -o $(TARGET) $(OBJS) typeck_su.o
 	@echo "bootstrap-typeck OK"
 
-# 6.2：.su codegen 入口与 C AST 对接；编译 typeck.su + codegen.su 生成 _gen.c，链接进 shuc，使 typeck 与 codegen 均由 .su 入口转调 C
+# 6.2：.su codegen 入口与 C AST 对接；编译 typeck.su + codegen.su 生成 _gen.c，链接进 shu，使 typeck 与 codegen 均由 .su 入口转调 C
 bootstrap-codegen: $(TARGET)
 	./$(TARGET) src/typeck/typeck.su -E > typeck_gen.c
 	./$(TARGET) src/codegen/codegen.su -E > codegen_gen.c
 	$(CC) $(CFLAGS) -c typeck_gen.c -o typeck_su.o
 	$(CC) $(CFLAGS) -c codegen_gen.c -o codegen_su.o
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_TYPECK -DSHUC_USE_SU_CODEGEN -o $(TARGET) $(OBJS) typeck_su.o codegen_su.o
+	$(CC) $(CFLAGS) -DSHU_USE_SU_TYPECK -DSHU_USE_SU_CODEGEN -o $(TARGET) $(OBJS) typeck_su.o codegen_su.o
 	@echo "bootstrap-codegen OK"
 
-# 6.3/6.4：入口在 main.su；链接时用 main_driver.o（带 SHUC_USE_SU_DRIVER/PIPELINE 以启用 -backend asm）+ runtime_driver.o + ...
+# 6.3/6.4：入口在 main.su；链接时用 main_driver.o（带 SHU_USE_SU_DRIVER/PIPELINE 以启用 -backend asm）+ runtime_driver.o + ...
 src/main_driver.o: src/main.c
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -c -o $@ $<
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -c -o $@ $<
 DRIVER_OBJS = src/main_driver.o src/runtime_driver.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
-# 6.3：.su 入口与 main.c 一一对应。bootstrap-driver-seed = 用 C 代码生成（生成 pipeline_gen.c / driver_gen.c）得到种子 shuc；仅首次或无 shuc 时需要。
-# bootstrap-driver-asm = 用现有 shuc 的 -backend asm 把全部 .su 编成机器码 .o 再链接，不生成 C；产出覆盖 $(TARGET)。
+# 6.3：.su 入口与 main.c 一一对应。bootstrap-driver-seed = 用 C 代码生成（生成 pipeline_gen.c / driver_gen.c）得到种子 shu；仅首次或无 shu 时需要。
+# bootstrap-driver-asm = 用现有 shu 的 -backend asm 把全部 .su 编成机器码 .o 再链接，不生成 C；产出覆盖 $(TARGET)。
 # bootstrap-driver = 先 seed 再 asm，最终 $(TARGET) 为 asm 版（直接出机器码，不依赖生成的 C 文件参与最终链接）。
 # 无补丁：driver_gen.c 仅由 -E -E-extern 生成；run_compiler_c 在 runtime.c 中定义并转调 main_run_compiler_c；其余从 main.su/codegen 根源修
-bootstrap-driver-seed: $(TARGET) $(SHUC_C) $(DRIVER_OBJS) pipeline_gen.c ../std/fs/fs.o
+# LSP 入口包装：driver 期望 lsp_lsp_main，lsp_gen.c 导出 typeck_lsp_main
+src/lsp/lsp_wrapper.o: src/lsp/lsp_wrapper.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+# LSP stdio：lsp_read_c/lsp_write_c，避免 lsp.su 依赖 std.fs 产生重复符号
+src/lsp/lsp_io.o: src/lsp/lsp_io.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+# LSP 诊断收集：parser 在 fail 时写入，lsp_build_diagnostics_response 跑 C parser 并生成 JSON 响应
+src/lsp/lsp_diag.o: src/lsp/lsp_diag.c src/lsp/lsp_diag.h
+	$(CC) $(CFLAGS) -I. -Iinclude -Isrc -c -o $@ $<
+
+# LSP 模块：main.su 依赖 lsp，需单独 -E 生成 lsp_gen.c；-L src/lsp 使 import lsp 解析为 src/lsp/lsp.su
+lsp_gen.c: $(TARGET) $(SHU_C)
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/lsp/lsp.su -E > lsp_gen.c
+
+bootstrap-driver-seed: $(TARGET) $(SHU_C) $(DRIVER_OBJS) pipeline_gen.c lsp_gen.c src/lsp/lsp_wrapper.o src/lsp/lsp_io.o src/lsp/lsp_diag.o ../std/fs/fs.o ../std/io/io.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
-	./$(SHUC_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c lsp_gen.c -o lsp_su.o
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o
-	@echo "bootstrap-driver-seed OK (shuc from generated C)"
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_OBJS) driver_su.o pipeline_su.o lsp_su.o src/lsp/lsp_wrapper.o src/lsp/lsp_io.o src/lsp/lsp_diag.o ../std/fs/fs.o ../std/io/io.o
+	@echo "bootstrap-driver-seed OK (shu from generated C)"
 
 # 用汇编后端直接出机器码：不生成 pipeline_gen.c/driver_gen.c，用 $(TARGET) -backend asm 编全部 .su → build_asm/*.o 再链接。
-# 依赖已有 $(TARGET)（由 bootstrap-driver-seed 或预构建产出）。若 asm 成功则产出 shuc_asm 并覆盖 $(TARGET)；否则保留 seed 并提示。
+# 依赖已有 $(TARGET)（由 bootstrap-driver-seed 或预构建产出）。若 asm 成功则产出 shu_asm 并覆盖 $(TARGET)；否则保留 seed 并提示。
 bootstrap-driver-asm: $(TARGET)
-	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
-	@if [ -f shuc_asm ]; then cp -f shuc_asm $(TARGET) && echo "bootstrap-driver-asm OK: $(TARGET) built from asm (no C gen)"; else echo "bootstrap-driver-asm: asm build skipped ($(TARGET) left as seed); run SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh for details."; fi
+	@SHU=./$(TARGET) ./scripts/build_shu_asm.sh
+	@if [ -f shu_asm ]; then cp -f shu_asm $(TARGET) && echo "bootstrap-driver-asm OK: $(TARGET) built from asm (no C gen)"; else echo "bootstrap-driver-asm: asm build skipped ($(TARGET) left as seed); run SHU=./$(TARGET) ./scripts/build_shu_asm.sh for details."; fi
 
 # 默认自举：仅走 asm，不生成任何 C 文件（不生成 pipeline_gen.c、driver_gen.c 等）。全部 .su 用 -backend asm 直接出机器码。
-# 要求已有可用的 $(TARGET)：首次请先 make bootstrap-driver-seed（会生成 C 一次得到种子 shuc），之后 make bootstrap-driver 即只出机器码。
-# 不把 $(TARGET) 列为依赖，避免 make 用 OBJS 构建出不含 pipeline/driver 的不完整 shuc。
+# 要求已有可用的 $(TARGET)：首次请先 make bootstrap-driver-seed（会生成 C 一次得到种子 shu），之后 make bootstrap-driver 即只出机器码。
+# 不把 $(TARGET) 列为依赖，避免 make 用 OBJS 构建出不含 pipeline/driver 的不完整 shu。
 bootstrap-driver:
-	@if [ ! -f $(TARGET) ]; then echo "No $(TARGET). Run 'make bootstrap-driver-seed' first (generates C once for seed shuc)."; exit 1; fi
-	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
-	@if [ -f shuc_asm ]; then cp -f shuc_asm $(TARGET) && echo "bootstrap-driver OK: $(TARGET) from asm, no C gen"; else echo "bootstrap-driver: asm build failed, $(TARGET) unchanged. Run SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh for errors."; exit 1; fi
+	@if [ ! -f $(TARGET) ]; then echo "No $(TARGET). Run 'make bootstrap-driver-seed' first (generates C once for seed shu)."; exit 1; fi
+	@SHU=./$(TARGET) ./scripts/build_shu_asm.sh
+	@if [ -f shu_asm ]; then cp -f shu_asm $(TARGET) && echo "bootstrap-driver OK: $(TARGET) from asm, no C gen"; else echo "bootstrap-driver: asm build failed, $(TARGET) unchanged. Run SHU=./$(TARGET) ./scripts/build_shu_asm.sh for errors."; exit 1; fi
 
 # 仅 asm、不生成 C（与 bootstrap-driver 同义，保留别名）
 bootstrap-driver-asm-only: bootstrap-driver
 
-# Goal 2（用 asm 后端构建 shuc）：构建最小 C 桩 + 可选执行 asm 自举脚本（需先 bootstrap-driver）
+# Goal 2（用 asm 后端构建 shu）：构建最小 C 桩 + 可选执行 asm 自举脚本（需先 bootstrap-driver）
 bootstrap-asm: $(TARGET) src/asm/runtime_asm_build.o src/runtime_driver.o
 	@echo "bootstrap-asm: runtime_asm_build.o + runtime_driver.o ready."
-	@echo "  Full asm build: SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh (requires bootstrap-driver first)"
+	@echo "  Full asm build: SHU=./$(TARGET) ./scripts/build_shu_asm.sh (requires bootstrap-driver first)"
 bootstrap-asm-full: bootstrap-driver bootstrap-asm
-	@SHUC=./$(TARGET) ./scripts/build_shuc_asm.sh
+	@SHU=./$(TARGET) ./scripts/build_shu_asm.sh
 
-# 6.4 验收：宿主编译器能编译整机 .su（typeck+codegen+driver）并产出新 shuc，且新 shuc 能编译运行测试（return-value 返回 42 视为成功）。用 seed 构建 shuc 以保证通过（asm 路径修好后可改为 bootstrap-driver）。
+# 6.4 验收：宿主编译器能编译整机 .su（typeck+codegen+driver）并产出新 shu，且新 shu 能编译运行测试（return-value 返回 42 视为成功）。用 seed 构建 shu 以保证通过（asm 路径修好后可改为 bootstrap-driver）。
 check-6.4: $(TARGET)
 	@$(MAKE) bootstrap-driver-seed && ./$(TARGET) ../tests/return-value/main.su -o /tmp/check64 && /tmp/check64; [ $$? -eq 42 ] && echo "check-6.4 OK"
 
-# 首次/从零构建：一条命令得到 shuc + build_tool（build-tool 依赖 $(TARGET) 会先产出 shuc）。与 README「读者一次做对」一致。
+# 首次/从零构建：一条命令得到 shu + build_tool（build-tool 依赖 $(TARGET) 会先产出 shu）。与 README「读者一次做对」一致。
 first-time: build-tool
 
-# 阶段 7：build.su 在仓库根目录，用 shuc 编成 build_tool（在 compiler 目录下），运行 build_tool 即完成一次编译器构建
+# 阶段 7：build.su 在仓库根目录，用 shu 编成 build_tool（在 compiler 目录下），运行 build_tool 即完成一次编译器构建
 build-tool: $(TARGET)
 	./$(TARGET) ../build.su -E > build_gen.c
 	$(CC) $(CFLAGS) -c build_gen.c -o build_tool.o
 	$(CC) $(CFLAGS) -c src/build_runtime.c -o build_runtime.o
 	$(CC) $(CFLAGS) -o build_tool build_tool.o build_runtime.o
-	@echo "build_tool OK（在 compiler 目录下运行 ./build_tool ./shuc 可产出 shuc）"
+	@echo "build_tool OK（在 compiler 目录下运行 ./build_tool ./shu 可产出 shu）"
 
 # build_tool 完全无 C（仅 Linux）：crt0 + build_runner.su + build.su + build_runtime_su.su，不再链接 build_runtime.c
 ifeq ($(UNAME_S),Linux)
@@ -398,55 +414,55 @@ build-tool-su: $(TARGET) src/asm/crt0_x86_64.o
 	./$(TARGET) ../build_runtime_su.su -E > build_runtime_su_gen.c
 	$(CC) $(CFLAGS) -ffreestanding -c build_runtime_su_gen.c -o build_runtime_su.o
 	$(CC) $(CFLAGS) -o build_tool src/asm/crt0_x86_64.o build_runner.o build_tool.o build_runtime_su.o -lc
-	@echo "build_tool OK (no C runtime; run ./build_tool ./shuc)"
+	@echo "build_tool OK (no C runtime; run ./build_tool ./shu)"
 endif
 
-# 运行 build_tool 产出 shuc（等价于 make bootstrap-driver，无需执行 Makefile bootstrap-driver 目标）
+# 运行 build_tool 产出 shu（等价于 make bootstrap-driver，无需执行 Makefile bootstrap-driver 目标）
 build-via-tool: build-tool
 	./build_tool ./$(TARGET)
-	@echo "build-via-tool OK（shuc 已由 build_tool 产出）"
+	@echo "build-via-tool OK（shu 已由 build_tool 产出）"
 
-# 阶段 8.1/8.2：bootstrap-driver 产出 shuc₁；用 shuc₁ 再编 pipeline + main.su 得到 shuc₂（与 6.3 链路一致：driver_su.o + pipeline_su.o）
+# 阶段 8.1/8.2：bootstrap-driver 产出 shu₁；用 shu₁ 再编 pipeline + main.su 得到 shu₂（与 6.3 链路一致：driver_su.o + pipeline_su.o）
 bootstrap-self: bootstrap-driver
 	@cp $(TARGET) $(TARGET)_stage1 && \
 	$(MAKE) -s pipeline_gen.c 2>/dev/null || true && \
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o && \
-	./$(TARGET) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c && \
+	./$(TARGET) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c && \
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o && \
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_DRIVER -DSHUC_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o && \
-	./$(TARGET)_stage2 -su -E ../tests/return-value/main.su > /tmp/out_self.c && $(CC) $(CFLAGS) -o /tmp/out_self /tmp/out_self.c -I. -Iinclude -Isrc && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shuc1 -> shuc2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o && \
+	./$(TARGET)_stage2 -su -E ../tests/return-value/main.su > /tmp/out_self.c && $(CC) $(CFLAGS) -o /tmp/out_self /tmp/out_self.c -I. -Iinclude -Isrc && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shu1 -> shu2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
-# 阶段 8.3：两代 shuc 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shuc_su
+# 阶段 8.3：两代 shu 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shu_su
 check-7.2: bootstrap-self
 	@ROOT=$$(pwd)/..; \
-	cp $(TARGET)_stage1 $(TARGET) && cd $$ROOT && SHUC=$$ROOT/compiler/$(TARGET)_stage1 ./tests/run-all.sh > /tmp/run_shuc1.log 2>&1; E1=$$?; \
-	cd $$ROOT/compiler && cp $(TARGET)_stage2 $(TARGET) && cd $$ROOT && SHUC=$$ROOT/compiler/$(TARGET)_stage2 ./tests/run-all.sh > /tmp/run_shuc2.log 2>&1; E2=$$?; \
-	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shuc generations passed full test suite)"; else echo "shuc1 exit=$$E1 shuc2 exit=$$E2"; exit 1; fi
+	cp $(TARGET)_stage1 $(TARGET) && cd $$ROOT && SHU=$$ROOT/compiler/$(TARGET)_stage1 ./tests/run-all.sh > /tmp/run_shu1.log 2>&1; E1=$$?; \
+	cd $$ROOT/compiler && cp $(TARGET)_stage2 $(TARGET) && cd $$ROOT && SHU=$$ROOT/compiler/$(TARGET)_stage2 ./tests/run-all.sh > /tmp/run_shu2.log 2>&1; E2=$$?; \
+	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shu generations passed full test suite)"; else echo "shu1 exit=$$E1 shu2 exit=$$E2"; exit 1; fi
 
 # 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。
-# 必须用 $(SHUC_C) 做 -E：C 解析器(parser.c) 会按源码顺序填充 stmt_order，codegen 按序输出；若用 $(TARGET) 走 .su 解析则 stmt_order 仅有 const+let 导致声明被提到函数首、顺序错乱。
-bootstrap-pipeline: $(SHUC_C)
-	./$(SHUC_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess src/pipeline/pipeline.su -E > pipeline_gen.c 2>/dev/null || true
+# 必须用 $(SHU_C) 做 -E：C 解析器(parser.c) 会按源码顺序填充 stmt_order，codegen 按序输出；若用 $(TARGET) 走 .su 解析则 stmt_order 仅有 const+let 导致声明被提到函数首、顺序错乱。
+bootstrap-pipeline: $(SHU_C)
+	./$(SHU_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess src/pipeline/pipeline.su -E > pipeline_gen.c 2>/dev/null || true
 	@echo "bootstrap-pipeline: pipeline_gen.c generated (if failed check parser/typeck/codegen/ast/lexer/preprocess and std.fs paths)"
 
 # pipeline_gen.c 由 bootstrap-pipeline 生成；-E 时 runtime.c 在入口为 pipeline.su 时自动追加 pipeline_glue.c 到 stdout，无 Makefile 补丁
 pipeline_gen.c: bootstrap-pipeline
 
-# 链接带 -su 流水线的 shuc（需 main_su.o 用 -DSHUC_USE_SU_PIPELINE 编译，否则 -su -E 不生效）
-shuc-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c
+# 链接带 -su 流水线的 shu（需 main_su.o 用 -DSHU_USE_SU_PIPELINE 编译，否则 -su -E 不生效）
+shu-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
 	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o
-	@echo "shuc_su built; use ./shuc_su -su -E <file.su> to test .su pipeline"
+	@echo "shu_su built; use ./shu_su -su -E <file.su> to test .su pipeline"
 
-# 4.5（.su 流水线编译 compiler 自身）：用 shuc_su 的 -su -E 生成 typeck.su / codegen.su 对应的 C，再由 cc 链接得到新的 shuc_su_stage2。
+# 4.5（.su 流水线编译 compiler 自身）：用 shu_su 的 -su -E 生成 typeck.su / codegen.su 对应的 C，再由 cc 链接得到新的 shu_su_stage2。
 # 这一目标的目的，是验证「完整前端（parse_into + typeck_su_ast + codegen_su_ast）」全部跑在 .su 上时，仍能产出能工作的编译器。
-bootstrap-su-compiler: shuc-su-pipeline
+bootstrap-su-compiler: shu-su-pipeline
 	./$(TARGET)_su -su -E src/typeck/typeck.su > typeck_su_su.c
 	./$(TARGET)_su -su -E src/codegen/codegen.su > codegen_su_su.c
 	$(CC) $(CFLAGS) -c typeck_su_su.c -o typeck_su_su.o
 	$(CC) $(CFLAGS) -c codegen_su_su.c -o codegen_su_su.o
-	$(CC) $(CFLAGS) -DSHUC_USE_SU_TYPECK -DSHUC_USE_SU_CODEGEN -o $(TARGET)_su_stage2 $(OBJS) typeck_su_su.o codegen_su_su.o
-	@echo "bootstrap-su-compiler OK (.su 流水线生成 typeck/codegen C 并链接 shuc_su_stage2)"
+	$(CC) $(CFLAGS) -DSHU_USE_SU_TYPECK -DSHU_USE_SU_CODEGEN -o $(TARGET)_su_stage2 $(OBJS) typeck_su_su.o codegen_su_su.o
+	@echo "bootstrap-su-compiler OK (.su 流水线生成 typeck/codegen C 并链接 shu_su_stage2)"
 
 # 7.3：自举验证通过（7.1+7.2 + 可选记录）。依赖 check-7.2，通过则视为自举验证通过
 bootstrap-verify: check-7.2
