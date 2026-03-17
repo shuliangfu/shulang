@@ -2079,7 +2079,7 @@ int RUN_CC_FUNC(int argc, char **argv) {
                 return 1;
             }
             target = argv[i + 1];
-            i += 2;
+            i++;  /* 只多跳 1：for 末尾还有 i++，会再跳过 triple，避免多跳把 <file.su> 也跳过导致 input_path 未设 */
         } else if (argv[i][0] == '-') {
             /* 未知选项（如 -backend 在未链 pipeline 的构建中）：提示而非当作输入文件 */
             if (strcmp(argv[i], "-backend") == 0) {
@@ -3501,7 +3501,8 @@ int driver_run_compiler_full(int argc, char **argv) {
         if (strcmp(argv[i], "-su") == 0) { continue; }
         if (strcmp(argv[i], "-target") == 0) {
             if (i + 1 >= argc) return 1;
-            i = i + 1;  /* 跳过 -target；下一轮 i++ 后为 triple，再下一轮才到 .su 文件；故再 +1 使下一轮直接到 .su */
+            i = i + 2;  /* 跳过 -target 与 triple */
+            i--;        /* 抵消 for 末尾的 i++，使下一轮处理 <file.su> 而非 -o */
             continue;
         }
         if (!input_path && argv[i][0] != '-') input_path = argv[i];
