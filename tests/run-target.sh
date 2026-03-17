@@ -11,7 +11,7 @@ case "$(uname -s)" in
     *)       triple="" ;;
 esac
 if [ -n "$triple" ]; then
-    ./compiler/shuc -target "$triple" examples/hello.su -o /tmp/shuc_target_hello 2>&1
-    /tmp/shuc_target_hello | grep -q "Hello World" || { echo "expected Hello World"; exit 1; }
+    ./compiler/shu -target "$triple" examples/hello.su -o /tmp/shu_target_hello 2>&1
+    /tmp/shu_target_hello | grep -q "Hello World" || { echo "expected Hello World"; exit 1; }
 fi
 echo "target test OK"
