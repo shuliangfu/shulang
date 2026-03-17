@@ -7,8 +7,8 @@
  * 重要约定：阶段 4 方案 B，入口模块生成 Hello World 的 printf 且 return 使用 main 体表达式的值（当前仅整数字面量）；库模块仅生成注释行（阶段 7.3）。阶段 8.1 DCE：可选传入 is_func_used/is_mono_used 仅生成被引用的函数与单态化实例。
  */
 
-#ifndef SHUC_CODEGEN_H
-#define SHUC_CODEGEN_H
+#ifndef SHU_CODEGEN_H
+#define SHU_CODEGEN_H
 
 #include <stdio.h>
 
@@ -64,4 +64,12 @@ void codegen_compute_used_types(struct ASTModule *entry, struct ASTModule **dep_
  */
 int codegen_emit_dep_types_only(struct ASTModule **mods, const char **import_paths, int n, FILE *out);
 
-#endif /* SHUC_CODEGEN_H */
+/**
+ * .su pipeline 用：在调用 pipeline_run_su_pipeline 前设置 dep 模块与路径，使 codegen 生成跨 dep 调用时使用正确 C 符号前缀（如 std_io_driver_）；调用后由 pipeline 或 driver 在适当时机清空。
+ */
+void codegen_set_dep_slots_for_su_pipeline(struct ASTModule **mods, const char **paths, int n);
+
+/** .su 用：path 为 "std.io.core" 时返回 1，codegen 不为其加前缀，生成 shu_io_register 等符号。 */
+int codegen_su_path_is_std_io_core(const char *path);
+
+#endif /* SHU_CODEGEN_H */
