@@ -81,9 +81,15 @@ compiler/su/
 compiler/*_gen.c
 compiler/**/*_gen.c
 compiler/std_fs_gen.c
-# 备份与临时
+# 生成 C 的快照/副本（与 *_gen.c 等价，构建时产出，不提交）
+compiler/*_gen_new.c
+# .su 自举时生成的中间 C（typeck_su_su.c, codegen_su_su.c）
+compiler/*_su_su.c
+# 备份与临时（含 .bak2, .bak3 等）
 compiler/*.new
 compiler/*.bak
+compiler/*.bak*
+compiler/**/*.bak*
 compiler/*.append
 # 调试与临时
 compiler/scripts/lldb_crash_bt.txt
