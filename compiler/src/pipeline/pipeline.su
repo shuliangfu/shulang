@@ -16,6 +16,10 @@ import asm;
 /** C 按需提供第 i 个依赖的 arena/module 缓冲（0≤i<32），pipeline 在解析 import 前取回并写入 ctx，避免 ctx.dep_arenas[i] 为空导致 ast_arena_init 写空指针。 */
 extern function driver_dep_arena_buf(i: i32): *u8;
 extern function driver_dep_module_buf(i: i32): *u8;
+/** 非 0 表示 dep i 已由 C 侧预填，跳过 read/parse 直接使用 driver 槽位。 */
+extern function driver_dep_seeded_get(i: i32): i32;
+/** 当前 dep 个数（与 ctx.ndep 同步，由 C 在 codegen 前设置）；循环中用 get_ndep() 从源头避免 build 对 while (j < ndep) 的补丁。 */
+extern function get_ndep(): i32;
 
 /** 阶段 6.1 完全自举：resolve、read、preprocess、parse 全在 .su；pipeline_parse_into_buf 调 parser.parse_into_buf，不再依赖 C。 */
 
@@ -172,12 +176,14 @@ function read_file_su(ctx: *PipelineDepCtx): i32 {
 }
 
 /**
- * 诊断用：仅调用 parse_one_function_into(lexer_init(), source)，返回 res.ok 的整型（1 成功，0 失败）。用 _into 避免 ABI 下 OneFuncResult 按值返回错误。
+ * 诊断用：仅调用 parse_one_function_impl(lexer_init(), source)，返回 res.ok 的整型（1 成功，0 失败）。
+ * arena 用于解析 let 时构建 init 表达式；调用方（如 C 诊断路径）传入临时 arena 即可。
  */
-function parse_one_function_ok(source: []u8): i32 {
+function parse_one_function_ok(source: []u8, arena: *ASTArena): i32 {
   let lex: Lexer = lexer_init();
   let empty64: [64]u8 = [];
   let empty32: [32]u8 = [];
+  let dummy_let_refs: [24]i32 = [];
   let dummy_pnames: [16][32]u8 = [empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32];
   let dummy_plens: [16]i32 = [];
   let dummy_const_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
@@ -186,8 +192,8 @@ function parse_one_function_ok(source: []u8): i32 {
   let dummy_let_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_let_lens: [24]i32 = [];
   let dummy_let_vals: [24]i32 = [];
-  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0 };
-  parser.parse_one_function_impl(&res, lex, source);
+  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0 };
+  parser.parse_one_function_impl(&res, arena, lex, source);
   if (res.ok) {
     return 1;
   }
@@ -219,6 +225,15 @@ function typeck_after_parse_ok(arena: *ASTArena, module: *Module, source: []u8, 
 extern function driver_diagnostic_parse_fail(main_idx: i32, num_funcs: i32, arena_num_types: i32): void;
 /** C 诊断：codegen 前打印 module.num_funcs、out_buf.len，便于排查 -su -E 多文件 dep 产出为空。由 runtime.c 实现。 */
 extern function driver_diagnostic_before_codegen(num_funcs: i32, out_len: i32): void;
+/** C 诊断：每个 dep codegen 后打印 j 与 out_buf.len，确认是否递增。由 runtime.c 实现。 */
+extern function driver_diagnostic_after_dep_codegen(j: i32, out_len: i32): void;
+extern function driver_diagnostic_codegen_fail(dep_index: i32, is_dep: i32): void;
+/** 非 0 时跳过 dep 0 的 codegen（-o 时 C 设，driver 由 io.o 提供）；用 extern 避免与 ctx 布局耦合。 */
+extern function driver_skip_codegen_dep_0_get(): i32;
+/** 诊断：解析 entry 后打印 module 的 main body_ref，便于排查 main 空体。由 pipeline_glue.c 实现。 */
+extern function driver_diagnostic_entry_module(module: *Module, arena: *ASTArena): void;
+/** 设置当前 codegen 的 dep 路径，供 codegen 生成 C 符号前缀（如 std_io_driver_）；传 0 表示清除。由 runtime.c 实现。 */
+extern function driver_set_current_dep_path_for_codegen(path: *u8): void;
 
 /**
  * 从源码到 C 的完整 .su 流水线；5.3/6.1 编排逻辑全在此处，dep 通过 ctx 传入，C 只提供 resolve/read/parse_into 原语。
@@ -226,47 +241,59 @@ extern function driver_diagnostic_before_codegen(num_funcs: i32, out_len: i32): 
  * 函数名 run_su_pipeline_impl 与 main.su extern 一致，避免 Makefile 对 -E 产出做重命名补丁。
  */
 function run_su_pipeline_impl(module: *Module, arena: *ASTArena, source: []u8, out_buf: *CodegenOutBuf, ctx: *PipelineDepCtx): i32 {
-  let r: ParseIntoResult = parse_into_with_init(arena, module, source);
-  if (r.ok != 0) {
-    driver_diagnostic_parse_fail(r.main_idx, module.num_funcs, arena.num_types);
-    return -2;
+  if (ctx.entry_already_parsed == 0) {
+    let r: ParseIntoResult = parse_into_with_init(arena, module, source);
+    if (r.ok != 0) {
+      driver_diagnostic_parse_fail(r.main_idx, module.num_funcs, arena.num_types);
+      return -2;
+    }
+    parse_into_set_main_index(module, r.main_idx);
   }
-  parse_into_set_main_index(module, r.main_idx);
+  driver_diagnostic_entry_module(module, arena);
   let n_imports: i32 = get_module_num_imports(module);
-  ctx.ndep = 0;
+  /* C 已填 ctx.ndep（如 driver_run_compiler_full 的 pctx.ndep）时不再用 n_imports 覆盖，保证 codegen 阶段遍历全部传递依赖。 */
+  if (ctx.ndep == 0) {
+    ctx.ndep = 0;
   if (n_imports > 0) {
     let i: i32 = 0;
     while (i < n_imports) {
       if (i >= 32) {
         return -1;
       }
-      let path_buf: [64]u8 = [];
-      get_module_import_path(module, i, path_buf);
-      let path_len: i32 = 0;
-      while (path_len < 64 && path_buf[path_len] != 0) {
-        path_len = path_len + 1;
-      }
-      if (resolve_path_su(ctx, path_buf, path_len) != 0) {
-        return -7;
-      }
-      if (read_file_su(ctx) != 0) {
-        return -8;
-      }
-      let out_len: i32 = preprocess_su_buf(ctx.loaded_buf, ctx.loaded_len, ctx.preprocess_buf, 262144);
-      if (out_len < 0) {
-        return -9;
-      }
-      ctx.preprocess_len = out_len;
-      ctx.dep_arenas[i] = (driver_dep_arena_buf(i)) as *ASTArena;
-      ctx.dep_modules[i] = (driver_dep_module_buf(i)) as *Module;
-      let dep_arena: *ASTArena = ctx.dep_arenas[i];
-      let dep_module: *Module = ctx.dep_modules[i];
-      if (pipeline_parse_into_buf(dep_arena, dep_module, ctx.preprocess_buf, ctx.preprocess_len) != 0) {
-        return -10;
+      if (driver_dep_seeded_get(i) != 0) {
+        /* C 侧已预填 dep i，直接使用 driver 槽位，不 resolve/read/parse。 */
+        ctx.dep_arenas[i] = (driver_dep_arena_buf(i)) as *ASTArena;
+        ctx.dep_modules[i] = (driver_dep_module_buf(i)) as *Module;
+      } else {
+        let path_buf: [64]u8 = [];
+        get_module_import_path(module, i, path_buf);
+        let path_len: i32 = 0;
+        while (path_len < 64 && path_buf[path_len] != 0) {
+          path_len = path_len + 1;
+        }
+        if (resolve_path_su(ctx, path_buf, path_len) != 0) {
+          return -7;
+        }
+        if (read_file_su(ctx) != 0) {
+          return -8;
+        }
+        let out_len: i32 = preprocess_su_buf(ctx.loaded_buf, ctx.loaded_len, ctx.preprocess_buf, 262144);
+        if (out_len < 0) {
+          return -9;
+        }
+        ctx.preprocess_len = out_len;
+        ctx.dep_arenas[i] = (driver_dep_arena_buf(i)) as *ASTArena;
+        ctx.dep_modules[i] = (driver_dep_module_buf(i)) as *Module;
+        let dep_arena: *ASTArena = ctx.dep_arenas[i];
+        let dep_module: *Module = ctx.dep_modules[i];
+        if (pipeline_parse_into_buf(dep_arena, dep_module, ctx.preprocess_buf, ctx.preprocess_len) != 0) {
+          return -10;
+        }
       }
       i = i + 1;
     }
     ctx.ndep = n_imports;
+  }
   }
   /* 失败时传播具体码：-5 库 typeck，-6 代码生成，便于诊断。 */
   if (module.main_func_index < 0) {
@@ -282,27 +309,44 @@ function run_su_pipeline_impl(module: *Module, arena: *ASTArena, source: []u8, o
   out_buf.len = 0;
   driver_diagnostic_before_codegen(module.num_funcs, out_buf.len);
   let j: i32 = 0;
-  while (j < ctx.ndep) {
+  while (j < get_ndep()) {
     if (j >= 32) {
       break;
     }
-    if (ctx.use_asm_backend != 0) {
-      if (asm.asm_codegen_ast(ctx.dep_modules[j], ctx.dep_arenas[j], out_buf, ctx) != 0) {
-        return -6;
-      }
-    } else {
-      if (codegen_su_ast(ctx.dep_modules[j], ctx.dep_arenas[j], out_buf) != 0) {
-        return -6;
+    if (j == 0 && driver_skip_codegen_dep_0_get() != 0) {
+      j = j + 1;
+      continue;
+    }
+    /* 仅对含函数的 dep 做代码生成，num_funcs==0 的库模块（如仅 extern/struct 的 std.io.core）跳过避免 codegen 返回 -1；设置当前 dep 路径供 codegen 加 C 符号前缀。 */
+    let dep_mod: *Module = ctx.dep_modules[j];
+    driver_set_current_dep_path_for_codegen(ctx.dep_paths[j]);
+    if (dep_mod.num_funcs > 0) {
+      if (ctx.use_asm_backend != 0) {
+        if (asm.asm_codegen_ast(dep_mod, ctx.dep_arenas[j], out_buf, ctx) != 0) {
+          driver_diagnostic_codegen_fail(j, 1);
+          return -6;
+        }
+      } else {
+        if (codegen_su_ast(dep_mod, ctx.dep_arenas[j], out_buf, ctx, j) != 0) {
+          driver_diagnostic_codegen_fail(j, 1);
+          return -6;
+        }
       }
     }
+    driver_diagnostic_after_dep_codegen(j, out_buf.len);
+    driver_set_current_dep_path_for_codegen(0 as *u8);
     j = j + 1;
   }
+  driver_diagnostic_entry_module(module, arena);
   if (ctx.use_asm_backend != 0) {
     if (asm.asm_codegen_ast(module, arena, out_buf, ctx) != 0) {
+      driver_diagnostic_codegen_fail(0, 0);
       return -6;
     }
   } else {
-    if (codegen_su_ast(module, arena, out_buf) != 0) {
+    let main_dep_index: i32 = -1;
+    if (codegen_su_ast(module, arena, out_buf, ctx, main_dep_index) != 0) {
+      driver_diagnostic_codegen_fail(0, 0);
       return -6;
     }
   }
