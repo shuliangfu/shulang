@@ -15,7 +15,7 @@
 
 ## 依赖
 
-- 实现：`std/heap/heap.c`，链接时需 `std/heap/heap.o`（shuc -o exe 时自动链入）。
+- 实现：`std/heap/heap.c`，链接时需 `std/heap/heap.o`（shu -o exe 时自动链入）。
 
 ## 约定
 
