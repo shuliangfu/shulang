@@ -1,0 +1,482 @@
+// lsp.su — LSP 协议层（路线 A：用 .su 写，内置于 shu）
+//
+// 职责：从 stdin 读 JSON-RPC（Content-Length + 正文），解析 method 并分发；向 stdout 写响应。
+// 已实现：initialize（含 capabilities）、initialized、textDocument/didOpen、didChange、didSave、
+// textDocument/diagnostics（parse+typeck 诊断与缓存）、definition（跳转定义）、references（查找引用）、hover（悬停类型）、shutdown、exit。
+// 高性能：仅在收到 diagnostics 请求时跑解析，不在 didChange 时跑。
+// 依赖：仅用 C 原语（lsp_io.c：read/write、文档提取、响应构建、InitializeResult），不 import std.fs，避免与 pipeline 重复链接 std。
+
+/** 单条消息 body 安全上限（64MB）；顶层 let 须在任意 extern/function 之前，供 C 解析器正确识别。 */
+let LSP_BODY_CAP: i32 = 67108864;
+
+/** C 原语：从 fd 读最多 count 字节到 buf；返回读入字节数，0=EOF，-1=错误。由 runtime 或 lsp_io.c 提供。 */
+extern function lsp_read_c(fd: i32, buf: *u8, count: usize): isize;
+/** 从 fd 读最多 count 字节到 buf[offset..]；避免 .su 端指针运算。返回读入字节数，0=EOF，-1=错误。 */
+extern function lsp_read_at(fd: i32, buf: *u8, offset: usize, count: usize): isize;
+/** 从 fd 读取一条 LSP 消息（缓冲读 Header+Body），body 写入 body_out，返回 body 长度；失败/EOF 返回 -1。减少 syscall。 */
+extern function lsp_read_message(fd: i32, body_out: *u8, body_cap: i32): isize;
+/** C 原语：向 fd 写 buf[0..count-1]；返回写入字节数，-1=错误。 */
+extern function lsp_write_c(fd: i32, buf: *u8, count: usize): isize;
+/** 从 didOpen/didChange 的 JSON body 中提取 "text" 字段到 out_buf，做 unescape；返回长度，失败 -1。 */
+extern function lsp_extract_document_text(body: *u8, body_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 构建 JSON-RPC 响应正文：{"jsonrpc":"2.0","id":<id_val>,"result":<result>}；result 由 result_ptr/result_len 指定；返回长度，失败 -1。 */
+extern function lsp_build_response_with_result(id_val: i32, result_ptr: *u8, result_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 构建 InitializeResult JSON（含 capabilities 与 serverInfo）；返回长度，失败 -1。 */
+extern function lsp_build_initialize_result(out_buf: *u8, out_cap: i32): i32;
+/** 对 source 跑 C parser 收集诊断，构建完整 JSON-RPC 响应（id + result: Diagnostic[]）；返回长度，失败 -1。高性能：仅此处跑解析。 */
+extern function lsp_build_diagnostics_response(id_val: i32, source: *u8, source_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 从 definition 请求 body 与当前文档构建 definition 响应（result: Location 或 null）；返回长度，失败 -1。 */
+extern function lsp_build_definition_response(id_val: i32, body: *u8, body_len: i32, doc_buf: *u8, doc_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 从 references 请求 body 与当前文档构建 references 响应（result: Location[]）；返回长度，失败 -1。 */
+extern function lsp_build_references_response(id_val: i32, body: *u8, body_len: i32, doc_buf: *u8, doc_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 从 hover 请求 body 与当前文档构建 hover 响应（result: Hover 或 null）；返回长度，失败 -1。 */
+extern function lsp_build_hover_response(id_val: i32, body: *u8, body_len: i32, doc_buf: *u8, doc_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 从 formatting 请求 body 与当前文档构建格式化响应（result: TextEdit[]）；返回长度，失败 -1。 */
+extern function lsp_build_formatting_response(id_val: i32, body: *u8, body_len: i32, doc_buf: *u8, doc_len: i32, out_buf: *u8, out_cap: i32): i32;
+/** 动态分配：按 size 字节分配，返回指针，失败返回“空”（用 lsp_is_null 判断）。 */
+extern function lsp_alloc(size: usize): *u8;
+/** 释放 lsp_alloc 得到的指针。 */
+extern function lsp_free(ptr: *u8): void;
+/** 判断指针是否为空（1=空，0=非空）。 */
+extern function lsp_is_null(ptr: *u8): i32;
+/** 从 didOpen/didChange 的 body 中提取文档并设为当前文档（内部堆分配，无固定上限）。 */
+extern function lsp_set_document_from_body(body: *u8, body_len: i32): void;
+/** 当前文档内容指针（只读，由 lsp_set_document_from_body 维护）。 */
+extern function lsp_get_document_ptr(): *u8;
+/** 当前文档字节长度。 */
+extern function lsp_get_document_len(): i32;
+
+/** 从 fd 读取一行（到 \n 或 \r\n），写入 line_buf[0..cap-1]，保证 NUL 结尾；返回写入长度（不含 NUL），EOF 返回 -1。 */
+function lsp_read_line(fd: i32, line_buf: *u8, cap: i32): i32 {
+  let i: i32 = 0;
+  while (i < cap - 1) {
+    let buf: [1]u8 = [];
+    let n: isize = lsp_read_c(fd, buf, 1);
+    if (n <= 0) {
+      if (i == 0) {
+        return -1;
+      }
+      break;
+    }
+    if (buf[0] == 10) {
+      break;
+    }
+    if (buf[0] != 13) {
+      line_buf[i] = buf[0];
+      i = i + 1;
+    }
+  }
+  line_buf[i] = 0;
+  return i;
+}
+
+/** 从 line 中解析 "Content-Length: 123"，返回 123；未找到或非法返回 -1。 */
+function lsp_parse_content_length(line: *u8, len: i32): i32 {
+  if (len < 16) {
+    return -1;
+  }
+  if (line[0] != 67 || line[1] != 111 || line[2] != 110 || line[3] != 116 || line[4] != 101 || line[5] != 110 || line[6] != 116 || line[7] != 45 || line[8] != 76 || line[9] != 101 || line[10] != 110 || line[11] != 103 || line[12] != 116 || line[13] != 104 || line[14] != 58 || line[15] != 32) {
+    return -1;
+  }
+  let val: i32 = 0;
+  let i: i32 = 16;
+  while (i < len) {
+    let c: u8 = line[i];
+    if (c >= 48 && c <= 57) {
+      val = val * 10 + (c as i32) - 48;
+      i = i + 1;
+    } else {
+      break;
+    }
+  }
+  return val;
+}
+
+/** 在 body[0..len-1] 中查找子串 "initialize"；找到返回 1 否则 0。 */
+function lsp_body_contains_initialize(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 10 <= len) {
+    if (body[i] == 105 && body[i + 1] == 110 && body[i + 2] == 105 && body[i + 3] == 116 && body[i + 4] == 105 && body[i + 5] == 97 && body[i + 6] == 108 && body[i + 7] == 105 && body[i + 8] == 122 && body[i + 9] == 101) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body[0..len-1] 中查找子串 "initialized"（11 字节）；握手后 Client 发的通知，无需响应。 */
+function lsp_body_contains_initialized(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 11 <= len) {
+    if (body[i] == 105 && body[i + 1] == 110 && body[i + 2] == 105 && body[i + 3] == 116 && body[i + 4] == 105 && body[i + 5] == 97 && body[i + 6] == 108 && body[i + 7] == 105 && body[i + 8] == 122 && body[i + 9] == 101 && body[i + 10] == 100) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body[0..len-1] 中查找子串 "shutdown"；找到返回 1 否则 0。 */
+function lsp_body_contains_shutdown(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 8 <= len) {
+    if (body[i] == 115 && body[i + 1] == 104 && body[i + 2] == 117 && body[i + 3] == 116 && body[i + 4] == 100 && body[i + 5] == 111 && body[i + 6] == 119 && body[i + 7] == 110) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body[0..len-1] 中查找子串 "textDocument/didOpen"；打开文件时 Client 发此通知。 */
+function lsp_body_contains_did_open(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 19 <= len) {
+    if (body[i] == 116 && body[i + 1] == 101 && body[i + 2] == 120 && body[i + 3] == 116 && body[i + 4] == 68 && body[i + 5] == 111 && body[i + 6] == 99 && body[i + 7] == 117 && body[i + 8] == 109 && body[i + 9] == 101 && body[i + 10] == 110 && body[i + 11] == 116 && body[i + 12] == 47 && body[i + 13] == 100 && body[i + 14] == 105 && body[i + 15] == 100 && body[i + 16] == 79 && body[i + 17] == 112 && body[i + 18] == 101 && body[i + 19] == 110) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body[0..len-1] 中查找子串 "textDocument/didChange"；编辑时 Client 发此通知。 */
+function lsp_body_contains_did_change(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 21 <= len) {
+    if (body[i] == 116 && body[i + 1] == 101 && body[i + 2] == 120 && body[i + 3] == 116 && body[i + 4] == 68 && body[i + 5] == 111 && body[i + 6] == 99 && body[i + 7] == 117 && body[i + 8] == 109 && body[i + 9] == 101 && body[i + 10] == 110 && body[i + 11] == 116 && body[i + 12] == 47 && body[i + 13] == 100 && body[i + 14] == 105 && body[i + 15] == 100 && body[i + 16] == 67 && body[i + 17] == 104 && body[i + 18] == 97 && body[i + 19] == 110 && body[i + 20] == 103 && body[i + 21] == 101) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/didSave"；保存时 Client 发此通知，不回复。 */
+function lsp_body_contains_did_save(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 19 <= len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 100 && body[i+14] == 105 && body[i+15] == 100 && body[i+16] == 83 && body[i+17] == 97 && body[i+18] == 118 && body[i+19] == 101) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/diagnostics"；Client 请求诊断，需按 id 回复 result: []。 */
+function lsp_body_contains_diagnostics(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 23 <= len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 100 && body[i+14] == 105 && body[i+15] == 97 && body[i+16] == 103 && body[i+17] == 110 && body[i+18] == 111 && body[i+19] == 115 && body[i+20] == 116 && body[i+21] == 105 && body[i+22] == 99 && body[i+23] == 115) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/definition"（23 字符）；转到定义请求，需按 id 回复 result。 */
+function lsp_body_contains_definition(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 22 < len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 100 && body[i+14] == 101 && body[i+15] == 102 && body[i+16] == 105 && body[i+17] == 110 && body[i+18] == 105 && body[i+19] == 116 && body[i+20] == 105 && body[i+21] == 111 && body[i+22] == 110) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/references"（24 字符）；查找引用请求。 */
+function lsp_body_contains_references(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 23 < len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 114 && body[i+14] == 101 && body[i+15] == 102 && body[i+16] == 101 && body[i+17] == 114 && body[i+18] == 101 && body[i+19] == 110 && body[i+20] == 99 && body[i+21] == 101 && body[i+22] == 115 && body[i+23] == 115) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/hover"；悬停请求。 */
+function lsp_body_contains_hover(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 17 <= len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 104 && body[i+14] == 111 && body[i+15] == 118 && body[i+16] == 101 && body[i+17] == 114) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body 中查找 "textDocument/formatting"；格式化文档请求。 */
+function lsp_body_contains_formatting(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 23 <= len) {
+    if (body[i] == 116 && body[i+1] == 101 && body[i+2] == 120 && body[i+3] == 116 && body[i+4] == 68 && body[i+5] == 111 && body[i+6] == 99 && body[i+7] == 117 && body[i+8] == 109 && body[i+9] == 101 && body[i+10] == 110 && body[i+11] == 116 && body[i+12] == 47 && body[i+13] == 102 && body[i+14] == 111 && body[i+15] == 114 && body[i+16] == 109 && body[i+17] == 97 && body[i+18] == 116 && body[i+19] == 116 && body[i+20] == 105 && body[i+21] == 110 && body[i+22] == 103) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 在 body[0..len-1] 中查找子串 "exit"；简单起见只查 "exit"。 */
+function lsp_body_contains_exit(body: *u8, len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 4 <= len) {
+    if (body[i] == 101 && body[i + 1] == 120 && body[i + 2] == 105 && body[i + 3] == 116) {
+      return 1;
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+
+/** 从 body 中提取请求 id（简单实现：找 "id": 后的数字）；未找到返回 -1。 */
+function lsp_parse_id(body: *u8, len: i32, id_buf: *u8, id_buf_len: i32): i32 {
+  let i: i32 = 0;
+  while (i + 6 <= len) {
+    if (body[i] == 34 && body[i + 1] == 105 && body[i + 2] == 100 && body[i + 3] == 34 && body[i + 4] == 58) {
+      i = i + 5;
+      while (i < len && (body[i] == 32 || body[i] == 9)) {
+        i = i + 1;
+      }
+      if (i >= len) {
+        return -1;
+      }
+      let val: i32 = 0;
+      let j: i32 = 0;
+      while (i < len && j < id_buf_len - 1) {
+        let c: u8 = body[i];
+        if (c >= 48 && c <= 57) {
+          val = val * 10 + (c as i32) - 48;
+          id_buf[j] = c;
+          j = j + 1;
+          i = i + 1;
+        } else {
+          break;
+        }
+      }
+      id_buf[j] = 0;
+      return val;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+/** 向 stdout（fd 1）发送 LSP 响应：Content-Length: <body_len>\r\n\r\n + body。 */
+function lsp_send_response(fd: i32, body: *u8, body_len: i32): i32 {
+  let header: [64]u8 = [];
+  header[0] = 67;
+  header[1] = 111;
+  header[2] = 110;
+  header[3] = 116;
+  header[4] = 101;
+  header[5] = 110;
+  header[6] = 116;
+  header[7] = 45;
+  header[8] = 76;
+  header[9] = 101;
+  header[10] = 110;
+  header[11] = 103;
+  header[12] = 116;
+  header[13] = 104;
+  header[14] = 58;
+  header[15] = 32;
+  let n: i32 = body_len;
+  let k: i32 = 16;
+  if (n == 0) {
+    header[k] = 48;
+    k = k + 1;
+  } else {
+    let digits: [12]i32 = [];
+    let d: i32 = 0;
+    let n2: i32 = n;
+    while (n2 > 0) {
+      digits[d] = n2 % 10;
+      n2 = n2 / 10;
+      d = d + 1;
+    }
+    let idx: i32 = d - 1;
+    while (idx >= 0) {
+      header[k] = (digits[idx] + 48) as u8;
+      k = k + 1;
+      idx = idx - 1;
+    }
+  }
+  header[k] = 13;
+  k = k + 1;
+  header[k] = 10;
+  k = k + 1;
+  header[k] = 13;
+  k = k + 1;
+  header[k] = 10;
+  k = k + 1;
+  let w: isize = lsp_write_c(fd, header, k as usize);
+  if (w < 0 || (w as i32) != k) {
+    return -1;
+  }
+  if (body_len > 0) {
+    let w2: isize = lsp_write_c(fd, body, body_len as usize);
+    if (w2 < 0 || (w2 as i32) != body_len) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/** LSP 主循环：从 stdin 读消息，根据 method 分发，向 stdout 写响应；收到 exit 后返回 0。body/doc 按需动态分配，无固定缓冲上限。 */
+function lsp_main(): i32 {
+  let stdin_fd: i32 = 0;
+  let stdout_fd: i32 = 1;
+  let line_buf: [256]u8 = [];
+  let out_buf: [4096]u8 = [];
+  let shutdown_requested: i32 = 0;
+  let id_buf: [32]u8 = [];
+  let diag_resp_buf: [32768]u8 = [];
+  let ref_resp_buf: [8192]u8 = [];
+  let format_resp_buf: [262144]u8 = [];
+  while (true) {
+    let body_ptr: *u8 = lsp_alloc(LSP_BODY_CAP as usize);
+    if (lsp_is_null(body_ptr) != 0) {
+      continue;
+    }
+    let msg_len: isize = lsp_read_message(stdin_fd, body_ptr, LSP_BODY_CAP);
+    if (msg_len < 0) {
+      lsp_free(body_ptr);
+      break;
+    }
+    if (msg_len == 0) {
+      lsp_free(body_ptr);
+      continue;
+    }
+    let content_len: i32 = msg_len as i32;
+    if (content_len > LSP_BODY_CAP) {
+      lsp_free(body_ptr);
+      continue;
+    }
+    /* 文档同步：didOpen / didChange 提取文档到 C 内部缓冲（堆，按需大小）。 */
+    if (lsp_body_contains_did_open(body_ptr, content_len) != 0) {
+      lsp_set_document_from_body(body_ptr, content_len);
+      lsp_free(body_ptr);
+      continue;
+    }
+    if (lsp_body_contains_did_change(body_ptr, content_len) != 0) {
+      lsp_set_document_from_body(body_ptr, content_len);
+      lsp_free(body_ptr);
+      continue;
+    }
+    if (lsp_body_contains_did_save(body_ptr, content_len) != 0) {
+      lsp_free(body_ptr);
+      continue;
+    }
+    if (lsp_body_contains_exit(body_ptr, content_len) != 0 && shutdown_requested != 0) {
+      lsp_free(body_ptr);
+      break;
+    }
+    if (lsp_body_contains_shutdown(body_ptr, content_len) != 0) {
+      shutdown_requested = 1;
+      let sid: i32 = lsp_parse_id(body_ptr, content_len, id_buf, 32);
+      if (sid < 0) { sid = 1; }
+      let null_val: [4]u8 = [110, 117, 108, 108];
+      let resp_len: i32 = lsp_build_response_with_result(sid, null_val, 4, out_buf, 4096);
+      if (resp_len > 0) {
+        lsp_send_response(stdout_fd, out_buf, resp_len);
+      }
+      lsp_free(body_ptr);
+      continue;
+    }
+    if (lsp_body_contains_initialized(body_ptr, content_len) != 0) {
+      lsp_free(body_ptr);
+      continue;
+    }
+    if (lsp_body_contains_initialize(body_ptr, content_len) != 0) {
+      let out_len: i32 = lsp_build_initialize_result(out_buf, 4096);
+      if (out_len > 0) {
+        lsp_send_response(stdout_fd, out_buf, out_len);
+      }
+      lsp_free(body_ptr);
+      continue;
+    }
+    /* 以下为带 id 的请求：解析 id 后按 id 回复 result；文档从 C 侧动态缓冲获取。 */
+    let req_id: i32 = lsp_parse_id(body_ptr, content_len, id_buf, 32);
+    let doc_ptr: *u8 = lsp_get_document_ptr();
+    let doc_len: i32 = lsp_get_document_len();
+    if (req_id >= 0) {
+      let empty_arr: [2]u8 = [91, 93];
+      let null_val: [4]u8 = [110, 117, 108, 108];
+      if (lsp_body_contains_diagnostics(body_ptr, content_len) != 0) {
+        let resp_len: i32 = lsp_build_diagnostics_response(req_id, doc_ptr, doc_len, diag_resp_buf, 32768);
+        if (resp_len > 0) {
+          lsp_send_response(stdout_fd, diag_resp_buf, resp_len);
+        } else {
+          let fallback_len: i32 = lsp_build_response_with_result(req_id, empty_arr, 2, out_buf, 4096);
+          if (fallback_len > 0) {
+            lsp_send_response(stdout_fd, out_buf, fallback_len);
+          }
+        }
+        lsp_free(body_ptr);
+        continue;
+      }
+      if (lsp_body_contains_definition(body_ptr, content_len) != 0) {
+        let resp_len: i32 = lsp_build_definition_response(req_id, body_ptr, content_len, doc_ptr, doc_len, out_buf, 4096);
+        if (resp_len > 0) {
+          lsp_send_response(stdout_fd, out_buf, resp_len);
+        } else {
+          let fallback_len: i32 = lsp_build_response_with_result(req_id, null_val, 4, out_buf, 4096);
+          if (fallback_len > 0) {
+            lsp_send_response(stdout_fd, out_buf, fallback_len);
+          }
+        }
+        lsp_free(body_ptr);
+        continue;
+      }
+      if (lsp_body_contains_references(body_ptr, content_len) != 0) {
+        let resp_len: i32 = lsp_build_references_response(req_id, body_ptr, content_len, doc_ptr, doc_len, ref_resp_buf, 8192);
+        if (resp_len > 0) {
+          lsp_send_response(stdout_fd, ref_resp_buf, resp_len);
+        } else {
+          let fallback_len: i32 = lsp_build_response_with_result(req_id, empty_arr, 2, out_buf, 4096);
+          if (fallback_len > 0) {
+            lsp_send_response(stdout_fd, out_buf, fallback_len);
+          }
+        }
+        lsp_free(body_ptr);
+        continue;
+      }
+      if (lsp_body_contains_hover(body_ptr, content_len) != 0) {
+        let resp_len: i32 = lsp_build_hover_response(req_id, body_ptr, content_len, doc_ptr, doc_len, out_buf, 4096);
+        if (resp_len > 0) {
+          lsp_send_response(stdout_fd, out_buf, resp_len);
+        } else {
+          let fallback_len: i32 = lsp_build_response_with_result(req_id, null_val, 4, out_buf, 4096);
+          if (fallback_len > 0) {
+            lsp_send_response(stdout_fd, out_buf, fallback_len);
+          }
+        }
+        lsp_free(body_ptr);
+        continue;
+      }
+      if (lsp_body_contains_formatting(body_ptr, content_len) != 0) {
+        let resp_len: i32 = lsp_build_formatting_response(req_id, body_ptr, content_len, doc_ptr, doc_len, format_resp_buf, 262144);
+        if (resp_len > 0) {
+          lsp_send_response(stdout_fd, format_resp_buf, resp_len);
+        } else {
+          let fallback_len: i32 = lsp_build_response_with_result(req_id, empty_arr, 2, out_buf, 4096);
+          if (fallback_len > 0) {
+            lsp_send_response(stdout_fd, out_buf, fallback_len);
+          }
+        }
+        lsp_free(body_ptr);
+        continue;
+      }
+    }
+    lsp_free(body_ptr);
+  }
+  return 0;
+}
