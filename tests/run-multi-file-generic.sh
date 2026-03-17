@@ -4,9 +4,9 @@ set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
-./compiler/shuc tests/multi-file-generic/main.su -o /tmp/shuc_multi_file_gen 2>&1
+./compiler/shu tests/multi-file-generic/main.su -o /tmp/shu_multi_file_gen 2>&1
 exitcode=0
-/tmp/shuc_multi_file_gen >/dev/null 2>&1 || exitcode=$?
+/tmp/shu_multi_file_gen >/dev/null 2>&1 || exitcode=$?
 if [ "$exitcode" -ne 42 ]; then
     echo "expected exit code 42 (id<i32>(42) from foo), got $exitcode"
     exit 1
