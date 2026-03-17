@@ -2,9 +2,9 @@
 set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
-SHUC="${SHUC:-./compiler/shuc}"
-exe="/tmp/shuc_crypto_$$"
-if ! $SHUC -L . tests/crypto/main.su -o "$exe" 2>&1; then echo "crypto test: compile failed"; rm -f "$exe"; exit 1; fi
+SHU="${SHU:-./compiler/shu}"
+exe="/tmp/shu_crypto_$$"
+if ! $SHU -L . tests/crypto/main.su -o "$exe" 2>&1; then echo "crypto test: compile failed"; rm -f "$exe"; exit 1; fi
 exitcode=0; $exe 2>/dev/null || exitcode=$?
 rm -f "$exe"
 if [ "$exitcode" -ne 0 ]; then echo "crypto test: expected exit 0, got $exitcode"; exit 1; fi
