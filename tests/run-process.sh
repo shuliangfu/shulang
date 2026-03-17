@@ -14,40 +14,40 @@
 #   8b. zerocopy.su — getcwd_ptr/getcwd_cached_len、self_exe_path_ptr/self_exe_path_cached_len 零拷贝
 #   9. spawn_wait.su — spawn_simple("/bin/true")、waitpid(pid)==0（Windows 无此路径则 SKIP；Alpine 仅有 /bin/true）
 #  10. exec_fail.su — exec_simple("/nonexistent") 返回 -1
-# 【运行方式】在仓库根目录执行 ./tests/run-process.sh；可选环境变量 SHUC 指定编译器路径。
-# 【约定】编译使用 compiler/shuc -L .；失败时打印用例名与原因并 exit 1；spawn_wait 在 Windows 上失败时仅打印 SKIP 不失败整脚本。
+# 【运行方式】在仓库根目录执行 ./tests/run-process.sh；可选环境变量 SHU 指定编译器路径。
+# 【约定】编译使用 compiler/shu -L .；失败时打印用例名与原因并 exit 1；spawn_wait 在 Windows 上失败时仅打印 SKIP 不失败整脚本。
 #
 set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
-SHUC="${SHUC:-./compiler/shuc}"
+SHU="${SHU:-./compiler/shu}"
 run_one() {
   local name="$1"
   local src="$2"
-  local exe="/tmp/shuc_process_$$_${name}"
-  if ! $SHUC -L . "$src" -o "$exe" 2>&1; then
+  local exe="/tmp/shu_process_$$_${name}"
+  if ! $SHU -L . "$src" -o "$exe" 2>&1; then
     echo "process test $name: compile failed"
     return 1
   fi
   local exitcode=0
-  $exe >/dev/null 2>/tmp/shuc_process_err || exitcode=$?
+  $exe >/dev/null 2>/tmp/shu_process_err || exitcode=$?
   if [ "$exitcode" -ne 0 ]; then
     echo "process test $name: expected exit 0, got $exitcode"
     echo "--- $name stderr (diagnostic) ---"
-    cat /tmp/shuc_process_err 2>/dev/null || true
-    rm -f "$exe" /tmp/shuc_process_err
+    cat /tmp/shu_process_err 2>/dev/null || true
+    rm -f "$exe" /tmp/shu_process_err
     return 1
   fi
-  rm -f "$exe" /tmp/shuc_process_err
+  rm -f "$exe" /tmp/shu_process_err
   return 0
 }
 
 # 1. exit(99)
-$SHUC -L . tests/process/main.su -o /tmp/shuc_process_exit 2>&1
-exitcode=0; /tmp/shuc_process_exit >/dev/null 2>&1 || exitcode=$?
+$SHU -L . tests/process/main.su -o /tmp/shu_process_exit 2>&1
+exitcode=0; /tmp/shu_process_exit >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 99 ] && { echo "process test exit: expected 99, got $exitcode"; exit 1; }
-rm -f /tmp/shuc_process_exit
+rm -f /tmp/shu_process_exit
 
 # 2. args_count、arg(0)、getenv("PATH")
 run_one "args" "tests/process/args.su" || exit 1
@@ -87,4 +87,4 @@ fi
 run_one "exec_fail" "tests/process/exec_fail.su" || exit 1
 
 echo "process test OK (all)"
-rm -f /tmp/shuc_process_$$_*
+rm -f /tmp/shu_process_$$_*
