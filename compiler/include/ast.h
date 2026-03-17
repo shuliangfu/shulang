@@ -14,8 +14,8 @@
  *   - name/return_type 等字符串由 Parser 侧 strdup，由 ast_module_free 统一释放，调用方不得单独 free。
  */
 
-#ifndef SHUC_AST_H
-#define SHUC_AST_H
+#ifndef SHU_AST_H
+#define SHU_AST_H
 
 /** 类型节点种类：内建整数/布尔、用户自定义名、指针等；与 analysis/变量类型与类型系统设计.md §2–§5、§六 一致 */
 typedef enum ASTTypeKind {
@@ -251,11 +251,12 @@ typedef struct ASTConstDecl {
     struct ASTExpr *init;
 } ASTConstDecl;
 
-/** 变量声明：名称、类型、初始化表达式 */
+/** 变量声明：名称、类型、初始化表达式；顶层时 is_const 区分 const/let */
 typedef struct ASTLetDecl {
     const char *name;
     struct ASTType *type;   /**< 如 i32/bool/u8 等，或用户自定义类型名 */
     struct ASTExpr *init;
+    int is_const;           /**< 仅顶层有效：1=const，0=let；块内 const 用 ASTBlock::const_decls */
 } ASTLetDecl;
 
 /** 单条 while 循环：条件 + 体块（体块内无嵌套 while） */
@@ -314,6 +315,8 @@ typedef struct ASTParam {
 
 /** 函数节点：name、参数列表、返回类型、体为块（含 const/let + 最终表达式）。阶段 7.1 支持泛型 function name<T>(...) { ... }。 */
 typedef struct ASTFunc {
+    int line;   /**< 函数名所在行（1-based），LSP 用；0 表示未知 */
+    int col;    /**< 函数名所在列（1-based），LSP 用；0 表示未知 */
     const char *name;
     char **generic_param_names; /**< 泛型类型参数名数组（strdup），可为 NULL 表示非泛型；由 ast_module_free 释放 */
     int num_generic_params;     /**< 泛型参数个数，0 表示非泛型 */
@@ -464,4 +467,4 @@ void ast_expr_free(ASTExpr *e);
  */
 void ast_type_free(ASTType *t);
 
-#endif /* SHUC_AST_H */
+#endif /* SHU_AST_H */
