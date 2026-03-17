@@ -11,8 +11,7 @@
  * 标准库 std.process，依赖 core 无；与 std/process/mod.su 同目录，mod.su 为对外 API 层，本文件为平台实现层。
  *
  * 【与其它文件的关系】
- * - 被依赖：compiler 在用户使用「-o exe」且程序 import std.process 时，将本文件编译产出的 process.o 链入可执行文件；
- *   runtime.c 中 std_process_stub_c 仅声明本文件符号，不提供实现。
+ * - 被依赖：compiler 在用户使用「-o exe」且程序 import std.process 时，将本文件编译产出的 process.o 链入可执行文件。
  * - 依赖：无项目内头文件；依赖系统 C 库（stdlib、string、unistd/sys/wait 或 Windows API）。
  * - 与 codegen：codegen 对入口 main 生成「写 shulang_process_argc/argv」的代码，本文件定义该全局供 args_count_c/arg_c 读取。
  *
