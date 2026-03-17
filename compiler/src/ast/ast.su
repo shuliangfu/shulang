@@ -299,6 +299,12 @@ allow(padding) struct PipelineDepCtx {
   current_block_ref: i32;
   /** typeck 用：当前检查的函数在 module.funcs 中的下标，供 EXPR_VAR 查形参填 resolved_type_ref。-1 表示未在函数内。 */
   current_func_index: i32;
+  /** 每个 dep 的 import 路径（如 "std.io.driver"），供 codegen 时设置 C 符号前缀，与 dep_modules 一一对应。 */
+  dep_paths: [32]*u8;
+  /** 非 0 时跳过 dep 0 的 codegen（-o 时设，driver 由 io.o 提供，避免重复符号） */
+  skip_codegen_dep_0: i32;
+  /** 非 0 时 entry 已由 C 侧 parser_parse_into 解析，pipeline 跳过 parse 直接 typeck+codegen，避免二次解析导致 main body_ref 丢失。 */
+  entry_already_parsed: i32;
 }
 
 /** 池下标空值：所有 ref 字段用 0 表示“无” */
