@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # 全量回归套件：运行所有 run-*.sh（与 compiler/Makefile 的 test 目标一致）。
 # 自举测试不跑：run-su-pipeline、run-su-multi-file、run-asm、run-without-c、run-bootstrap-verify 均不执行。
-# 入口：./tests/run-all.sh；C 版编译器由 make -C compiler 产出（不设 SHUC 时用 compiler/shuc）。
+# 入口：./tests/run-all.sh；C 版编译器由 make -C compiler 产出（不设 SHU 时用 compiler/shu）。
 
 set -e
 cd "$(dirname "$0")/.."
-if [ -n "$SHUC" ]; then
-    [ -f compiler/shuc ] && mv compiler/shuc compiler/shuc.bak
-    cp "$SHUC" compiler/shuc
-    trap '[ -f compiler/shuc.bak ] && mv compiler/shuc.bak compiler/shuc' EXIT
+if [ -n "$SHU" ]; then
+    [ -f compiler/shu ] && mv compiler/shu compiler/shu.bak
+    cp "$SHU" compiler/shu
+    trap '[ -f compiler/shu.bak ] && mv compiler/shu.bak compiler/shu' EXIT
 else
-    # 无 SHUC 时构建 compiler：显式目标 all，否则 make 默认只构建 Makefile 第一个目标（io.o）。
+    # 无 SHU 时构建 compiler：显式目标 all，否则 make 默认只构建 Makefile 第一个目标（io.o）。
     make -C compiler -q all 2>/dev/null || make -C compiler all
 fi
 
-# 无 shuc 则直接失败，避免整次跑完仍打印 all tests OK
-if [ ! -f compiler/shuc ] || [ ! -x compiler/shuc ]; then
-    echo "run-all.sh: compiler/shuc not found or not executable (run 'make -C compiler' first)." >&2
+# 无 shu 则直接失败，避免整次跑完仍打印 all tests OK
+if [ ! -f compiler/shu ] || [ ! -x compiler/shu ]; then
+    echo "run-all.sh: compiler/shu not found or not executable (run 'make -C compiler' first)." >&2
     exit 127
 fi
 
