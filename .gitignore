@@ -2,10 +2,10 @@
 analysis/
 
 # --- 构建产物 ---
-# 可执行文件（编译器 shuc / shuc_su / shuc-c 等）
-shuc
-shuc_su
-shuc-c
+# 可执行文件（编译器 shu / shu_su / shu-c 等）
+shu
+shu_su
+shu-c
 su
 *.exe
 *.out
@@ -49,6 +49,8 @@ vendor/
 third_party/
 deps/
 .pkg/
+# Node（VSCode 扩展 editors/vscode 等）
+node_modules/
 
 # --- 开发环境 ---
 # IDE
@@ -68,8 +70,8 @@ Thumbs.db
 *.log
 
 # --- compiler 目录：构建产物与生成文件（不提交） ---
-# 可执行文件（根已有 shuc/shuc-c，此处补 compiler 下特有）
-compiler/shuc_driver
+# 可执行文件（根已有 shu/shu-c，此处补 compiler 下特有）
+compiler/shu_driver
 compiler/build_tool
 # 构建目录
 compiler/build_asm/
