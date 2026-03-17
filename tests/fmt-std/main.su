@@ -1,5 +1,5 @@
 // 测试 std.fmt：重导出 core.fmt、print/println、format_2_i32_i32
-// 【运行方式】bash tests/run-fmt-std.sh 或 shuc -L . tests/fmt-std/main.su -o /tmp/fmt_std_main && /tmp/fmt_std_main
+// 【运行方式】bash tests/run-fmt-std.sh 或 shu -L . tests/fmt-std/main.su -o /tmp/fmt_std_main && /tmp/fmt_std_main
 import std.fmt;
 
 function main(): i32 {
