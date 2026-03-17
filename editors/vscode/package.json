@@ -1,0 +1,67 @@
+{
+  "name": "vscode-shulang",
+  "displayName": "Shulang Language",
+  "description": "Shulang (.su) 语法高亮、语言配置与 LSP（诊断、跳转定义、查找引用、悬停、文档格式化）",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "shulang",
+  "icon": "icon.png",
+  "main": "./out/extension.js",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shuliangfu/shulang"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "su",
+        "extensions": [".su"],
+        "aliases": ["Shulang", "su"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/su.png",
+          "dark": "./icons/su.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "su",
+        "scopeName": "source.su",
+        "path": "./grammars/su.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Shulang",
+      "properties": {
+        "shulang.serverPath": {
+          "type": "string",
+          "default": "shu",
+          "description": "Shulang 编译器（shu）可执行文件路径，用于 LSP（诊断、跳转定义、查找引用、格式化）。若 shu 已在 PATH 中可填 shu；否则填绝对路径或相对工作区路径。"
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[su]": {
+        "editor.defaultFormatter": "shulang.vscode-shulang",
+        "editor.formatOnSave": false
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^5.0.0"
+  }
+}

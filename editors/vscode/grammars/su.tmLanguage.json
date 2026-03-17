@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Shulang",
+  "scopeName": "source.su",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#literals" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.su",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.line.number-sign.su",
+          "match": "#.*$"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "name": "comment.block.su"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.su",
+          "patterns": [
+            {
+              "name": "constant.character.escape.su",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.su",
+          "match": "\\b(function|let|const|if|else|while|for|return|break|continue|loop|match|defer|goto|panic|import|struct|enum|trait|impl|extern|self|as)\\b"
+        },
+        {
+          "name": "keyword.other.su",
+          "match": "\\b(packed)\\b"
+        },
+        {
+          "name": "keyword.control.su",
+          "match": "\\b_\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.su",
+          "match": "\\b(i32|i64|u8|u32|u64|usize|isize|bool|f32|f64|void)\\b"
+        },
+        {
+          "name": "support.type.vector.su",
+          "match": "\\b(i32x4|i32x8|i32x16|u32x4|u32x8|u32x16)\\b"
+        }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        {
+          "name": "constant.language.su",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.numeric.integer.su",
+          "match": "\\b(0[xX][0-9a-fA-F]([0-9a-fA-F]_?)*|0[oO][0-7]([0-7]_?)*|0[bB][01]([01]_?)*|[0-9]([0-9]_?)*)([uU]?[iI]?(8|16|32|64|size))?\\b"
+        },
+        {
+          "name": "constant.numeric.float.su",
+          "match": "\\b[0-9]([0-9]_?)*\\.([0-9]([0-9]_?)*)?([eE][+-]?[0-9]([0-9]_?)*)?[fF]?\\b|\\b[0-9]([0-9]_?)*[eE][+-]?[0-9]([0-9]_?)*[fF]?\\b|\\.([0-9]([0-9]_?)*)([eE][+-]?[0-9]([0-9]_?)*)?[fF]?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.su",
+          "match": "=>|->|==|!=|<=|>=|<<|>>|&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.su",
+          "match": "[+\\-*/%&|^!~?:=<>.;,\\[\\]{}()]"
+        }
+      ]
+    }
+  }
+}

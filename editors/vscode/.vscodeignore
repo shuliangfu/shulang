@@ -1,0 +1,9 @@
+# 打包 vsix 时排除，仅保留扩展运行所需文件
+README.md
+*.md
+.git*
+.vscode/**
+node_modules/**
+src/**
+tsconfig.json
+*.ts

@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "file-su": {
+      "iconPath": "./su.png"
+    }
+  },
+  "fileExtensions": {
+    "su": "file-su"
+  }
+}
