@@ -7,9 +7,9 @@ set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
-SHUC="${SHUC:-./compiler/shuc}"
-exe="/tmp/shuc_fmt_std_$$_main"
-if ! $SHUC -L . tests/fmt-std/main.su -o "$exe" 2>&1; then
+SHU="${SHU:-./compiler/shu}"
+exe="/tmp/shu_fmt_std_$$_main"
+if ! $SHU -L . tests/fmt-std/main.su -o "$exe" 2>&1; then
   echo "fmt-std test: compile failed"
   rm -f "$exe"
   exit 1
