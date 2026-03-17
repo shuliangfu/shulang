@@ -17,9 +17,9 @@
 
 | 状态 | 项 | 验收 |
 |------|----|------|
-| ⬜ | std.time：最小 API（单调时间、墙上时钟、sleep_ms） | 有模块、测试、文档，按需链接 |
-| ⬜ | std.random：最小 API（fill_bytes、u32） | 有模块、测试、文档，按需链接 |
-| ⬜ | std.env（或扩 std.process）：getenv 等独立/扩展 | 与现有 process 不重复，文档清晰 |
+| ✅ | std.time：最小 API（单调时间、墙上时钟、sleep_ms） | 已有 mod.su、time.c、README、run-time.sh，按需链接 |
+| ✅ | std.random：最小 API（fill_bytes、u32） | 已有 mod.su、random.c、README、run-random.sh，按需链接 |
+| ✅ | std.env（或扩 std.process）：getenv 等独立/扩展 | 已有 mod.su、env.c、README、run-env.sh，与 process 独立，文档清晰 |
 
 ---
 
