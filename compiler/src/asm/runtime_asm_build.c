@@ -1,5 +1,5 @@
 /**
- * runtime_asm_build.c — Goal 2 用 asm 后端构建 shuc 时的最小 C 桩
+ * runtime_asm_build.c — Goal 2 用 asm 后端构建 shu 时的最小 C 桩
  *
  * 仅提供 main()，转调 main.su 编译为 asm/.o 后的入口符号 entry。
  * 与 main.c 等价：main.c 调 main_entry（来自 -E 展开的 driver_gen.c），
