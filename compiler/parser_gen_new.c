@@ -1,1 +1,1 @@
-(eval):1: no such file or directory: ./shuc
+(eval):1: no such file or directory: ./shu
