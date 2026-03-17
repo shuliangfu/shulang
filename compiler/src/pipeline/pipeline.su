@@ -108,6 +108,39 @@ function resolve_path_su(ctx: *PipelineDepCtx, import_path: [64]u8, path_len: i3
           return 0;
         }
       }
+      /* 单段 import（如 preprocess）：尝试 lib_root/import/import.su（如 src/preprocess/preprocess.su 当 lib_root=src） */
+      if (path_len > 0 && path_len < 64) {
+        let has_dot: i32 = 0;
+        let k: i32 = 0;
+        while (k < path_len) { if (import_path[k] == 46) { has_dot = 1; } k = k + 1; }
+        if (has_dot == 0) {
+          let off_base: i32 = 0;
+          if (ctx.lib_root_lens[r] > 0) {
+            off_base = path_append_from_buf_256(ctx, 0, ctx.lib_root_bufs[r], ctx.lib_root_lens[r]);
+          }
+          if (off_base < 509) {
+            ctx.path_buf[off_base] = 47;
+            off_base = off_base + 1;
+          }
+          off_base = path_append_import_path(ctx, off_base, import_path, path_len);
+          if (off_base < 509) {
+            ctx.path_buf[off_base] = 47;
+            off_base = off_base + 1;
+          }
+          off_base = path_append_import_path(ctx, off_base, import_path, path_len);
+          if (off_base + 4 <= 512) {
+            ctx.path_buf[off_base] = 46;
+            ctx.path_buf[off_base + 1] = 115;
+            ctx.path_buf[off_base + 2] = 117;
+            ctx.path_buf[off_base + 3] = 0;
+            let fd_dir: i32 = fs_open_read(ctx.path_buf);
+            if (fd_dir >= 0) {
+              fs_close(fd_dir);
+              return 0;
+            }
+          }
+        }
+      }
     }
     r = r + 1;
   }
@@ -184,6 +217,8 @@ function parse_one_function_ok(source: []u8, arena: *ASTArena): i32 {
   let empty64: [64]u8 = [];
   let empty32: [32]u8 = [];
   let dummy_let_refs: [24]i32 = [];
+  let dummy_loop_refs: [8]i32 = [];
+  let dummy_for_refs: [8]i32 = [];
   let dummy_pnames: [16][32]u8 = [empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32];
   let dummy_plens: [16]i32 = [];
   let dummy_const_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
@@ -192,7 +227,7 @@ function parse_one_function_ok(source: []u8, arena: *ASTArena): i32 {
   let dummy_let_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_let_lens: [24]i32 = [];
   let dummy_let_vals: [24]i32 = [];
-  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0 };
+  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0, num_loops: 0, loop_cond_refs: dummy_loop_refs, loop_body_refs: dummy_loop_refs, num_for_loops: 0, for_init_refs: dummy_for_refs, for_cond_refs: dummy_for_refs, for_step_refs: dummy_for_refs, for_body_refs: dummy_for_refs };
   parser.parse_one_function_impl(&res, arena, lex, source);
   if (res.ok) {
     return 1;

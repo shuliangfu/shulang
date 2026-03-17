@@ -77,7 +77,83 @@ static const char *get_io_o_path(const char *argv0) {
     return buf;
 }
 
-/** 由 argv0 推导仓库根目录（用于 -I 以便生成 .c 能 #include "std/io/io_abi.h"）；基于 get_io_o_path 的路径向上取三级目录。 */
+#if defined(SHU_USE_SU_PIPELINE)
+/** 向生成 C 写入 std.io / std.net 内联 ABI（原 io_abi.h、net_abi.h 内容），不再依赖该二头文件。成功返回 0。 */
+static int write_io_net_abi_inline(FILE *cf) {
+    static const char *lines[] = {
+        "#include <stddef.h>\n",
+        "#include <stdint.h>\n",
+        "typedef struct { uint8_t *ptr; size_t len; size_t handle; } shu_batch_buf_t;\n",
+        "extern int io_register_buffer(uint8_t *ptr, size_t len);\n",
+        "extern int io_register_buffers_4(uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3, unsigned nr);\n",
+        "extern int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);\n",
+        "static inline int io_register_buffers_buf_i32(int32_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n",
+        "#define io_register_buffers_buf(bufs, nr) io_register_buffers_buf_i32((bufs), (nr))\n",
+        "extern void io_unregister_buffers(void);\n",
+        "extern ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms);\n",
+        "extern ptrdiff_t io_write(int fd, uint8_t *buf, size_t count, unsigned timeout_ms);\n",
+        "extern ptrdiff_t io_read_batch(int fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3, int n, unsigned timeout_ms);\n",
+        "extern ptrdiff_t io_write_batch(int fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3, int n, unsigned timeout_ms);\n",
+        "extern ptrdiff_t io_read_fixed(int fd, unsigned buf_index, size_t offset, size_t len, unsigned timeout_ms);\n",
+        "extern ptrdiff_t io_write_fixed(int fd, unsigned buf_index, size_t offset, size_t len, unsigned timeout_ms);\n",
+        "extern int io_wait_readable(int32_t *fds, int n, unsigned timeout_ms);\n",
+        "extern uint8_t *io_read_ptr(size_t handle, unsigned timeout_ms);\n",
+        "extern int io_read_ptr_len(void);\n",
+        "extern int32_t shu_io_register(uint8_t *ptr, size_t len, size_t handle);\n",
+        "extern int32_t shu_io_submit_read(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n",
+        "extern int32_t shu_io_submit_write(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n",
+        "extern int32_t shu_io_read_fixed(int32_t fd, int32_t buf_index, int32_t offset, int32_t len, int32_t timeout_m);\n",
+        "extern int32_t shu_io_write_fixed(int32_t fd, int32_t buf_index, int32_t offset, int32_t len, int32_t timeout_m);\n",
+        "extern uint8_t *shu_io_read_ptr(size_t handle, unsigned timeout_ms);\n",
+        "extern int32_t shu_io_read_ptr_len(void);\n",
+        "typedef struct { void *ptr; size_t len; size_t handle; } shu_buffer_abi_t;\n",
+        "static inline int32_t shu_io_register_buf(int32_t buf) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_register((uint8_t *)b->ptr, b->len, b->handle); }\n",
+        "static inline int32_t shu_io_submit_read_buf(int32_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_read)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
+        "static inline int32_t shu_io_submit_write_buf(int32_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_write)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
+        "#define shu_io_register(buf) shu_io_register_buf(buf)\n",
+        "#define shu_io_submit_read(buf, timeout_m) shu_io_submit_read_buf(buf, timeout_m)\n",
+        "#define shu_io_submit_write(buf, timeout_m) shu_io_submit_write_buf(buf, timeout_m)\n",
+        "struct std_io_driver_Buffer { void *ptr; size_t len; size_t handle; };\n",
+        "extern int32_t std_io_driver_submit_read(int32_t buf, int32_t timeout_m);\n",
+        "extern int32_t std_io_driver_submit_write(int32_t buf, int32_t timeout_m);\n",
+        "extern int32_t std_io_driver_submit_register_fixed_buffers_buf(int32_t bufs, int32_t nr);\n",
+        "#define std_io_driver_driver_read_ptr_len shu_io_read_ptr_len\n",
+        "#define std_io_driver_driver_read_ptr shu_io_read_ptr\n",
+        "#define driver_read_ptr_len std_io_driver_driver_read_ptr_len\n",
+        "#define driver_read_ptr std_io_driver_driver_read_ptr\n",
+        "#define submit_register_fixed_buffers_buf std_io_driver_submit_register_fixed_buffers_buf\n",
+        "#define std_io_core_shu_io_register shu_io_register\n",
+        "#define std_io_core_shu_io_register_buffers shu_io_register_buffers\n",
+        "#define std_io_core_shu_io_unregister_buffers shu_io_unregister_buffers\n",
+        "#define std_io_core_shu_io_submit_read shu_io_submit_read\n",
+        "#define std_io_core_shu_io_read_ptr shu_io_read_ptr\n",
+        "#define std_io_core_shu_io_read_ptr_len shu_io_read_ptr_len\n",
+        "#define std_io_core_shu_io_submit_write shu_io_submit_write\n",
+        "#define std_io_core_shu_io_submit_read_batch shu_io_submit_read_batch\n",
+        "#define std_io_core_shu_io_submit_write_batch shu_io_submit_write_batch\n",
+        "extern int32_t std_io_handle_from_fd(int32_t fd, int32_t unused);\n",
+        "extern int32_t std_io_driver_submit_read_batch_buf(size_t handle, struct std_io_driver_Buffer * bufs, int32_t n, uint32_t timeout_ms);\n",
+        "extern int32_t std_io_driver_submit_write_batch_buf(size_t handle, struct std_io_driver_Buffer * bufs, int32_t n, uint32_t timeout_ms);\n",
+        "#define std_io_submit_read_batch_buf std_io_driver_submit_read_batch_buf\n",
+        "#define std_io_submit_write_batch_buf std_io_driver_submit_write_batch_buf\n",
+        "extern int32_t std_io_read_fixed_fd(int32_t fd, int32_t p1, int32_t p2, int32_t p3, int32_t p4);\n",
+        "extern int32_t std_io_write_fixed_fd(int32_t fd, int32_t p1, int32_t p2, int32_t p3, int32_t p4);\n",
+        "#define handle_from_fd std_io_handle_from_fd\n",
+        "#define submit_read_batch_buf std_io_submit_read_batch_buf\n",
+        "#define submit_write_batch_buf std_io_submit_write_batch_buf\n",
+        "#define read_fixed_fd std_io_read_fixed_fd\n",
+        "#define write_fixed_fd std_io_write_fixed_fd\n",
+        "extern int32_t net_close_socket_c(int32_t fd);\n",
+        "extern int32_t net_run_accept_workers_c(int32_t listener_fd, int32_t n_workers, uint32_t timeout_ms);\n",
+    };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+        if (fputs(lines[i], cf) == EOF) return 1;
+    }
+    return 0;
+}
+#endif /* SHU_USE_SU_PIPELINE */
+
+/** 由 argv0 推导仓库根目录（用于 -I 以便生成 .c 能 #include std/fs、path、map、error 等 ABI 头）；基于 get_io_o_path 的路径向上取三级目录。 */
 static const char *get_repo_root(const char *argv0) {
     static char buf[512];
     const char *io_o = get_io_o_path(argv0);
@@ -693,6 +769,13 @@ struct ast_PipelineDepCtx {
     const char *dep_paths[32];  /* 每个 dep 的 import 路径，供 codegen 时设置 C 符号前缀，与 dep_modules 一一对应 */
     int32_t skip_codegen_dep_0; /* 非 0 时跳过 dep 0 的 codegen，-o 时设 1，driver 由 io.o 提供 */
     int32_t entry_already_parsed; /* 非 0 时 entry 已由 C 侧解析，pipeline 跳过 parse 直接 typeck+codegen */
+    int32_t current_func_single_empty_param_index; /* codegen：当前函数唯一无名形参下标，无名 EXPR_VAR 输出 _pN；无或多个为 -1 */
+    int32_t current_func_empty_param_count;        /* codegen：当前函数无名形参个数，≥2 时按出现顺序用 indices 中下标输出 _pN */
+    int32_t current_func_empty_param_indices[16];  /* codegen：无名形参的 param 下标，与声明 _p1,_p2 等一致 */
+    int32_t current_emit_empty_var_next_index;     /* codegen：下一个无名 EXPR_VAR 使用的下标，发射后自增 */
+    int32_t emit_expr_as_callee;                    /* codegen：当前在发射 call 的 callee 时置 1，无名 VAR 不占 _pN */
+    void *current_codegen_module;                   /* codegen：当前正在生成 C 的模块，CALL 未在 dep 解析时判断是否本模块并加前缀 */
+    void *current_codegen_arena;                     /* codegen：当前正在生成 C 的 arena */
 };
 /* 形参顺序与 pipeline.su 一致：第一为 module，第二为 arena，避免 entry 被错位导致 main 空体。 */
 extern int pipeline_run_su_pipeline(void *module, void *arena, const uint8_t *source_data, size_t source_len, void *out_buf, void *ctx);
@@ -1494,7 +1577,7 @@ static char *read_file(const char *path, size_t *out_len) {
  * env_o：可选，std.env .o（环境变量与临时目录）；NULL 则不链入。
  * sync_o：可选，std.sync .o（互斥锁）；NULL 则不链入；Unix 需 -lpthread。
  * encoding_o, base64_o, crypto_o, log_o, test_o：可选，std.encoding/base64/crypto/log/test .o。
- * include_root：可选，仓库根目录，用于 -I 以便生成 .c 能 #include "std/io/io_abi.h"；NULL 或空则不传 -I。
+ * include_root：可选，仓库根目录，用于 -I 以便生成 .c 能 #include std/fs、path、map、error 等 ABI 头；NULL 或空则不传 -I。
  * 返回值：0 表示 cc 执行成功且退出码为 0；-1 表示参数非法、fork/exec 失败或 cc 非零退出。
  */
 static int invoke_cc(const char **c_paths, int n, const char *out_path, const char *target, const char *opt_level, int use_lto, const char *io_o, const char *fs_o, const char *process_o, const char *string_o, const char *heap_o, const char *runtime_o, const char *runtime_panic_o, const char *net_o, const char *thread_o, const char *time_o, const char *random_o, const char *env_o, const char *sync_o, const char *encoding_o, const char *base64_o, const char *crypto_o, const char *log_o, const char *atomic_o, const char *channel_o, const char *backtrace_o, const char *hash_o, const char *math_o, const char *sort_o, const char *ffi_o, const char *json_o, const char *csv_o, const char *regex_o, const char *compress_o, const char *unicode_o, const char *dynlib_o, const char *http_o, const char *tar_o, const char *test_o, const char *include_root) {
@@ -1996,7 +2079,7 @@ int RUN_CC_FUNC(int argc, char **argv) {
                 return 1;
             }
             target = argv[i + 1];
-            i++;
+            i += 2;
         } else if (argv[i][0] == '-') {
             /* 未知选项（如 -backend 在未链 pipeline 的构建中）：提示而非当作输入文件 */
             if (strcmp(argv[i], "-backend") == 0) {
@@ -2549,6 +2632,26 @@ int RUN_CC_FUNC(int argc, char **argv) {
             fprintf(cf, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
             fprintf(cf, "  abort();\n");
             fprintf(cf, "}\n");
+            /* std.io.driver：前向声明 + 与 io.o 一致的 extern，再提供两桩实现；完整 struct 由 codegen 在后文给出 */
+            fprintf(cf, "struct std_io_driver_Buffer;\n");
+            fprintf(cf, "extern ptrdiff_t io_read_batch_buf(int fd, const struct std_io_driver_Buffer *bufs, int n, unsigned timeout_ms);\n");
+            fprintf(cf, "extern ptrdiff_t io_write_batch_buf(int fd, const struct std_io_driver_Buffer *bufs, int n, unsigned timeout_ms);\n");
+            fprintf(cf, "static int32_t std_io_driver_submit_read_batch_buf(size_t handle, struct std_io_driver_Buffer *bufs, int32_t n, uint32_t timeout_ms) {\n");
+            fprintf(cf, "  ptrdiff_t r = io_read_batch_buf((int)handle, bufs, n, timeout_ms);\n");
+            fprintf(cf, "  return (r < 0) ? -1 : (int32_t)r;\n");
+            fprintf(cf, "}\n");
+            fprintf(cf, "static int32_t std_io_driver_submit_write_batch_buf(size_t handle, struct std_io_driver_Buffer *bufs, int32_t n, uint32_t timeout_ms) {\n");
+            fprintf(cf, "  ptrdiff_t r = io_write_batch_buf((int)handle, bufs, n, timeout_ms);\n");
+            fprintf(cf, "  return (r < 0) ? -1 : (int32_t)r;\n");
+            fprintf(cf, "}\n");
+            fprintf(cf, "#define std_io_submit_read_batch_buf std_io_driver_submit_read_batch_buf\n");
+            fprintf(cf, "#define std_io_submit_write_batch_buf std_io_driver_submit_write_batch_buf\n");
+            /* driver 的 read_ptr/read_ptr_len 由 core/io.o 提供，与 pipeline 内联 ABI 一致 */
+            fprintf(cf, "#define std_io_driver_driver_read_ptr_len shu_io_read_ptr_len\n");
+            fprintf(cf, "#define std_io_driver_driver_read_ptr shu_io_read_ptr\n");
+            /* 自举：入口为 parser.su 时需 parser_slice_from_buf；前向声明使调用处可编译，定义在文件末尾追加 */
+            if (input_path && strstr(input_path, "parser.su") != NULL)
+                fprintf(cf, "static struct shulang_slice_uint8_t parser_slice_from_buf(uint8_t *data, int32_t len);\n");
             for (int i = 0; i < n_all; i++) {
                 ASTModule *lib_deps[32];
                 const char *lib_dep_paths[32];
@@ -2586,6 +2689,11 @@ int RUN_CC_FUNC(int argc, char **argv) {
             ast_module_free(mod);
             free(src);
             return 1;
+        }
+        /* 自举：parser.su 单独编可执行文件时提供 parser_slice_from_buf 桩实现（与 pipeline_glue.c 中一致） */
+        if (input_path && strstr(input_path, "parser.su") != NULL) {
+            fprintf(cf, "\nstatic struct shulang_slice_uint8_t parser_slice_from_buf(uint8_t *data, int32_t len) {\n");
+            fprintf(cf, "  struct shulang_slice_uint8_t s;\n  s.data = data;\n  s.length = (size_t)(len >= 0 ? len : 0);\n  return s;\n}\n");
         }
         fclose(cf);
         snprintf(tmp_c, sizeof(tmp_c), "%s.c", tmp);
@@ -2918,13 +3026,20 @@ int run_compiler_su_path(int argc, char **argv) {
         return 1;
     }
     {
-        /* 从源头引入 std.io ABI，不再内联补丁字符串（见 std/io/io_abi.h） */
+        /* 内联 std.io / std.net ABI；其余 std.fs / path / map / error 仍 include 头文件 */
         size_t first_line = 0;
         while (first_line < (size_t)out_buf.len && out_buf.data[first_line] != '\n') first_line++;
         if (first_line < (size_t)out_buf.len) first_line++;
-        static const char io_abi_include[] = "#include \"std/io/io_abi.h\"\n";
+        static const char fs_abi_include[] = "#include \"std/fs/fs_abi.h\"\n";
+        static const char path_abi_include[] = "#include \"std/path/path_abi.h\"\n";
+        static const char map_abi_include[] = "#include \"std/map/map_abi.h\"\n";
+        static const char error_abi_include[] = "#include \"std/error/error_abi.h\"\n";
         if (fwrite(out_buf.data, 1, first_line, cf) != first_line
-            || fwrite(io_abi_include, 1, sizeof(io_abi_include) - 1, cf) != (size_t)(sizeof(io_abi_include) - 1)
+            || write_io_net_abi_inline(cf) != 0
+            || fwrite(fs_abi_include, 1, sizeof(fs_abi_include) - 1, cf) != (size_t)(sizeof(fs_abi_include) - 1)
+            || fwrite(path_abi_include, 1, sizeof(path_abi_include) - 1, cf) != (size_t)(sizeof(path_abi_include) - 1)
+            || fwrite(map_abi_include, 1, sizeof(map_abi_include) - 1, cf) != (size_t)(sizeof(map_abi_include) - 1)
+            || fwrite(error_abi_include, 1, sizeof(error_abi_include) - 1, cf) != (size_t)(sizeof(error_abi_include) - 1)
             || fwrite(out_buf.data + first_line, 1, (size_t)out_buf.len - first_line, cf) != (size_t)out_buf.len - first_line) {
             if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
             return 1;
@@ -3093,6 +3208,44 @@ const char *driver_get_current_dep_path_for_codegen(void) {
 /** 返回 1 当当前 codegen 的 dep 路径为 "std.io.core"（与 codegen_su_path_is_std_io_core 一致，供 .su 在 ctx.dep_paths 不可靠时仍能不加前缀）。 */
 int driver_current_dep_path_is_std_io_core(void) {
     return (driver_current_dep_path_for_codegen && strcmp(driver_current_dep_path_for_codegen, "std.io.core") == 0) ? 1 : 0;
+}
+
+/** 返回 1 当应跳过生成该函数（当前为 std.io.driver 且名为 driver_read_ptr_len/driver_read_ptr）；无条件跳过，避免与 core 的 shu_io_* 重定义。 */
+int driver_should_skip_emit_func(const uint8_t *name, int name_len) {
+    if (!driver_current_dep_path_for_codegen || strcmp(driver_current_dep_path_for_codegen, "std.io.driver") != 0)
+        return 0;
+    if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
+    if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    return 0;
+}
+
+/** 同上，但显式传入 dep 路径（*u8 以 NUL 结尾），供 codegen.su 在 dep_index>=0 时用 ctx.dep_paths[dep_index] 调用，避免依赖全局 path 未设置。 */
+int driver_should_skip_emit_func_for_dep_path(const uint8_t *path, const uint8_t *name, int name_len) {
+    if (!path || strcmp((const char *)path, "std.io.driver") != 0) return 0;
+    if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
+    if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    return 0;
+}
+
+/** std.io.core 的 shu_io_read_ptr_len/shu_io_read_ptr 由 io.o 提供，pipeline 不生成以免与 io.o 重复。 */
+int driver_should_skip_emit_func_core_read_ptr(const uint8_t *name, int name_len) {
+    if (!name) return 0;
+    if (name_len >= 19 && strncmp((const char *)name, "shu_io_read_ptr_len", 19) == 0) return 1;
+    if (name_len == 15 && strncmp((const char *)name, "shu_io_read_ptr", 15) == 0) return 1;
+    return 0;
+}
+
+/** 按「前缀+函数名」拼接结果判断是否跳过：若拼接后为 std_io_driver_driver_read_ptr_len 或 std_io_driver_driver_read_ptr 则返回 1，避免依赖 prefix/name 单独比较。 */
+int driver_should_skip_emit_func_for_prefix(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len) {
+    if (!prefix || !name || prefix_len <= 0 || name_len <= 0) return 0;
+    if (prefix_len + name_len > 64) return 0;
+    char buf[65];
+    memcpy(buf, prefix, (size_t)prefix_len);
+    memcpy(buf + prefix_len, name, (size_t)name_len);
+    buf[prefix_len + name_len] = '\0';
+    if (strcmp(buf, "std_io_driver_driver_read_ptr_len") == 0) return 1;
+    if (strcmp(buf, "std_io_driver_driver_read_ptr") == 0) return 1;
+    return 0;
 }
 
 /** 将当前 dep 路径转为 C 前缀写入 buf（如 "std.io.driver" -> "std_io_driver_"），len 为 buf 容量。 */
@@ -3346,6 +3499,11 @@ int driver_run_compiler_full(int argc, char **argv) {
         }
         if (strcmp(argv[i], "-flto") == 0) { use_lto = 1; continue; }
         if (strcmp(argv[i], "-su") == 0) { continue; }
+        if (strcmp(argv[i], "-target") == 0) {
+            if (i + 1 >= argc) return 1;
+            i = i + 1;  /* 跳过 -target；下一轮 i++ 后为 triple，再下一轮才到 .su 文件；故再 +1 使下一轮直接到 .su */
+            continue;
+        }
         if (!input_path && argv[i][0] != '-') input_path = argv[i];
     }
     if (!use_lto && getenv("SHULANG_LTO") && strcmp(getenv("SHULANG_LTO"), "1") == 0) use_lto = 1;
@@ -3482,7 +3640,7 @@ int driver_run_compiler_full(int argc, char **argv) {
         pctx.dep_paths[j] = dep_paths[j];
     }
     pctx.ndep = n_deps;
-    pctx.skip_codegen_dep_0 = 1; /* driver 由 io.o 提供，只生成 core + std.io + main */
+    pctx.skip_codegen_dep_0 = 0; /* 不再跳过 dep 0：io.o 仅提供 C 层，std.io.driver 的 .su 包装须由 codegen 生成。 */
     /* 先对每个 dep 跑 pipeline 仅做 parse+typecheck，填充 dep_arenas/dep_modules，不写 C 到文件。 */
     for (int j = 0; j < n_deps; j++) {
         struct ast_PipelineDepCtx one_ctx;
@@ -3516,9 +3674,7 @@ int driver_run_compiler_full(int argc, char **argv) {
     codegen_set_dep_slots_for_su_pipeline((struct ASTModule **)dep_modules, (const char **)dep_paths, n_deps);
     /* entry 已由前面 parser_parse_into 解析，保留 module/arena 不 zero，并告知 pipeline 跳过二次解析，避免 main body_ref 丢失。 */
     pctx.entry_already_parsed = 1;
-    driver_skip_codegen_dep_0_set(1); /* driver 由 io.o 提供，pipeline 内跳过 dep 0 的 codegen */
     int ec = pipeline_run_su_pipeline(module, arena, src_slice.data, (size_t)src_slice.length, (void *)&out_buf, (void *)&pctx);
-    driver_skip_codegen_dep_0_set(0);
     driver_dep_seeded_clear_all();
     codegen_set_dep_slots_for_su_pipeline(NULL, NULL, 0);
     for (int j = 0; j < n_deps; j++) { free(dep_arenas[j]); free(dep_modules[j]); }
@@ -3532,13 +3688,20 @@ int driver_run_compiler_full(int argc, char **argv) {
         return 1;
     }
     {
-        /* 从源头引入 std.io ABI，不再内联补丁字符串（见 std/io/io_abi.h） */
+        /* 内联 std.io / std.net ABI；其余 std.fs / path / map / error 仍 include 头文件 */
         size_t first_line = 0;
         while (first_line < (size_t)out_buf.len && out_buf.data[first_line] != '\n') first_line++;
         if (first_line < (size_t)out_buf.len) first_line++;
-        static const char io_abi_include_full[] = "#include \"std/io/io_abi.h\"\n";
+        static const char fs_abi_include_full[] = "#include \"std/fs/fs_abi.h\"\n";
+        static const char path_abi_include_full[] = "#include \"std/path/path_abi.h\"\n";
+        static const char map_abi_include_full[] = "#include \"std/map/map_abi.h\"\n";
+        static const char error_abi_include_full[] = "#include \"std/error/error_abi.h\"\n";
         if (fwrite(out_buf.data, 1, first_line, cf) != first_line
-            || fwrite(io_abi_include_full, 1, sizeof(io_abi_include_full) - 1, cf) != (size_t)(sizeof(io_abi_include_full) - 1)
+            || write_io_net_abi_inline(cf) != 0
+            || fwrite(fs_abi_include_full, 1, sizeof(fs_abi_include_full) - 1, cf) != (size_t)(sizeof(fs_abi_include_full) - 1)
+            || fwrite(path_abi_include_full, 1, sizeof(path_abi_include_full) - 1, cf) != (size_t)(sizeof(path_abi_include_full) - 1)
+            || fwrite(map_abi_include_full, 1, sizeof(map_abi_include_full) - 1, cf) != (size_t)(sizeof(map_abi_include_full) - 1)
+            || fwrite(error_abi_include_full, 1, sizeof(error_abi_include_full) - 1, cf) != (size_t)(sizeof(error_abi_include_full) - 1)
             || fwrite(out_buf.data + first_line, 1, (size_t)out_buf.len - first_line, cf) != (size_t)out_buf.len - first_line) {
             if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
             return 1;

@@ -147,21 +147,22 @@ function fs_munmap(ptr: *u8, size: usize): i32 { return fs_munmap_c(ptr, size); 
 
 // ——— 与 std.io 联合：用户仅 import std.fs 即可用下列 fd 接口，走 io_uring/readv 极致压榨（无需再 import std.io） ———
 /** 将 fd 转为 io handle；与 read_fd/write_fd/read_batch_fd/write_batch_fd 配套。 */
-function handle_from_fd(fd: i32): usize { return (fd as usize); }
+/** 与 std.io 一致，第二参 unused，调用处传 0。 */
+function handle_from_fd(fd: i32, _unused: i32): usize { return (fd as usize); }
 
 /** 从 fd 单次大块读（走 std.io，Linux 下 io_uring）；推荐 len ≥ fs_read_chunk()。返回读入字节数，0=EOF，-1=错误。 */
 function read_fd(fd: i32, ptr: *u8, len: usize): i32 {
-  return read_into(handle_from_fd(fd), ptr, len, 0);
+  return read_into(handle_from_fd(fd, 0), ptr, len, 0);
 }
 
 /** 向 fd 单次大块写（走 std.io，Linux 下 io_uring）。返回写入字节数，-1=错误。 */
 function write_fd(fd: i32, ptr: *u8, len: usize): i32 {
-  return write_from(handle_from_fd(fd), ptr, len, 0);
+  return write_from(handle_from_fd(fd, 0), ptr, len, 0);
 }
 
 /** 从 fd 批量读：一次 submit 最多 4 段，n 为段数 1..4；走 io_uring/readv。返回总字节数，-1=错误。 */
 function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },
@@ -173,7 +174,7 @@ function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8,
 
 /** 向 fd 批量写：一次 submit 最多 4 段，n 为段数 1..4；走 io_uring/writev。返回总字节数，-1=错误。 */
 function write_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },

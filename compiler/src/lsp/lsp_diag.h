@@ -50,4 +50,15 @@ int lsp_references_at(const uint8_t *source, int source_len, int line_0, int col
  */
 int lsp_hover_at(const uint8_t *source, int source_len, int line_0, int col_0, char *out_buf, int out_cap);
 
+/* ---------- 原 lsp_io.c：文档缓冲与 JSON 响应构建（已合并到 lsp_diag.c，去掉 lsp_io.c） ---------- */
+void lsp_set_document_from_body(const uint8_t *body, int body_len);
+uint8_t *lsp_get_document_ptr(void);
+int lsp_get_document_len(void);
+int lsp_build_initialize_result(uint8_t *out_buf, int out_cap);
+int lsp_build_response_with_result(int id_val, const uint8_t *result_ptr, int result_len, uint8_t *out_buf, int out_cap);
+int lsp_build_definition_response(int id_val, const uint8_t *body, int body_len, const uint8_t *doc_buf, int doc_len, uint8_t *out_buf, int out_cap);
+int lsp_build_references_response(int id_val, const uint8_t *body, int body_len, const uint8_t *doc_buf, int doc_len, uint8_t *out_buf, int out_cap);
+int lsp_build_hover_response(int id_val, const uint8_t *body, int body_len, const uint8_t *doc_buf, int doc_len, uint8_t *out_buf, int out_cap);
+int lsp_build_formatting_response(int id_val, const uint8_t *body, int body_len, const uint8_t *doc_buf, int doc_len, uint8_t *out_buf, int out_cap);
+
 #endif /* SHU_LSP_DIAG_H */

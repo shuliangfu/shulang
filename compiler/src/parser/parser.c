@@ -187,8 +187,8 @@ static int parse_generic_param_list(Parser *p, char ***out_names, int *out_count
     return 0;
 }
 
-/** 单 struct 字面量最大字段数（与 parse_one_struct 用到的 MAX_STRUCT_FIELDS 一致） */
-#define MAX_STRUCT_FIELDS 32
+/** 单 struct 字面量最大字段数（与 parse_one_struct 用到的 MAX_STRUCT_FIELDS 一致；需 >= OneFuncResult 字段数，当前 35） */
+#define MAX_STRUCT_FIELDS 40
 
 /* 前向声明：parse_primary 中 ( expr ) 会调用 parse_expr；parse_postfix 调用 parse_cast；parse_cast 调用 parse_primary 并处理 expr as type */
 static ASTExpr *parse_expr(Parser *p);

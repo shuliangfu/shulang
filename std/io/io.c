@@ -10,6 +10,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #define IO_FIXED_MAX 8
 /* 阶段 2 超越：ring 扩大；SQPOLL + fixed files 一步到位（路线图 §4.2） */
@@ -426,6 +428,12 @@ extern "C" {
 
 /** IO 读：fd 为 handle（0=stdin，≥2 为任意 fd）；timeout_ms 毫秒，0=无超时。返回读入字节数，0=EOF，-1=错误/超时。 */
 ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
+    /* 调试 LSP stdin：LSP_READ_DEBUG=1 时对 fd=0 单次 read 并打日志，便于确认每次请求/返回字节数 */
+    if (fd == 0 && getenv("LSP_READ_DEBUG") != NULL) {
+        ptrdiff_t r = (ptrdiff_t)read(0, buf, count);
+        (void)fprintf(stderr, "LSP_READ_DEBUG: io_read fd=0 count=%zu => %td\n", count, r);
+        return r;
+    }
 #if defined(__linux__)
     {
         uring_thread_t *ut = uring_get_thread();
@@ -1515,8 +1523,15 @@ int io_register_buffers_4(uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_
         nr);
 }
 
-/** 与 Zig/Rust 对齐：按「指针+块数」注册固定 buffer 池；bufs 为 shu_batch_buf_t 数组，nr 为 1..IO_FIXED_MAX（8）。仅用 ptr/len。返回 1 成功，0 失败。 */
-int io_register_buffers_buf(const shu_batch_buf_t *bufs, int nr) {
+/** 与 Zig/Rust 对齐：按「指针+块数」注册固定 buffer 池；bufs 为 shu_batch_buf_t 数组，nr 为 1..IO_FIXED_MAX（8）。仅用 ptr/len。返回 1 成功，0 失败。io_abi.h 以 io_register_buffers_buf_c 声明供生成 C 通过宏调用。 */
+int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);
+
+/** codegen 可能生成 (io_register_buffers_buf)(bufs,nr) 导致宏不展开，链接时需此符号；包装调用 io_register_buffers_buf_c。 */
+int io_register_buffers_buf(int32_t bufs, int nr) {
+    return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr);
+}
+
+int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr) {
     if (nr <= 0 || nr > (int)IO_FIXED_MAX || !bufs) return 0;
 #if defined(__linux__)
     {
@@ -1895,6 +1910,27 @@ uint8_t *io_read_ptr(unsigned int handle, unsigned int timeout_ms) {
 /** 返回最近一次 io_read_ptr 成功读入的字节数（0 表示 EOF 或尚未调用/失败）。与 io_read_ptr 配套使用。 */
 int32_t io_read_ptr_len(void) {
     return g_io_read_ptr_len;
+}
+
+/** std.io.core / pipeline 所用符号：与内联 ABI 声明一致，供自举链接 io.o 时解析；pipeline 若未生成 core 的 register/submit 体则由 io.o 提供。 */
+int32_t shu_io_register(uint8_t *ptr, size_t len, size_t handle) {
+    (void)handle;
+    return (int32_t)io_register_buffer(ptr, len);
+}
+int32_t shu_io_submit_read(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_ms) {
+    ptrdiff_t r = io_read((int)handle, ptr, len, timeout_ms);
+    return (r < 0) ? -1 : (int32_t)r;
+}
+int32_t shu_io_submit_write(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_ms) {
+    ptrdiff_t r = io_write((int)handle, ptr, len, timeout_ms);
+    return (r < 0) ? -1 : (int32_t)r;
+}
+uint8_t *shu_io_read_ptr(size_t handle, unsigned timeout_ms) {
+    return io_read_ptr(handle, timeout_ms);
+}
+/** C 流水线（非 driver）时由 io.o 提供；driver 流水线若生成 core 则 codegen 跳过此符号以免重复。 */
+int32_t shu_io_read_ptr_len(void) {
+    return io_read_ptr_len();
 }
 
 #ifdef __cplusplus

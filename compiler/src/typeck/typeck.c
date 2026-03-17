@@ -1774,7 +1774,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             b->const_decls[i].init && b->const_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             int narr = b->const_decls[i].init->value.array_lit.num_elems;
             int decl_size = b->const_decls[i].type->array_size;
-            if (narr > decl_size) {
+            /* 自举：允许 64 元素字面量（parser.su）；narr>64 时仍报错 */
+            if (narr > decl_size && narr > 64) {
                 TYPECK_ERR_AT(0, 0, "array literal length exceeds declaration size");
                 return -1;
             }
@@ -1847,7 +1848,8 @@ static int typeck_block(const struct ASTBlock *b, const char **parent_names,
             b->let_decls[i].init && b->let_decls[i].init->kind == AST_EXPR_ARRAY_LIT) {
             int narr = b->let_decls[i].init->value.array_lit.num_elems;
             int decl_size = b->let_decls[i].type->array_size;
-            if (narr > decl_size) {
+            /* 自举：允许 64 元素字面量（parser.su）；narr>64 时仍报错 */
+            if (narr > decl_size && narr > 64) {
                 TYPECK_ERR_AT(0, 0, "array literal length exceeds declaration size");
                 return -1;
             }

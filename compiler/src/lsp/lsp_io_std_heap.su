@@ -1,0 +1,18 @@
+// lsp_io_std_heap.su — 提供 std_heap_alloc / std_heap_free，供 lsp_io_su.o 链接
+//
+// 职责：在 bootstrap 构建中，lsp_io.su 使用 std.heap 时仅生成 extern std_heap_alloc/std_heap_free；
+// 本模块转调 C 运行时 heap_alloc_c / heap_free_c，替代原 lsp_io_std_heap.c，实现全部 .su 化。
+
+/** C 运行时堆分配/释放，由 std/heap/heap.o 或 runtime 提供。 */
+extern function heap_alloc_c(size: usize): *u8;
+extern function heap_free_c(ptr: *u8): void;
+
+/** 分配 size 字节，返回指针；失败返回 null。供 lsp_io 层通过 std_heap_alloc 名链接。 */
+function std_heap_alloc(size: usize): *u8 {
+  return heap_alloc_c(size);
+}
+
+/** 释放 ptr；ptr 可为 null（C 端 heap_free_c 对 null 无操作）。供 lsp_io 层通过 std_heap_free 名链接。 */
+function std_heap_free(ptr: *u8): void {
+  heap_free_c(ptr);
+}

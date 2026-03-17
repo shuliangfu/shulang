@@ -409,7 +409,9 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
     let left_ref: i32 = e.binop_left_ref;
     let right_ref: i32 = e.binop_right_ref;
     if (!ref_is_null(left_ref) && !ref_is_null(right_ref)) {
-      if (!type_refs_equal(arena, expr_type_ref(arena, left_ref), expr_type_ref(arena, right_ref))) {
+      let lt: i32 = expr_type_ref(arena, left_ref);
+      let rt: i32 = expr_type_ref(arena, right_ref);
+      if (!ref_is_null(lt) && !ref_is_null(rt) && !type_refs_equal(arena, lt, rt)) {
         return -1;
       }
     }
@@ -529,7 +531,7 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
   if (e.kind == ExprKind.EXPR_VAR && ctx.current_block_ref != 0 && ctx.current_block_ref <= arena.num_blocks) {
     let b: Block = ast_arena_block_get(arena, ctx.current_block_ref);
     let i: i32 = 0;
-    while (i < b.num_consts && i < 24) {
+    while (i < b.num_consts && i < 64) {
       let cd: ConstDecl = b.const_decls[i];
       if (!ref_is_null(cd.type_ref) && name_equal(cd.name, cd.name_len, e.var_name, e.var_name_len)) {
         e.resolved_type_ref = cd.type_ref;
@@ -539,7 +541,7 @@ function check_expr_impl(module: *Module, arena: *ASTArena, expr_ref: i32, retur
       i = i + 1;
     }
     i = 0;
-    while (i < b.num_lets && i < 24) {
+    while (i < b.num_lets && i < 64) {
       let ld: LetDecl = b.let_decls[i];
       if (!ref_is_null(ld.type_ref) && name_equal(ld.name, ld.name_len, e.var_name, e.var_name_len)) {
         e.resolved_type_ref = ld.type_ref;
@@ -608,37 +610,39 @@ function check_block_impl(module: *Module, arena: *ASTArena, block_ref: i32, ret
   let b: Block = ast_arena_block_get(arena, block_ref);
   let i: i32 = 0;
   while (i < b.num_consts) {
-    if (i >= 24) {
+    if (i >= 64) {
       break;
     }
     let cd: ConstDecl = b.const_decls[i];
-    if (!ref_is_null(cd.init_ref) && !ref_is_null(cd.type_ref)) {
-      if (!type_refs_equal(arena, cd.type_ref, expr_type_ref(arena, cd.init_ref))) {
-        ctx.current_block_ref = saved_block_ref;
-        return -1;
-      }
-    }
     if (check_expr(module, arena, cd.init_ref, return_type_ref, ctx) != 0) {
       ctx.current_block_ref = saved_block_ref;
       return -1;
+    }
+    if (!ref_is_null(cd.init_ref) && !ref_is_null(cd.type_ref)) {
+      let init_ty: i32 = expr_type_ref(arena, cd.init_ref);
+      if (!ref_is_null(init_ty) && !type_refs_equal(arena, cd.type_ref, init_ty)) {
+        ctx.current_block_ref = saved_block_ref;
+        return -1;
+      }
     }
     i = i + 1;
   }
   i = 0;
   while (i < b.num_lets) {
-    if (i >= 24) {
+    if (i >= 64) {
       break;
     }
     let ld: LetDecl = b.let_decls[i];
-    if (!ref_is_null(ld.init_ref) && !ref_is_null(ld.type_ref)) {
-      if (!type_refs_equal(arena, ld.type_ref, expr_type_ref(arena, ld.init_ref))) {
-        ctx.current_block_ref = saved_block_ref;
-        return -1;
-      }
-    }
     if (check_expr(module, arena, ld.init_ref, return_type_ref, ctx) != 0) {
       ctx.current_block_ref = saved_block_ref;
       return -1;
+    }
+    if (!ref_is_null(ld.init_ref) && !ref_is_null(ld.type_ref)) {
+      let init_ty: i32 = expr_type_ref(arena, ld.init_ref);
+      if (!ref_is_null(init_ty) && !type_refs_equal(arena, ld.type_ref, init_ty)) {
+        ctx.current_block_ref = saved_block_ref;
+        return -1;
+      }
     }
     i = i + 1;
   }
@@ -706,8 +710,10 @@ function check_block_impl(module: *Module, arena: *ASTArena, block_ref: i32, ret
       ctx.current_block_ref = saved_block_ref;
       return -1;
     }
+    /* 仅当块末表达式类型已解析时才与 return_type_ref 比较；未解析（如跨模块 call 未解析到返回类型）时不判失败，避免库模块 std.io 等 typeck -5。 */
     if (!ref_is_null(return_type_ref)) {
-      if (!type_refs_equal(arena, expr_type_ref(arena, b.final_expr_ref), return_type_ref)) {
+      let got: i32 = expr_type_ref(arena, b.final_expr_ref);
+      if (!ref_is_null(got) && !type_refs_equal(arena, got, return_type_ref)) {
         ctx.current_block_ref = saved_block_ref;
         return -1;
       }

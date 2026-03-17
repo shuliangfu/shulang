@@ -36,7 +36,8 @@ function handle_stdout(): usize { return 1; }
 function handle_stderr(): usize { return 2; }
 
 /** 将 std.fs 等得到的 fd 转为 io handle，用于 read/write；与 std.fs 联合压榨时 fd 走 io_uring/readv。 */
-function handle_from_fd(fd: i32): usize { return (fd as usize); }
+/** fd 转 handle；第二参 unused 与 codegen 产出一致，调用处传 0。 */
+function handle_from_fd(fd: i32, _unused: i32): usize { return (fd as usize); }
 
 // ——— 通用 handle 读写：任意 handle（stdin/stdout/stderr 或 fd）均可走同一套 submit ———
 // 从 handle 读入至 ptr[0..len]，timeout_ms 毫秒（0=无超时）。返回读入字节数，0=EOF，-1=错误。
@@ -108,17 +109,17 @@ function write_stderr_with_timeout(ptr: *u8, len: usize, timeout_ms: u32): i32 {
 // ——— 与 std.fs 联合极致压榨：fd 单次/批量走 io_uring（Linux）/readv/writev，一次 submit 多段 ———
 /** 从 fd 读入至 ptr[0..len]（timeout=0）；fd 可为 std.fs 打开的文件。推荐 len ≥ std.fs.fs_read_chunk() 压榨 syscall。返回读入字节数，0=EOF，-1=错误。 */
 function read_fd(fd: i32, ptr: *u8, len: usize): i32 {
-  return read(handle_from_fd(fd), ptr, len, 0);
+  return read(handle_from_fd(fd, 0), ptr, len, 0);
 }
 
 /** 将 ptr[0..len] 写入 fd（timeout=0）；fd 可为 std.fs 打开的文件。返回写入字节数，-1=错误。 */
 function write_fd(fd: i32, ptr: *u8, len: usize): i32 {
-  return write(handle_from_fd(fd), ptr, len, 0);
+  return write(handle_from_fd(fd, 0), ptr, len, 0);
 }
 
 /** 从 fd 批量读：一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4。Linux 走 io_uring 多 SQE 或 readv，极致压榨。返回总字节数，-1=错误。 */
 function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },
@@ -130,7 +131,7 @@ function read_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8,
 
 /** 向 fd 批量写：一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4。Linux 走 io_uring 多 SQE 或 writev，极致压榨。返回总字节数，-1=错误。 */
 function write_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },
@@ -142,13 +143,13 @@ function write_batch_fd(fd: i32, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8
 
 /** 与 Zig/Rust 对齐：从 fd 按「指针+段数」批量读；buffers 指向至少 n 个 Buffer（ptr/len 有效），n 为 1..16。timeout=0。返回总字节数，-1=错误。 */
 function read_batch_fd_buf(fd: i32, buffers: *Buffer, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   return submit_read_batch_buf(h, buffers, n, 0);
 }
 
 /** 与 Zig/Rust 对齐：向 fd 按「指针+段数」批量写；buffers 同上，n 为 1..16。返回总字节数，-1=错误。 */
 function write_batch_fd_buf(fd: i32, buffers: *Buffer, n: i32): i32 {
-  let h: usize = handle_from_fd(fd);
+  let h: usize = handle_from_fd(fd, 0);
   return submit_write_batch_buf(h, buffers, n, 0);
 }
 
@@ -169,12 +170,12 @@ function register_fixed_buffers_buf(bufs: *Buffer, nr: u32): i32 {
 
 /** 阶段 4 性能压榨：从 fd 用已注册 fixed buffer 读；buf_index 为 register_fixed_buffers 池下标，offset+len 须 ≤ 该块长度。返回读入字节数，0=EOF，-1=错误。供 std.net 热路径用。 */
 function read_fixed_fd(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
-  return shu_io_read_fixed(handle_from_fd(fd), buf_index, offset, len, timeout_ms);
+  return shu_io_read_fixed(handle_from_fd(fd, 0), buf_index, offset, len, timeout_ms);
 }
 
 /** 阶段 4 性能压榨：向 fd 用已注册 fixed buffer 写；buf_index/offset/len 同上。返回写入字节数，-1=错误。 */
 function write_fixed_fd(fd: i32, buf_index: u32, offset: usize, len: usize, timeout_ms: u32): i32 {
-  return shu_io_write_fixed(handle_from_fd(fd), buf_index, offset, len, timeout_ms);
+  return shu_io_write_fixed(handle_from_fd(fd, 0), buf_index, offset, len, timeout_ms);
 }
 
 // ——— 多 fd 就绪等待：fds 指向 n 个 i32（fd），一次系统调用等待任意可读。返回就绪下标 0..n-1，超时/错误 -1。———

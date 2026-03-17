@@ -190,9 +190,9 @@ struct LabeledStmt {
 
 /** 块：const/let 声明 + while/for + defer 块 + 标签语句 + 表达式语句 + 最终表达式 + stmt_order */
 struct Block {
-  const_decls: [24]ConstDecl;
+  const_decls: [64]ConstDecl;
   num_consts: i32;
-  let_decls: [24]LetDecl;
+  let_decls: [64]LetDecl;
   num_lets: i32;
   num_early_lets: i32;
   loops: [8]WhileLoop;
@@ -305,6 +305,19 @@ allow(padding) struct PipelineDepCtx {
   skip_codegen_dep_0: i32;
   /** 非 0 时 entry 已由 C 侧 parser_parse_into 解析，pipeline 跳过 parse 直接 typeck+codegen，避免二次解析导致 main body_ref 丢失。 */
   entry_already_parsed: i32;
+  /** codegen 用：当前函数中唯一无名/空格名形参的下标（0..num_params-1），供 EXPR_VAR 无名时输出 _pN；若无或不止一个则为 -1。 */
+  current_func_single_empty_param_index: i32;
+  /** codegen 用：当前函数无名形参个数（≥2 时与下一字段配合）；无名引用按出现顺序用对应 param 下标输出 _pN。 */
+  current_func_empty_param_count: i32;
+  /** codegen 用：当前函数无名形参的 param 下标（如 [1,2] 表示第 1、2 个形参无名），与声明 _p1,_p2 一致。 */
+  current_func_empty_param_indices: [16]i32;
+  /** codegen 用：下一个待发射的无名 EXPR_VAR 使用的下标（0..current_func_empty_param_count-1），每发射一次自增。 */
+  current_emit_empty_var_next_index: i32;
+  /** codegen 用：非 0 表示当前在发射 EXPR_CALL 的 callee，无名 EXPR_VAR 不占 _pN 而输出 _0。 */
+  emit_expr_as_callee: i32;
+  /** codegen 用：当前正在生成 C 的模块/arena，供 CALL 未在 dep 中解析时判断是否为本模块函数并加前缀。 */
+  current_codegen_module: *Module;
+  current_codegen_arena: *ASTArena;
 }
 
 /** 池下标空值：所有 ref 字段用 0 表示“无” */

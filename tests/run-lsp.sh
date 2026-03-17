@@ -13,10 +13,11 @@ if ! "$SHU" --help 2>/dev/null | grep -q '\-\-lsp'; then
 fi
 
 # 发送一条 LSP 消息：Content-Length: N\r\n\r\n<body>
+# 注意：wc -c 在 BSD/macOS 会输出前导空格，需去掉，否则 LSP 解析 Content-Length 时会在空格处停止得到 0
 send_lsp() {
   local body="$1"
   local len
-  len=$(printf '%s' "$body" | wc -c)
+  len=$(printf '%s' "$body" | wc -c | tr -d ' \n')
   printf 'Content-Length: %d\r\n\r\n%s' "$len" "$body"
 }
 
@@ -36,16 +37,24 @@ EXIT_NOTIF='{"jsonrpc":"2.0","method":"exit"}'
 
 OUT=$(mktemp)
 ERR=$(mktemp)
-trap "rm -f $OUT $ERR" EXIT
+LSP_IN=$(mktemp)
+trap "rm -f $OUT $ERR $LSP_IN" EXIT
 
-(
+# 先写入临时文件再重定向 stdin，避免管道在子 shell 退出后关闭导致 LSP 只读到第一条消息即 EOF
+{
   send_lsp "$INIT_REQ"
   send_lsp "$DID_OPEN"
   send_lsp "$DIAG_REQ"
   send_lsp "$FMT_REQ"
   send_lsp "$SHUTDOWN"
   send_lsp "$EXIT_NOTIF"
-) | timeout 5 "$SHU" --lsp 2>"$ERR" >"$OUT"; true
+} >"$LSP_IN"
+# 调试 stdin 每次 read 的请求/返回字节数：LSP_READ_DEBUG=1 时 LSP 的 stderr 会打 io_read 日志
+LSP_READ_DEBUG="${LSP_READ_DEBUG:-}" timeout 5 "$SHU" --lsp <"$LSP_IN" 2>"$ERR" >"$OUT"; true
+if [ -n "${LSP_READ_DEBUG:-}" ]; then
+  echo "LSP stderr (LSP_READ_DEBUG):" >&2
+  cat "$ERR" >&2
+fi
 
 # 至少应收到 initialize 与 shutdown 的响应；stdout 为多条 Content-Length+\r\n\r\n+body
 if ! grep -q '"jsonrpc"' "$OUT"; then

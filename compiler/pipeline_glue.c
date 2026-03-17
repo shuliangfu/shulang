@@ -73,3 +73,17 @@ void driver_diagnostic_entry_block_after_parse(void *mod, void *arena) {
   fprintf(stderr, "[diag] after_parse body_ref=%d num_blocks=%d block.num_stmt_order=%d\n",
           (int)br, (int)a->num_blocks, (int)b.num_stmt_order); */
 }
+
+/* std.io.driver 批量读写桩：pipeline_gen.c 同 TU 已定义 struct std_io_driver_Buffer；io.o 提供 io_read_batch_buf/io_write_batch_buf，供 shu_su 链接时解析。 */
+extern ptrdiff_t io_read_batch_buf(int fd, const struct std_io_driver_Buffer *bufs, int n, unsigned timeout_ms);
+extern ptrdiff_t io_write_batch_buf(int fd, const struct std_io_driver_Buffer *bufs, int n, unsigned timeout_ms);
+
+int32_t std_io_driver_submit_read_batch_buf(size_t handle, struct std_io_driver_Buffer *bufs, int32_t n, uint32_t timeout_ms) {
+  ptrdiff_t r = io_read_batch_buf((int)handle, bufs, n, timeout_ms);
+  return (r < 0) ? -1 : (int32_t)r;
+}
+
+int32_t std_io_driver_submit_write_batch_buf(size_t handle, struct std_io_driver_Buffer *bufs, int32_t n, uint32_t timeout_ms) {
+  ptrdiff_t r = io_write_batch_buf((int)handle, bufs, n, timeout_ms);
+  return (r < 0) ? -1 : (int32_t)r;
+}

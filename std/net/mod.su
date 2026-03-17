@@ -103,7 +103,7 @@ function close_stream(stream: TcpStream): i32 {
 
 /** 阶段 3 性能压榨：从 TcpStream 批量读，一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4；timeout_ms 毫秒（0=无超时）。走 io_uring/readv。热路径建议打满 4 段减少 syscall。返回总字节数，-1=错误。 */
 function stream_read_batch(stream: TcpStream, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32, timeout_ms: u32): i32 {
-  let h: usize = handle_from_fd(stream.fd);
+  let h: usize = handle_from_fd(stream.fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },
@@ -115,7 +115,7 @@ function stream_read_batch(stream: TcpStream, p0: *u8, l0: usize, p1: *u8, l1: u
 
 /** 阶段 3 性能压榨：向 TcpStream 批量写，一次 submit 最多 4 段 (p0,l0)..(p3,l3)，n 为段数 1..4；timeout_ms 毫秒（0=无超时）。走 io_uring/writev。热路径建议打满 4 段减少 syscall。返回总字节数，-1=错误。 */
 function stream_write_batch(stream: TcpStream, p0: *u8, l0: usize, p1: *u8, l1: usize, p2: *u8, l2: usize, p3: *u8, l3: usize, n: i32, timeout_ms: u32): i32 {
-  let h: usize = handle_from_fd(stream.fd);
+  let h: usize = handle_from_fd(stream.fd, 0);
   let bufs: [4]Buffer = [
     Buffer { ptr: p0, len: l0, handle: h },
     Buffer { ptr: p1, len: l1, handle: h },
@@ -127,13 +127,13 @@ function stream_write_batch(stream: TcpStream, p0: *u8, l0: usize, p1: *u8, l1: 
 
 /** 与 Zig/Rust 对齐：按「指针+段数」批量读；buffers 指向至少 n 个 Buffer（ptr/len 由调用方填充，handle 可忽略），n 为 1..16。一次 readv/io_uring 覆盖多段。返回总字节数，-1=错误。 */
 function stream_read_batch_buf(stream: TcpStream, buffers: *Buffer, n: i32, timeout_ms: u32): i32 {
-  let h: usize = handle_from_fd(stream.fd);
+  let h: usize = handle_from_fd(stream.fd, 0);
   return submit_read_batch_buf(h, buffers, n, timeout_ms);
 }
 
 /** 与 Zig/Rust 对齐：按「指针+段数」批量写；buffers 同上。返回总字节数，-1=错误。 */
 function stream_write_batch_buf(stream: TcpStream, buffers: *Buffer, n: i32, timeout_ms: u32): i32 {
-  let h: usize = handle_from_fd(stream.fd);
+  let h: usize = handle_from_fd(stream.fd, 0);
   return submit_write_batch_buf(h, buffers, n, timeout_ms);
 }
 

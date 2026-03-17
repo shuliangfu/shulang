@@ -11,7 +11,7 @@ CC      ?= cc
 CFLAGS  ?= -Wall -Wextra -I. -Iinclude -Isrc
 # 仅编译 pipeline_gen.c 时加：生成代码难以逐处改，静默已知警告类别，使 bootstrap-driver 整次 0 警告
 # -Wno-logical-op-parentheses 等部分选项仅 Clang 支持，GCC 会报 unrecognized，无害；-Wno-ignored-qualifiers 与 -Wno-discarded-qualifiers 同义，Clang 用前者；-Wno-type-limits 静默 (pos < 0) 对 size_t 的警告
-PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-ignored-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
+PIPELINE_GEN_CFLAGS = -Wno-logical-op-parentheses -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function -Wno-bitwise-op-parentheses -Wno-parentheses -Wno-sign-compare -Wno-incompatible-pointer-types-discards-qualifiers -Wno-ignored-qualifiers -Wno-unused-but-set-variable -Wno-type-limits
 # 阶段 8：make OPT=1 时为 shu 启用 -O2，便于开发时快速运行测试
 ifeq ($(OPT),1)
   CFLAGS += -O2
@@ -22,7 +22,7 @@ OBJS    = src/main.o src/runtime.o src/preprocess.o src/lexer/lexer.o src/ast/as
 
 # C 仅版 shu：无 main_su/pipeline_su，供 bootstrap-pipeline 用 -E 生成 pipeline_gen.c（避免用已链 main_su 的 $(TARGET) 导致走 .su 路径失败）
 SHU_C = shu-c
-.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-driver-seed bootstrap-driver-asm bootstrap-driver-asm-only bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify build-tool build-tool-su build-via-tool first-time
+.PHONY: all clean test size-baseline perf-baseline bootstrap-token bootstrap-lexer bootstrap-parser bootstrap-parse-file bootstrap-typeck bootstrap-codegen bootstrap-driver bootstrap-driver-seed bootstrap-driver-asm bootstrap-driver-asm-only bootstrap-asm check-6.4 bootstrap-self check-7.2 bootstrap-verify bootstrap-test build-tool build-tool-su build-via-tool first-time
 
 # 舒 IO 后端（分析/舒IO实现路线图.md 阶段 1）：源码在 std/io/io.c；产出 ../std/io/io.o。
 ../std/io/io.o: ../std/io/io.c
@@ -282,6 +282,7 @@ test: $(TARGET) $(STD_AND_PANIC_O)
 	@if [ -f ../tests/run-ub.sh ]; then (cd .. && chmod +x tests/run-ub.sh && ./tests/run-ub.sh); fi
 	@if [ -f ../tests/run-abi-layout.sh ]; then (cd .. && chmod +x tests/run-abi-layout.sh && ./tests/run-abi-layout.sh); fi
 	@if [ -f ../tests/run-lsp.sh ]; then (cd .. && chmod +x tests/run-lsp.sh && ./tests/run-lsp.sh); fi
+	@echo "Test all OK"
 
 # 自举 9.1：用 shu 编译 token 模块（库）+ token_standalone.su（入口），验证 .su 前端数据定义可由宿主编译
 bootstrap-token: $(TARGET)
@@ -338,31 +339,44 @@ bootstrap-codegen: $(TARGET)
 src/main_driver.o: src/main.c
 	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -c -o $@ $<
 DRIVER_OBJS = src/main_driver.o src/runtime_driver.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
+# bootstrap-driver-seed：pipeline_gen.c 单文件展开已含 parser.su，故 pipeline_su.o 提供 parser_*；lsp_diag.c 需 C 解析器 parse()，故链 parser.o
+DRIVER_SEED_OBJS = src/main_driver.o src/runtime_driver.o src/preprocess.o src/lexer/lexer.o src/ast/ast.o src/parser/parser.o src/typeck/typeck.o src/codegen/codegen.o
 
 # 6.3：.su 入口与 main.c 一一对应。bootstrap-driver-seed = 用 C 代码生成（生成 pipeline_gen.c / driver_gen.c）得到种子 shu；仅首次或无 shu 时需要。
 # bootstrap-driver-asm = 用现有 shu 的 -backend asm 把全部 .su 编成机器码 .o 再链接，不生成 C；产出覆盖 $(TARGET)。
 # bootstrap-driver = 先 seed 再 asm，最终 $(TARGET) 为 asm 版（直接出机器码，不依赖生成的 C 文件参与最终链接）。
 # 无补丁：driver_gen.c 仅由 -E -E-extern 生成；run_compiler_c 在 runtime.c 中定义并转调 main_run_compiler_c；其余从 main.su/codegen 根源修
-# LSP 入口包装：driver 期望 lsp_lsp_main，lsp_gen.c 导出 typeck_lsp_main
-src/lsp/lsp_wrapper.o: src/lsp/lsp_wrapper.c
-	$(CC) $(CFLAGS) -c -o $@ $<
-# LSP stdio：lsp_read_c/lsp_write_c，避免 lsp.su 依赖 std.fs 产生重复符号
-src/lsp/lsp_io.o: src/lsp/lsp_io.c
-	$(CC) $(CFLAGS) -c -o $@ $<
 # LSP 诊断收集：parser 在 fail 时写入，lsp_build_diagnostics_response 跑 C parser 并生成 JSON 响应
 src/lsp/lsp_diag.o: src/lsp/lsp_diag.c src/lsp/lsp_diag.h
 	$(CC) $(CFLAGS) -I. -Iinclude -Isrc -c -o $@ $<
 
-# LSP 模块：main.su 依赖 lsp，需单独 -E 生成 lsp_gen.c；-L src/lsp 使 import lsp 解析为 src/lsp/lsp.su
-lsp_gen.c: $(TARGET) $(SHU_C)
-	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/lsp/lsp.su -E > lsp_gen.c
+# lsp_io.su 单独 -E -E-extern 生成 lsp_io_gen.c，提供 read_message/write_fd/alloc/free 等，std.io/std.heap 为 extern，由 io.o/heap.o 提供。
+lsp_io_gen.c: $(TARGET) $(SHU_C)
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/lsp/lsp_io.su -E -E-extern > lsp_io_gen.c
 
-bootstrap-driver-seed: $(TARGET) $(SHU_C) $(DRIVER_OBJS) pipeline_gen.c lsp_gen.c src/lsp/lsp_wrapper.o src/lsp/lsp_io.o src/lsp/lsp_diag.o ../std/fs/fs.o ../std/io/io.o
-	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
-	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c lsp_gen.c -o lsp_su.o
+# LSP 模块：main.su 依赖 lsp，需单独 -E 生成 lsp_gen.c；-E-extern 使 lsp_io、std.io、std.heap 仅生成 extern，由 lsp_io_su.o 与 io.o/heap.o 提供。
+# LSP state 单独 .c，避免 lsp_main 内大数组导致 state 被覆盖
+src/lsp/lsp_state.o: src/lsp/lsp_state.c
+	$(CC) $(CFLAGS) -I. -Iinclude -Isrc -c -o $@ $<
+
+lsp_gen.c: $(TARGET) $(SHU_C)
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/lsp/lsp.su -E -E-extern > lsp_gen.c
+	@sed -i.bak 's/uint8_t state_buf\[16388\] = { 0 }/extern uint8_t g_lsp_state_buf[16388]/' lsp_gen.c 2>/dev/null || true
+	@sed -i.bak 's/(state_buf)/(g_lsp_state_buf)/g' lsp_gen.c 2>/dev/null || true
+
+# std_heap_* 由 lsp_io_std_heap.su 提供（转调 heap_alloc_c/heap_free_c），完全去掉 LSP 的 C 文件；lsp_io_extern.h 仅做 typeck_ 符号映射与 extern 声明
+lsp_io_std_heap_gen.c: $(TARGET) $(SHU_C)
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/lsp/lsp_io_std_heap.su -E -E-extern > lsp_io_std_heap_gen.c
+lsp_io_std_heap_su.o: lsp_io_std_heap_gen.c
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -Iinclude -Isrc -c lsp_io_std_heap_gen.c -o lsp_io_std_heap_su.o
+
+bootstrap-driver-seed: $(TARGET) $(SHU_C) pipeline_gen.c lsp_io_gen.c lsp_gen.c lsp_io_std_heap_gen.c src/main_driver.o src/runtime_driver.o src/lsp/lsp_diag.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I.. -Dstd_io_driver_driver_read_ptr_len=shu_io_read_ptr_len -Dstd_io_driver_driver_read_ptr=shu_io_read_ptr -c pipeline_gen.c -o pipeline_su.o
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_io_extern.h -c lsp_io_gen.c -o lsp_io_su.o
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_gen_extern.h -c lsp_gen.c -o lsp_su.o
 	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o
-	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_OBJS) driver_su.o pipeline_su.o lsp_su.o src/lsp/lsp_wrapper.o src/lsp/lsp_io.o src/lsp/lsp_diag.o ../std/fs/fs.o ../std/io/io.o
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_SEED_OBJS) driver_su.o pipeline_su.o lsp_su.o lsp_io_su.o src/lsp/lsp_diag.o src/lsp/lsp_state.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o
 	@echo "bootstrap-driver-seed OK (shu from generated C)"
 
 # 用汇编后端直接出机器码：不生成 pipeline_gen.c/driver_gen.c，用 $(TARGET) -backend asm 编全部 .su → build_asm/*.o 再链接。
@@ -422,15 +436,20 @@ build-via-tool: build-tool
 	./build_tool ./$(TARGET)
 	@echo "build-via-tool OK（shu 已由 build_tool 产出）"
 
-# 阶段 8.1/8.2：bootstrap-driver 产出 shu₁；用 shu₁ 再编 pipeline + main.su 得到 shu₂（与 6.3 链路一致：driver_su.o + pipeline_su.o）
-bootstrap-self: bootstrap-driver
+# 阶段 8.1/8.2：用 seed 产出 shu₁（C 生成 pipeline_gen.c/driver_gen.c 再链接）；用 shu₁ 再编得到 shu₂。两代跑 run-all 一致即自举验证通过。
+# 注：asm 链接就绪（Goal 2）后可改为 bootstrap-driver，则 shu₁ 为 asm 版，实现「无 C 生成」自举。
+# 与 bootstrap-driver-seed 一致：需生成 lsp_io_gen.c / lsp_io_std_heap_gen.c，编译时带 lsp_gen_extern.h / lsp_io_extern.h，并链接 lsp_io_su.o、lsp_io_std_heap_su.o、heap.o。
+bootstrap-self: bootstrap-driver-seed
 	@cp $(TARGET) $(TARGET)_stage1 && \
-	$(MAKE) -s pipeline_gen.c 2>/dev/null || true && \
-	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o && \
-	./$(TARGET) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c && \
+	$(MAKE) -s pipeline_gen.c lsp_io_gen.c lsp_gen.c lsp_io_std_heap_gen.c 2>/dev/null || true && \
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I.. -Dstd_io_driver_driver_read_ptr_len=shu_io_read_ptr_len -Dstd_io_driver_driver_read_ptr=shu_io_read_ptr -c pipeline_gen.c -o pipeline_su.o && \
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_io_extern.h -c lsp_io_gen.c -o lsp_io_su.o && \
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_gen_extern.h -c lsp_gen.c -o lsp_su.o && \
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -Iinclude -Isrc -c lsp_io_std_heap_gen.c -o lsp_io_std_heap_su.o && \
+	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c && \
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o && \
-	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_OBJS) driver_su.o pipeline_su.o ../std/fs/fs.o && \
-	./$(TARGET)_stage2 -su -E ../tests/return-value/main.su > /tmp/out_self.c && $(CC) $(CFLAGS) -o /tmp/out_self /tmp/out_self.c -I. -Iinclude -Isrc && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shu1 -> shu2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET)_stage2 $(DRIVER_SEED_OBJS) driver_su.o pipeline_su.o lsp_su.o lsp_io_su.o src/lsp/lsp_diag.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o && \
+	./$(TARGET)_stage2 ../tests/return-value/main.su -o /tmp/out_self && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shu1 -> shu2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
 # 阶段 8.3：两代 shu 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shu_su
 check-7.2: bootstrap-self
@@ -449,9 +468,10 @@ bootstrap-pipeline: $(SHU_C)
 pipeline_gen.c: bootstrap-pipeline
 
 # 链接带 -su 流水线的 shu（需 main_su.o 用 -DSHU_USE_SU_PIPELINE 编译，否则 -su -E 不生效）
-shu-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c
-	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -c pipeline_gen.c -o pipeline_su.o
-	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o
+# pipeline_su.o 引用 fs_*_c、io_*、lsp_diag_*、std_io_driver_submit_*；pipeline_glue.c 提供 submit 桩，fs/io/heap/lsp_diag 由对应 .o 提供
+shu-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o src/lsp/lsp_diag.o
+	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I.. -Dstd_io_driver_driver_read_ptr_len=shu_io_read_ptr_len -Dstd_io_driver_driver_read_ptr=shu_io_read_ptr -c pipeline_gen.c -o pipeline_su.o
+	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o src/lsp/lsp_diag.o
 	@echo "shu_su built; use ./shu_su -su -E <file.su> to test .su pipeline"
 
 # 4.5（.su 流水线编译 compiler 自身）：用 shu_su 的 -su -E 生成 typeck.su / codegen.su 对应的 C，再由 cc 链接得到新的 shu_su_stage2。
@@ -464,7 +484,11 @@ bootstrap-su-compiler: shu-su-pipeline
 	$(CC) $(CFLAGS) -DSHU_USE_SU_TYPECK -DSHU_USE_SU_CODEGEN -o $(TARGET)_su_stage2 $(OBJS) typeck_su_su.o codegen_su_su.o
 	@echo "bootstrap-su-compiler OK (.su 流水线生成 typeck/codegen C 并链接 shu_su_stage2)"
 
-# 7.3：自举验证通过（7.1+7.2 + 可选记录）。依赖 check-7.2，通过则视为自举验证通过
+# 自举测试（不含 run-all）：seed 构建 shu，再用 shu 自编得到 shu_stage2，stage2 跑 return-value 返回 42 即通过。用于快速验证「shu 能编译自己」。
+bootstrap-test: bootstrap-self
+	@echo "Bootstrap tests OK (self-compilation: shu1 -> shu2)"
+
+# 7.3：自举验证通过（7.1+7.2 + 可选记录）。依赖 check-7.2（两代 shu 跑全量 run-all 一致）。当前 run-all 若因 std/io、std/net 等失败，可先跑 make bootstrap-test 验证自举链。
 bootstrap-verify: check-7.2
 	@echo "bootstrap-verify OK"
 

@@ -181,6 +181,7 @@ AST (typeck 后) --[asm_codegen_ast]--> 汇编文本 (.s) --[as]--> .o --[ld]-->
 ## 九、构建
 
 - Makefile 的 bootstrap-pipeline 已加 `-L src/asm`；pipeline import asm、backend；backend import arch.x86_64、arch.arm64。新架构在 arch/ 新增 .su 并分派即可。
+- **asm_build_list.su**：asm 自举时各模块的编译顺序与 `-L` 库根（LIBROOT）的唯一定义；`scripts/build_shu_asm.sh` 通过 `// LIBROOT:` 与 `// BUILD:` 行读取，后续可将「逐条编译」逻辑迁入 .su（如 driver 调 spawn 执行 shu -backend asm）。
 
 ## 十、如何添加新架构（以 riscv64 为例）
 

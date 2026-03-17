@@ -1,6 +1,6 @@
-# Shulang CI: multi-platform build and C test suite only
+# Shulang CI: multi-platform build, C test suite, and self-host (.su) tests
 # Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
-# Build: shu (C compiler). Test: run-all.sh (full run-*.sh suite with compiler/shu). No bootstrap / shu_su / run-all-su.sh; run those locally when needed.
+# Build: shu (C compiler). 各平台 run-all.sh 后均追加 shu_su 构建、run-all-su.sh、bootstrap-verify。
 
 name: CI
 
@@ -42,6 +42,15 @@ jobs:
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
+      - name: Build shu_su (.su pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
+        timeout-minutes: 10
+      - name: Run full test suite with shu_su (run-all-su.sh)
+        run: ./tests/run-all-su.sh
+        timeout-minutes: 25
+      - name: Bootstrap verify (shu1 -> shu2, both run run-all)
+        run: ./tests/run-bootstrap-verify.sh
+        timeout-minutes: 25
 
   linux-arm64:
     name: Linux (ARM64)
@@ -68,6 +77,15 @@ jobs:
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
+      - name: Build shu_su (.su pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
+        timeout-minutes: 10
+      - name: Run full test suite with shu_su (run-all-su.sh)
+        run: ./tests/run-all-su.sh
+        timeout-minutes: 25
+      - name: Bootstrap verify (shu1 -> shu2, both run run-all)
+        run: ./tests/run-bootstrap-verify.sh
+        timeout-minutes: 25
 
   mac:
     name: macOS (${{ matrix.os }})
@@ -98,6 +116,15 @@ jobs:
       - name: Run full test suite (run-all.sh)
         run: ./tests/run-all.sh
         timeout-minutes: 20
+      - name: Build shu_su (.su pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
+        timeout-minutes: 10
+      - name: Run full test suite with shu_su (run-all-su.sh)
+        run: ./tests/run-all-su.sh
+        timeout-minutes: 25
+      - name: Bootstrap verify (shu1 -> shu2, both run run-all)
+        run: ./tests/run-bootstrap-verify.sh
+        timeout-minutes: 25
 
   windows:
     name: Windows (MSYS2)
@@ -132,6 +159,22 @@ jobs:
         run: ./tests/run-all.sh
         shell: msys2 {0}
         timeout-minutes: 20
+        env:
+          CI: "1"
+      - name: Build shu_su (.su pipeline)
+        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
+        shell: msys2 {0}
+        timeout-minutes: 10
+      - name: Run full test suite with shu_su (run-all-su.sh)
+        run: ./tests/run-all-su.sh
+        shell: msys2 {0}
+        timeout-minutes: 25
+        env:
+          CI: "1"
+      - name: Bootstrap verify (shu1 -> shu2, both run run-all)
+        run: ./tests/run-bootstrap-verify.sh
+        shell: msys2 {0}
+        timeout-minutes: 25
         env:
           CI: "1"
 
@@ -180,7 +223,7 @@ jobs:
           uname -a
           pwd
       - name: Build and test in ${{ matrix.image }}
-        timeout-minutes: 25
+        timeout-minutes: 60
         run: |
           docker run --rm -e CI=1 \
             -v "${{ github.workspace }}:/src" -w /src \
@@ -193,5 +236,8 @@ jobs:
               fi &&
               make -C compiler clean &&
               make -C compiler OPT=1 all &&
-              ./tests/run-all.sh
+              ./tests/run-all.sh &&
+              make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline &&
+              ./tests/run-all-su.sh &&
+              ./tests/run-bootstrap-verify.sh
             '

@@ -12,7 +12,6 @@ import ast;
 import codegen;
 import preprocess;
 import std.fs;
-import lsp;
 
 /** -su -E 解析结果：路径与 -L 库根、是否用 asm 后端、目标架构，由 driver_argv_parse_su / driver_argv_parse_su_path 填充。 */
 struct DriverSuEmitState {
@@ -411,7 +410,14 @@ function driver_run_su_emit_su(state: *DriverSuEmitState): i32 {
     current_func_index: -1,
     dep_paths: [],
     skip_codegen_dep_0: 0,
-    entry_already_parsed: 0
+    entry_already_parsed: 0,
+    current_func_single_empty_param_index: -1,
+    current_func_empty_param_count: 0,
+    current_func_empty_param_indices: [],
+    current_emit_empty_var_next_index: 0,
+    emit_expr_as_callee: 0,
+    current_codegen_module: 0 as *Module,
+    current_codegen_arena: 0 as *ASTArena
   };
   let last_slash: i32 = -1;
   k = 0;
@@ -504,10 +510,13 @@ function run_compiler_su_path_impl(argc: i32, argv: *u8): i32 {
   return driver_run_su_emit_su(&state);
 }
 
+/** LSP 主循环由 lsp.su 实现，编译为 lsp_gen.c 时以 typeck_ 为前缀导出，故此处 extern 直接调 typeck_lsp_main，不再依赖 lsp_wrapper.c。 */
+extern function typeck_lsp_main(): i32;
+
 /**
  * 程序入口：与 main.c 的 main() 对应；C 的 main() 仅做 return main_entry(argc, argv)。
  * 6.2：-su -E 的解析与执行全部在 .su；非 -su -E 时由 run_compiler_su_path_impl 优先走 .su 简化路径。
- * LSP：若任一参数为 --lsp 则进入 LSP 主循环（lsp.lsp_main），不再走编译。
+ * LSP：若任一参数为 --lsp 则进入 LSP 主循环（typeck_lsp_main），不再走编译。
  */
 function entry(argc: i32, argv: *u8): i32 {
   let arg_buf: [64]u8 = [];
@@ -515,7 +524,7 @@ function entry(argc: i32, argv: *u8): i32 {
   while (i < argc) {
     let len: i32 = driver_get_argv_i(argc, argv, i, arg_buf, 64);
     if (len >= 0 && eq_minus_lsp(arg_buf, len) != 0) {
-      return lsp_main();
+      return typeck_lsp_main();
     }
     i = i + 1;
   }
