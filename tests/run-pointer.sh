@@ -4,8 +4,8 @@ set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
-./compiler/shuc tests/pointer/main.su -o /tmp/shuc_ptr 2>&1
-exitcode=0; /tmp/shuc_ptr >/dev/null 2>&1 || exitcode=$?
+./compiler/shu tests/pointer/main.su -o /tmp/shu_ptr 2>&1
+exitcode=0; /tmp/shu_ptr >/dev/null 2>&1 || exitcode=$?
 [ "$exitcode" -ne 0 ] && { echo "expected 0 (pointer main), got $exitcode"; exit 1; }
 
 echo "pointer test OK"
