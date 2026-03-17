@@ -5,11 +5,11 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
 PERF_SU="tests/perf-baseline/main.su"
-OUT="/tmp/shuc_perf_baseline"
+OUT="/tmp/shu_perf_baseline"
 RUNS=3
 
 echo "=== 性能基线（-O2，strip）==="
-./compiler/shuc "$PERF_SU" -o "$OUT" 2>&1
+./compiler/shu "$PERF_SU" -o "$OUT" 2>&1
 if [ ! -f "$OUT" ]; then
   echo "编译失败，无产物" >&2
   exit 1
