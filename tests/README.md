@@ -8,13 +8,13 @@
 
 **执行方式：**
 
-- **推荐（分轨全量）**：`./tests/run-all-c.sh`（全量用 C 版编译器 shuc-c）、`./tests/run-all-su.sh`（全量用 .su 流水线编译器 shuc_su）。CI 两条都跑，见 `.github/workflows/ci.yml`。
-- **通用脚本**：`./tests/run-all.sh` 跑全部 run-*.sh；通过环境变量 `SHUC=compiler/shuc-c` 或 `SHUC=compiler/shuc_su` 指定用哪支编译器，不设则用当前 `compiler/shuc`。
+- **推荐（分轨全量）**：`./tests/run-all-c.sh`（全量用 C 版编译器 shu-c）、`./tests/run-all-su.sh`（全量用 .su 流水线编译器 shu_su）。CI 两条都跑，见 `.github/workflows/ci.yml`。
+- **通用脚本**：`./tests/run-all.sh` 跑全部 run-*.sh；通过环境变量 `SHU=compiler/shu-c` 或 `SHU=compiler/shu_su` 指定用哪支编译器，不设则用当前 `compiler/shu`。
 - 编译器目录：`make -C compiler test` 与上述等价（内部调 run-all）。
 
 **不纳入回归的脚本**：`run-size-baseline.sh`、`run-perf-baseline.sh` 为可选体积/性能基线，需时单独执行。
 
-**CI 多端测试**：push/PR 时在 **Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim）上先构建 shuc + shuc_su，再依次执行 `./tests/run-all-c.sh` 与 `./tests/run-all-su.sh`，见 `.github/workflows/ci.yml`。
+**CI 多端测试**：push/PR 时在 **Linux**（ubuntu-22.04、ubuntu-latest）、**Linux ARM64**、**macOS**（macos-14、macos-latest）、**Windows**（MSYS2）、**Docker**（Alpine、Debian bookworm-slim）上先构建 shu + shu_su，再依次执行 `./tests/run-all-c.sh` 与 `./tests/run-all-su.sh`，见 `.github/workflows/ci.yml`。
 
 ## 二、测试脚本与覆盖范围
 
@@ -60,7 +60,7 @@
 | `run-su-pipeline.sh` | .su 流水线（-su -E 生成 C）；无 pipeline 时 SKIP | 正例 / SKIP |
 | `run-su-multi-file.sh` | 多文件 .su 流水线；无 pipeline 时 SKIP | 正例 / SKIP |
 | `run-asm.sh` | -backend asm 出汇编、.text/main/ret、可选 as+ld；无 asm 时 SKIP | 正例 / SKIP |
-| `run-without-c.sh` | 用 asm 路径构建 shuc_asm 再跑全量测试（无 C 运行时）；无 asm 时 SKIP | 正例 / SKIP |
+| `run-without-c.sh` | 用 asm 路径构建 shu_asm 再跑全量测试（无 C 运行时）；无 asm 时 SKIP | 正例 / SKIP |
 | `run-vector.sh` | 向量 i32x4/u32x4/i32x16、0 与字面量初始化、逐分量加 | 正例 |
 | `run-fmt.sh` | core.fmt 格式化 | 正例 |
 | `run-debug.sh` | 调试/打印相关 | 正例 |
@@ -79,8 +79,9 @@
 | `run-io-driver.sh` | std.io.driver 占位（Buffer、submit、submit_*_batch_buf、register_fixed_buffers_buf） | 正例 |
 | `run-ub.sh` | 未定义行为收窄：除零、越界等应 panic | 正例 + 负例 |
 | `run-abi-layout.sh` | ABI/布局断言（layout_abi.c），与 analysis/ABI与布局.md 一致 | 正例 |
+| `run-lsp.sh` | LSP（shu --lsp）：initialize、didOpen、diagnostics、**textDocument/formatting**、shutdown/exit，校验 JSON-RPC 响应含 capabilities（含 documentFormattingProvider）、result 数组及格式化结果 newText | 正例 |
 
-**说明**：`make test`（在 `compiler/` 下执行）或 `./tests/run-all.sh` 会依次执行上表全部脚本，与自举回归套件一致。`run-asm.sh`、`run-without-c.sh` 需支持 `-backend asm` 的 shuc（`make -C compiler bootstrap-driver`）；若当前构建无 asm 则 SKIP 且不视为失败。
+**说明**：`make test`（在 `compiler/` 下执行）或 `./tests/run-all.sh` 会依次执行上表全部脚本，与自举回归套件一致。`run-asm.sh`、`run-without-c.sh` 需支持 `-backend asm` 的 shu（`make -C compiler bootstrap-driver`）；若当前构建无 asm 则 SKIP 且不视为失败。`run-lsp.sh` 会按需执行 `make -C compiler bootstrap-driver-seed` 以得到带 LSP 的 shu，再发送 JSON-RPC 消息（含格式化请求）并校验响应。`run-lexer.sh`、`run-typeck.sh` 在存在 `compiler/shu-c` 时使用 shu-c，以保证无 `-o` 时输出 token/typeck OK 的语义一致。
 
 ## 三、边界与负向测试
 
@@ -146,11 +147,11 @@ make test
 |------|------|------|
 | **CI 必跑** | run-all.sh 中除 run-asm、run-without-c 外的全部 run-*.sh | 在 GitHub Actions 多平台（Linux/macOS/Windows/Docker）上执行；失败则 CI 失败（部分脚本在 CI 下失败时由 run() 打印 SKIP 保绿，见 run-all.sh）。 |
 | **CI 不跑 / 可选** | run-asm.sh | 脚本在 CI 下主动 SKIP（`run-asm SKIP (CI: skip -backend asm ...)`），避免长构建与 asm 环境差异。 |
-| **CI 可选（条件 SKIP）** | run-without-c.sh | 需支持 `-backend asm` 的 shuc（`make -C compiler bootstrap-driver`）；CI 默认不构建 bootstrap-driver，故通常输出 `run-without-c SKIP (shuc does not support -backend asm; ...)`。 |
+| **CI 可选（条件 SKIP）** | run-without-c.sh | 需支持 `-backend asm` 的 shu（`make -C compiler bootstrap-driver`）；CI 默认不构建 bootstrap-driver，故通常输出 `run-without-c SKIP (shu does not support -backend asm; ...)`。 |
 
 **本地全量验证（含 asm）**：
 
-1. 构建支持 asm 的 shuc：`make -C compiler bootstrap-driver`
+1. 构建支持 asm 的 shu：`make -C compiler bootstrap-driver`
 2. 跑全量测试：`./tests/run-all.sh`（此时 run-without-c 会真正执行；run-asm.sh 在非 CI 环境下会执行，不再主动 SKIP）
 3. 若仅验证 asm 后端：`./tests/run-asm.sh`；验证无 C 运行时路径：`./tests/run-without-c.sh`
 
@@ -158,15 +159,15 @@ make test
 
 ### 6.2 完全脱离 C 的验证（run-without-c）
 
-- **适用场景**：验证「用 asm 后端构建出的 shuc_asm」能否在不依赖 C 运行时逻辑的前提下通过全量测试（仅链接最少 C 桩）；为日后完全脱离 C/Makefile 的路线提供回归保障。
-- **验证方式**：先 `make -C compiler bootstrap-driver` 得到支持 `-backend asm` 的 shuc，再在仓库根执行 `./tests/run-without-c.sh`。脚本会使用 `build_tool` 以 asm 路径编出 `compiler/shuc_asm`，并用 `SHUC=compiler/shuc_asm ./tests/run-all.sh` 跑全量测试；通过即表示脱离 C 的构建路径可用。CI 下不跑此脚本（见 §6.1）。
+- **适用场景**：验证「用 asm 后端构建出的 shu_asm」能否在不依赖 C 运行时逻辑的前提下通过全量测试（仅链接最少 C 桩）；为日后完全脱离 C/Makefile 的路线提供回归保障。
+- **验证方式**：先 `make -C compiler bootstrap-driver` 得到支持 `-backend asm` 的 shu，再在仓库根执行 `./tests/run-without-c.sh`。脚本会使用 `build_tool` 以 asm 路径编出 `compiler/shu_asm`，并用 `SHU=compiler/shu_asm ./tests/run-all.sh` 跑全量测试；通过即表示脱离 C 的构建路径可用。CI 下不跑此脚本（见 §6.1）。
 
 ### 6.3 run-su-pipeline 与 -su -E 超时
 
-- **现象**：Linux/macOS CI 在「shuc_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shuc-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
-- **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shuc-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shuc_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。
+- **现象**：Linux/macOS CI 在「shu_su built」之后执行 `run-su-pipeline.sh` 时可能长时间无输出甚至卡住；有时卡在 **make shu-su-pipeline**（编译巨大的 pipeline_gen.c）而非 -su -E 本身。
+- **原因**：① **macOS 无 `timeout` 命令**，脚本若不用可移植超时则会无限等待；② **make bootstrap-pipeline / shu-su-pipeline** 无超时，编译 pipeline_gen.c 可耗时数分钟；③ **shu_su -su -E** 会进入 `pipeline_run_su_pipeline_impl`（`compiler/pipeline_gen.c`），内部 typeck/codegen 在部分环境下可能死循环或极慢。
 - **根因（已通过诊断确认）**：run-su-multi-file 时最后一条诊断为 `pipeline: impl start`、无 `pipeline: after parse` → 卡在 **parser**（`pipeline_parse_into_with_init` / `parser_parse_into`）解析 **foo.su** 阶段，需在 compiler 生成的 parser 码（pipeline_gen.c 中 `parser_parse_into`）或 src/parser 中查死循环/平台分支。  
 - **处理**：  
   - **CI**：run-all.sh 会执行 run-su-pipeline.sh、run-su-multi-file.sh（通过 run()）；若失败则打印 SKIP 并继续，保证 run-all 不因单脚本失败而红。  
-  - **非 CI**：两脚本对「make bootstrap-pipeline + shuc-su-pipeline」整段施加 **120 秒**可移植超时，对 **shuc_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。  
+  - **非 CI**：两脚本对「make bootstrap-pipeline + shu-su-pipeline」整段施加 **120 秒**可移植超时，对 **shu_su -su -E** 施加 **60 秒**超时；任一步超时则 SKIP 并 exit 0。  
   - **run-vector.sh**：CI 下若向量测试失败则 SKIP 并 exit 0（会先打印失败原因），保证 run-all 通过；本地失败仍 exit 1，便于从根上修。
