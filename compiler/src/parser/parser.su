@@ -8,6 +8,9 @@ import token;
 import ast;
 import std.fs;
 
+/** 从 (data, len) 构造 []u8 slice，供 parse_into_buf 内调 parse_one_function_impl 时使用；实现由 pipeline_glue.c 提供。 */
+extern function parser_slice_from_buf(data: *u8, len: i32): []u8;
+
 /** 最小解析结果：ok 表示整句解析成功，return_val 为 return 后的整数字面量值。 */
 struct ParseResult {
   ok: bool;
@@ -75,6 +78,8 @@ allow(padding) struct OneFuncResult {
   let_names: [24][64]u8;
   let_name_lens: [24]i32;
   let_init_vals: [24]i32;
+  /** 非 0 时表示该 let 的初值为 arena 中的 expr ref（如 EXPR_ARRAY_LIT、EXPR_CALL），block 构建时优先用此而非 let_init_vals。 */
+  let_init_refs: [24]i32;
   has_if_expr: bool;
   if_cond_true: bool;
   if_then_val: i32;
@@ -138,6 +143,8 @@ function copy_onefunc_into(dst: *OneFuncResult, src: *OneFuncResult): void {
   while (lli < 24) { dst.let_name_lens[lli] = src.let_name_lens[lli]; lli = lli + 1; }
   let lvi: i32 = 0;
   while (lvi < 24) { dst.let_init_vals[lvi] = src.let_init_vals[lvi]; lvi = lvi + 1; }
+  let lri: i32 = 0;
+  while (lri < 24) { dst.let_init_refs[lri] = src.let_init_refs[lri]; lri = lri + 1; }
   dst.has_if_expr = src.has_if_expr;
   dst.if_cond_true = src.if_cond_true;
   dst.if_then_val = src.if_then_val;
@@ -368,6 +375,394 @@ function body_skip_let_const_then_if_into(out: *LexerResult, lex: Lexer, source:
     out.next_lex = r.next_lex;
     out.tok = r.tok;
   }
+}
+
+/**
+ * 从 body 首 token（{ 之后）起解析 let 声明，填充 out.num_lets、out.let_names、out.let_name_lens、
+ * out.let_init_vals、out.let_init_refs（数组字面量或调用表达式时在 arena 中构建并写 ref）。
+ * 返回第一个非 let/const 的 token 对应的 lex（即该 token 起始位置），供调用方继续解析 return/if 等。
+ * 支持的 init：整数字面量（写 let_init_vals，let_init_refs=0）、[ int , ... ]（EXPR_ARRAY_LIT）、
+ * ident ( ident , int )（EXPR_CALL，如 print_str(msg, 12)）。
+ */
+function parse_body_lets_into(arena: *ASTArena, lex: Lexer, source: []u8, out: *OneFuncResult): Lexer {
+  let r: LexerResult = LexerResult { next_lex: lex, tok: Token { kind: TokenKind.TOKEN_EOF, line: 0, col: 0, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 } };
+  lexer_next_into(&r, lex, source);
+  while (r.tok.kind == TokenKind.TOKEN_LET || r.tok.kind == TokenKind.TOKEN_CONST) {
+    if (out.num_lets >= 24) {
+      return lex;
+    }
+    let is_let: bool = r.tok.kind == TokenKind.TOKEN_LET;
+    lex_from_result_ptr_into(&lex, &r);
+    lexer_next_into(&r, lex, source);
+    if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+      return lex;
+    }
+    let name_start: usize = lex.pos;
+    let name_len: i32 = r.tok.ident_len;
+    if (name_len <= 0 || name_len > 63) {
+      return lex;
+    }
+    let name_row: [64]u8 = [];
+    let ni: i32 = 0;
+    while (ni < name_len && ni < 64) {
+      if (name_start + ni < source.length) {
+        name_row[ni] = source[name_start + ni];
+      }
+      ni = ni + 1;
+    }
+    let zi: i32 = ni;
+    while (zi < 64) {
+      name_row[zi] = 0;
+      zi = zi + 1;
+    }
+    if (is_let) {
+      let copy_k: i32 = 0;
+      while (copy_k < 64) {
+        out.let_names[out.num_lets][copy_k] = name_row[copy_k];
+        copy_k = copy_k + 1;
+      }
+      out.let_name_lens[out.num_lets] = name_len;
+    }
+    lex_from_result_ptr_into(&lex, &r);
+    lexer_next_into(&r, lex, source);
+    if (r.tok.kind != TokenKind.TOKEN_COLON) {
+      return lex;
+    }
+    lex_from_result_ptr_into(&lex, &r);
+    lexer_next_into(&r, lex, source);
+    /* 跳过类型直到 = */
+    while (r.tok.kind != TokenKind.TOKEN_ASSIGN) {
+      if (r.tok.kind == TokenKind.TOKEN_EOF) {
+        return lex;
+      }
+      lex_from_result_ptr_into(&lex, &r);
+      lexer_next_into(&r, lex, source);
+    }
+    lex_from_result_ptr_into(&lex, &r);
+    lexer_next_into(&r, lex, source);
+    /* 解析 init：[ int , ... ] | ident ( ident , int ) | int；仅 LET 时写 out.let_init_* */
+    if (is_let) {
+      out.let_init_refs[out.num_lets] = 0;
+      out.let_init_vals[out.num_lets] = 0;
+    }
+    if (r.tok.kind == TokenKind.TOKEN_LBRACKET) {
+      /* 数组字面量 [ int , int , ... ]，最多 16 个元素 */
+      lex_from_result_ptr_into(&lex, &r);
+      lexer_next_into(&r, lex, source);
+      let elem_refs: [16]i32 = [];
+      let n_elems: i32 = 0;
+      while (r.tok.kind != TokenKind.TOKEN_RBRACKET && n_elems < 16) {
+        if (r.tok.kind == TokenKind.TOKEN_INT) {
+          let er: i32 = ast_arena_expr_alloc(arena);
+          if (er != 0) {
+            let ee: Expr = ast_arena_expr_get(arena, er);
+            ee.kind = ExprKind.EXPR_LIT;
+            ee.resolved_type_ref = 0;
+            ee.line = 0;
+            ee.col = 0;
+            ee.int_val = r.tok.int_val;
+            ee.binop_left_ref = 0;
+            ee.binop_right_ref = 0;
+            ee.unary_operand_ref = 0;
+            ee.if_cond_ref = 0;
+            ee.if_then_ref = 0;
+            ee.if_else_ref = 0;
+            ee.block_ref = 0;
+            ee.match_matched_ref = 0;
+            ee.match_num_arms = 0;
+            ast.expr_init_match_enum(&ee);
+            ee.field_access_base_ref = 0;
+            ee.field_access_field_len = 0;
+            ee.field_access_is_enum_variant = 0;
+            ee.field_access_offset = 0;
+            ee.index_base_ref = 0;
+            ee.index_index_ref = 0;
+            ee.index_base_is_slice = 0;
+            ee.call_callee_ref = 0;
+            ee.call_num_args = 0;
+            ee.method_call_base_ref = 0;
+            ee.method_call_name_len = 0;
+            ee.method_call_num_args = 0;
+            ee.const_folded_val = 0;
+            ee.const_folded_valid = 0;
+            ee.index_proven_in_bounds = 0;
+            ast_arena_expr_set(arena, er, ee);
+            elem_refs[n_elems] = er;
+            n_elems = n_elems + 1;
+          }
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+        } else if (r.tok.kind == TokenKind.TOKEN_COMMA) {
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+        } else {
+          break;
+        }
+      }
+      if (r.tok.kind == TokenKind.TOKEN_RBRACKET && n_elems > 0) {
+        let arr_ref: i32 = ast_arena_expr_alloc(arena);
+        if (arr_ref != 0) {
+          let ae: Expr = ast_arena_expr_get(arena, arr_ref);
+          ae.kind = ExprKind.EXPR_ARRAY_LIT;
+          ae.resolved_type_ref = 0;
+          ae.line = 0;
+          ae.col = 0;
+          ae.array_lit_num_elems = n_elems;
+          let ei: i32 = 0;
+          while (ei < 16) {
+            ae.array_lit_elem_refs[ei] = ei < n_elems ? elem_refs[ei] : 0;
+            ei = ei + 1;
+          }
+          ae.binop_left_ref = 0;
+          ae.binop_right_ref = 0;
+          ae.unary_operand_ref = 0;
+          ae.if_cond_ref = 0;
+          ae.if_then_ref = 0;
+          ae.if_else_ref = 0;
+          ae.block_ref = 0;
+          ae.match_matched_ref = 0;
+          ae.match_num_arms = 0;
+          ast.expr_init_match_enum(&ae);
+          ae.field_access_base_ref = 0;
+          ae.field_access_field_len = 0;
+          ae.field_access_is_enum_variant = 0;
+          ae.field_access_offset = 0;
+          ae.index_base_ref = 0;
+          ae.index_index_ref = 0;
+          ae.index_base_is_slice = 0;
+          ae.call_callee_ref = 0;
+          ae.call_num_args = 0;
+          ae.method_call_base_ref = 0;
+          ae.method_call_name_len = 0;
+          ae.method_call_num_args = 0;
+          ae.const_folded_val = 0;
+          ae.const_folded_valid = 0;
+          ae.index_proven_in_bounds = 0;
+          ast_arena_expr_set(arena, arr_ref, ae);
+          if (is_let) {
+            out.let_init_refs[out.num_lets] = arr_ref;
+          }
+        }
+        lex_from_result_ptr_into(&lex, &r);
+        lexer_next_into(&r, lex, source);
+      }
+    } else if (r.tok.kind == TokenKind.TOKEN_IDENT) {
+      let callee_start: usize = lex.pos;
+      let callee_len: i32 = r.tok.ident_len;
+      lex_from_result_ptr_into(&lex, &r);
+      lexer_next_into(&r, lex, source);
+      if (r.tok.kind == TokenKind.TOKEN_LPAREN) {
+        lex_from_result_ptr_into(&lex, &r);
+        lexer_next_into(&r, lex, source);
+        let arg0_ref: i32 = 0;
+        let arg1_ref: i32 = 0;
+        if (r.tok.kind == TokenKind.TOKEN_IDENT) {
+          let a0: i32 = ast_arena_expr_alloc(arena);
+          if (a0 != 0) {
+            let a0e: Expr = ast_arena_expr_get(arena, a0);
+            a0e.kind = ExprKind.EXPR_VAR;
+            a0e.resolved_type_ref = 0;
+            a0e.line = 0;
+            a0e.col = 0;
+            a0e.var_name_len = r.tok.ident_len;
+            let k: i32 = 0;
+            while (k < r.tok.ident_len && k < 64) {
+              if (lex.pos + k < source.length) {
+                a0e.var_name[k] = source[lex.pos + k];
+              }
+              k = k + 1;
+            }
+            while (k < 64) {
+              a0e.var_name[k] = 0;
+              k = k + 1;
+            }
+            a0e.binop_left_ref = 0;
+            a0e.binop_right_ref = 0;
+            a0e.unary_operand_ref = 0;
+            a0e.if_cond_ref = 0;
+            a0e.if_then_ref = 0;
+            a0e.if_else_ref = 0;
+            a0e.block_ref = 0;
+            a0e.match_matched_ref = 0;
+            a0e.match_num_arms = 0;
+            ast.expr_init_match_enum(&a0e);
+            a0e.field_access_base_ref = 0;
+            a0e.field_access_field_len = 0;
+            a0e.field_access_is_enum_variant = 0;
+            a0e.field_access_offset = 0;
+            a0e.index_base_ref = 0;
+            a0e.index_index_ref = 0;
+            a0e.index_base_is_slice = 0;
+            a0e.call_callee_ref = 0;
+            a0e.call_num_args = 0;
+            a0e.method_call_base_ref = 0;
+            a0e.method_call_name_len = 0;
+            a0e.method_call_num_args = 0;
+            a0e.const_folded_val = 0;
+            a0e.const_folded_valid = 0;
+            a0e.index_proven_in_bounds = 0;
+            ast_arena_expr_set(arena, a0, a0e);
+            arg0_ref = a0;
+          }
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+        }
+        if (r.tok.kind == TokenKind.TOKEN_COMMA) {
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+        }
+        if (r.tok.kind == TokenKind.TOKEN_INT) {
+          let a1: i32 = ast_arena_expr_alloc(arena);
+          if (a1 != 0) {
+            let a1e: Expr = ast_arena_expr_get(arena, a1);
+            a1e.kind = ExprKind.EXPR_LIT;
+            a1e.resolved_type_ref = 0;
+            a1e.line = 0;
+            a1e.col = 0;
+            a1e.int_val = r.tok.int_val;
+            a1e.binop_left_ref = 0;
+            a1e.binop_right_ref = 0;
+            a1e.unary_operand_ref = 0;
+            a1e.if_cond_ref = 0;
+            a1e.if_then_ref = 0;
+            a1e.if_else_ref = 0;
+            a1e.block_ref = 0;
+            a1e.match_matched_ref = 0;
+            a1e.match_num_arms = 0;
+            ast.expr_init_match_enum(&a1e);
+            a1e.field_access_base_ref = 0;
+            a1e.field_access_field_len = 0;
+            a1e.field_access_is_enum_variant = 0;
+            a1e.field_access_offset = 0;
+            a1e.index_base_ref = 0;
+            a1e.index_index_ref = 0;
+            a1e.index_base_is_slice = 0;
+            a1e.call_callee_ref = 0;
+            a1e.call_num_args = 0;
+            a1e.method_call_base_ref = 0;
+            a1e.method_call_name_len = 0;
+            a1e.method_call_num_args = 0;
+            a1e.const_folded_val = 0;
+            a1e.const_folded_valid = 0;
+            a1e.index_proven_in_bounds = 0;
+            ast_arena_expr_set(arena, a1, a1e);
+            arg1_ref = a1;
+          }
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+        }
+        if (r.tok.kind == TokenKind.TOKEN_RPAREN) {
+          lex_from_result_ptr_into(&lex, &r);
+          lexer_next_into(&r, lex, source);
+          let callee_ref: i32 = ast_arena_expr_alloc(arena);
+          if (callee_ref != 0) {
+            let ve: Expr = ast_arena_expr_get(arena, callee_ref);
+            ve.kind = ExprKind.EXPR_VAR;
+            ve.resolved_type_ref = 0;
+            ve.line = 0;
+            ve.col = 0;
+            ve.var_name_len = callee_len;
+            let ck: i32 = 0;
+            while (ck < callee_len && ck < 64) {
+              if (callee_start + ck < source.length) {
+                ve.var_name[ck] = source[callee_start + ck];
+              }
+              ck = ck + 1;
+            }
+            while (ck < 64) {
+              ve.var_name[ck] = 0;
+              ck = ck + 1;
+            }
+            ve.binop_left_ref = 0;
+            ve.binop_right_ref = 0;
+            ve.unary_operand_ref = 0;
+            ve.if_cond_ref = 0;
+            ve.if_then_ref = 0;
+            ve.if_else_ref = 0;
+            ve.block_ref = 0;
+            ve.match_matched_ref = 0;
+            ve.match_num_arms = 0;
+            ast.expr_init_match_enum(&ve);
+            ve.field_access_base_ref = 0;
+            ve.field_access_field_len = 0;
+            ve.field_access_is_enum_variant = 0;
+            ve.field_access_offset = 0;
+            ve.index_base_ref = 0;
+            ve.index_index_ref = 0;
+            ve.index_base_is_slice = 0;
+            ve.call_callee_ref = 0;
+            ve.call_num_args = 0;
+            ve.method_call_base_ref = 0;
+            ve.method_call_name_len = 0;
+            ve.method_call_num_args = 0;
+            ve.const_folded_val = 0;
+            ve.const_folded_valid = 0;
+            ve.index_proven_in_bounds = 0;
+            ast_arena_expr_set(arena, callee_ref, ve);
+            let call_ref: i32 = ast_arena_expr_alloc(arena);
+            if (call_ref != 0) {
+              let ce: Expr = ast_arena_expr_get(arena, call_ref);
+              ce.kind = ExprKind.EXPR_CALL;
+              ce.resolved_type_ref = 0;
+              ce.line = 0;
+              ce.col = 0;
+              ce.call_callee_ref = callee_ref;
+              ce.call_num_args = 2;
+              ce.call_arg_refs[0] = arg0_ref;
+              ce.call_arg_refs[1] = arg1_ref;
+              let ai: i32 = 2;
+              while (ai < 16) {
+                ce.call_arg_refs[ai] = 0;
+                ai = ai + 1;
+              }
+              ce.binop_left_ref = 0;
+              ce.binop_right_ref = 0;
+              ce.unary_operand_ref = 0;
+              ce.if_cond_ref = 0;
+              ce.if_then_ref = 0;
+              ce.if_else_ref = 0;
+              ce.block_ref = 0;
+              ce.match_matched_ref = 0;
+              ce.match_num_arms = 0;
+              ast.expr_init_match_enum(&ce);
+              ce.field_access_base_ref = 0;
+              ce.field_access_field_len = 0;
+              ce.field_access_is_enum_variant = 0;
+              ce.field_access_offset = 0;
+              ce.index_base_ref = 0;
+              ce.index_index_ref = 0;
+              ce.index_base_is_slice = 0;
+              ce.method_call_base_ref = 0;
+              ce.method_call_name_len = 0;
+              ce.method_call_num_args = 0;
+              ce.const_folded_val = 0;
+              ce.const_folded_valid = 0;
+              ce.index_proven_in_bounds = 0;
+              ast_arena_expr_set(arena, call_ref, ce);
+              if (is_let) {
+                out.let_init_refs[out.num_lets] = call_ref;
+              }
+            }
+          }
+        }
+      }
+    } else if (r.tok.kind == TokenKind.TOKEN_INT) {
+      if (is_let) {
+        out.let_init_vals[out.num_lets] = r.tok.int_val;
+      }
+      lex_from_result_ptr_into(&lex, &r);
+      lexer_next_into(&r, lex, source);
+    }
+    if (r.tok.kind != TokenKind.TOKEN_SEMICOLON) {
+      return lex;
+    }
+    lex_from_result_ptr_into(&lex, &r);
+    lexer_next_into(&r, lex, source);
+    if (is_let) {
+      out.num_lets = out.num_lets + 1;
+    }
+  }
+  return lex;
 }
 
 /** 兼容：返回 LexerResult，内部调 _into（仍有 return 的 ABI 风险）。 */
@@ -716,7 +1111,7 @@ function diag_fail_at_token_kind(source: []u8): i32 {
       }
       lex_from_next_into(&lex, r);
       lexer_next_into(&r, lex, source);
-      if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
+      if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_USIZE || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
         lex_from_next_into(&lex, r);
         lexer_next_into(&r, lex, source);
       } else if (r.tok.kind == TokenKind.TOKEN_STAR) {
@@ -765,7 +1160,7 @@ function diag_fail_at_token_kind(source: []u8): i32 {
   }
   lex_from_next_into(&lex, r);
   lexer_next_into(&r, lex, source);
-  if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
+  if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_USIZE || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
   } else if (r.tok.kind == TokenKind.TOKEN_STAR) {
@@ -864,13 +1259,26 @@ function copy_slice_to_name64_at_end_buf(source: *u8, source_len: i32, end_pos: 
   copy_slice_to_name64_buf(source, source_len, start, nlen, out);
 }
 
+/** 从 buf 的 [end_pos-nlen..end_pos) 复制到 out[0..31]，供 parse_one_function_library_scan_buf 内 param_name 复制。 */
+function copy_slice_to_param32_at_end_buf(source: *u8, source_len: i32, end_pos: usize, nlen: i32, out: [32]u8): void {
+  let start: usize = end_pos - (nlen as usize);
+  let i: i32 = 0;
+  while (i < 32) {
+    if (i < nlen && start + (i as usize) < (source_len as usize)) {
+      out[i] = source[start + (i as usize)];
+    } else {
+      out[i] = 0;
+    }
+    i = i + 1;
+  }
+}
 
 /**
- * 解析一个最小函数：function <ident>( [ <name>: i32 [, ...] ] ): i32 { return <int>; }。
- * 当前 lex 必须指向 TOKEN_FUNCTION；成功时写 ok=true、函数名、参数列表（仅 i32）、return 值及消费后的 next_lex 到 out；否则写 ok=false 与 next_lex。
- * 使用 out 参数避免 ABI 下 OneFuncResult 按值返回错误（darwin/arm64 等）。
+ * 解析一个最小函数：function <ident>( [ <name>: i32 [, ...] ] ): i32 { [ let ... ; ] return <int>; }。
+ * 当前 lex 必须指向 TOKEN_FUNCTION；成功时写 ok=true、函数名、参数列表、let 列表（含 let_init_refs）、return 值及消费后的 next_lex 到 out；否则写 ok=false 与 next_lex。
+ * arena 用于在 parse_body_lets_into 中构建 let 的 init 表达式（数组字面量、调用等）。
  */
-function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8): void {
+function parse_one_function_impl(out: *OneFuncResult, arena: *ASTArena, lex: Lexer, source: []u8): void {
   let dummy_name: [64]u8 = [];
   let empty32: [32]u8 = [];
   let dummy_pnames: [16][32]u8 = [empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32];
@@ -885,6 +1293,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
   let dummy_let_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_let_lens: [24]i32 = [];
   let dummy_let_vals: [24]i32 = [];
+  let dummy_let_refs: [24]i32 = [];
   let num_consts: i32 = 0;
   let const_names: [24][64]u8 = dummy_const_names;
   let const_name_lens: [24]i32 = dummy_const_lens;
@@ -893,6 +1302,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
   let let_names: [24][64]u8 = dummy_let_names;
   let let_name_lens: [24]i32 = dummy_let_lens;
   let let_init_vals: [24]i32 = dummy_let_vals;
+  let let_init_refs: [24]i32 = dummy_let_refs;
   let has_if_expr: bool = false;
   let if_cond_true: bool = false;
   let if_then_val: i32 = 0;
@@ -982,7 +1392,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
         }
         lex_from_next_into(&lex, r);
         lexer_next_into(&r, lex, source);
-      } else if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
+      } else if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_USIZE || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
         lex_from_next_into(&lex, r);
         lexer_next_into(&r, lex, source);
       } else {
@@ -1005,7 +1415,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
   }
   lex_from_next_into(&lex, r);
   lexer_next_into(&r, lex, source);
-  /* 返回类型：i32 / i64 / bool / void / Ident / * Ident */
+  /* 返回类型：i32 / i64 / bool / void / usize / Ident / * Ident */
   if (r.tok.kind == TokenKind.TOKEN_STAR) {
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
@@ -1014,7 +1424,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
     }
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
-  } else if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
+  } else if (r.tok.kind == TokenKind.TOKEN_I32 || r.tok.kind == TokenKind.TOKEN_I64 || r.tok.kind == TokenKind.TOKEN_BOOL || r.tok.kind == TokenKind.TOKEN_U8 || r.tok.kind == TokenKind.TOKEN_U32 || r.tok.kind == TokenKind.TOKEN_U64 || r.tok.kind == TokenKind.TOKEN_USIZE || r.tok.kind == TokenKind.TOKEN_VOID || r.tok.kind == TokenKind.TOKEN_IDENT) {
     if (r.tok.kind == TokenKind.TOKEN_BOOL) {
       return_type_is_bool = true;
     }
@@ -1026,10 +1436,32 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
   if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
     set_onefunc_fail(out, lex); return;
   }
-  /* 取 body 首 token 并跳过 let/const 与 if；写在 LBRACE 分支内避免 codegen 将调用提到函数开头 */
+  /* 消费 {，解析 body 内 let/const 并填充 out.num_lets、let_init_refs 等，再跳过 if，得到 return/int 等 token */
   if (r.tok.kind == TokenKind.TOKEN_LBRACE) {
     lex_from_next_into(&lex, r);
-    body_skip_let_const_then_if_into(&r, lex, source);
+    lex = parse_body_lets_into(arena, lex, source, out);
+    lexer_next_into(&r, lex, source);
+    while (r.tok.kind == TokenKind.TOKEN_IF) {
+      let skip_r: LexerResult = skip_one_if_statement(r.next_lex, source);
+      r.next_lex = skip_r.next_lex;
+      r.tok = skip_r.tok;
+      lex_from_result_ptr_into(&lex, &r);
+      lexer_next_into(&r, lex, source);
+    }
+    /* 将 out 中由 parse_body_lets_into 填写的 let 相关字段同步到局部变量，以便后续 tmp_success/copy_onefunc_into 写回时保留 */
+    num_lets = out.num_lets;
+    let lri: i32 = 0;
+    while (lri < 24) {
+      let_init_refs[lri] = out.let_init_refs[lri];
+      let_init_vals[lri] = out.let_init_vals[lri];
+      let_name_lens[lri] = out.let_name_lens[lri];
+      let copy_k: i32 = 0;
+      while (copy_k < 64) {
+        let_names[lri][copy_k] = out.let_names[lri][copy_k];
+        copy_k = copy_k + 1;
+      }
+      lri = lri + 1;
+    }
   } else {
     set_onefunc_fail(out, lex); return;
   }
@@ -1053,28 +1485,46 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
     }
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
-    if (r.tok.kind != TokenKind.TOKEN_TRUE && r.tok.kind != TokenKind.TOKEN_FALSE) {
-      set_onefunc_fail(out, lex); return;
+    /* 支持 return if ( true/false ) { int } else { int } 或 return if ( <任意条件> ) { int } else { int }（条件用 skip_balanced_parens 跳过，占位用 true）。 */
+    if (r.tok.kind == TokenKind.TOKEN_TRUE || r.tok.kind == TokenKind.TOKEN_FALSE) {
+      if_cond_true = r.tok.kind == TokenKind.TOKEN_TRUE;
+      lex_from_next_into(&lex, r);
+      lexer_next_into(&r, lex, source);
+    } else {
+      lex = skip_balanced_parens(lex, source);
+      lexer_next_into(&r, lex, source);
+      if_cond_true = true;
     }
-    if_cond_true = r.tok.kind == TokenKind.TOKEN_TRUE;
-    lex_from_next_into(&lex, r);
-    lexer_next_into(&r, lex, source);
     if (r.tok.kind != TokenKind.TOKEN_RPAREN) {
       set_onefunc_fail(out, lex); return;
     }
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
+    /* then 分支：接受 { int } 或 裸 int */
+    if (r.tok.kind == TokenKind.TOKEN_LBRACE) {
+      lex_from_next_into(&lex, r);
+      lexer_next_into(&r, lex, source);
+    }
     if (r.tok.kind != TokenKind.TOKEN_INT) {
       set_onefunc_fail(out, lex); return;
     }
     if_then_val = r.tok.int_val;
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
+    if (r.tok.kind == TokenKind.TOKEN_RBRACE) {
+      lex_from_next_into(&lex, r);
+      lexer_next_into(&r, lex, source);
+    }
     if (r.tok.kind != TokenKind.TOKEN_ELSE) {
       set_onefunc_fail(out, lex); return;
     }
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
+    /* else 分支：接受 { int } 或 裸 int */
+    if (r.tok.kind == TokenKind.TOKEN_LBRACE) {
+      lex_from_next_into(&lex, r);
+      lexer_next_into(&r, lex, source);
+    }
     if (r.tok.kind != TokenKind.TOKEN_INT) {
       set_onefunc_fail(out, lex); return;
     }
@@ -1082,6 +1532,10 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
     has_if_expr = true;
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
+    if (r.tok.kind == TokenKind.TOKEN_RBRACE) {
+      lex_from_next_into(&lex, r);
+      lexer_next_into(&r, lex, source);
+    }
   } else if (r.tok.kind == TokenKind.TOKEN_MINUS) {
     lex_from_next_into(&lex, r);
     lexer_next_into(&r, lex, source);
@@ -1141,7 +1595,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
     } else {
       set_onefunc_fail(out, lex); return;
     }
-    let tmp_success: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
+    let tmp_success: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
     copy_onefunc_into(out, &tmp_success);
     return;
   } else {
@@ -1158,6 +1612,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
           lex_from_next_into(&lex, r);
           lexer_next_into(&r, lex, source);
           if (r.tok.kind == TokenKind.TOKEN_RPAREN) {
+            /* 无参：return ident(); */
             lex_from_next_into(&lex, r);
             lexer_next_into(&r, lex, source);
             if (r.tok.kind == TokenKind.TOKEN_SEMICOLON) {
@@ -1167,7 +1622,23 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
               ret_val = 0;
               if (r.tok.kind == TokenKind.TOKEN_RBRACE) {
                 lex_from_next_into(&lex, r);
-                let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
+                let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
+    copy_onefunc_into(out, &tmp_ok);
+    return;
+              }
+            }
+          } else {
+            /* 有参：return ident(...); 跳过匹配括号至 ); 再 }; */
+            lex = skip_balanced_parens(r.next_lex, source);
+            lexer_next_into(&r, lex, source);
+            if (r.tok.kind == TokenKind.TOKEN_SEMICOLON) {
+              lex_from_next_into(&lex, r);
+              lexer_next_into(&r, lex, source);
+              has_call_expr = true;
+              ret_val = 0;
+              if (r.tok.kind == TokenKind.TOKEN_RBRACE) {
+                lex_from_next_into(&lex, r);
+                let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
     copy_onefunc_into(out, &tmp_ok);
     return;
               }
@@ -1195,7 +1666,7 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
     } else {
       set_onefunc_fail(out, lex); return;
     }
-    let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
+    let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
     copy_onefunc_into(out, &tmp_ok);
     return;
   }
@@ -1215,11 +1686,11 @@ function parse_one_function_impl(out: *OneFuncResult, lex: Lexer, source: []u8):
   } else {
     /* body 以非 INT/return 开头（如赋值、if 等）：跳过整块 { ... }，仍视为解析成功以便继续下一函数（bootstrap codegen.su） */
     lex = skip_balanced_braces(lex, source);
-    let tmp_ok0: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 };
+    let tmp_ok0: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 };
     copy_onefunc_into(out, &tmp_ok0);
     return;
   }
-  let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
+  let tmp_ok: OneFuncResult = OneFuncResult { ok: true, next_lex: lex, name: name, name_len: func_name_len_storage[0], num_params: num_params, param_names: param_names, param_name_lens: param_name_lens, num_consts: num_consts, const_names: const_names, const_name_lens: const_name_lens, const_init_vals: const_init_vals, num_lets: num_lets, let_names: let_names, let_name_lens: let_name_lens, let_init_vals: let_init_vals, let_init_refs: let_init_refs, has_if_expr: has_if_expr, if_cond_true: if_cond_true, if_then_val: if_then_val, if_else_val: if_else_val, has_mul: has_mul, mul_right_val: mul_right_val, has_binop: has_binop, binop_right_val: binop_right_val, has_unary_neg: has_unary_neg, return_val: ret_val, has_call_expr: has_call_expr, call_callee_name: call_callee_name, call_callee_len: call_callee_len };
     copy_onefunc_into(out, &tmp_ok);
     return;
 }
@@ -1463,6 +1934,62 @@ function skip_one_enum(lex: Lexer, source: []u8): Lexer {
   return lex;
 }
 
+/**
+ * 跳过一条顶层 trait 定义：trait <ident> { ... }；供 parse_into 在解析 function 前跳过 std.io 等文件中的 trait。
+ */
+function skip_one_trait(lex: Lexer, source: []u8): Lexer {
+  let r: LexerResult = LexerResult { next_lex: lex, tok: Token { kind: TokenKind.TOKEN_EOF, line: 0, col: 0, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 } };
+  lexer_next_into(&r, lex, source);
+  if (r.tok.kind != TokenKind.TOKEN_TRAIT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  lexer_next_into(&r, lex, source);
+  if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  lexer_next_into(&r, lex, source);
+  if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
+    return lex;
+  }
+  lex = skip_balanced_braces(r.next_lex, source);
+  return lex;
+}
+
+/**
+ * 跳过一条顶层 impl 块：impl [<ident> for ] <ident> { ... }；供 parse_into 在解析 function 前跳过 std.io 等文件中的 impl。
+ */
+function skip_one_impl(lex: Lexer, source: []u8): Lexer {
+  let r: LexerResult = LexerResult { next_lex: lex, tok: Token { kind: TokenKind.TOKEN_EOF, line: 0, col: 0, int_val: 0, float_val: 0.0, ident: 0, ident_len: 0 } };
+  lexer_next_into(&r, lex, source);
+  if (r.tok.kind != TokenKind.TOKEN_IMPL) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  lexer_next_into(&r, lex, source);
+  /* impl [Ident for] Ident { ... }：至少一个 ident，可能 for Ident，然后 { */
+  if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  lexer_next_into(&r, lex, source);
+  if (r.tok.kind == TokenKind.TOKEN_FOR) {
+    lex_from_next_into(&lex, r);
+    lexer_next_into(&r, lex, source);
+    if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+      return lex;
+    }
+    lex_from_next_into(&lex, r);
+    lexer_next_into(&r, lex, source);
+  }
+  if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
+    return lex;
+  }
+  lex = skip_balanced_braces(r.next_lex, source);
+  return lex;
+}
+
 /** 与 skip_one_enum 等价，接受 (data: *u8, len) 供 buf 路径使用。 */
 function skip_one_enum_buf(lex: Lexer, data: *u8, len: i32): Lexer {
   let r: LexerResult = lexer_next_buf(lex, data, len);
@@ -1476,6 +2003,55 @@ function skip_one_enum_buf(lex: Lexer, data: *u8, len: i32): Lexer {
   }
   lex_from_next_into(&lex, r);
   r = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
+    return lex;
+  }
+  lex = skip_balanced_braces_buf(r.next_lex, data, len);
+  return lex;
+}
+
+/** 与 skip_one_trait 等价，供 parse_into_buf 使用。 */
+function skip_one_trait_buf(lex: Lexer, data: *u8, len: i32): Lexer {
+  let r: LexerResult = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_TRAIT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  r = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  r = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
+    return lex;
+  }
+  lex = skip_balanced_braces_buf(r.next_lex, data, len);
+  return lex;
+}
+
+/** 与 skip_one_impl 等价，供 parse_into_buf 使用。 */
+function skip_one_impl_buf(lex: Lexer, data: *u8, len: i32): Lexer {
+  let r: LexerResult = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_IMPL) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  r = lexer_next_buf(lex, data, len);
+  if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+    return lex;
+  }
+  lex_from_next_into(&lex, r);
+  r = lexer_next_buf(lex, data, len);
+  if (r.tok.kind == TokenKind.TOKEN_FOR) {
+    lex_from_next_into(&lex, r);
+    r = lexer_next_buf(lex, data, len);
+    if (r.tok.kind != TokenKind.TOKEN_IDENT) {
+      return lex;
+    }
+    lex_from_next_into(&lex, r);
+    r = lexer_next_buf(lex, data, len);
+  }
   if (r.tok.kind != TokenKind.TOKEN_LBRACE) {
     return lex;
   }
@@ -2324,7 +2900,8 @@ function parse_one_function_buf(lex: Lexer, data: *u8, len: i32): OneFuncResult 
   let dummy_let_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_let_lens: [24]i32 = [];
   let dummy_let_vals: [24]i32 = [];
-  let fail: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: dummy_name, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 };
+  let dummy_let_refs: [24]i32 = [];
+  let fail: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: dummy_name, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 };
   let r: LexerResult = lexer_next_buf(lex, data, len);
   if (r.tok.kind != TokenKind.TOKEN_FUNCTION) {
     return fail;
@@ -2358,7 +2935,7 @@ function parse_one_function_buf(lex: Lexer, data: *u8, len: i32): OneFuncResult 
   }
   lex_from_next_into(&lex, r);
   r = lexer_next_buf(lex, data, len);
-  if (r.tok.kind != TokenKind.TOKEN_I32 && r.tok.kind != TokenKind.TOKEN_I64 && r.tok.kind != TokenKind.TOKEN_BOOL && r.tok.kind != TokenKind.TOKEN_VOID && r.tok.kind != TokenKind.TOKEN_U8 && r.tok.kind != TokenKind.TOKEN_U32 && r.tok.kind != TokenKind.TOKEN_U64 && r.tok.kind != TokenKind.TOKEN_IDENT) {
+  if (r.tok.kind != TokenKind.TOKEN_I32 && r.tok.kind != TokenKind.TOKEN_I64 && r.tok.kind != TokenKind.TOKEN_BOOL && r.tok.kind != TokenKind.TOKEN_VOID && r.tok.kind != TokenKind.TOKEN_U8 && r.tok.kind != TokenKind.TOKEN_U32 && r.tok.kind != TokenKind.TOKEN_U64 && r.tok.kind != TokenKind.TOKEN_USIZE && r.tok.kind != TokenKind.TOKEN_IDENT) {
     return fail;
   }
   lex_from_next_into(&lex, r);
@@ -2376,7 +2953,7 @@ function parse_one_function_buf(lex: Lexer, data: *u8, len: i32): OneFuncResult 
       return fail;
     }
     lex_from_next_into(&lex, r);
-    return OneFuncResult { ok: true, next_lex: lex, name: name, name_len: name_len, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: ret_val, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 }
+    return OneFuncResult { ok: true, next_lex: lex, name: name, name_len: name_len, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: ret_val, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 }
   }
   if (r.tok.kind == TokenKind.TOKEN_RETURN) {
     lex_from_next_into(&lex, r);
@@ -2398,7 +2975,7 @@ function parse_one_function_buf(lex: Lexer, data: *u8, len: i32): OneFuncResult 
       }
     }
     lex_from_next_into(&lex, r);
-    return OneFuncResult { ok: true, next_lex: lex, name: name, name_len: name_len, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: ret_val, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 }
+    return OneFuncResult { ok: true, next_lex: lex, name: name, name_len: name_len, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: ret_val, has_call_expr: false, call_callee_name: dummy_name, call_callee_len: 0 }
   }
   return fail;
 }
@@ -2429,14 +3006,14 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
     lexer_next_into(&r, lex, source);
     lex_from_next_into(&lex, r);
     if (r.tok.kind == TokenKind.TOKEN_STRUCT) {
-      lex = skip_one_struct(lex, source);
+      lex = skip_one_struct(iter_start, source);
       if (lex.pos == iter_start.pos && lex.pos < source.length) {
         lex = Lexer { pos: lex.pos + 1, line: lex.line, col: lex.col + 1 };
       }
       continue;
     }
     if (r.tok.kind == TokenKind.TOKEN_ENUM) {
-      lex = skip_one_enum(lex, source);
+      lex = skip_one_enum(iter_start, source);
       if (lex.pos == iter_start.pos && lex.pos < source.length) {
         lex = Lexer { pos: lex.pos + 1, line: lex.line, col: lex.col + 1 };
       }
@@ -2452,6 +3029,20 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
       }
       continue;
     }
+    if (r.tok.kind == TokenKind.TOKEN_TRAIT) {
+      lex = skip_one_trait(iter_start, source);
+      if (lex.pos == iter_start.pos && lex.pos < source.length) {
+        lex = Lexer { pos: lex.pos + 1, line: lex.line, col: lex.col + 1 };
+      }
+      continue;
+    }
+    if (r.tok.kind == TokenKind.TOKEN_IMPL) {
+      lex = skip_one_impl(iter_start, source);
+      if (lex.pos == iter_start.pos && lex.pos < source.length) {
+        lex = Lexer { pos: lex.pos + 1, line: lex.line, col: lex.col + 1 };
+      }
+      continue;
+    }
     if (r.tok.kind != TokenKind.TOKEN_FUNCTION) {
       let try_res: TrySkipAllowResult = parse_into_try_skip_allow(lex, r, source);
       if (try_res.skipped != 0) {
@@ -2461,7 +3052,12 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
         }
         continue;
       }
-      break;
+      /* 非 function 且未 skip：可能是注释等，前进一个 token 再试，避免注释导致只解析前若干函数（与 parse_into_buf 一致） */
+      if (r.tok.kind == TokenKind.TOKEN_EOF) {
+        break;
+      }
+      lex_from_next_into(&lex, r);
+      continue;
     }
     /* 库模块或正常结束：break 后若为 EOF 则直接返回成功，避免在 EOF 处当作 function 解析导致死循环（-backend asm 编 token.su 等仅 enum 的模块依赖此路径）。 */
     if (r.tok.kind == TokenKind.TOKEN_EOF) {
@@ -2485,8 +3081,9 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
     let parse_into_dummy_ln: [24][64]u8 = [parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64, parse_into_empty64];
     let parse_into_dummy_llens: [24]i32 = [];
     let parse_into_dummy_lvals: [24]i32 = [];
-    let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: parse_into_empty64, name_len: 0, num_params: 0, param_names: parse_into_dummy_p, param_name_lens: parse_into_dummy_plens, num_consts: 0, const_names: parse_into_dummy_c, const_name_lens: parse_into_dummy_clens, const_init_vals: parse_into_dummy_cvals, num_lets: 0, let_names: parse_into_dummy_ln, let_name_lens: parse_into_dummy_llens, let_init_vals: parse_into_dummy_lvals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: parse_into_empty64, call_callee_len: 0 };
-    parse_one_function_impl(&res, lex, source);
+    let parse_into_dummy_let_refs: [24]i32 = [];
+    let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: parse_into_empty64, name_len: 0, num_params: 0, param_names: parse_into_dummy_p, param_name_lens: parse_into_dummy_plens, num_consts: 0, const_names: parse_into_dummy_c, const_name_lens: parse_into_dummy_clens, const_init_vals: parse_into_dummy_cvals, num_lets: 0, let_names: parse_into_dummy_ln, let_name_lens: parse_into_dummy_llens, let_init_vals: parse_into_dummy_lvals, let_init_refs: parse_into_dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: parse_into_empty64, call_callee_len: 0 };
+    parse_one_function_impl(&res, arena, lex, source);
     if (!res.ok) {
       let lib: LibraryParseResult = parse_one_function_library(arena, module, lex_at_function, source);
       if (!lib.ok) {
@@ -3119,7 +3716,64 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
           ce.line = 0;
           ce.col = 0;
           ce.call_callee_ref = callee_ref;
-          ce.call_num_args = 0;
+          /* 有参调用时用形参名作为实参（EXPR_VAR），如 print_str -> return write_stdout(ptr, len) */
+          ce.call_num_args = res.num_params;
+          if (ce.call_num_args > 16) { ce.call_num_args = 16; }
+          let arg_i: i32 = 0;
+          while (arg_i < 16) {
+            ce.call_arg_refs[arg_i] = 0;
+            arg_i = arg_i + 1;
+          }
+          arg_i = 0;
+          while (arg_i < ce.call_num_args && arg_i < 24) {
+            let arg_ref: i32 = ast_arena_expr_alloc(arena);
+            if (arg_ref != 0) {
+              let ae: Expr = ast_arena_expr_get(arena, arg_ref);
+              ae.kind = ExprKind.EXPR_VAR;
+              ae.resolved_type_ref = 0;
+              ae.line = 0;
+              ae.col = 0;
+              ae.var_name_len = res.param_name_lens[arg_i];
+              let k: i32 = 0;
+              while (k < res.param_name_lens[arg_i] && k < 64) {
+                ae.var_name[k] = res.param_names[arg_i][k];
+                k = k + 1;
+              }
+              let z: u8 = 0;
+              while (k < 64) {
+                ae.var_name[k] = z;
+                k = k + 1;
+              }
+              ae.binop_left_ref = 0;
+              ae.binop_right_ref = 0;
+              ae.unary_operand_ref = 0;
+              ae.if_cond_ref = 0;
+              ae.if_then_ref = 0;
+              ae.if_else_ref = 0;
+              ae.block_ref = 0;
+              ae.match_matched_ref = 0;
+              ae.match_num_arms = 0;
+              ast.expr_init_match_enum(&ae);
+              ae.field_access_base_ref = 0;
+              ae.field_access_field_len = 0;
+              ae.field_access_is_enum_variant = 0;
+              ae.field_access_offset = 0;
+              ae.index_base_ref = 0;
+              ae.index_index_ref = 0;
+              ae.index_base_is_slice = 0;
+              ae.call_callee_ref = 0;
+              ae.call_num_args = 0;
+              ae.method_call_base_ref = 0;
+              ae.method_call_name_len = 0;
+              ae.method_call_num_args = 0;
+              ae.const_folded_val = 0;
+              ae.const_folded_valid = 0;
+              ae.index_proven_in_bounds = 0;
+              ast_arena_expr_set(arena, arg_ref, ae);
+              ce.call_arg_refs[arg_i] = arg_ref;
+            }
+            arg_i = arg_i + 1;
+          }
           ce.binop_left_ref = 0;
           ce.binop_right_ref = 0;
           ce.unary_operand_ref = 0;
@@ -3222,16 +3876,20 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
     }
     let let_i: i32 = 0;
     while (let_i < res.num_lets && let_i < 24) {
-      let init_ref: i32 = ast_arena_expr_alloc(arena);
-      if (init_ref == 0) {
-        return ParseIntoResult { ok: -1, main_idx: -1 }
-      }
-      let le: Expr = ast_arena_expr_get(arena, init_ref);
-      le.kind = ExprKind.EXPR_LIT;
-      le.resolved_type_ref = type_ref;
-      le.line = 0;
-      le.col = 0;
-      le.int_val = res.let_init_vals[let_i];
+      let init_ref: i32 = 0;
+      if (res.let_init_refs[let_i] != 0) {
+        init_ref = res.let_init_refs[let_i];
+      } else {
+        init_ref = ast_arena_expr_alloc(arena);
+        if (init_ref == 0) {
+          return ParseIntoResult { ok: -1, main_idx: -1 }
+        }
+        let le: Expr = ast_arena_expr_get(arena, init_ref);
+        le.kind = ExprKind.EXPR_LIT;
+        le.resolved_type_ref = type_ref;
+        le.line = 0;
+        le.col = 0;
+        le.int_val = res.let_init_vals[let_i];
       le.binop_left_ref = 0;
       le.binop_right_ref = 0;
       le.unary_operand_ref = 0;
@@ -3258,6 +3916,7 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
       le.const_folded_valid = 0;
       le.index_proven_in_bounds = 0;
       ast_arena_expr_set(arena, init_ref, le);
+      }
       let ld: LetDecl = b.let_decls[let_i];
       let lk: i32 = 0;
       while (lk < res.let_name_lens[let_i] && lk < 64) {
@@ -3291,6 +3950,15 @@ function parse_into(arena: *ASTArena, module: *Module, source: []u8): ParseIntoR
       b.stmt_order[so].idx = li;
       so = so + 1;
       li = li + 1;
+    }
+    /* 仅有 final_expr（如单条 print_str(...) 无 return）时，当作一条 expr_stmt 填入 stmt_order，供 codegen emit_block 输出；清空 final_expr_ref 以便 codegen 补 return 0。 */
+    if (!ref_is_null(b.final_expr_ref) && b.num_expr_stmts == 0 && so < 96) {
+      b.expr_stmt_refs[0] = b.final_expr_ref;
+      b.num_expr_stmts = 1;
+      b.final_expr_ref = 0;
+      b.stmt_order[so].kind = 2;
+      b.stmt_order[so].idx = 0;
+      so = so + 1;
     }
     b.num_stmt_order = so;
     ast_arena_block_set(arena, block_ref, b);
@@ -3365,6 +4033,14 @@ function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len: i32):
       lex = skip_one_enum_buf(lex, data, len);
       continue;
     }
+    if (r.tok.kind == TokenKind.TOKEN_TRAIT) {
+      lex = skip_one_trait_buf(lex, data, len);
+      continue;
+    }
+    if (r.tok.kind == TokenKind.TOKEN_IMPL) {
+      lex = skip_one_impl_buf(lex, data, len);
+      continue;
+    }
     if (r.tok.kind == TokenKind.TOKEN_EXTERN) {
       let iter_start_buf: Lexer = lex;
       lex = parse_one_extern_and_add_buf(arena, module, lex, data, len);
@@ -3397,14 +4073,31 @@ function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len: i32):
     }
     let lex_at_function_buf: Lexer = lex;
     let res: OneFuncResult = parse_one_function_buf(lex, data, len);
+    /* 当精简 buf 解析失败时，用 (data,len) 构造 slice 调完整 impl 解析（支持带参、复杂体，如 std.io 的 print_str）。
+     * 若首 token 非 FUNCTION（如注释），先跳过直至 FUNCTION 或 EOF，再尝试 impl，避免漏掉 read/print_str 等。 */
     if (!res.ok) {
-      let lib: LibraryParseResult = parse_one_function_library_buf(arena, module, lex_at_function_buf, data, len);
-      if (!lib.ok) {
-        lex = skip_one_function_full_buf(lex_at_function_buf, data, len);
+      let lex_skip: Lexer = lex_at_function_buf;
+      let r_buf: LexerResult = lexer_next_buf(lex_skip, data, len);
+      while (r_buf.tok.kind != TokenKind.TOKEN_FUNCTION && r_buf.tok.kind != TokenKind.TOKEN_EOF) {
+        lex_skip = r_buf.next_lex;
+        r_buf = lexer_next_buf(lex_skip, data, len);
+      }
+      if (r_buf.tok.kind == TokenKind.TOKEN_FUNCTION) {
+        let lex_after_function: Lexer = lex_skip;
+        lex_from_next_into(&lex_after_function, r_buf);
+        let slice_for_impl: []u8 = parser_slice_from_buf(data, len);
+        parse_one_function_impl(&res, arena, lex_after_function, slice_for_impl);
+      }
+      if (!res.ok) {
+        let lib: LibraryParseResult = parse_one_function_library_buf(arena, module, lex_at_function_buf, data, len);
+        if (!lib.ok) {
+          lex = skip_one_function_full_buf(lex_at_function_buf, data, len);
+          continue;
+        }
+        lex_from_library_into(&lex, lib);
         continue;
       }
-      lex_from_library_into(&lex, lib);
-      continue;
+      /* res.ok 为 true，落入下方统一“加入 module”逻辑，最后 lex_from_onefunc_next_into(&lex, res) */
     }
     let is_main_storage: [1]i32 = [];
     if (res.name_len == 4 && res.name[0] == 109 && res.name[1] == 97 && res.name[2] == 105 && res.name[3] == 110) {
@@ -3611,6 +4304,145 @@ function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len: i32):
       ast_arena_expr_set(arena, binop_ref, be);
       ast_arena_expr_set(arena, expr_ref, e);
     }
+    /* 与 parse_into 一致：return ident(...); 有参/无参调用时构建 EXPR_CALL，供 buf 路径多文件 std.io print_str */
+    if (res.has_call_expr && res.call_callee_len > 0 && res.call_callee_len <= 63) {
+      let callee_ref: i32 = ast_arena_expr_alloc(arena);
+      if (callee_ref != 0) {
+        let ve: Expr = ast_arena_expr_get(arena, callee_ref);
+        ve.kind = ExprKind.EXPR_VAR;
+        ve.resolved_type_ref = 0;
+        ve.line = 0;
+        ve.col = 0;
+        ve.var_name_len = res.call_callee_len;
+        let ck: i32 = 0;
+        while (ck < res.call_callee_len && ck < 64) {
+          ve.var_name[ck] = res.call_callee_name[ck];
+          ck = ck + 1;
+        }
+        let z: u8 = 0;
+        while (ck < 64) {
+          ve.var_name[ck] = z;
+          ck = ck + 1;
+        }
+        ve.binop_left_ref = 0;
+        ve.binop_right_ref = 0;
+        ve.unary_operand_ref = 0;
+        ve.if_cond_ref = 0;
+        ve.if_then_ref = 0;
+        ve.if_else_ref = 0;
+        ve.block_ref = 0;
+        ve.match_matched_ref = 0;
+        ve.match_num_arms = 0;
+        ast.expr_init_match_enum(&ve);
+        ve.field_access_base_ref = 0;
+        ve.field_access_field_len = 0;
+        ve.field_access_is_enum_variant = 0;
+        ve.field_access_offset = 0;
+        ve.index_base_ref = 0;
+        ve.index_index_ref = 0;
+        ve.index_base_is_slice = 0;
+        ve.call_callee_ref = 0;
+        ve.call_num_args = 0;
+        ve.method_call_base_ref = 0;
+        ve.method_call_name_len = 0;
+        ve.method_call_num_args = 0;
+        ve.const_folded_val = 0;
+        ve.const_folded_valid = 0;
+        ve.index_proven_in_bounds = 0;
+        ast_arena_expr_set(arena, callee_ref, ve);
+        let call_ref: i32 = ast_arena_expr_alloc(arena);
+        if (call_ref != 0) {
+          let ce: Expr = ast_arena_expr_get(arena, call_ref);
+          ce.kind = ExprKind.EXPR_CALL;
+          ce.resolved_type_ref = type_ref;
+          ce.line = 0;
+          ce.col = 0;
+          ce.call_callee_ref = callee_ref;
+          ce.call_num_args = res.num_params;
+          if (ce.call_num_args > 16) { ce.call_num_args = 16; }
+          let arg_i: i32 = 0;
+          while (arg_i < 16) {
+            ce.call_arg_refs[arg_i] = 0;
+            arg_i = arg_i + 1;
+          }
+          arg_i = 0;
+          while (arg_i < ce.call_num_args && arg_i < 24) {
+            let arg_ref: i32 = ast_arena_expr_alloc(arena);
+            if (arg_ref != 0) {
+              let ae: Expr = ast_arena_expr_get(arena, arg_ref);
+              ae.kind = ExprKind.EXPR_VAR;
+              ae.resolved_type_ref = 0;
+              ae.line = 0;
+              ae.col = 0;
+              ae.var_name_len = res.param_name_lens[arg_i];
+              let k: i32 = 0;
+              while (k < res.param_name_lens[arg_i] && k < 64) {
+                ae.var_name[k] = res.param_names[arg_i][k];
+                k = k + 1;
+              }
+              let z: u8 = 0;
+              while (k < 64) {
+                ae.var_name[k] = z;
+                k = k + 1;
+              }
+              ae.binop_left_ref = 0;
+              ae.binop_right_ref = 0;
+              ae.unary_operand_ref = 0;
+              ae.if_cond_ref = 0;
+              ae.if_then_ref = 0;
+              ae.if_else_ref = 0;
+              ae.block_ref = 0;
+              ae.match_matched_ref = 0;
+              ae.match_num_arms = 0;
+              ast.expr_init_match_enum(&ae);
+              ae.field_access_base_ref = 0;
+              ae.field_access_field_len = 0;
+              ae.field_access_is_enum_variant = 0;
+              ae.field_access_offset = 0;
+              ae.index_base_ref = 0;
+              ae.index_index_ref = 0;
+              ae.index_base_is_slice = 0;
+              ae.call_callee_ref = 0;
+              ae.call_num_args = 0;
+              ae.method_call_base_ref = 0;
+              ae.method_call_name_len = 0;
+              ae.method_call_num_args = 0;
+              ae.const_folded_val = 0;
+              ae.const_folded_valid = 0;
+              ae.index_proven_in_bounds = 0;
+              ast_arena_expr_set(arena, arg_ref, ae);
+              ce.call_arg_refs[arg_i] = arg_ref;
+            }
+            arg_i = arg_i + 1;
+          }
+          ce.binop_left_ref = 0;
+          ce.binop_right_ref = 0;
+          ce.unary_operand_ref = 0;
+          ce.if_cond_ref = 0;
+          ce.if_then_ref = 0;
+          ce.if_else_ref = 0;
+          ce.block_ref = 0;
+          ce.match_matched_ref = 0;
+          ce.match_num_arms = 0;
+          ast.expr_init_match_enum(&ce);
+          ce.field_access_base_ref = 0;
+          ce.field_access_field_len = 0;
+          ce.field_access_is_enum_variant = 0;
+          ce.field_access_offset = 0;
+          ce.index_base_ref = 0;
+          ce.index_index_ref = 0;
+          ce.index_base_is_slice = 0;
+          ce.method_call_base_ref = 0;
+          ce.method_call_name_len = 0;
+          ce.method_call_num_args = 0;
+          ce.const_folded_val = 0;
+          ce.const_folded_valid = 0;
+          ce.index_proven_in_bounds = 0;
+          ast_arena_expr_set(arena, call_ref, ce);
+          final_expr_ref = call_ref;
+        }
+      }
+    }
     if (is_main_storage[0] != 0) {
       main_idx = module.num_funcs;
     }
@@ -3619,6 +4451,17 @@ function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len: i32):
       return ParseIntoResult { ok: -1, main_idx: -1 }
     }
     let f: Func = ast_arena_func_get(arena, func_ref);
+    /* 与 parse_into 一致：将 res.name 写回 f.name，否则 codegen 读出为全 0 导致 C 中函数名为空。 */
+    let k: i32 = 0;
+    while (k < res.name_len && k < 64) {
+      f.name[k] = res.name[k];
+      k = k + 1;
+    }
+    let zero_u8: u8 = 0;
+    while (k < 64) {
+      f.name[k] = zero_u8;
+      k = k + 1;
+    }
     f.name_len = res.name_len;
     f.return_type_ref = type_ref;
     f.body_expr_ref = final_expr_ref;
@@ -3657,9 +4500,9 @@ function diag_token_after_collect_imports(source: []u8, module: *Module): i32 {
 
 /**
  * 诊断：用 collect_imports 后的 lex 调用 parse_one_function，返回 res.ok（1 成功 0 失败）。
- * 若为 0 则说明在 parse_into 内会因 !res.ok 而 break。
+ * 若为 0 则说明在 parse_into 内会因 !res.ok 而 break。arena 用于解析 let 时构建 init 表达式。
  */
-function diag_parse_one_after_collect_imports(source: []u8, module: *Module): i32 {
+function diag_parse_one_after_collect_imports(source: []u8, module: *Module, arena: *ASTArena): i32 {
   let lex: Lexer = lexer_init();
   let import_res: CollectImportsResult = CollectImportsResult { lex: lex };
   collect_imports(lex, source, module, &import_res);
@@ -3674,8 +4517,9 @@ function diag_parse_one_after_collect_imports(source: []u8, module: *Module): i3
   let diag_dummy_ln: [24][64]u8 = [diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64, diag_empty64];
   let diag_dummy_llens: [24]i32 = [];
   let diag_dummy_lvals: [24]i32 = [];
-  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: diag_empty64, name_len: 0, num_params: 0, param_names: diag_dummy_p, param_name_lens: diag_dummy_plens, num_consts: 0, const_names: diag_dummy_c, const_name_lens: diag_dummy_clens, const_init_vals: diag_dummy_cvals, num_lets: 0, let_names: diag_dummy_ln, let_name_lens: diag_dummy_llens, let_init_vals: diag_dummy_lvals, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: diag_empty64, call_callee_len: 0 };
-  parse_one_function_impl(&res, lex, source);
+  let diag_dummy_let_refs: [24]i32 = [];
+  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: diag_empty64, name_len: 0, num_params: 0, param_names: diag_dummy_p, param_name_lens: diag_dummy_plens, num_consts: 0, const_names: diag_dummy_c, const_name_lens: diag_dummy_clens, const_init_vals: diag_dummy_cvals, num_lets: 0, let_names: diag_dummy_ln, let_name_lens: diag_dummy_llens, let_init_vals: diag_dummy_lvals, let_init_refs: diag_dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: diag_empty64, call_callee_len: 0 };
+  parse_one_function_impl(&res, arena, lex, source);
   return res.ok ? 1 : 0;
 }
 
