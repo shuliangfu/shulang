@@ -1,8 +1,8 @@
 # Cursor 索引/上下文忽略（.cursor 不忽略，以便读取规则）
 
 # --- 构建产物 ---
-shuc
-compiler/shuc
+shu
+compiler/shu
 *.exe
 *.out
 *.o
