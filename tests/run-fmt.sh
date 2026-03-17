@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
 
 _run_fmt() {
-  ./compiler/shuc -L . tests/fmt/main.su -o /tmp/shuc_fmt 2>&1
-  exitcode=0; /tmp/shuc_fmt >/dev/null 2>&1 || exitcode=$?
+  ./compiler/shu -L . tests/fmt/main.su -o /tmp/shu_fmt 2>&1
+  exitcode=0; /tmp/shu_fmt >/dev/null 2>&1 || exitcode=$?
   [ "$exitcode" -eq 42 ] && return 0
   echo "run-fmt FAIL: expected exit 42 (fmt_i32(42)), got $exitcode"
   return 1
