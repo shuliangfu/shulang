@@ -4,4 +4,4 @@
 
 - **职责**：解析命令行、调 lexer→parser→typeck→codegen、多文件协调、调系统链接器。
 - **.su 实现**：见 src/main.su（entry 生成 main_entry，与 main.c 的 main()→main_entry() 对应）。
-- **构建**：默认 `make` 得到 shuc（main.o + runtime.o）；`make bootstrap-driver` 编 main.su + pipeline 得到 driver_su.o + pipeline_su.o，与 main.o + runtime_driver.o 链接为 shuc。
+- **构建**：默认 `make` 得到 shu（main.o + runtime.o）；`make bootstrap-driver` 编 main.su + pipeline 得到 driver_su.o + pipeline_su.o，与 main.o + runtime_driver.o 链接为 shu。
