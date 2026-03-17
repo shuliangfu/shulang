@@ -89,7 +89,7 @@
 - **crt0_x86_64.s**：提供 `_start` 与 `driver_get_argv_i`，用于「无 C」构建时替代 main.o / runtime_asm_build.o。
 - **_start**：从栈取 argc、argv，对齐栈后调用 `entry`，再以返回值做 exit(60) 系统调用。
 - **driver_get_argv_i**：ABI 为 rdi=argc, rsi=argv, rdx=i, rcx=buf, r8=max；从 argv[i] 拷贝到 buf 并 NUL 结尾，返回长度，越界/失败返回 -1。
-- Makefile 中已增加 `src/asm/crt0_x86_64.o` 目标（仅 `uname -s == Linux` 时）；链接 asm 版 shuc 时可将该 .o 与各 .su 的 asm .o、runtime_panic.o、-lc 一起链接。
+- Makefile 中已增加 `src/asm/crt0_x86_64.o` 目标（仅 `uname -s == Linux` 时）；链接 asm 版 shu 时可将该 .o 与各 .su 的 asm .o、runtime_panic.o、-lc 一起链接。
 
 ---
 
@@ -161,8 +161,8 @@ AST (typeck 后) --[asm_codegen_ast]--> 汇编文本 (.s) --[as]--> .o --[ld]-->
 - **arm64**：文本 asm 与直接 .o 均支持（arm64_enc 已实现，ELF e_machine 等按 AArch64 设置）。
 - **riscv64**：文本 asm 与直接 .o 均支持（riscv64.su / riscv64_enc.su 已实现，ELF e_machine=243，B/J 型 patch）。
 - **用法**：  
-  - 出 .s：`shuc -backend asm -target aarch64-linux-gnu -o out.s file.su` 或 `-target riscv64`  
-  - 出 .o：`shuc -backend asm -o out.o file.su`（x86_64）；`-target aarch64-linux-gnu` / `-target riscv64` 出对应 .o；再 `ld -e _main -o out out.o`。
+  - 出 .s：`shu -backend asm -target aarch64-linux-gnu -o out.s file.su` 或 `-target riscv64`  
+  - 出 .o：`shu -backend asm -o out.o file.su`（x86_64）；`-target aarch64-linux-gnu` / `-target riscv64` 出对应 .o；再 `ld -e _main -o out out.o`。
 
 ## 七、依赖
 
@@ -172,8 +172,8 @@ AST (typeck 后) --[asm_codegen_ast]--> 汇编文本 (.s) --[as]--> .o --[ld]-->
 
 ## 八、用法小结
 
-- 出汇编：`shuc -backend asm file.su` 或 `shuc -backend asm -o out.s file.su`。
-- 出 .o（x86_64 或 arm64）：`shuc -backend asm -o out.o file.su`（或 `-target aarch64-linux-gnu` 出 arm64 .o）；再 `ld -e _main -o out out.o`。
+- 出汇编：`shu -backend asm file.su` 或 `shu -backend asm -o out.s file.su`。
+- 出 .o（x86_64 或 arm64）：`shu -backend asm -o out.o file.su`（或 `-target aarch64-linux-gnu` 出 arm64 .o）；再 `ld -e _main -o out out.o`。
 - **macOS**：`-o out.o` 自动写出 Mach-O；链接用 `ld -e _main -o out out.o -lSystem` 或 `clang -o out out.o`。
 - **Windows**：`-target x86_64-pc-windows-msvc`（或含 `windows` 的 triple）且 `-o out.o`/`-o out.obj` 时写出 COFF .obj；链接用 `link /entry:_main out.obj` 或 `lld-link /entry:_main out.obj`。
 - 测试：`./tests/run-asm.sh`（含 x86_64 与 arm64 的 .s、.o；macOS 下会检测 Mach-O 并用 ld/clang 链接）。
@@ -197,32 +197,32 @@ AST (typeck 后) --[asm_codegen_ast]--> 汇编文本 (.s) --[as]--> .o --[ld]-->
 
 ## 十一、完全脱离 C 依赖：当前状态与路线图
 
-asm 后端已经实现「AST → 汇编 / .o」，**不经过 C 或 LLVM**。但要达到「完全脱离 C」的目标，需要区分三层：**① 谁在编译 shuc 自己**、**② 用户用 shuc 编译 .su 时是否还用 C**、**③ 生成的可执行程序运行时是否还用 C 库**。
+asm 后端已经实现「AST → 汇编 / .o」，**不经过 C 或 LLVM**。但要达到「完全脱离 C」的目标，需要区分三层：**① 谁在编译 shu 自己**、**② 用户用 shu 编译 .su 时是否还用 C**、**③ 生成的可执行程序运行时是否还用 C 库**。
 
 ### 当前状态（简要）
 
 | 层次 | 是否还依赖 C | 说明 |
 |------|----------------|------|
-| **① 构建 shuc** | ✅ 仍依赖 | 当前用 `cc` 编译 main.c、runtime.c、parser.c、codegen.c 等得到 shuc；自举时 pipeline 产出 C（pipeline_gen.c）再与 C 对象链接。 |
-| **② 用户 `shuc -o out file.su`（默认）** | ✅ 仍依赖 | 默认走 codegen 出 C → 调 `cc` 得到可执行文件。 |
-| **② 用户 `shuc -backend asm -o out.o file.su`** | ❌ 不依赖 C 编译器 | 直接出 .s 或 .o，**不生成 C、不调用 cc**；若要可执行文件需**手动** `ld -e _main -o out out.o`（或 macOS/Windows 下对应链接命令）。 |
+| **① 构建 shu** | ✅ 仍依赖 | 当前用 `cc` 编译 main.c、runtime.c、parser.c、codegen.c 等得到 shu；自举时 pipeline 产出 C（pipeline_gen.c）再与 C 对象链接。 |
+| **② 用户 `shu -o out file.su`（默认）** | ✅ 仍依赖 | 默认走 codegen 出 C → 调 `cc` 得到可执行文件。 |
+| **② 用户 `shu -backend asm -o out.o file.su`** | ❌ 不依赖 C 编译器 | 直接出 .s 或 .o，**不生成 C、不调用 cc**；若要可执行文件需**手动** `ld -e _main -o out out.o`（或 macOS/Windows 下对应链接命令）。 |
 | **③ 生成程序的运行时** | ✅ 可脱离 libc（Linux） | asm 后端改为 `call shulang_panic_`，链接时加 `runtime_panic.o`（Linux 为 .s 仅 syscall exit，不链 libc；macOS 等用 .c 调 abort 链 -lSystem）。 |
 
-因此：**只要使用 `-backend asm` 且只产出 .o/.s，编译用户代码这一步已经可以不依赖 C 编译器**；尚未脱离的是「构建 shuc 自己」和「生成程序对 libc 的依赖」。
+因此：**只要使用 `-backend asm` 且只产出 .o/.s，编译用户代码这一步已经可以不依赖 C 编译器**；尚未脱离的是「构建 shu 自己」和「生成程序对 libc 的依赖」。
 
 ### 完全脱离 C 需要满足的条件（按目标拆分）
 
-- **目标 A：用户用 shuc 编译 .su 时不再调用 C 编译器**  
-  - **已满足**：使用 `shuc -backend asm -o out.o file.su`，不再生成 C、不调用 cc。  
+- **目标 A：用户用 shu 编译 .su 时不再调用 C 编译器**
+  - **已满足**：使用 `shu -backend asm -o out.o file.su`，不再生成 C、不调用 cc。
   - **未满足**：若希望「一条命令直接得到可执行文件」且不用 cc，需要 driver 在 asm 产出 .o 后**自动调用系统链接器 `ld`**（或提供 `-o out` 且 `-backend asm` 时内部调 ld），并约定是否链接 libc（见目标 C）。
 
-- **目标 B：构建 shuc 本身不再依赖 C 编译器**  
-  - **未满足**：当前 shuc 由 C 源码（main.c、runtime.c、parser.c、typeck.c、codegen.c 等）编译而成；自举路径仍通过 .su → -E 展开成 C（pipeline_gen.c 等）再与 C 对象文件链接。  
+- **目标 B：构建 shu 本身不再依赖 C 编译器**
+  - **未满足**：当前 shu 由 C 源码（main.c、runtime.c、parser.c、typeck.c、codegen.c 等）编译而成；自举路径仍通过 .su → -E 展开成 C（pipeline_gen.c 等）再与 C 对象文件链接。
   - **条件**：  
-    1. 编译器前端（lexer/parser/typeck）与 pipeline 已用 .su 实现并可被当前 shuc 编译（✅ 已有）；  
-    2. **用 asm 后端编译「编译器 .su 源码」**：即用 `shuc -backend asm` 为 compiler 的 .su 模块产出 .o，而不是先展开成 C 再交给 cc；  
-    3. 用**系统 ld**（或自研链接器）把上述 .o 与**仅含启动/运行时的最小 C 桩**（或将来用 .su 写的 crt0）链接成 shuc 可执行文件；  
-    4. 若进一步去掉「用 C 写 shuc 的 main/runtime 等」，则需在 .su 中实现 driver（读文件、解析 argv、调 pipeline、写 -o、调 ld 等），并由 asm 产出该可执行文件，此时**构建 shuc 仅需：已有 shuc + 系统 ld**，不再需要 cc。
+    1. 编译器前端（lexer/parser/typeck）与 pipeline 已用 .su 实现并可被当前 shu 编译（✅ 已有）；  
+    2. **用 asm 后端编译「编译器 .su 源码」**：即用 `shu -backend asm` 为 compiler 的 .su 模块产出 .o，而不是先展开成 C 再交给 cc；  
+    3. 用**系统 ld**（或自研链接器）把上述 .o 与**仅含启动/运行时的最小 C 桩**（或将来用 .su 写的 crt0）链接成 shu 可执行文件；  
+    4. 若进一步去掉「用 C 写 shu 的 main/runtime 等」，则需在 .su 中实现 driver（读文件、解析 argv、调 pipeline、写 -o、调 ld 等），并由 asm 产出该可执行文件，此时**构建 shu 仅需：已有 shu + 系统 ld**，不再需要 cc。
 
 - **目标 C：生成的可执行程序不再依赖 libc（freestanding）**  
   - **已部分满足**：asm 中 `EXPR_PANIC` 已改为 `call shulang_panic_`；链接时加 `runtime_panic.o`（Linux 为 .s 仅 syscall exit，可不链 libc）。  
@@ -231,15 +231,15 @@ asm 后端已经实现「AST → 汇编 / .o」，**不经过 C 或 LLVM**。但
 ### 建议达成顺序（与「完全脱离 C」直接相关）
 
 1. **可选、体验改进**：在 driver 中为 `-backend asm -o out`（out 为可执行文件名）增加「产出 .o 后自动调用 ld」的逻辑，这样用户一条命令得到可执行文件，且仍可不依赖 cc。  
-2. **构建 shuc 脱离 cc（核心）**：用 `-backend asm` 为 pipeline、parser、typeck、codegen、driver 等 .su 产出 .o，用 ld 与最少 C 桩（或后续 .su crt0）链接成 shuc；去掉「pipeline_gen.c + cc」的构建路径。  
+2. **构建 shu 脱离 cc（核心）**：用 `-backend asm` 为 pipeline、parser、typeck、codegen、driver 等 .su 产出 .o，用 ld 与最少 C 桩（或后续 .su crt0）链接成 shu；去掉「pipeline_gen.c + cc」的构建路径。  
 3. **运行时脱离 libc（可选）**：asm 中 panic 改为调自有 runtime；提供最小 .su runtime（或 crt0），链接时不依赖 libc，达成 freestanding 可执行文件。
 
-总结：**已经自己写汇编后端且用 `-backend asm` 时，编译用户代码可以完全不依赖 C 编译器**；要「完全脱离 C」还需要：**用 asm 后端构建 shuc 自身**（替代当前 C 编译 + -E 生成 C 再 cc 的链路），以及可选地**去掉生成程序对 libc 的依赖**（panic/runtime 自实现）。
+总结：**已经自己写汇编后端且用 `-backend asm` 时，编译用户代码可以完全不依赖 C 编译器**；要「完全脱离 C」还需要：**用 asm 后端构建 shu 自身**（替代当前 C 编译 + -E 生成 C 再 cc 的链路），以及可选地**去掉生成程序对 libc 的依赖**（panic/runtime 自实现）。
 
-### Goal 2 实现计划（用 asm 后端构建 shuc，脱离 cc）
+### Goal 2 实现计划（用 asm 后端构建 shu，脱离 cc）
 
-1. **准备宿主 shuc**：`make bootstrap-driver` 已可产出带 `-backend asm` 的 shuc。pipeline_gen.c 由 `-E` 生成，胶水由 runtime.c 在生成时追加到 stdout，无 Makefile/脚本补丁，问题已从根源修。
-2. **用 asm 产出编译器 .o**：`scripts/build_shuc_asm.sh` 按依赖顺序对 token、ast、codegen、typeck、lexer、preprocess、std.fs、asm 子树、parser、pipeline、main 执行 `shuc -backend asm -o build_asm/xxx.o xxx.su`；若全部成功则链接 `runtime_asm_build.o + runtime_driver.o + build_asm/*.o` 得到 shuc_asm。
-3. **最小 C 桩**：已提供 `src/asm/runtime_asm_build.c`，仅含 `main()` 转调 `entry(argc, argv)`。`make bootstrap-asm` 会生成 `runtime_asm_build.o` 与依赖的 `runtime_driver.o`；完整 asm 自举：`make bootstrap-asm-full`（内部调 build_shuc_asm.sh）。
+1. **准备宿主 shu**：`make bootstrap-driver` 已可产出带 `-backend asm` 的 shu。pipeline_gen.c 由 `-E` 生成，胶水由 runtime.c 在生成时追加到 stdout，无 Makefile/脚本补丁，问题已从根源修。
+2. **用 asm 产出编译器 .o**：`scripts/build_shu_asm.sh` 按依赖顺序对 token、ast、codegen、typeck、lexer、preprocess、std.fs、asm 子树、parser、pipeline、main 执行 `shu -backend asm -o build_asm/xxx.o xxx.su`；若全部成功则链接 `runtime_asm_build.o + runtime_driver.o + build_asm/*.o` 得到 shu_asm。
+3. **最小 C 桩**：已提供 `src/asm/runtime_asm_build.c`，仅含 `main()` 转调 `entry(argc, argv)`。`make bootstrap-asm` 会生成 `runtime_asm_build.o` 与依赖的 `runtime_driver.o`；完整 asm 自举：`make bootstrap-asm-full`（内部调 build_shu_asm.sh）。
 4. **替换构建链路**：当前仍以「-E 生成 pipeline_gen.c + cc 编 pipeline_su.o」为主；asm 路径为可选，通过 `bootstrap-asm-full` 尝试。
-5. **验收**：新 shuc（或 shuc_asm）能通过 `../tests/run-all.sh`，且可再次用 `-backend asm` 编自身 .su 即自举闭环。
+5. **验收**：新 shu（或 shu_asm）能通过 `../tests/run-all.sh`，且可再次用 `-backend asm` 编自身 .su 即自举闭环。
