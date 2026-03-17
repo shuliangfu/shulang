@@ -4,7 +4,7 @@
 // 【测试目的】确认 exit(code) 由 codegen 生成对 C exit() 的调用，进程以指定退出码终止。
 // 【覆盖 API】exit(code: i32)。
 // 【预期结果】进程退出码为 99；由 run-process.sh 通过「运行后检查 $? -eq 99」校验。
-// 【运行方式】./tests/run-process.sh 或 shuc -L . tests/process/main.su -o exe && ./exe; echo $?
+// 【运行方式】./tests/run-process.sh 或 shu -L . tests/process/main.su -o exe && ./exe; echo $?
 import std.process;
 
 function main(): i32 {
