@@ -5,9 +5,9 @@
 set -e
 cd "$(dirname "$0")/.."
 make -C compiler -q 2>/dev/null || make -C compiler
-./compiler/shuc tests/multi-func/main.su -o /tmp/shuc_multi_func 2>&1
+./compiler/shu tests/multi-func/main.su -o /tmp/shu_multi_func 2>&1
 exitcode=0
-/tmp/shuc_multi_func >/dev/null 2>&1 || exitcode=$?
+/tmp/shu_multi_func >/dev/null 2>&1 || exitcode=$?
 if [ "$exitcode" -ne 3 ]; then
     echo "expected exit code 3 (add(1,2)), got $exitcode"
     exit 1
