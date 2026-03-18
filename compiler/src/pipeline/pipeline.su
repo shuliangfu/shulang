@@ -221,13 +221,14 @@ function parse_one_function_ok(source: []u8, arena: *ASTArena): i32 {
   let dummy_for_refs: [8]i32 = [];
   let dummy_pnames: [16][32]u8 = [empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32, empty32];
   let dummy_plens: [16]i32 = [];
+  let dummy_ptrefs: [16]i32 = [];
   let dummy_const_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_const_lens: [24]i32 = [];
   let dummy_const_vals: [24]i32 = [];
   let dummy_let_names: [24][64]u8 = [empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64, empty64];
   let dummy_let_lens: [24]i32 = [];
   let dummy_let_vals: [24]i32 = [];
-  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0, num_loops: 0, loop_cond_refs: dummy_loop_refs, loop_body_refs: dummy_loop_refs, num_for_loops: 0, for_init_refs: dummy_for_refs, for_cond_refs: dummy_for_refs, for_step_refs: dummy_for_refs, for_body_refs: dummy_for_refs };
+  let res: OneFuncResult = OneFuncResult { ok: false, next_lex: lex, name: empty64, name_len: 0, num_params: 0, param_names: dummy_pnames, param_name_lens: dummy_plens, param_type_refs: dummy_ptrefs, num_consts: 0, const_names: dummy_const_names, const_name_lens: dummy_const_lens, const_init_vals: dummy_const_vals, num_lets: 0, let_names: dummy_let_names, let_name_lens: dummy_let_lens, let_init_vals: dummy_let_vals, let_init_refs: dummy_let_refs, has_if_expr: false, if_cond_true: false, if_then_val: 0, if_else_val: 0, has_mul: false, mul_right_val: 0, has_binop: false, binop_right_val: 0, has_unary_neg: false, return_val: 0, has_call_expr: false, call_callee_name: empty64, call_callee_len: 0, num_loops: 0, loop_cond_refs: dummy_loop_refs, loop_body_refs: dummy_loop_refs, num_for_loops: 0, for_init_refs: dummy_for_refs, for_cond_refs: dummy_for_refs, for_step_refs: dummy_for_refs, for_body_refs: dummy_for_refs };
   parser.parse_one_function_impl(&res, arena, lex, source);
   if (res.ok) {
     return 1;

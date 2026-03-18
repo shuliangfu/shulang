@@ -3227,8 +3227,8 @@ int driver_should_skip_emit_func(const uint8_t *name, int name_len) {
     if (strcmp(p, "std.io.driver") != 0 && strcmp(p, "std.io") != 0) return 0;
     if (name_len == 20 && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
     if (name_len == 16 && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
-    if (name_len == 24 && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
-    if (name_len == 25 && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
+    if (name_len == 21 && strncmp((const char *)name, "submit_read_batch_buf", 21) == 0) return 1;
+    if (name_len == 22 && strncmp((const char *)name, "submit_write_batch_buf", 22) == 0) return 1;
     return 0;
 }
 
@@ -3241,8 +3241,41 @@ int driver_should_skip_emit_func_for_dep_path(const uint8_t *path, const uint8_t
     if (!is_io_driver) return 0;
     if (name_len == 20 && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
     if (name_len == 16 && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
-    if (name_len == 24 && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
-    if (name_len == 25 && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
+    if (name_len == 21 && strncmp((const char *)name, "submit_read_batch_buf", 21) == 0) return 1;
+    if (name_len == 22 && strncmp((const char *)name, "submit_write_batch_buf", 22) == 0) return 1;
+    return 0;
+}
+
+/** 仅按函数名跳过：submit_read_batch_buf、submit_write_batch_buf 由 preamble 提供 extern，任何 dep 都跳过生成定义，避免签名冲突。 */
+int driver_should_skip_emit_func_by_name(const uint8_t *name, int name_len) {
+    if (!name) return 0;
+    if (name_len == 21 && strncmp((const char *)name, "submit_read_batch_buf", 21) == 0) return 1;
+    if (name_len == 22 && strncmp((const char *)name, "submit_write_batch_buf", 22) == 0) return 1;
+    return 0;
+}
+
+/** 调用处补第 4 参：若为 submit_read_batch_buf/submit_write_batch_buf 且当前为 3 参调用，需补 timeout_ms（如 0）。 */
+int driver_is_submit_batch_buf_call(const uint8_t *name, int name_len) {
+    if (!name) return 0;
+    if (name_len == 21 && strncmp((const char *)name, "submit_read_batch_buf", 21) == 0) return 1;
+    if (name_len == 22 && strncmp((const char *)name, "submit_write_batch_buf", 22) == 0) return 1;
+    return 0;
+}
+
+/** 生成函数定义时，若当前前缀为 std_io_driver_（或路径 std/io/driver 生成的 std/io/driver_）且 preamble 将该参数声明为 int32_t，则返回 1。 */
+int driver_force_param_i32(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
+    if (!name || param_index != 0) return 0;
+    if (!prefix || prefix_len < 14) return 0;
+    /* 路径可能为 "std.io.driver" 或 "std/io/driver"，取前 14 字符归一化后比较。 */
+    char norm[16];
+    for (int i = 0; i < 14 && i < prefix_len; i++)
+        norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
+    norm[14] = '\0';
+    if (strcmp(norm, "std_io_driver_") != 0) return 0;
+    if (name_len == 8 && strncmp((const char *)name, "register", 8) == 0) return 1;
+    if (name_len == 31 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 31) == 0) return 1;
+    if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
+    if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
     return 0;
 }
 

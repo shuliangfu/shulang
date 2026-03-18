@@ -386,6 +386,9 @@ static const char *codegen_library_prefix;
 static const struct ASTModule *codegen_library_module;
 /** 库模块 import 路径（如 std.process），用于 std.process.exit 等特殊函数体生成。 */
 static const char *codegen_library_import_path;
+
+/** std.io.driver 由 preamble 声明为 int32_t 的形参（register/submit_read 等），生成定义时用此覆盖，与 extern 一致。 */
+static const struct ASTType codegen_override_i32 = { .kind = AST_TYPE_I32, .name = NULL, .elem_type = NULL, .array_size = 0 };
 /** 入口模块代码生成时的依赖模块与 import 路径，用于 NAMED 类型解析为 "struct prefix_Name"（依赖中的 struct）。 */
 static struct ASTModule **codegen_dep_mods;
 static const char **codegen_dep_paths;
@@ -4732,7 +4735,20 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
     fprintf(out, "%s %s(", cret, fname);
     for (int i = 0; i < f->num_params; i++) {
         if (i) fprintf(out, ", ");
-        codegen_emit_param(&f->params[i], out, NULL, i);
+        /* std.io.driver 的 register/submit_* 首参 preamble 声明为 int32_t，定义须一致。按 prefix 或 import_path 判定。 */
+        const struct ASTType *param_override = NULL;
+        if (i == 0 && f->name) {
+            int is_io_driver = (codegen_library_prefix && strcmp(codegen_library_prefix, "std_io_driver_") == 0)
+                || (codegen_library_import_path && (strcmp(codegen_library_import_path, "std.io.driver") == 0
+                    || strcmp(codegen_library_import_path, "std/io/driver") == 0
+                    || strstr(codegen_library_import_path, "io/driver") != NULL
+                    || strstr(codegen_library_import_path, "io.driver") != NULL));
+            if (is_io_driver
+                && (strcmp(f->name, "register") == 0 || strcmp(f->name, "submit_register_fixed_buffers_buf") == 0
+                    || strcmp(f->name, "submit_read") == 0 || strcmp(f->name, "submit_write") == 0))
+                param_override = &codegen_override_i32;
+        }
+        codegen_emit_param(&f->params[i], out, param_override, i);
     }
     fprintf(out, ") {\n");
     /* std.process.exit(code)：生成对 C exit() 的调用（noreturn） */

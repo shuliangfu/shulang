@@ -15,7 +15,7 @@
 #include <string.h>
 
 /** 符号表：names[0..n) 为当前作用域内 const/let 名称（const 在前）；type_kinds[i] 为对应类型；type_names[i] 为 NAMED 类型名（结构体名等）。 */
-#define MAX_SYMTAB 64
+#define MAX_SYMTAB 128
 
 /** BCE 扩展：循环内值域上下文，用于 for (let i=0; i<n; i++) 或 i < s.length 时证明 arr[i]/s[i] 在界内。 */
 #define MAX_BCE_RANGES 4

@@ -13,6 +13,12 @@ extern function codegen_su_field_access_base_is_pointer(expr: *u8): i32;
 extern function driver_get_current_dep_prefix_for_codegen(buf: *u8, len: i32): void;
 /** 当前 dep 路径是否为 std.io.core（与 ctx.dep_paths 互补，确保 core 不加前缀）。 */
 extern function driver_current_dep_path_is_std_io_core(): i32;
+/** 仅按名跳过：submit_read_batch_buf/submit_write_batch_buf 任何 dep 都跳过，由 preamble 提供 extern。 */
+extern function driver_should_skip_emit_func_by_name(name: *u8, name_len: i32): i32;
+/** 调用处补第 4 参：若为 submit_*_batch_buf 且 3 参调用，需补 ", 0" 作为 timeout_ms。 */
+extern function driver_is_submit_batch_buf_call(name: *u8, name_len: i32): i32;
+/** 生成函数定义时：若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 int32_t，返回 1，本模块对该参数输出 int32_t。 */
+extern function driver_force_param_i32(prefix: *u8, prefix_len: i32, name: *u8, name_len: i32, param_index: i32): i32;
 /** 当前为 std.io.driver 且函数名为 driver_read_ptr_len/driver_read_ptr 时返回 1，pipeline 跳过生成此二函数避免与 core 的 shu_io_* 重定义。 */
 extern function driver_should_skip_emit_func(name: *u8, name_len: i32): i32;
 /** 同上，显式传 dep 路径，供 dep_index>=0 时用 ctx.dep_paths[dep_index] 调用。 */
@@ -336,15 +342,15 @@ function emit_type_kind(out: *CodegenOutBuf, kind: TypeKind): i32 {
   return -1;
 }
 
-/** 写类型到 out（从 arena 取 Type，仅处理内建与简单 NAMED、PTR）。 */
-function emit_type(arena: *ASTArena, out: *CodegenOutBuf, type_ref: i32): i32 {
+/** 写类型到 out（从 arena 取 Type，仅处理内建与简单 NAMED、PTR）。struct_prefix/struct_prefix_len 非空时对 NAMED 输出 "struct " + prefix + name，与 C preamble 一致（如 std_fs_FsIovecBuf）。 */
+function emit_type(arena: *ASTArena, out: *CodegenOutBuf, type_ref: i32, struct_prefix: *u8, struct_prefix_len: i32): i32 {
   if (ref_is_null(type_ref)) {
     let s: [8]u8 = [105, 110, 116, 51, 50, 95, 116, 0];
     return emit_bytes_8(out, s, 7);
   }
   let t: Type = ast_arena_type_get(arena, type_ref);
   if (t.kind == TypeKind.TYPE_PTR && !ref_is_null(t.elem_type_ref)) {
-    if (emit_type(arena, out, t.elem_type_ref) != 0) {
+    if (emit_type(arena, out, t.elem_type_ref, struct_prefix, struct_prefix_len) != 0) {
       return -1;
     }
     if (append_byte(out, 32) != 0) {
@@ -353,11 +359,21 @@ function emit_type(arena: *ASTArena, out: *CodegenOutBuf, type_ref: i32): i32 {
     return append_byte(out, 42);
   }
   if (t.kind == TypeKind.TYPE_NAMED && t.name_len > 0) {
+    if (struct_prefix != 0 as *u8 && struct_prefix_len > 0) {
+      let s: [8]u8 = [115, 116, 114, 117, 99, 116, 32, 0];
+      if (emit_bytes_8(out, s, 7) != 0) {
+        return -1;
+      }
+      if (emit_bytes_from_ptr(out, struct_prefix, struct_prefix_len) != 0) {
+        return -1;
+      }
+      return emit_bytes_64(out, t.name, t.name_len);
+    }
     return emit_bytes_64(out, t.name, t.name_len);
   }
   /* C 中数组形参退化为指针，输出 elem_type * 以便 extern/定义一致，避免 build 对 preprocess_su_buf 签名的补丁 */
   if (t.kind == TypeKind.TYPE_ARRAY && !ref_is_null(t.elem_type_ref)) {
-    if (emit_type(arena, out, t.elem_type_ref) != 0) {
+    if (emit_type(arena, out, t.elem_type_ref, struct_prefix, struct_prefix_len) != 0) {
       return -1;
     }
     if (append_byte(out, 32) != 0) {
@@ -669,6 +685,12 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
                     }
                     ai = ai + 1;
                   }
+                  if (driver_is_submit_batch_buf_call(callee.var_name, callee.var_name_len) != 0 && e.call_num_args == 3) {
+                    let comma0: [4]u8 = [44, 32, 48, 0];
+                    if (emit_bytes_4(out, comma0, 3) != 0) {
+                      return -1;
+                    }
+                  }
                   if (append_byte(out, 41) != 0) {
                     return -1;
                   }
@@ -736,6 +758,12 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
                   }
                   ai = ai + 1;
                 }
+                if (driver_is_submit_batch_buf_call(callee2.var_name, callee2.var_name_len) != 0 && e.call_num_args == 3) {
+                  let comma0: [4]u8 = [44, 32, 48, 0];
+                  if (emit_bytes_4(out, comma0, 3) != 0) {
+                    return -1;
+                  }
+                }
                 if (append_byte(out, 41) != 0) {
                   return -1;
                 }
@@ -745,6 +773,62 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
           }
           fi = fi + 1;
         }
+      }
+    }
+    /* 特例：map_*_find_c(m, key) 在 .su 中为 2 参，C ABI 为 (keys, occupied, cap, key)，展开为 (m).keys, (m).occupied, (m).cap, key。 */
+    if (!ref_is_null(e.call_callee_ref) && e.call_num_args == 2 && e.call_callee_ref > 0 && e.call_callee_ref <= arena.num_exprs) {
+      let callee_fb: Expr = ast_arena_expr_get(arena, e.call_callee_ref);
+      if (callee_fb.kind == ExprKind.EXPR_VAR && callee_fb.var_name_len >= 10) {
+        let prefix_ok: bool = callee_fb.var_name[0] == 109 && callee_fb.var_name[1] == 97 && callee_fb.var_name[2] == 112 && callee_fb.var_name[3] == 95;
+        let off: i32 = callee_fb.var_name_len - 6;
+        let suffix_ok: bool = off >= 0 && callee_fb.var_name[off] == 102 && callee_fb.var_name[off + 1] == 105 && callee_fb.var_name[off + 2] == 110 && callee_fb.var_name[off + 3] == 100 && callee_fb.var_name[off + 4] == 95 && callee_fb.var_name[off + 5] == 99;
+        if (prefix_ok && suffix_ok) {
+          if (emit_bytes_64(out, callee_fb.var_name, callee_fb.var_name_len) != 0) {
+            return -1;
+          }
+          let open: [3]u8 = [40, 40, 0];
+          if (emit_bytes_3(out, open, 2) != 0) {
+            return -1;
+          }
+          if (emit_expr(arena, out, e.call_arg_refs[0], ctx) != 0) {
+            return -1;
+          }
+          /* ").keys, (" 9 字节 */
+          let mid1: [10]u8 = [41, 46, 107, 101, 121, 115, 44, 32, 40, 0];
+          if (emit_bytes_from_ptr(out, &mid1[0], 9) != 0) {
+            return -1;
+          }
+          if (emit_expr(arena, out, e.call_arg_refs[0], ctx) != 0) {
+            return -1;
+          }
+          /* ").occupied, (" 13 字节 */
+          let mid2: [14]u8 = [41, 46, 111, 99, 99, 117, 112, 105, 101, 100, 44, 32, 40, 0];
+          if (emit_bytes_from_ptr(out, &mid2[0], 13) != 0) {
+            return -1;
+          }
+          if (emit_expr(arena, out, e.call_arg_refs[0], ctx) != 0) {
+            return -1;
+          }
+          /* ").cap, " 7 字节 */
+          let mid3: [8]u8 = [41, 46, 99, 97, 112, 44, 32, 0];
+          if (emit_bytes_8(out, mid3, 7) != 0) {
+            return -1;
+          }
+          if (emit_expr(arena, out, e.call_arg_refs[1], ctx) != 0) {
+            return -1;
+          }
+          if (append_byte(out, 41) != 0) {
+            return -1;
+          }
+          return 0;
+        }
+      }
+    }
+    let need_4th: i32 = 0;
+    if (!ref_is_null(e.call_callee_ref) && e.call_callee_ref > 0 && e.call_callee_ref <= arena.num_exprs && e.call_num_args == 3) {
+      let callee_f4: Expr = ast_arena_expr_get(arena, e.call_callee_ref);
+      if (callee_f4.kind == ExprKind.EXPR_VAR && driver_is_submit_batch_buf_call(callee_f4.var_name, callee_f4.var_name_len) != 0) {
+        need_4th = 1;
       }
     }
     let saved_callee_flag: i32 = 0;
@@ -783,6 +867,12 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
         return -1;
       }
       ai = ai + 1;
+    }
+    if (need_4th != 0) {
+      let comma0: [4]u8 = [44, 32, 48, 0];
+      if (emit_bytes_4(out, comma0, 3) != 0) {
+        return -1;
+      }
     }
     if (append_byte(out, 41) != 0) {
       return -1;
@@ -1329,7 +1419,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
       if (append_byte(out, 40) != 0) {
         return -1;
       }
-      if (emit_type(arena, out, e.resolved_type_ref) != 0) {
+      if (emit_type(arena, out, e.resolved_type_ref, 0 as *u8, 0) != 0) {
         let fallback: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 0, 0];
         if (emit_bytes_9(out, fallback, 7) != 0) {
           return -1;
@@ -1342,7 +1432,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
       if (append_byte(out, 40) != 0) {
         return -1;
       }
-      if (!ref_is_null(elem_type_ref) && emit_type(arena, out, elem_type_ref) != 0) {
+      if (!ref_is_null(elem_type_ref) && emit_type(arena, out, elem_type_ref, 0 as *u8, 0) != 0) {
         let fallback: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 0, 0];
         if (emit_bytes_9(out, fallback, 7) != 0) {
           return -1;
@@ -1357,7 +1447,7 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
       if (append_byte(out, 40) != 0) {
         return -1;
       }
-      if (ref_is_null(elem_type_ref) || emit_type(arena, out, elem_type_ref) != 0) {
+      if (ref_is_null(elem_type_ref) || emit_type(arena, out, elem_type_ref, 0 as *u8, 0) != 0) {
         let fallback: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 0, 0];
         if (emit_bytes_9(out, fallback, 7) != 0) {
           return -1;
@@ -1430,7 +1520,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_indent(out, indent) != 0) {
             return -1;
           }
-          if (emit_type(arena, out, cd.type_ref) != 0) {
+          if (emit_type(arena, out, cd.type_ref, 0 as *u8, 0) != 0) {
             return -1;
           }
           let sp: [3]u8 = [32, 0, 0];
@@ -1492,7 +1582,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
                 let_type_ref = init_e.resolved_type_ref;
               }
             }
-            if (emit_type(arena, out, let_type_ref) != 0) {
+            if (emit_type(arena, out, let_type_ref, 0 as *u8, 0) != 0) {
               return -1;
             }
           }
@@ -1667,7 +1757,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_indent(out, indent) != 0) {
       return -1;
     }
-    if (emit_type(arena, out, cd.type_ref) != 0) {
+    if (emit_type(arena, out, cd.type_ref, 0 as *u8, 0) != 0) {
       return -1;
     }
     let sp: [3]u8 = [32, 0, 0];
@@ -1733,7 +1823,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           let_type_ref = init_e.resolved_type_ref;
         }
       }
-      if (emit_type(arena, out, let_type_ref) != 0) {
+      if (emit_type(arena, out, let_type_ref, 0 as *u8, 0) != 0) {
         return -1;
       }
     }
@@ -1912,7 +2002,7 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
  * 写单个函数到 out：返回类型 + 名称 + (参数) + { 体 }。
  */
 function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: bool, prefix: *u8, prefix_len: i32, ctx: *PipelineDepCtx): i32 {
-  if (emit_type(arena, out, f.return_type_ref) != 0) {
+  if (emit_type(arena, out, f.return_type_ref, prefix, prefix_len) != 0) {
     return -1;
   }
   if (append_byte(out, 32) != 0) {
@@ -1955,7 +2045,13 @@ function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: boo
         }
       }
       let param: Param = f.params[p];
-      if (emit_type(arena, out, param.type_ref) != 0) {
+      /* std.io.driver 等由 preamble 声明为 int32_t 的形参，生成定义时须一致，否则与 extern 冲突。 */
+      if (driver_force_param_i32(prefix, prefix_len, f.name, f.name_len, p) != 0) {
+        let i32_str: [8]u8 = [105, 110, 116, 51, 50, 95, 116, 0];
+        if (emit_bytes_8(out, i32_str, 7) != 0) {
+          return -1;
+        }
+      } else if (emit_type(arena, out, param.type_ref, prefix, prefix_len) != 0) {
         return -1;
       }
       if (append_byte(out, 32) != 0) {
@@ -2133,9 +2229,10 @@ function codegen_su_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf, 
       break;
     }
     let f: Func = module.funcs[i];
-    /* std.io.driver 的 driver_read_ptr_len/driver_read_ptr 跳过生成；std.io.core 的 shu_io_read_ptr_len/shu_io_read_ptr 由 io.o 提供也跳过。 */
+    /* std.io.driver 的 driver_read_ptr_len/driver_read_ptr 跳过生成；std.io.core 的 shu_io_read_ptr_len/shu_io_read_ptr 由 io.o 提供也跳过；submit_*_batch_buf 按名跳过。 */
     let skip: i32 = 0;
-    if (prefix_len == 0) {
+    skip = driver_should_skip_emit_func_by_name(f.name, f.name_len);
+    if (skip == 0 && prefix_len == 0) {
       skip = driver_should_skip_emit_func_core_read_ptr(f.name, f.name_len);
     }
     if (skip == 0 && prefix_len > 0) {
