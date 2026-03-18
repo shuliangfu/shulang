@@ -375,7 +375,7 @@ lsp_io_std_heap_gen.c: $(TARGET) $(SHU_C)
 lsp_io_std_heap_su.o: lsp_io_std_heap_gen.c
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -Iinclude -Isrc -c lsp_io_std_heap_gen.c -o lsp_io_std_heap_su.o
 
-bootstrap-driver-seed: $(TARGET) $(SHU_C) pipeline_gen.c lsp_io_gen.c lsp_gen.c lsp_io_std_heap_gen.c src/main_driver.o src/runtime_driver.o src/lsp/lsp_diag.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o
+bootstrap-driver-seed: $(TARGET) $(SHU_C) pipeline_gen.c lsp_io_gen.c lsp_gen.c lsp_io_std_heap_gen.c src/main_driver.o src/runtime_driver.o src/lsp/lsp_diag.o src/lsp/lsp_state.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I.. -Dstd_io_driver_driver_read_ptr_len=shu_io_read_ptr_len -Dstd_io_driver_driver_read_ptr=shu_io_read_ptr -c pipeline_gen.c -o pipeline_su.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_io_extern.h -c lsp_io_gen.c -o lsp_io_su.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_gen_extern.h -c lsp_gen.c -o lsp_su.o
