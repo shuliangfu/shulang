@@ -1469,15 +1469,25 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
           if (emit_indent(out, indent) != 0) {
             return -1;
           }
-          /* type_ref 为空时用 init 的 resolved_type_ref，避免 int32_t _l0 = (uint8_t[]){...} 类型不匹配 */
+          /* type_ref 为空时用 init 的 resolved_type_ref；若仍空且 init 为数组字面量则输出 uint8_t *，避免 int32_t _l0 = (uint8_t[]){...} */
           let let_type_ref: i32 = ld.type_ref;
+          let type_emitted: i32 = 0;
           if (ref_is_null(let_type_ref) && !ref_is_null(ld.init_ref) && ld.init_ref > 0 && ld.init_ref <= arena.num_exprs) {
             let init_e: Expr = ast_arena_expr_get(arena, ld.init_ref);
             if (!ref_is_null(init_e.resolved_type_ref)) {
               let_type_ref = init_e.resolved_type_ref;
+            } else if (init_e.kind == ExprKind.EXPR_ARRAY_LIT) {
+              let u8ptr: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 32, 0];
+              if (emit_bytes_9(out, u8ptr, 7) != 0) {
+                return -1;
+              }
+              if (append_byte(out, 42) != 0) {
+                return -1;
+              }
+              type_emitted = 1;
             }
           }
-          if (emit_type(arena, out, let_type_ref) != 0) {
+          if (type_emitted == 0 && emit_type(arena, out, let_type_ref) != 0) {
             return -1;
           }
           if (append_byte(out, 32) != 0) {
@@ -1694,15 +1704,25 @@ function emit_block(arena: *ASTArena, out: *CodegenOutBuf, block_ref: i32, inden
     if (emit_indent(out, indent) != 0) {
       return -1;
     }
-    /* type_ref 为空时用 init 的 resolved_type_ref，避免 int32_t _l0 = (uint8_t[]){...} 类型不匹配 */
+    /* type_ref 为空时用 init 的 resolved_type_ref；若仍空且 init 为数组字面量则输出 uint8_t * */
     let let_type_ref: i32 = ld.type_ref;
+    let type_emitted: i32 = 0;
     if (ref_is_null(let_type_ref) && !ref_is_null(ld.init_ref) && ld.init_ref > 0 && ld.init_ref <= arena.num_exprs) {
       let init_e: Expr = ast_arena_expr_get(arena, ld.init_ref);
       if (!ref_is_null(init_e.resolved_type_ref)) {
         let_type_ref = init_e.resolved_type_ref;
+      } else if (init_e.kind == ExprKind.EXPR_ARRAY_LIT) {
+        let u8ptr: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 32, 0];
+        if (emit_bytes_9(out, u8ptr, 7) != 0) {
+          return -1;
+        }
+        if (append_byte(out, 42) != 0) {
+          return -1;
+        }
+        type_emitted = 1;
       }
     }
-    if (emit_type(arena, out, let_type_ref) != 0) {
+    if (type_emitted == 0 && emit_type(arena, out, let_type_ref) != 0) {
       return -1;
     }
     if (append_byte(out, 32) != 0) {
