@@ -9,7 +9,8 @@ cd "$(dirname "$0")/.."
 make -C compiler -q all 2>/dev/null || make -C compiler all
 make -C compiler bootstrap-pipeline 2>/dev/null || true
 make -C compiler shu-su-pipeline 2>/dev/null || true
-# 构建 bootstrap-driver 并保存为 shu_driver，供 run-all 里 run-without-c 临时使用（与 run-all-c 一致）
+# 先产出 seed shu（含 pipeline），再尝试 asm 构建；否则 bootstrap-driver 用的 ./shu 是 make all 的 C 版，无 -backend asm，会全部 SKIP
+make -C compiler bootstrap-driver-seed 2>/dev/null || true
 make -C compiler bootstrap-driver 2>/dev/null || true
 [ -x compiler/shu ] && cp compiler/shu compiler/shu_driver
 if [ ! -x compiler/shu_su ]; then

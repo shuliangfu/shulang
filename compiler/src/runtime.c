@@ -151,6 +151,9 @@ static int write_io_net_abi_inline(FILE *cf) {
         "struct std_net_TcpStream { int32_t fd; };\n",
         "struct std_net_TcpListener { int32_t fd; };\n",
         "struct std_net_UdpSocket { int32_t fd; };\n",
+        "#define STD_FS_FS_IOVEC_BUF_DEFINED\nstruct std_fs_FsIovecBuf { void *ptr; size_t len; size_t handle; };\n",
+        "struct std_map_Map_i32_i32 { int32_t *keys; int32_t *vals; uint8_t *occupied; int32_t cap; int32_t len; };\n",
+        "typedef struct std_io_driver_Buffer std_net_Buffer;\n",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
         if (fputs(lines[i], cf) == EOF) return 1;
@@ -3353,30 +3356,34 @@ int driver_is_submit_batch_buf_call(const uint8_t *name, int name_len) {
     return 0;
 }
 
-/** 生成函数定义时，若当前前缀为 std_io_driver_ 且 preamble 将该参数声明为 ptrdiff_t（首参 register/submit_read/submit_write），则返回 1，.su codegen 输出 ptrdiff_t。 */
+/** 归一化 prefix 到 norm（. 与 / 转 _），前 14 字符；用于与 std_io_driver 匹配（兼容 13/14 字符前缀）。 */
+static void driver_norm_prefix(const uint8_t *prefix, int prefix_len, char *norm) {
+    int i = 0;
+    for (; i < 14 && i < prefix_len && prefix; i++)
+        norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
+    norm[i] = '\0';
+}
+
+/** 生成函数定义时，若当前前缀为 std_io_driver（或 std_io_driver_）且 preamble 将该参数声明为 ptrdiff_t（首参 register/submit_read/submit_write），则返回 1。 */
 int driver_force_param_ptrdiff_t(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
     if (!name || param_index != 0) return 0;
-    if (!prefix || prefix_len < 14) return 0;
+    if (!prefix || prefix_len < 13) return 0;
     char norm[16];
-    for (int i = 0; i < 14 && i < prefix_len; i++)
-        norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
-    norm[14] = '\0';
-    if (strcmp(norm, "std_io_driver_") != 0) return 0;
+    driver_norm_prefix(prefix, prefix_len, norm);
+    if (strncmp(norm, "std_io_driver", 13) != 0 || (norm[13] != '\0' && norm[13] != '_')) return 0;
     if (name_len == 8 && strncmp((const char *)name, "register", 8) == 0) return 1;
     if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
     if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
     return 0;
 }
 
-/** 生成函数定义时，若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 uint32_t（submit_read/submit_write 的 timeout_ms、submit_register_fixed_buffers_buf 的 nr），则返回 1。 */
+/** 生成函数定义时，若 prefix 为 std_io_driver（或 std_io_driver_）且 preamble 将该参数声明为 uint32_t（timeout_ms/nr），则返回 1。 */
 int driver_force_param_uint32_t(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
     if (!name || param_index != 1) return 0;
-    if (!prefix || prefix_len < 14) return 0;
+    if (!prefix || prefix_len < 13) return 0;
     char norm[16];
-    for (int i = 0; i < 14 && i < prefix_len; i++)
-        norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
-    norm[14] = '\0';
-    if (strcmp(norm, "std_io_driver_") != 0) return 0;
+    driver_norm_prefix(prefix, prefix_len, norm);
+    if (strncmp(norm, "std_io_driver", 13) != 0 || (norm[13] != '\0' && norm[13] != '_')) return 0;
     if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
     if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
     if (name_len == 31 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 31) == 0) return 1;

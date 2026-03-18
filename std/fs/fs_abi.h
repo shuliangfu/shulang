@@ -10,7 +10,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct { uint8_t *ptr; size_t len; size_t handle; } fs_iovec_buf_t;
+#ifndef STD_FS_FS_IOVEC_BUF_DEFINED
+#define STD_FS_FS_IOVEC_BUF_DEFINED
+struct std_fs_FsIovecBuf { uint8_t *ptr; size_t len; size_t handle; };
+#endif
+typedef struct std_fs_FsIovecBuf fs_iovec_buf_t;
 
 extern uint64_t fs_direct_align_c(void);
 extern int32_t fs_fadvise_sequential_c(int32_t fd);
