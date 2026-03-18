@@ -19,6 +19,8 @@ extern function driver_should_skip_emit_func_by_name(name: *u8, name_len: i32): 
 extern function driver_is_submit_batch_buf_call(name: *u8, name_len: i32): i32;
 /** 生成函数定义时：若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 ptrdiff_t（首参 register/submit_read/submit_write），返回 1。 */
 extern function driver_force_param_ptrdiff_t(prefix: *u8, prefix_len: i32, name: *u8, name_len: i32, param_index: i32): i32;
+/** 生成函数定义时：若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 uint32_t（timeout_ms/nr），返回 1。 */
+extern function driver_force_param_uint32_t(prefix: *u8, prefix_len: i32, name: *u8, name_len: i32, param_index: i32): i32;
 /** 生成函数定义时：若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 int32_t，返回 1，本模块对该参数输出 int32_t。 */
 extern function driver_force_param_i32(prefix: *u8, prefix_len: i32, name: *u8, name_len: i32, param_index: i32): i32;
 /** 当前为 std.io.driver 且函数名为 driver_read_ptr_len/driver_read_ptr 时返回 1，pipeline 跳过生成此二函数避免与 core 的 shu_io_* 重定义。 */
@@ -2047,10 +2049,15 @@ function emit_func(arena: *ASTArena, out: *CodegenOutBuf, f: Func, is_entry: boo
         }
       }
       let param: Param = f.params[p];
-      /* std.io.driver 的 register/submit_read/submit_write 首参与 preamble 一致用 ptrdiff_t；其余或 int32_t 覆盖或自然类型。 */
+      /* std.io.driver 的 register/submit_read/submit_write 首参 ptrdiff_t；timeout_ms/nr 为 uint32_t；其余或 int32_t 或自然类型。 */
       if (driver_force_param_ptrdiff_t(prefix, prefix_len, f.name, f.name_len, p) != 0) {
         let ptrdiff_t_buf: [32]u8 = [112, 116, 114, 100, 105, 102, 102, 95, 116, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         if (emit_bytes_32(out, ptrdiff_t_buf, 10) != 0) {
+          return -1;
+        }
+      } else if (driver_force_param_uint32_t(prefix, prefix_len, f.name, f.name_len, p) != 0) {
+        let u32_buf: [32]u8 = [117, 105, 110, 116, 51, 50, 95, 116, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        if (emit_bytes_32(out, u32_buf, 9) != 0) {
           return -1;
         }
       } else if (driver_force_param_i32(prefix, prefix_len, f.name, f.name_len, p) != 0) {

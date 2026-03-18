@@ -114,6 +114,7 @@ static int write_io_net_abi_inline(FILE *cf) {
         "#define shu_io_submit_read(buf, timeout_m) shu_io_submit_read_buf(buf, timeout_m)\n",
         "#define shu_io_submit_write(buf, timeout_m) shu_io_submit_write_buf(buf, timeout_m)\n",
         "struct std_io_driver_Buffer { void *ptr; size_t len; size_t handle; };\n",
+        "typedef struct std_io_driver_Buffer std_io_Buffer;\n",
         "extern int32_t std_io_driver_submit_read(ptrdiff_t buf, uint32_t timeout_ms);\n",
         "extern int32_t std_io_driver_submit_write(ptrdiff_t buf, uint32_t timeout_ms);\n",
         "extern int32_t std_io_driver_submit_register_fixed_buffers_buf(struct std_io_driver_Buffer * bufs, uint32_t nr);\n",
@@ -145,6 +146,11 @@ static int write_io_net_abi_inline(FILE *cf) {
         "#define write_fixed_fd std_io_write_fixed_fd\n",
         "extern int32_t net_close_socket_c(int32_t fd);\n",
         "extern int32_t net_run_accept_workers_c(int32_t listener_fd, int32_t n_workers, uint32_t timeout_ms);\n",
+        "struct std_net_Ipv4Addr { uint8_t a; uint8_t b; uint8_t c; uint8_t d; };\n",
+        "struct std_net_Ipv6Addr { uint8_t b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,b10,b11,b12,b13,b14,b15; };\n",
+        "struct std_net_TcpStream { int32_t fd; };\n",
+        "struct std_net_TcpListener { int32_t fd; };\n",
+        "struct std_net_UdpSocket { int32_t fd; };\n",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
         if (fputs(lines[i], cf) == EOF) return 1;
@@ -3362,7 +3368,22 @@ int driver_force_param_ptrdiff_t(const uint8_t *prefix, int prefix_len, const ui
     return 0;
 }
 
-/** 生成函数定义时，若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 int32_t，则返回 1。现仅 submit_register_fixed_buffers_buf 不再强制 int32_t（首参 struct *、次参 uint32_t 由 emit_type 输出）。 */
+/** 生成函数定义时，若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 uint32_t（submit_read/submit_write 的 timeout_ms、submit_register_fixed_buffers_buf 的 nr），则返回 1。 */
+int driver_force_param_uint32_t(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
+    if (!name || param_index != 1) return 0;
+    if (!prefix || prefix_len < 14) return 0;
+    char norm[16];
+    for (int i = 0; i < 14 && i < prefix_len; i++)
+        norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
+    norm[14] = '\0';
+    if (strcmp(norm, "std_io_driver_") != 0) return 0;
+    if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
+    if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
+    if (name_len == 31 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 31) == 0) return 1;
+    return 0;
+}
+
+/** 生成函数定义时，若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 int32_t，则返回 1。现已全部由 ptrdiff_t/uint32_t/struct* 覆盖，不再强制 int32_t。 */
 int driver_force_param_i32(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
     (void)prefix;
     (void)prefix_len;
