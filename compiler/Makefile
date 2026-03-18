@@ -457,11 +457,16 @@ bootstrap-self: bootstrap-driver-seed
 	./$(TARGET)_stage2 ../tests/return-value/main.su -o /tmp/out_self && /tmp/out_self; EX=$$?; [ $$EX -eq 42 ] && echo "bootstrap-self OK (shu1 -> shu2)" || (echo "bootstrap-self FAIL: stage2 or out_self exit=$$EX"; exit 1)
 
 # 阶段 8.3：两代 shu 对同一测试套件（run-all.sh）行为一致；run-all 含 run-su-pipeline/run-su-multi-file，需先各自编出 shu_su
+# 失败时打印日志尾部，便于 CI 定位（run-all 在 CI 下会输出 *** run-all FAILED: <script> ***）
 check-7.2: bootstrap-self
 	@ROOT=$$(pwd)/..; \
 	cp $(TARGET)_stage1 $(TARGET) && cd $$ROOT && SHU=$$ROOT/compiler/$(TARGET)_stage1 ./tests/run-all.sh > /tmp/run_shu1.log 2>&1; E1=$$?; \
 	cd $$ROOT/compiler && cp $(TARGET)_stage2 $(TARGET) && cd $$ROOT && SHU=$$ROOT/compiler/$(TARGET)_stage2 ./tests/run-all.sh > /tmp/run_shu2.log 2>&1; E2=$$?; \
-	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shu generations passed full test suite)"; else echo "shu1 exit=$$E1 shu2 exit=$$E2"; exit 1; fi
+	if [ $$E1 -eq 0 ] && [ $$E2 -eq 0 ]; then echo "check-7.2 OK (both shu generations passed full test suite)"; else \
+	  echo "shu1 exit=$$E1 shu2 exit=$$E2"; \
+	  if [ $$E1 -ne 0 ] && [ -f /tmp/run_shu1.log ]; then echo "--- tail /tmp/run_shu1.log ---"; tail -n 80 /tmp/run_shu1.log; fi; \
+	  if [ $$E2 -ne 0 ] && [ -f /tmp/run_shu2.log ]; then echo "--- tail /tmp/run_shu2.log ---"; tail -n 80 /tmp/run_shu2.log; fi; \
+	  exit 1; fi
 
 # 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。
 # 必须用 $(SHU_C) 做 -E：C 解析器(parser.c) 会按源码顺序填充 stmt_order，codegen 按序输出；若用 $(TARGET) 走 .su 解析则 stmt_order 仅有 const+let 导致声明被提到函数首、顺序错乱。
