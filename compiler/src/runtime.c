@@ -88,7 +88,7 @@ static int write_io_net_abi_inline(FILE *cf) {
         "extern int io_register_buffers_4(uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3, unsigned nr);\n",
         "extern int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);\n",
         "static inline int io_register_buffers_buf_i32(intptr_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n",
-        "#define io_register_buffers_buf(bufs, nr) io_register_buffers_buf_i32((bufs), (nr))\n",
+        "#define io_register_buffers_buf(bufs, nr) io_register_buffers_buf_i32((intptr_t)(void *)(bufs), (nr))\n",
         "extern void io_unregister_buffers(void);\n",
         "extern ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms);\n",
         "extern ptrdiff_t io_write(int fd, uint8_t *buf, size_t count, unsigned timeout_ms);\n",
@@ -3347,20 +3347,28 @@ int driver_is_submit_batch_buf_call(const uint8_t *name, int name_len) {
     return 0;
 }
 
-/** 生成函数定义时，若当前前缀为 std_io_driver_（或路径 std/io/driver 生成的 std/io/driver_）且 preamble 将该参数声明为 int32_t，则返回 1。 */
-int driver_force_param_i32(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
+/** 生成函数定义时，若当前前缀为 std_io_driver_ 且 preamble 将该参数声明为 ptrdiff_t（首参 register/submit_read/submit_write），则返回 1，.su codegen 输出 ptrdiff_t。 */
+int driver_force_param_ptrdiff_t(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
     if (!name || param_index != 0) return 0;
     if (!prefix || prefix_len < 14) return 0;
-    /* 路径可能为 "std.io.driver" 或 "std/io/driver"，取前 14 字符归一化后比较。 */
     char norm[16];
     for (int i = 0; i < 14 && i < prefix_len; i++)
         norm[i] = (char)(prefix[i] == '/' || prefix[i] == '.' ? '_' : prefix[i]);
     norm[14] = '\0';
     if (strcmp(norm, "std_io_driver_") != 0) return 0;
     if (name_len == 8 && strncmp((const char *)name, "register", 8) == 0) return 1;
-    if (name_len == 31 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 31) == 0) return 1;
     if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
     if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
+    return 0;
+}
+
+/** 生成函数定义时，若 prefix 为 std_io_driver_ 且 preamble 将该参数声明为 int32_t，则返回 1。现仅 submit_register_fixed_buffers_buf 不再强制 int32_t（首参 struct *、次参 uint32_t 由 emit_type 输出）。 */
+int driver_force_param_i32(const uint8_t *prefix, int prefix_len, const uint8_t *name, int name_len, int param_index) {
+    (void)prefix;
+    (void)prefix_len;
+    (void)name;
+    (void)name_len;
+    (void)param_index;
     return 0;
 }
 

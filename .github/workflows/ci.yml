@@ -51,6 +51,17 @@ jobs:
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
         run: ./tests/run-bootstrap-verify.sh
         timeout-minutes: 25
+      - name: Dump failure logs (on failure)
+        if: failure()
+        run: |
+          echo "=== run_shu1.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu1.log 2>/dev/null || true
+          echo "=== run_shu2.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu2.log 2>/dev/null || true
+          echo "=== Kept generated C (head 120 lines each) ==="
+          for f in /tmp/shu_su.*.c 2>/dev/null; do
+            [ -f "$f" ] && echo "--- $f ---" && head -120 "$f" && echo ""
+          done
 
   linux-arm64:
     name: Linux (ARM64)
@@ -86,6 +97,14 @@ jobs:
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
         run: ./tests/run-bootstrap-verify.sh
         timeout-minutes: 25
+      - name: Dump failure logs (on failure)
+        if: failure()
+        run: |
+          echo "=== run_shu1.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu1.log 2>/dev/null || true
+          echo "=== run_shu2.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu2.log 2>/dev/null || true
+          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
 
   mac:
     name: macOS (${{ matrix.os }})
@@ -125,6 +144,14 @@ jobs:
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
         run: ./tests/run-bootstrap-verify.sh
         timeout-minutes: 25
+      - name: Dump failure logs (on failure)
+        if: failure()
+        run: |
+          echo "=== run_shu1.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu1.log 2>/dev/null || true
+          echo "=== run_shu2.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu2.log 2>/dev/null || true
+          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
 
   windows:
     name: Windows (MSYS2)
@@ -177,6 +204,15 @@ jobs:
         timeout-minutes: 25
         env:
           CI: "1"
+      - name: Dump failure logs (on failure)
+        if: failure()
+        run: |
+          echo "=== run_shu1.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu1.log 2>/dev/null || true
+          echo "=== run_shu2.log (last 200 lines) ==="
+          tail -200 /tmp/run_shu2.log 2>/dev/null || true
+          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
+        shell: msys2 {0}
 
   # 当 run-option 段错误时，用 ASan 构建并复现以获取崩溃位置（可选，不阻塞主流程）
   # 仅 shu 用 ASan 编译；std/*.o 用普通 CFLAGS，避免链接生成的 option 二进制时出现未定义 __asan_* 符号
