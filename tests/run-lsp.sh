@@ -50,7 +50,12 @@ trap "rm -f $OUT $ERR $LSP_IN" EXIT
   send_lsp "$EXIT_NOTIF"
 } >"$LSP_IN"
 # 调试 stdin 每次 read 的请求/返回字节数：LSP_READ_DEBUG=1 时 LSP 的 stderr 会打 io_read 日志
-LSP_READ_DEBUG="${LSP_READ_DEBUG:-}" timeout 5 "$SHU" --lsp <"$LSP_IN" 2>"$ERR" >"$OUT"; true
+# timeout 为 GNU coreutils，macOS 默认无；无 timeout 时直接运行，避免 exit 127
+if command -v timeout >/dev/null 2>&1; then
+  LSP_READ_DEBUG="${LSP_READ_DEBUG:-}" timeout 5 "$SHU" --lsp <"$LSP_IN" 2>"$ERR" >"$OUT"; true
+else
+  LSP_READ_DEBUG="${LSP_READ_DEBUG:-}" "$SHU" --lsp <"$LSP_IN" 2>"$ERR" >"$OUT"; true
+fi
 if [ -n "${LSP_READ_DEBUG:-}" ]; then
   echo "LSP stderr (LSP_READ_DEBUG):" >&2
   cat "$ERR" >&2
