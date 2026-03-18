@@ -390,13 +390,20 @@ static const char *codegen_library_import_path;
 /** 指针宽度有符号类型（ptrdiff_t），用于 std.io.driver 的 register/submit_read/submit_write 首参，避免 64 位下 int32_t 截断。 */
 static const struct ASTType codegen_override_isize = { .kind = AST_TYPE_ISIZE, .name = NULL, .elem_type = NULL, .array_size = 0 };
 
-/** 若 import_path 为 std.io.driver 且 func_name 为 register/submit_read/submit_write 且 param_index==0，返回 &codegen_override_isize（指针宽度）；submit_register_fixed_buffers_buf 首参为 struct * 不覆盖。 */
+/** uint32_t 覆盖，用于 std.io.driver 的 submit_register_fixed_buffers_buf 第二参 nr、submit_read/submit_write 的 timeout_ms，与 preamble 声明一致。 */
+static const struct ASTType codegen_override_u32 = { .kind = AST_TYPE_U32, .name = NULL, .elem_type = NULL, .array_size = 0 };
+
+/** 若 import_path 为 std.io.driver：param_index==0 且 register/submit_read/submit_write 返回 isize（ptrdiff_t）；param_index==1 且 submit_register_fixed_buffers_buf/submit_read/submit_write 返回 u32（uint32_t）。submit_register_fixed_buffers_buf 首参为 struct * 不覆盖。 */
 static const struct ASTType *codegen_io_driver_param_override(const char *import_path, const char *func_name, int param_index) {
-    if (param_index != 0 || !import_path || !func_name) return NULL;
+    if (!import_path || !func_name) return NULL;
     if (strcmp(import_path, "std.io.driver") != 0 && strcmp(import_path, "std/io/driver") != 0)
         return NULL;
-    if (strcmp(func_name, "register") == 0 || strcmp(func_name, "submit_read") == 0 || strcmp(func_name, "submit_write") == 0)
+    if (param_index == 0
+        && (strcmp(func_name, "register") == 0 || strcmp(func_name, "submit_read") == 0 || strcmp(func_name, "submit_write") == 0))
         return &codegen_override_isize;
+    if (param_index == 1
+        && (strcmp(func_name, "submit_register_fixed_buffers_buf") == 0 || strcmp(func_name, "submit_read") == 0 || strcmp(func_name, "submit_write") == 0))
+        return &codegen_override_u32;
     return NULL;
 }
 
@@ -4794,15 +4801,14 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
     fprintf(out, "%s %s(", cret, fname);
     for (int i = 0; i < f->num_params; i++) {
         if (i) fprintf(out, ", ");
-        /* std.io.driver 的 register/submit_read/submit_write 首参 preamble 声明为 ptrdiff_t（指针宽度）；submit_register_fixed_buffers_buf 首参为 struct *，与 preamble 一致。 */
+        /* std.io.driver 的 register/submit_read/submit_write 首参 ptrdiff_t、第二参 timeout_ms 与 submit_register_fixed_buffers_buf 第二参 nr 为 uint32_t，与 preamble 一致。 */
         const struct ASTType *param_override = NULL;
-        if (i == 0 && f->name) {
+        if (f->name) {
             int is_io_driver = (codegen_library_prefix && strcmp(codegen_library_prefix, "std_io_driver_") == 0)
                 || (codegen_library_import_path && (strcmp(codegen_library_import_path, "std.io.driver") == 0
                     || strcmp(codegen_library_import_path, "std/io/driver") == 0));
-            if (is_io_driver
-                && (strcmp(f->name, "register") == 0 || strcmp(f->name, "submit_read") == 0 || strcmp(f->name, "submit_write") == 0))
-                param_override = &codegen_override_isize;
+            if (is_io_driver)
+                param_override = codegen_io_driver_param_override(codegen_library_import_path ? codegen_library_import_path : "std.io.driver", f->name, i);
         }
         codegen_emit_param(&f->params[i], out, param_override, i);
     }

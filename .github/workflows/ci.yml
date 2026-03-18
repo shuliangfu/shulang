@@ -1,6 +1,6 @@
 # Shulang CI: multi-platform build, C test suite, and self-host (.su) tests
 # Linux (multi-version), Linux ARM64, macOS (multi-version), Windows, Docker multi-distro (Alpine/Debian).
-# Build: shu (C compiler). 各平台 run-all.sh 后均追加 shu_su 构建、run-all-su.sh、bootstrap-verify。
+# Build: shu (C compiler). 各平台测试：make test_c（C 路径全量）、make test_su（.su 自举 + run-all-su）、make bootstrap-verify。
 
 name: CI
 
@@ -39,17 +39,14 @@ jobs:
             echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
-      - name: Run full test suite (run-all.sh)
-        run: ./tests/run-all.sh
+      - name: Run C test suite (make test_c)
+        run: make -C compiler test_c
         timeout-minutes: 20
-      - name: Build shu_su (.su pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
-        timeout-minutes: 10
-      - name: Run full test suite with shu_su (run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run .su test suite (make test_su)
+        run: make -C compiler test_su
         timeout-minutes: 25
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
-        run: ./tests/run-bootstrap-verify.sh
+        run: make -C compiler bootstrap-verify
         timeout-minutes: 25
       - name: Dump failure logs (on failure)
         if: failure()
@@ -59,8 +56,9 @@ jobs:
           echo "=== run_shu2.log (last 200 lines) ==="
           tail -200 /tmp/run_shu2.log 2>/dev/null || true
           echo "=== Kept generated C (head 120 lines each) ==="
-          for f in /tmp/shu_su.*.c 2>/dev/null; do
-            [ -f "$f" ] && echo "--- $f ---" && head -120 "$f" && echo ""
+          for f in /tmp/shu_su.*.c; do
+            [ -f "$f" ] || continue
+            echo "--- $f ---" && head -120 "$f" && echo ""
           done
 
   linux-arm64:
@@ -85,17 +83,14 @@ jobs:
             echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
-      - name: Run full test suite (run-all.sh)
-        run: ./tests/run-all.sh
+      - name: Run C test suite (make test_c)
+        run: make -C compiler test_c
         timeout-minutes: 20
-      - name: Build shu_su (.su pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
-        timeout-minutes: 10
-      - name: Run full test suite with shu_su (run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run .su test suite (make test_su)
+        run: make -C compiler test_su
         timeout-minutes: 25
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
-        run: ./tests/run-bootstrap-verify.sh
+        run: make -C compiler bootstrap-verify
         timeout-minutes: 25
       - name: Dump failure logs (on failure)
         if: failure()
@@ -104,7 +99,7 @@ jobs:
           tail -200 /tmp/run_shu1.log 2>/dev/null || true
           echo "=== run_shu2.log (last 200 lines) ==="
           tail -200 /tmp/run_shu2.log 2>/dev/null || true
-          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
+          for f in /tmp/shu_su.*.c; do [ -f "$f" ] || continue; echo "--- $f ---" && head -120 "$f"; done
 
   mac:
     name: macOS (${{ matrix.os }})
@@ -132,17 +127,14 @@ jobs:
             echo "::error::compiler/shu not found or not executable (Build compiler step did not produce it)"
             exit 1
           fi
-      - name: Run full test suite (run-all.sh)
-        run: ./tests/run-all.sh
+      - name: Run C test suite (make test_c)
+        run: make -C compiler test_c
         timeout-minutes: 20
-      - name: Build shu_su (.su pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
-        timeout-minutes: 10
-      - name: Run full test suite with shu_su (run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run .su test suite (make test_su)
+        run: make -C compiler test_su
         timeout-minutes: 25
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
-        run: ./tests/run-bootstrap-verify.sh
+        run: make -C compiler bootstrap-verify
         timeout-minutes: 25
       - name: Dump failure logs (on failure)
         if: failure()
@@ -151,7 +143,7 @@ jobs:
           tail -200 /tmp/run_shu1.log 2>/dev/null || true
           echo "=== run_shu2.log (last 200 lines) ==="
           tail -200 /tmp/run_shu2.log 2>/dev/null || true
-          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
+          for f in /tmp/shu_su.*.c; do [ -f "$f" ] || continue; echo "--- $f ---" && head -120 "$f"; done
 
   windows:
     name: Windows (MSYS2)
@@ -182,24 +174,20 @@ jobs:
             exit 1
           fi
         shell: msys2 {0}
-      - name: Run full test suite (run-all.sh)
-        run: ./tests/run-all.sh
+      - name: Run C test suite (make test_c)
+        run: make -C compiler test_c
         shell: msys2 {0}
         timeout-minutes: 20
         env:
           CI: "1"
-      - name: Build shu_su (.su pipeline)
-        run: make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline
-        shell: msys2 {0}
-        timeout-minutes: 10
-      - name: Run full test suite with shu_su (run-all-su.sh)
-        run: ./tests/run-all-su.sh
+      - name: Run .su test suite (make test_su)
+        run: make -C compiler test_su
         shell: msys2 {0}
         timeout-minutes: 25
         env:
           CI: "1"
       - name: Bootstrap verify (shu1 -> shu2, both run run-all)
-        run: ./tests/run-bootstrap-verify.sh
+        run: make -C compiler bootstrap-verify
         shell: msys2 {0}
         timeout-minutes: 25
         env:
@@ -211,7 +199,7 @@ jobs:
           tail -200 /tmp/run_shu1.log 2>/dev/null || true
           echo "=== run_shu2.log (last 200 lines) ==="
           tail -200 /tmp/run_shu2.log 2>/dev/null || true
-          for f in /tmp/shu_su.*.c 2>/dev/null; do [ -f "$f" ] && echo "--- $f ---" && head -120 "$f"; done
+          for f in /tmp/shu_su.*.c; do [ -f "$f" ] || continue; echo "--- $f ---" && head -120 "$f"; done
         shell: msys2 {0}
 
   # 当 run-option 段错误时，用 ASan 构建并复现以获取崩溃位置（可选，不阻塞主流程）
@@ -272,8 +260,7 @@ jobs:
               fi &&
               make -C compiler clean &&
               make -C compiler OPT=1 all &&
-              ./tests/run-all.sh &&
-              make -C compiler bootstrap-pipeline && make -C compiler shu-su-pipeline &&
-              ./tests/run-all-su.sh &&
-              ./tests/run-bootstrap-verify.sh
+              make -C compiler test_c &&
+              make -C compiler test_su &&
+              make -C compiler bootstrap-verify
             '

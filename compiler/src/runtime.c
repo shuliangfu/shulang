@@ -115,6 +115,7 @@ static int write_io_net_abi_inline(FILE *cf) {
         "#define shu_io_submit_write(buf, timeout_m) shu_io_submit_write_buf(buf, timeout_m)\n",
         "struct std_io_driver_Buffer { void *ptr; size_t len; size_t handle; };\n",
         "typedef struct std_io_driver_Buffer std_io_Buffer;\n",
+        "#define std_io_Buffer std_io_driver_Buffer\n",
         "extern int32_t std_io_driver_submit_read(ptrdiff_t buf, uint32_t timeout_ms);\n",
         "extern int32_t std_io_driver_submit_write(ptrdiff_t buf, uint32_t timeout_ms);\n",
         "extern int32_t std_io_driver_submit_register_fixed_buffers_buf(struct std_io_driver_Buffer * bufs, uint32_t nr);\n",
@@ -139,21 +140,32 @@ static int write_io_net_abi_inline(FILE *cf) {
         "#define std_io_submit_write_batch_buf std_io_driver_submit_write_batch_buf\n",
         "extern int32_t std_io_read_fixed_fd(int32_t fd, int32_t p1, int32_t p2, int32_t p3, int32_t p4);\n",
         "extern int32_t std_io_write_fixed_fd(int32_t fd, int32_t p1, int32_t p2, int32_t p3, int32_t p4);\n",
-        "#define handle_from_fd std_io_handle_from_fd\n",
-        "#define submit_read_batch_buf std_io_submit_read_batch_buf\n",
-        "#define submit_write_batch_buf std_io_submit_write_batch_buf\n",
-        "#define read_fixed_fd std_io_read_fixed_fd\n",
-        "#define write_fixed_fd std_io_write_fixed_fd\n",
-        "extern int32_t net_close_socket_c(int32_t fd);\n",
-        "extern int32_t net_run_accept_workers_c(int32_t listener_fd, int32_t n_workers, uint32_t timeout_ms);\n",
         "struct std_net_Ipv4Addr { uint8_t a; uint8_t b; uint8_t c; uint8_t d; };\n",
         "struct std_net_Ipv6Addr { uint8_t b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,b10,b11,b12,b13,b14,b15; };\n",
         "struct std_net_TcpStream { int32_t fd; };\n",
         "struct std_net_TcpListener { int32_t fd; };\n",
         "struct std_net_UdpSocket { int32_t fd; };\n",
+        "#define handle_from_fd std_io_handle_from_fd\n",
+        "#define submit_read_batch_buf std_io_submit_read_batch_buf\n",
+        "#define submit_write_batch_buf std_io_submit_write_batch_buf\n",
+        "#define read_fixed_fd(x, a, b, c, d) std_io_read_fixed_fd(_Generic((x), struct std_net_TcpStream: (x).fd, struct std_net_TcpListener: (x).fd, struct std_net_UdpSocket: (x).fd, default: (x)), a, b, c, d)\n",
+        "#define write_fixed_fd(x, a, b, c, d) std_io_write_fixed_fd(_Generic((x), struct std_net_TcpStream: (x).fd, struct std_net_TcpListener: (x).fd, struct std_net_UdpSocket: (x).fd, default: (x)), a, b, c, d)\n",
+        "extern int32_t net_close_socket_c(int32_t fd);\n",
+        "extern int32_t net_run_accept_workers_c(int32_t listener_fd, int32_t n_workers, uint32_t timeout_ms);\n",
+        "#define net_close_socket_c_real net_close_socket_c\n",
+        "#define net_close_socket_c(x) net_close_socket_c_real(_Generic((x), struct std_net_TcpStream: (x).fd, struct std_net_TcpListener: (x).fd, struct std_net_UdpSocket: (x).fd, default: (x)))\n",
+        "#define net_run_accept_workers_c_real net_run_accept_workers_c\n",
+        "#define net_run_accept_workers_c(x, n, t) net_run_accept_workers_c_real(_Generic((x), struct std_net_TcpStream: (x).fd, struct std_net_TcpListener: (x).fd, default: (x)), n, t)\n",
         "#define STD_FS_FS_IOVEC_BUF_DEFINED\nstruct std_fs_FsIovecBuf { void *ptr; size_t len; size_t handle; };\n",
         "struct std_map_Map_i32_i32 { int32_t *keys; int32_t *vals; uint8_t *occupied; int32_t cap; int32_t len; };\n",
         "typedef struct std_io_driver_Buffer std_net_Buffer;\n",
+        "struct std_vec_Vec_i32 { int32_t *ptr; int32_t len; int32_t cap; };\n",
+        "extern int32_t std_vec_vec_len_empty(void);\n",
+        "extern int32_t std_heap_alloc_size_zero(void);\n",
+        "extern int32_t std_runtime_runtime_ready(void);\n",
+        "#define vec_len_empty std_vec_vec_len_empty\n",
+        "#define alloc_size_zero std_heap_alloc_size_zero\n",
+        "#define runtime_ready std_runtime_runtime_ready\n",
     };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
         if (fputs(lines[i], cf) == EOF) return 1;
@@ -3386,7 +3398,7 @@ int driver_force_param_uint32_t(const uint8_t *prefix, int prefix_len, const uin
     if (strncmp(norm, "std_io_driver", 13) != 0 || (norm[13] != '\0' && norm[13] != '_')) return 0;
     if (name_len == 11 && strncmp((const char *)name, "submit_read", 11) == 0) return 1;
     if (name_len == 12 && strncmp((const char *)name, "submit_write", 12) == 0) return 1;
-    if (name_len == 31 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 31) == 0) return 1;
+    if (name_len == 33 && strncmp((const char *)name, "submit_register_fixed_buffers_buf", 33) == 0) return 1;
     return 0;
 }
 
