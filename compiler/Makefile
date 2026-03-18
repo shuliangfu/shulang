@@ -190,6 +190,11 @@ PIPELINE_OBJS = src/main_su.o src/runtime_su.o src/preprocess.o src/lexer/lexer.
 
 # asm 后端 -o <exe> 时链接用：提供 shulang_panic_；Linux 有 .s 时用 .s（syscall exit 不链 libc），否则用 .c；其它平台用 .c
 UNAME_S := $(shell uname -s 2>/dev/null || echo Unknown)
+# shu-su-pipeline 链接了 ../std/io/io.o；Linux 下 io.c 使用 io_uring，需 -luring -lpthread（见 std/io/io.c 头注释）
+PIPELINE_LIBS :=
+ifeq ($(UNAME_S),Linux)
+  PIPELINE_LIBS := -luring -lpthread
+endif
 RUNTIME_PANIC_S := $(wildcard src/asm/runtime_panic_x86_64.s)
 ifeq ($(UNAME_S),Linux)
 ifneq (,$(RUNTIME_PANIC_S))
@@ -471,7 +476,7 @@ pipeline_gen.c: bootstrap-pipeline
 # pipeline_su.o 引用 fs_*_c、io_*、lsp_diag_*、std_io_driver_submit_*；pipeline_glue.c 提供 submit 桩，fs/io/heap/lsp_diag 由对应 .o 提供
 shu-su-pipeline: $(PIPELINE_OBJS) pipeline_gen.c ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o src/lsp/lsp_diag.o
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I.. -Dstd_io_driver_driver_read_ptr_len=shu_io_read_ptr_len -Dstd_io_driver_driver_read_ptr=shu_io_read_ptr -c pipeline_gen.c -o pipeline_su.o
-	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o src/lsp/lsp_diag.o
+	$(CC) $(CFLAGS) -o $(TARGET)_su $(PIPELINE_OBJS) pipeline_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o src/lsp/lsp_diag.o $(PIPELINE_LIBS)
 	@echo "shu_su built; use ./shu_su -su -E <file.su> to test .su pipeline"
 
 # 4.5（.su 流水线编译 compiler 自身）：用 shu_su 的 -su -E 生成 typeck.su / codegen.su 对应的 C，再由 cc 链接得到新的 shu_su_stage2。
