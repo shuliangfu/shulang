@@ -5,7 +5,7 @@
 
 import ast;
 import codegen;
-import types;
+import asm.types;
 import backend;
 import peephole;
 import platform.elf;

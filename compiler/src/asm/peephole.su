@@ -5,7 +5,7 @@
 // 当前：去除连续空行；消除连续 push rax + pop rax（x86/arm64，与 7.3 寄存器分配相关）。
 
 import codegen;
-import types;
+import asm.types;
 
 /** 比较 out.data[pos..pos+len] 与 ptr 指向的 len 字节是否相等。相等返回 1，否则 0。 */
 function slice_eq(out: *CodegenOutBuf, pos: i32, ptr: *u8, len: i32): i32 {

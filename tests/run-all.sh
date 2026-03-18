@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 if [ -n "$SHU" ]; then
     [ -f compiler/shu ] && mv compiler/shu compiler/shu.bak
     cp "$SHU" compiler/shu
-    trap '[ -f compiler/shu.bak ] && mv compiler/shu.bak compiler/shu' EXIT
+    trap '[ -f compiler/shu.bak ] && mv compiler/shu.bak compiler/shu 2>/dev/null || true' EXIT
 else
     # 无 SHU 时构建 compiler：显式目标 all，否则 make 默认只构建 Makefile 第一个目标（io.o）。
     make -C compiler -q all 2>/dev/null || make -C compiler all

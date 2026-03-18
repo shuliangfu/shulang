@@ -246,7 +246,7 @@ function parse_into_with_init(arena: *ASTArena, module: *Module, source: []u8): 
 }
 
 /**
- * 诊断用：parse_into_with_init + set_main_index 后只跑 typeck_su_ast，返回其返回值（0 通过，-1 失败）。ctx 可为 ndep==0 的上下文。
+ * 诊断用：parse_into_with_init + set_main_index 后跑 typeck；库模块（无 main）走 typeck_su_ast_library，否则 typeck_su_ast。与 run_su_pipeline_impl 一致，-backend asm -o xxx.o 编库模块依赖此路径。
  */
 function typeck_after_parse_ok(arena: *ASTArena, module: *Module, source: []u8, ctx: *PipelineDepCtx): i32 {
   let r: ParseIntoResult = parse_into_with_init(arena, module, source);
@@ -254,6 +254,9 @@ function typeck_after_parse_ok(arena: *ASTArena, module: *Module, source: []u8, 
     return r.main_idx;
   }
   parse_into_set_main_index(module, r.main_idx);
+  if (module.main_func_index < 0) {
+    return typeck_su_ast_library(module, arena, ctx);
+  }
   return typeck_su_ast(module, arena, ctx);
 }
 

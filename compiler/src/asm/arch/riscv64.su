@@ -5,7 +5,7 @@
 // 依赖：codegen（CodegenOutBuf）、types（append_asm_line、format_i32_to_buf）。
 
 import codegen;
-import types;
+import asm.types;
 
 /** .text 段 */
 function emit_section_text(out: *CodegenOutBuf): i32 {

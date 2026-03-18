@@ -22,6 +22,7 @@ fi
 echo "build_shu_asm: using SHU=$SHU (list from $BUILD_LIST_SU)"
 
 # 按依赖顺序尝试编译各 .su 为 .o（顺序由 asm_build_list.su 的 // BUILD: 行定义）
+# SKIP 表示该模块 -backend asm -o 失败。常见原因：rc=-2 解析失败（如 main_idx=-1003 循环防护）；rc=-6 asm codegen 失败（库模块中某表达式/函数 asm 后端尚未支持）。见 src/asm/README.md。
 # 若需看 SKIP 原因，可设 SHU_ASM_VERBOSE=1 保留 stderr
 compile_su() {
   local out="$BUILD_DIR/$1"

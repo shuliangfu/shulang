@@ -387,8 +387,19 @@ static const struct ASTModule *codegen_library_module;
 /** 库模块 import 路径（如 std.process），用于 std.process.exit 等特殊函数体生成。 */
 static const char *codegen_library_import_path;
 
-/** std.io.driver 由 preamble 声明为 int32_t 的形参（register/submit_read 等），生成定义时用此覆盖，与 extern 一致。 */
-static const struct ASTType codegen_override_i32 = { .kind = AST_TYPE_I32, .name = NULL, .elem_type = NULL, .array_size = 0 };
+/** 指针宽度有符号类型（ptrdiff_t），用于 std.io.driver 的 register/submit_read/submit_write 首参，避免 64 位下 int32_t 截断。 */
+static const struct ASTType codegen_override_isize = { .kind = AST_TYPE_ISIZE, .name = NULL, .elem_type = NULL, .array_size = 0 };
+
+/** 若 import_path 为 std.io.driver 且 func_name 为 register/submit_read/submit_write 且 param_index==0，返回 &codegen_override_isize（指针宽度）；submit_register_fixed_buffers_buf 首参为 struct * 不覆盖。 */
+static const struct ASTType *codegen_io_driver_param_override(const char *import_path, const char *func_name, int param_index) {
+    if (param_index != 0 || !import_path || !func_name) return NULL;
+    if (strcmp(import_path, "std.io.driver") != 0 && strcmp(import_path, "std/io/driver") != 0)
+        return NULL;
+    if (strcmp(func_name, "register") == 0 || strcmp(func_name, "submit_read") == 0 || strcmp(func_name, "submit_write") == 0)
+        return &codegen_override_isize;
+    return NULL;
+}
+
 /** 入口模块代码生成时的依赖模块与 import 路径，用于 NAMED 类型解析为 "struct prefix_Name"（依赖中的 struct）。 */
 static struct ASTModule **codegen_dep_mods;
 static const char **codegen_dep_paths;
@@ -3235,6 +3246,31 @@ static int codegen_emit_one_call_arg(FILE *out, const struct ASTExpr *arg) {
     return 0;
 }
 
+/** std.io.driver 的 register/submit_read/submit_write 首参为 Buffer 传指针宽度（ptrdiff_t）；submit_register_fixed_buffers_buf 首参为 *Buffer 直接传指针，不转换。 */
+static int codegen_emit_io_driver_arg0(FILE *out, const struct ASTExpr *e, int arg_index, const struct ASTExpr *arg) {
+    if (arg_index != 0 || !e || !e->value.call.resolved_import_path || !e->value.call.resolved_callee_func) return 0;
+    if (!arg) return 0;
+    const char *path = e->value.call.resolved_import_path;
+    const struct ASTFunc *f = e->value.call.resolved_callee_func;
+    if (strcmp(path, "std.io.driver") != 0 && strcmp(path, "std/io/driver") != 0) return 0;
+    if (!f->name || !f->params) return 0;
+    /* submit_register_fixed_buffers_buf 定义签名为 struct * bufs，调用处直接传指针，不转 ptrdiff_t */
+    int need_cast = (strcmp(f->name, "register") == 0 || strcmp(f->name, "submit_read") == 0 || strcmp(f->name, "submit_write") == 0);
+    if (!need_cast) return 0;
+    if (f->num_params < 1 || !f->params[0].type) return 0;
+    int is_ptr_param = (f->params[0].type->kind == AST_TYPE_PTR);
+    if (is_ptr_param) {
+        fprintf(out, "(ptrdiff_t)(uintptr_t)(");
+        if (codegen_emit_one_call_arg(out, arg) != 0) return -1;
+        fprintf(out, ")");
+    } else {
+        fprintf(out, "(ptrdiff_t)(uintptr_t)&(");
+        if (codegen_emit_one_call_arg(out, arg) != 0) return -1;
+        fprintf(out, ")");
+    }
+    return 1; /* 已处理 */
+}
+
 /** CALL 跨模块（import 解析）：prefix + name(args)；经 builtin_intrinsic_name 映射后可变为 __builtin_memcpy 等。 */
 static int codegen_emit_call_import_path_impl(FILE *out, const struct ASTExpr *e) {
     char pre[256];
@@ -3248,7 +3284,13 @@ static int codegen_emit_call_import_path_impl(FILE *out, const struct ASTExpr *e
     fprintf(out, "%s(", builtin_intrinsic_name(full_name));
     for (int i = 0; i < e->value.call.num_args; i++) {
         if (i) fprintf(out, ", ");
-        if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
+        const struct ASTExpr *arg_i = (e->value.call.args && i < e->value.call.num_args) ? e->value.call.args[i] : NULL;
+        {
+            int r = codegen_emit_io_driver_arg0(out, e, i, arg_i);
+            if (r == -1) return -1;
+            if (r == 1) continue;
+        }
+        if (codegen_emit_one_call_arg(out, arg_i) != 0) return -1;
     }
     fprintf(out, ")");
     return 0;
@@ -3280,7 +3322,7 @@ static int codegen_emit_call_library_same_impl(FILE *out, const struct ASTExpr *
     return 0;
 }
 
-/** CALL 库模块内跨模块（依赖）：dep_prefix + name(args)。 */
+/** CALL 库模块内跨模块（依赖）：dep_prefix + name(args)。std.io 调 std.io.driver 的 register/submit_* 时首参须转为 (ptrdiff_t)(uintptr_t)&buf 或 (ptrdiff_t)(uintptr_t)ptr，与 codegen_emit_call_import_path_impl 一致。 */
 static int codegen_emit_call_library_dep_impl(FILE *out, const struct ASTExpr *e) {
     const char *callee_name = e->value.call.callee->value.var.name;
     if (!callee_name) return -1;
@@ -3290,14 +3332,31 @@ static int codegen_emit_call_library_dep_impl(FILE *out, const struct ASTExpr *e
         for (int fi = 0; fi < dm->num_funcs; fi++) {
             if (!dm->funcs[fi]) continue;
             if (dm->funcs[fi]->name && strcmp(dm->funcs[fi]->name, callee_name) == 0) {
+                const struct ASTFunc *f = dm->funcs[fi];
+                const char *dep_path = codegen_dep_paths[di];
                 char pre[256];
-                import_path_to_c_prefix(codegen_dep_paths[di], pre, sizeof(pre));
+                import_path_to_c_prefix(dep_path, pre, sizeof(pre));
                 char full_name[256];
                 (void)snprintf(full_name, sizeof(full_name), "%s%s", pre, callee_name);
                 fprintf(out, "%s(", builtin_intrinsic_name(full_name));
+                /* submit_register_fixed_buffers_buf 首参为 struct *，不转 ptrdiff_t */
+                int need_io_driver_cast = (dep_path && (strcmp(dep_path, "std.io.driver") == 0 || strcmp(dep_path, "std/io/driver") == 0)
+                    && (strcmp(callee_name, "register") == 0 || strcmp(callee_name, "submit_read") == 0 || strcmp(callee_name, "submit_write") == 0)
+                    && f->num_params >= 1 && f->params);
                 for (int i = 0; i < e->value.call.num_args; i++) {
                     if (i) fprintf(out, ", ");
-                    if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
+                    if (need_io_driver_cast && i == 0) {
+                        const struct ASTExpr *arg_i = (e->value.call.args && i < e->value.call.num_args) ? e->value.call.args[i] : NULL;
+                        if (arg_i && f->params[0].type && f->params[0].type->kind == AST_TYPE_PTR) {
+                            fprintf(out, "(ptrdiff_t)(uintptr_t)(");
+                            if (codegen_emit_one_call_arg(out, arg_i) != 0) return -1;
+                            fprintf(out, ")");
+                        } else if (arg_i) {
+                            fprintf(out, "(ptrdiff_t)(uintptr_t)&(");
+                            if (codegen_emit_one_call_arg(out, arg_i) != 0) return -1;
+                            fprintf(out, ")");
+                        } else if (codegen_emit_one_call_arg(out, arg_i) != 0) return -1;
+                    } else if (codegen_emit_one_call_arg(out, e->value.call.args[i]) != 0) return -1;
                 }
                 fprintf(out, ")");
                 return 0;
@@ -4735,22 +4794,47 @@ static int codegen_one_func(const struct ASTFunc *f, const struct ASTModule *m, 
     fprintf(out, "%s %s(", cret, fname);
     for (int i = 0; i < f->num_params; i++) {
         if (i) fprintf(out, ", ");
-        /* std.io.driver 的 register/submit_* 首参 preamble 声明为 int32_t，定义须一致。按 prefix 或 import_path 判定。 */
+        /* std.io.driver 的 register/submit_read/submit_write 首参 preamble 声明为 ptrdiff_t（指针宽度）；submit_register_fixed_buffers_buf 首参为 struct *，与 preamble 一致。 */
         const struct ASTType *param_override = NULL;
         if (i == 0 && f->name) {
             int is_io_driver = (codegen_library_prefix && strcmp(codegen_library_prefix, "std_io_driver_") == 0)
                 || (codegen_library_import_path && (strcmp(codegen_library_import_path, "std.io.driver") == 0
-                    || strcmp(codegen_library_import_path, "std/io/driver") == 0
-                    || strstr(codegen_library_import_path, "io/driver") != NULL
-                    || strstr(codegen_library_import_path, "io.driver") != NULL));
+                    || strcmp(codegen_library_import_path, "std/io/driver") == 0));
             if (is_io_driver
-                && (strcmp(f->name, "register") == 0 || strcmp(f->name, "submit_register_fixed_buffers_buf") == 0
-                    || strcmp(f->name, "submit_read") == 0 || strcmp(f->name, "submit_write") == 0))
-                param_override = &codegen_override_i32;
+                && (strcmp(f->name, "register") == 0 || strcmp(f->name, "submit_read") == 0 || strcmp(f->name, "submit_write") == 0))
+                param_override = &codegen_override_isize;
         }
         codegen_emit_param(&f->params[i], out, param_override, i);
     }
     fprintf(out, ") {\n");
+    /* std.io.driver 的 register/submit_read/submit_write 首参已生成为 ptrdiff_t，须直接调 _buf 包装；submit_register_fixed_buffers_buf 首参为 struct *，体内转 intptr_t 调 io_register_buffers_buf_i32。 */
+    if (codegen_library_import_path && f->name && f->params
+        && (strcmp(codegen_library_import_path, "std.io.driver") == 0 || strcmp(codegen_library_import_path, "std/io/driver") == 0)) {
+        const char *p0 = (f->num_params > 0 && f->params[0].name && (unsigned char)f->params[0].name[0] > ' ') ? f->params[0].name : "buf";
+        const char *p1 = (f->num_params > 1 && f->params[1].name && (unsigned char)f->params[1].name[0] > ' ') ? f->params[1].name : "timeout_ms";
+        /* 直接调 preamble 的 _buf/_i32 包装，避免依赖 #define 与生成文件中 core 的 3 参 extern 冲突 */
+        if (strcmp(f->name, "register") == 0 && f->num_params == 1) {
+            fprintf(out, "  return shu_io_register_buf(%s);\n", p0);
+            fprintf(out, "}\n");
+            return 0;
+        }
+        if (strcmp(f->name, "submit_read") == 0 && f->num_params == 2) {
+            fprintf(out, "  return shu_io_submit_read_buf(%s, %s);\n", p0, p1);
+            fprintf(out, "}\n");
+            return 0;
+        }
+        if (strcmp(f->name, "submit_write") == 0 && f->num_params == 2) {
+            fprintf(out, "  return shu_io_submit_write_buf(%s, %s);\n", p0, p1);
+            fprintf(out, "}\n");
+            return 0;
+        }
+        if (strcmp(f->name, "submit_register_fixed_buffers_buf") == 0 && f->num_params == 2) {
+            /* 首参为 struct std_io_driver_Buffer *，io_register_buffers_buf_i32 需 intptr_t，显式转换 */
+            fprintf(out, "  return io_register_buffers_buf_i32((intptr_t)(void *)%s, (int)%s);\n", p0, p1);
+            fprintf(out, "}\n");
+            return 0;
+        }
+    }
     /* std.process.exit(code)：生成对 C exit() 的调用（noreturn） */
     if (codegen_library_import_path && strcmp(codegen_library_import_path, "std.process") == 0
         && f->name && strcmp(f->name, "exit") == 0 && f->num_params == 1
@@ -5614,7 +5698,7 @@ int codegen_module_to_c(struct ASTModule *m, FILE *out, struct ASTModule **dep_m
             fprintf(out, "extern %s %s%s(", c_type_str(f->return_type), pre, f->name ? f->name : "");
             for (int j = 0; j < f->num_params; j++) {
                 if (j) fprintf(out, ", ");
-                codegen_emit_param(&f->params[j], out, NULL, j);
+                codegen_emit_param(&f->params[j], out, codegen_io_driver_param_override(imp_paths[i], f->name, j), j);
             }
             fprintf(out, ");\n");
         }
@@ -5978,7 +6062,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
             fprintf(out, "extern %s %s%s(", c_type_str(f->return_type), pre, f->name ? f->name : "");
             for (int p = 0; p < f->num_params; p++) {
                 if (p) fprintf(out, ", ");
-                codegen_emit_param(&f->params[p], out, NULL, p);
+                codegen_emit_param(&f->params[p], out, codegen_io_driver_param_override(ext_paths[k], f->name, p), p);
             }
             fprintf(out, ");\n");
         }
@@ -6087,7 +6171,7 @@ int codegen_library_module_to_c(struct ASTModule *m, const char *import_path,
         fprintf(out, "%s %s(", c_type_str(f->return_type), fwd_name);
         for (int j = 0; j < f->num_params; j++) {
             if (j) fprintf(out, ", ");
-            codegen_emit_param(&f->params[j], out, NULL, j);
+            codegen_emit_param(&f->params[j], out, codegen_io_driver_param_override(codegen_library_import_path, f->name, j), j);
         }
         fprintf(out, ");\n");
     }

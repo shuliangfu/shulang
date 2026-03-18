@@ -217,6 +217,11 @@ int64_t fs_posix_write_c(int32_t fd, const uint8_t *buf, size_t count) {
     return (int64_t)_write((int)fd, buf, c);
 }
 
+/** 包装 libc 关闭 fd，供 .su 的 fs_close 及 driver/pipeline 的 std_fs_fs_close 宏映射使用。返回 0 成功，-1 失败。 */
+int32_t fs_posix_close_c(int32_t fd) {
+    return (int32_t)_close((int)fd);
+}
+
 /** 分散读：四段 readv；返回总字节数，-1 错误。 */
 int64_t fs_readv4_c(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3) {
     HANDLE h;
@@ -549,6 +554,11 @@ int64_t fs_posix_read_c(int32_t fd, uint8_t *buf, size_t count) {
 /** 包装 libc write，供 .su 的 fs_write 调用。 */
 int64_t fs_posix_write_c(int32_t fd, const uint8_t *buf, size_t count) {
     return (int64_t)write((int)fd, buf, count);
+}
+
+/** 包装 libc close，供 .su 的 fs_close 及 driver/pipeline 的 std_fs_fs_close 宏映射使用。返回 0 成功，-1 失败。 */
+int32_t fs_posix_close_c(int32_t fd) {
+    return (int32_t)close((int)fd);
 }
 
 /** 分散读：一次 syscall 读入四段；返回总字节数，0=EOF，-1 错误。 */

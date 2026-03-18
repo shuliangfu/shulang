@@ -6,7 +6,7 @@
 
 import ast;
 import codegen;
-import types;
+import asm.types;
 
 /** .text 段 */
 function emit_section_text(out: *CodegenOutBuf): i32 {

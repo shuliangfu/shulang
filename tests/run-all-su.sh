@@ -5,7 +5,8 @@
 
 set -e
 cd "$(dirname "$0")/.."
-make -C compiler -q 2>/dev/null || make -C compiler
+# 先确保 shu、shu-c 及全部 std .o、runtime_panic.o 存在（make clean 后 run-all 里编译 -o 会链这些 .o）
+make -C compiler -q all 2>/dev/null || make -C compiler all
 make -C compiler bootstrap-pipeline 2>/dev/null || true
 make -C compiler shu-su-pipeline 2>/dev/null || true
 # 构建 bootstrap-driver 并保存为 shu_driver，供 run-all 里 run-without-c 临时使用（与 run-all-c 一致）

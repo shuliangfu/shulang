@@ -6,7 +6,7 @@
 
 import ast;
 import codegen;
-import types;
+import asm.types;
 import arch.x86_64;
 import arch.arm64;
 import arch.riscv64;
@@ -14,6 +14,74 @@ import platform.elf;
 import arch.x86_64_enc;
 import arch.arm64_enc;
 import arch.riscv64_enc;
+
+/** 诊断：asm 不支持的 ExprKind 时由 runtime.c 打印，便于定位 rc=-6。 */
+extern function driver_diagnostic_asm_unsupported_expr(kind: i32): void;
+/** 诊断：return -1 前调用，loc 1=section_text 2=globl 3=label 4=prologue 5=block_body 6=block_inits 7=emit_expr 8=epilogue。 */
+extern function driver_diagnostic_asm_fail_at(loc: i32): void;
+/** 诊断：记录当前正在 emit 的 ExprKind 序数，供 fail_at 时打印。 */
+extern function driver_diagnostic_asm_set_last_expr_kind(k: i32): void;
+/** 诊断：EXPR_VAR 未找到时调用；first_slot/first_len 为 ctx 首槽名（num_locals>0 时传 ctx.locals[0]）。 */
+extern function driver_diagnostic_asm_var_not_found(name: *u8, name_len: i32, num_locals: i32, first_slot: *u8, first_len: i32): void;
+/** 诊断：每函数 codegen 前设置当前函数名，供 var_not_found 打印。 */
+extern function driver_diagnostic_asm_set_current_func(name: *u8, name_len: i32): void;
+
+/** 将 ExprKind 转为序数 (0..60)，供诊断打印；typeck 暂不支持 enum as i32，故用分支显式映射。 */
+function expr_kind_ordinal(k: ExprKind): i32 {
+  if (k == ExprKind.EXPR_LIT) { return 0; }
+  if (k == ExprKind.EXPR_FLOAT_LIT) { return 1; }
+  if (k == ExprKind.EXPR_BOOL_LIT) { return 2; }
+  if (k == ExprKind.EXPR_VAR) { return 3; }
+  if (k == ExprKind.EXPR_ADD) { return 4; }
+  if (k == ExprKind.EXPR_SUB) { return 5; }
+  if (k == ExprKind.EXPR_MUL) { return 6; }
+  if (k == ExprKind.EXPR_DIV) { return 7; }
+  if (k == ExprKind.EXPR_MOD) { return 8; }
+  if (k == ExprKind.EXPR_SHL) { return 9; }
+  if (k == ExprKind.EXPR_SHR) { return 10; }
+  if (k == ExprKind.EXPR_BITAND) { return 11; }
+  if (k == ExprKind.EXPR_BITOR) { return 12; }
+  if (k == ExprKind.EXPR_BITXOR) { return 13; }
+  if (k == ExprKind.EXPR_EQ) { return 14; }
+  if (k == ExprKind.EXPR_NE) { return 15; }
+  if (k == ExprKind.EXPR_LT) { return 16; }
+  if (k == ExprKind.EXPR_LE) { return 17; }
+  if (k == ExprKind.EXPR_GT) { return 18; }
+  if (k == ExprKind.EXPR_GE) { return 19; }
+  if (k == ExprKind.EXPR_LOGAND) { return 20; }
+  if (k == ExprKind.EXPR_LOGOR) { return 21; }
+  if (k == ExprKind.EXPR_NEG) { return 22; }
+  if (k == ExprKind.EXPR_BITNOT) { return 23; }
+  if (k == ExprKind.EXPR_LOGNOT) { return 24; }
+  if (k == ExprKind.EXPR_IF) { return 25; }
+  if (k == ExprKind.EXPR_BLOCK) { return 26; }
+  if (k == ExprKind.EXPR_TERNARY) { return 27; }
+  if (k == ExprKind.EXPR_ASSIGN) { return 28; }
+  if (k == ExprKind.EXPR_ADD_ASSIGN) { return 29; }
+  if (k == ExprKind.EXPR_SUB_ASSIGN) { return 30; }
+  if (k == ExprKind.EXPR_MUL_ASSIGN) { return 31; }
+  if (k == ExprKind.EXPR_DIV_ASSIGN) { return 32; }
+  if (k == ExprKind.EXPR_MOD_ASSIGN) { return 33; }
+  if (k == ExprKind.EXPR_BITAND_ASSIGN) { return 34; }
+  if (k == ExprKind.EXPR_BITOR_ASSIGN) { return 35; }
+  if (k == ExprKind.EXPR_BITXOR_ASSIGN) { return 36; }
+  if (k == ExprKind.EXPR_SHL_ASSIGN) { return 37; }
+  if (k == ExprKind.EXPR_SHR_ASSIGN) { return 38; }
+  if (k == ExprKind.EXPR_BREAK) { return 39; }
+  if (k == ExprKind.EXPR_CONTINUE) { return 40; }
+  if (k == ExprKind.EXPR_RETURN) { return 41; }
+  if (k == ExprKind.EXPR_PANIC) { return 42; }
+  if (k == ExprKind.EXPR_MATCH) { return 43; }
+  if (k == ExprKind.EXPR_FIELD_ACCESS) { return 44; }
+  if (k == ExprKind.EXPR_STRUCT_LIT) { return 45; }
+  if (k == ExprKind.EXPR_ARRAY_LIT) { return 46; }
+  if (k == ExprKind.EXPR_INDEX) { return 47; }
+  if (k == ExprKind.EXPR_CALL) { return 48; }
+  if (k == ExprKind.EXPR_METHOD_CALL) { return 49; }
+  if (k == ExprKind.EXPR_ENUM_VARIANT) { return 50; }
+  if (k == ExprKind.EXPR_BINOP) { return 51; }
+  return -1;
+}
 
 /** ELF enc 按 target_arch 分派：ta 0=x86_64，1=arm64，2=riscv64。 */
 function enc_label_arch(elf_ctx: *platform.elf.ElfCodegenCtx, name: [64]u8, name_len: i32, is_func: i32, ta: i32): i32 {
@@ -265,10 +333,10 @@ function ctx_reset(ctx: *AsmFuncCtx): void {
   ctx.continue_len = 0;
 }
 
-/** 按块中 const + let 数量计算栈帧大小（每槽 8 字节，向上取整到 16），并预留 64 字节 temp 区供 STRUCT_LIT/ARRAY_LIT。
+/** 按形参 + 块中 const + let 数量计算栈帧大小（每槽 8 字节，向上取整到 16），并预留 64 字节 temp 区供 STRUCT_LIT/ARRAY_LIT。
  * temp 区限制：STRUCT_LIT 最多 8 字段（8×8=64），ARRAY_LIT 最多 16 元素（16×4=64），超出由调用方保证不出现。 */
-function compute_frame_size(block: *Block): i32 {
-  let n: i32 = block.num_consts + block.num_lets;
+function compute_frame_size(num_params: i32, block: *Block): i32 {
+  let n: i32 = num_params + block.num_consts + block.num_lets;
   let size: i32 = 0;
   if (n > 0) {
     size = n * 8;
@@ -280,9 +348,31 @@ function compute_frame_size(block: *Block): i32 {
   return size;
 }
 
-/** 将块的 const_decls 与 let_decls 填入 ctx 的局部表，分配偏移 8, 16, 24, ... */
-function fill_local_slots(ctx: *AsmFuncCtx, block: *Block): void {
+/** 将函数的形参填入 ctx 的局部表（偏移 8, 16, 24, ...），供 EXPR_VAR 解析参数名；须在 fill_local_slots 前调用。 */
+function fill_param_slots(ctx: *AsmFuncCtx, f: *Func): void {
   let off: i32 = 8;
+  let i: i32 = 0;
+  while (i < f.num_params && i < 16 && ctx.num_locals < 24) {
+    let p: Param = f.params[i];
+    let idx: i32 = ctx.num_locals;
+    let k: i32 = 0;
+    while (k < p.name_len && k < 32 && k < 64) {
+      let ch: u8 = p.name[k];
+      ctx.locals[idx].name[k] = ch;
+      k = k + 1;
+    }
+    ctx.locals[idx].name_len = p.name_len;
+    ctx.locals[idx].offset = off;
+    ctx.num_locals = ctx.num_locals + 1;
+    off = off + 8;
+    i = i + 1;
+  }
+  ctx.next_offset = off;
+}
+
+/** 将块的 const_decls 与 let_decls 填入 ctx 的局部表，偏移从 ctx.next_offset 起（fill_param_slots 后调用）。 */
+function fill_local_slots(ctx: *AsmFuncCtx, block: *Block): void {
+  let off: i32 = ctx.next_offset;
   let i: i32 = 0;
   while (i < block.num_consts && ctx.num_locals < 24) {
     let d: ConstDecl = block.const_decls[i];
@@ -318,7 +408,8 @@ function fill_local_slots(ctx: *AsmFuncCtx, block: *Block): void {
   ctx.next_offset = off;
 }
 
-/** 在 ctx 的局部表中查找名字，返回偏移；未找到返回 -1。 */
+/** 在 ctx 的局部表中查找名字，返回偏移；未找到返回 -1。
+ * 回退：若 parser 未填形参名（槽名为全 0 但 name_len 正确），按「name_len 匹配且槽名为空」取第一个此类槽，确保 parse_into_buf 与 lex.pos 回退下 asm 仍可工作。 */
 function local_offset(ctx: *AsmFuncCtx, name: *u8, name_len: i32): i32 {
   let i: i32 = 0;
   while (i < ctx.num_locals) {
@@ -336,6 +427,25 @@ function local_offset(ctx: *AsmFuncCtx, name: *u8, name_len: i32): i32 {
       }
     }
     i = i + 1;
+  }
+  if (name_len > 0 && name_len <= 32) {
+    let j: i32 = 0;
+    while (j < ctx.num_locals) {
+      if (ctx.locals[j].name_len == name_len) {
+        let all_zero: i32 = 1;
+        let kk: i32 = 0;
+        while (kk < name_len && all_zero != 0) {
+          if (ctx.locals[j].name[kk] != 0) {
+            all_zero = 0;
+          }
+          kk = kk + 1;
+        }
+        if (all_zero != 0) {
+          return ctx.locals[j].offset;
+        }
+      }
+      j = j + 1;
+    }
   }
   return -1;
 }
@@ -514,7 +624,7 @@ function arch_emit_add_sp_imm(out: *CodegenOutBuf, n: i32, ta: i32): i32 {
 /** 单独处理 EXPR_CALL，避免 codegen 在块内生成 Expr 型导致 C 侧赋值类型错误。返回 0 成功 -1 失败。x86：实参入 rdi..r9；arm64：实参入栈再装入 w0..w5。 */
 function emit_expr_call(arena: *ASTArena, out: *CodegenOutBuf, e: Expr, ctx: *AsmFuncCtx, target_arch: i32): i32 {
   let callee: Expr = ast_arena_expr_get(arena, e.call_callee_ref);
-  if (callee.kind != ExprKind.EXPR_VAR) { return -1; }
+  if (callee.kind != ExprKind.EXPR_VAR) { driver_diagnostic_asm_fail_at(71); return -1; }
   let nargs: i32 = e.call_num_args;
   if (nargs > 6) { return -1; }
   if (nargs > 0) {
@@ -776,11 +886,14 @@ function get_return_expr_ref(arena: *ASTArena, f: *Func): i32 {
  * target_arch：0=x86_64，1=arm64；据此分派 arch.x86_64 / arch.arm64。
  * 返回 0 成功，-1 失败。
  */
+/** fail_at 70=emit_expr expr_ref==0，71=call callee 非 VAR；72=method_call 等。 */
 function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *AsmFuncCtx, target_arch: i32): i32 {
   if (expr_ref == 0) {
+    driver_diagnostic_asm_fail_at(70);
     return -1;
   }
   let e: Expr = ast_arena_expr_get(arena, expr_ref);
+  driver_diagnostic_asm_set_last_expr_kind(expr_kind_ordinal(e.kind));
   if (e.kind == ExprKind.EXPR_LIT) {
     return arch_emit_ret_imm32(out, e.int_val, target_arch);
   }
@@ -1063,7 +1176,16 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *A
   }
   if (e.kind == ExprKind.EXPR_VAR) {
     let off: i32 = local_offset(ctx, e.var_name, e.var_name_len);
-    if (off < 0) { return -1; }
+    if (off < 0) {
+      let first_name: *u8 = 0;
+      let first_len: i32 = 0;
+      if (ctx.num_locals > 0) {
+        first_name = &ctx.locals[0].name[0];
+        first_len = ctx.locals[0].name_len;
+      }
+      driver_diagnostic_asm_var_not_found(e.var_name, e.var_name_len, ctx.num_locals, first_name, first_len);
+      return -1;
+    }
     return arch_emit_load_rbp_to_rax(out, off, target_arch);
   }
   if (e.kind == ExprKind.EXPR_CALL) {
@@ -1164,10 +1286,16 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *A
   }
   if (e.kind == ExprKind.EXPR_BLOCK && e.block_ref != 0) {
     let inner: Block = ast_arena_block_get(arena, e.block_ref);
-    if (emit_block_inits(arena, out, &inner, ctx, target_arch) != 0) { return -1; }
+    let saved_locals: i32 = ctx.num_locals;
+    let saved_next: i32 = ctx.next_offset;
+    fill_local_slots(ctx, &inner);
+    let slot_base: i32 = saved_locals;
+    if (emit_block_inits(arena, out, &inner, ctx, target_arch, slot_base) != 0) { driver_diagnostic_asm_fail_at(73); return -1; }
     if (inner.final_expr_ref != 0) {
-      return emit_expr(arena, out, inner.final_expr_ref, ctx, target_arch);
+      if (emit_expr(arena, out, inner.final_expr_ref, ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(73); return -1; }
     }
+    ctx.num_locals = saved_locals;
+    ctx.next_offset = saved_next;
     return 0;
   }
   /* EXPR_MATCH：发射待匹配值到 rax，再按每臂比较（字面量/枚举 variant_index）或通配符，多分支到对应 result。 */
@@ -1249,6 +1377,8 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *A
   if (e.const_folded_valid != 0) {
     return arch_emit_ret_imm32(out, e.const_folded_val, target_arch);
   }
+  driver_diagnostic_asm_unsupported_expr(expr_kind_ordinal(e.kind));
+  driver_diagnostic_asm_fail_at(99);
   return -1;
 }
 
@@ -1582,7 +1712,16 @@ function emit_expr_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, e
   }
   if (e.kind == ExprKind.EXPR_VAR) {
     let off: i32 = local_offset(ctx, e.var_name, e.var_name_len);
-    if (off < 0) { return -1; }
+    if (off < 0) {
+      let first_name: *u8 = 0;
+      let first_len: i32 = 0;
+      if (ctx.num_locals > 0) {
+        first_name = &ctx.locals[0].name[0];
+        first_len = ctx.locals[0].name_len;
+      }
+      driver_diagnostic_asm_var_not_found(e.var_name, e.var_name_len, ctx.num_locals, first_name, first_len);
+      return -1;
+    }
     return enc_load_rbp_to_rax_arch(elf_ctx, off, ta);
   }
   if (e.kind == ExprKind.EXPR_CALL) {
@@ -1637,10 +1776,16 @@ function emit_expr_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, e
   }
   if (e.kind == ExprKind.EXPR_BLOCK && e.block_ref != 0) {
     let inner: Block = ast_arena_block_get(arena, e.block_ref);
-    if (emit_block_inits_elf(arena, elf_ctx, &inner, ctx, ta) != 0) { return -1; }
+    let saved_locals: i32 = ctx.num_locals;
+    let saved_next: i32 = ctx.next_offset;
+    fill_local_slots(ctx, &inner);
+    let slot_base: i32 = saved_locals;
+    if (emit_block_inits_elf(arena, elf_ctx, &inner, ctx, ta, slot_base) != 0) { return -1; }
     if (inner.final_expr_ref != 0) {
-      return emit_expr_elf(arena, elf_ctx, inner.final_expr_ref, ctx, ta);
+      if (emit_expr_elf(arena, elf_ctx, inner.final_expr_ref, ctx, ta) != 0) { return -1; }
     }
+    ctx.num_locals = saved_locals;
+    ctx.next_offset = saved_next;
     return 0;
   }
   if (e.kind == ExprKind.EXPR_MATCH && e.match_matched_ref != 0 && e.match_num_arms > 0) {
@@ -1718,28 +1863,30 @@ function emit_expr_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, e
   if (e.const_folded_valid != 0) {
     return enc_ret_imm32_arch(elf_ctx, e.const_folded_val, ta);
   }
+  driver_diagnostic_asm_unsupported_expr(expr_kind_ordinal(e.kind));
+  driver_diagnostic_asm_fail_at(99);
   return -1;
 }
 
-/** ELF 路径：块的 const/let 初始化。ta 0=x86_64，1=arm64。 */
-function emit_block_inits_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, block: *Block, ctx: *AsmFuncCtx, ta: i32): i32 {
+/** ELF 路径：块的 const/let 初始化；slot_base 同 emit_block_inits。ta 0=x86_64，1=arm64。 */
+function emit_block_inits_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, block: *Block, ctx: *AsmFuncCtx, ta: i32, slot_base: i32): i32 {
   let idx: i32 = 0;
   let i: i32 = 0;
-  while (i < block.num_consts && idx < ctx.num_locals) {
+  while (i < block.num_consts && (slot_base + idx) < ctx.num_locals) {
     let init_ref: i32 = block.const_decls[i].init_ref;
     if (init_ref != 0) {
       if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
-      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[slot_base + idx].offset, ta) != 0) { return -1; }
     }
     idx = idx + 1;
     i = i + 1;
   }
   i = 0;
-  while (i < block.num_lets && idx < ctx.num_locals) {
+  while (i < block.num_lets && (slot_base + idx) < ctx.num_locals) {
     let init_ref: i32 = block.let_decls[i].init_ref;
     if (init_ref != 0) {
       if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
-      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+      if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[slot_base + idx].offset, ta) != 0) { return -1; }
     }
     idx = idx + 1;
     i = i + 1;
@@ -1791,24 +1938,26 @@ function emit_for_loop_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCt
   return 0;
 }
 
-/** ELF 路径：按 stmt_order 发射块体。ta 0=x86_64，1=arm64。 */
+/** ELF 路径：按 stmt_order 发射块体；slot_base 同 emit_block_body。ta 0=x86_64，1=arm64。 */
 function emit_block_body_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegenCtx, block: *Block, ctx: *AsmFuncCtx, ta: i32): i32 {
+  let slot_base: i32 = ctx.num_locals - block.num_consts - block.num_lets;
+  if (slot_base < 0) { slot_base = 0; }
   let i: i32 = 0;
   while (i < block.num_stmt_order && i < 96) {
     let item: StmtOrderItem = block.stmt_order[i];
     if (item.kind == 0) {
       let idx: i32 = item.idx;
-      if (idx < block.num_consts && idx < ctx.num_locals) {
+      if (idx < block.num_consts && (slot_base + idx) < ctx.num_locals) {
         let init_ref: i32 = block.const_decls[idx].init_ref;
         if (init_ref != 0) {
           if (emit_expr_elf(arena, elf_ctx, init_ref, ctx, ta) != 0) { return -1; }
-          if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[idx].offset, ta) != 0) { return -1; }
+          if (enc_store_rax_to_rbp_arch(elf_ctx, ctx.locals[slot_base + idx].offset, ta) != 0) { return -1; }
         }
       }
     } else if (item.kind == 1) {
       let idx: i32 = item.idx;
       if (idx < block.num_lets) {
-        let slot: i32 = block.num_consts + idx;
+        let slot: i32 = slot_base + block.num_consts + idx;
         if (slot < ctx.num_locals) {
           let init_ref: i32 = block.let_decls[idx].init_ref;
           if (init_ref != 0) {
@@ -1842,26 +1991,27 @@ function emit_block_body_elf(arena: *ASTArena, elf_ctx: *platform.elf.ElfCodegen
 }
 
 /**
- * 发射块的 const/let 初始化；target_arch 用于分派 emit_expr / emit_store。
+ * 发射块的 const/let 初始化；slot_base 为该块在 ctx.locals 中的起始下标（params 之后为函数体块）。
+ * 嵌套块在 EXPR_BLOCK 中先 fill_local_slots 再调用本函数，slot_base 为填入前的 ctx.num_locals。
  */
-function emit_block_inits(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+function emit_block_inits(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32, slot_base: i32): i32 {
   let idx: i32 = 0;
   let i: i32 = 0;
-  while (i < block.num_consts && idx < ctx.num_locals) {
+  while (i < block.num_consts && (slot_base + idx) < ctx.num_locals) {
     let init_ref: i32 = block.const_decls[i].init_ref;
     if (init_ref != 0) {
       if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
-      if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+      if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot_base + idx].offset, target_arch) != 0) { return -1; }
     }
     idx = idx + 1;
     i = i + 1;
   }
   i = 0;
-  while (i < block.num_lets && idx < ctx.num_locals) {
+  while (i < block.num_lets && (slot_base + idx) < ctx.num_locals) {
     let init_ref: i32 = block.let_decls[i].init_ref;
     if (init_ref != 0) {
       if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
-      if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+      if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot_base + idx].offset, target_arch) != 0) { return -1; }
     }
     idx = idx + 1;
     i = i + 1;
@@ -1989,28 +2139,32 @@ function emit_for_loop(arena: *ASTArena, out: *CodegenOutBuf, floop: *ForLoop, c
 /**
  * 按 stmt_order 发射块体；target_arch 用于分派 emit_expr / store / while / for。
  */
+/** fail_at 扩展：50=block_body const init，51=block_body let init，52=block_body expr_stmt，53=while_loop，54=for_loop。 */
 function emit_block_body(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, ctx: *AsmFuncCtx, target_arch: i32): i32 {
+  /* 当前块的 const/let 在 ctx 中的起始下标（函数体块 = num_params，嵌套块由 EXPR_BLOCK 先 fill 再进入）。 */
+  let slot_base: i32 = ctx.num_locals - block.num_consts - block.num_lets;
+  if (slot_base < 0) { slot_base = 0; }
   let i: i32 = 0;
   while (i < block.num_stmt_order && i < 96) {
     let item: StmtOrderItem = block.stmt_order[i];
     if (item.kind == 0) {
       let idx: i32 = item.idx;
-      if (idx < block.num_consts && idx < ctx.num_locals) {
+      if (idx < block.num_consts && (slot_base + idx) < ctx.num_locals) {
         let init_ref: i32 = block.const_decls[idx].init_ref;
         if (init_ref != 0) {
-          if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
-          if (arch_emit_store_rax_to_rbp(out, ctx.locals[idx].offset, target_arch) != 0) { return -1; }
+          if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(50); return -1; }
+          if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot_base + idx].offset, target_arch) != 0) { driver_diagnostic_asm_fail_at(50); return -1; }
         }
       }
     } else if (item.kind == 1) {
       let idx: i32 = item.idx;
       if (idx < block.num_lets) {
-        let slot: i32 = block.num_consts + idx;
+        let slot: i32 = slot_base + block.num_consts + idx;
         if (slot < ctx.num_locals) {
           let init_ref: i32 = block.let_decls[idx].init_ref;
           if (init_ref != 0) {
-            if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { return -1; }
-            if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot].offset, target_arch) != 0) { return -1; }
+            if (emit_expr(arena, out, init_ref, ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(51); return -1; }
+            if (arch_emit_store_rax_to_rbp(out, ctx.locals[slot].offset, target_arch) != 0) { driver_diagnostic_asm_fail_at(51); return -1; }
           }
         }
       }
@@ -2019,18 +2173,18 @@ function emit_block_body(arena: *ASTArena, out: *CodegenOutBuf, block: *Block, c
       if (idx < block.num_expr_stmts) {
         let expr_ref: i32 = block.expr_stmt_refs[idx];
         if (expr_ref != 0) {
-          if (emit_expr(arena, out, expr_ref, ctx, target_arch) != 0) { return -1; }
+          if (emit_expr(arena, out, expr_ref, ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(52); return -1; }
         }
       }
     } else if (item.kind == 3) {
       let idx: i32 = item.idx;
       if (idx < block.num_loops) {
-        if (emit_while_loop(arena, out, &block.loops[idx], ctx, target_arch) != 0) { return -1; }
+        if (emit_while_loop(arena, out, &block.loops[idx], ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(53); return -1; }
       }
     } else if (item.kind == 4) {
       let idx: i32 = item.idx;
       if (idx < block.num_for_loops) {
-        if (emit_for_loop(arena, out, &block.for_loops[idx], ctx, target_arch) != 0) { return -1; }
+        if (emit_for_loop(arena, out, &block.for_loops[idx], ctx, target_arch) != 0) { driver_diagnostic_asm_fail_at(54); return -1; }
       }
     }
     i = i + 1;
@@ -2050,36 +2204,65 @@ function asm_codegen_ast(module: *Module, arena: *ASTArena, out: *CodegenOutBuf,
   let i: i32 = 0;
   while (i < module.num_funcs && i < 256) {
     if (i == 0) {
-      if (arch_emit_section_text(out, ta) != 0) { return -1; }
+      if (arch_emit_section_text(out, ta) != 0) {
+        driver_diagnostic_asm_fail_at(1);
+        return -1;
+      }
     }
     let f: Func = module.funcs[i];
     if (f.is_extern != 0) {
       i = i + 1;
       continue;
     }
+    driver_diagnostic_asm_set_current_func(f.name, f.name_len);
     ctx_reset(&ctx);
-    if (arch_emit_globl(out, f.name, f.name_len, ta) != 0) { return -1; }
-    if (arch_emit_label(out, f.name, f.name_len, ta) != 0) { return -1; }
+    /* 始终填入形参槽，供 return 表达式与块内 expr_stmt 解析 EXPR_VAR（如 fs_close(fd) 中的 fd）。 */
+    fill_param_slots(&ctx, &f);
+    if (arch_emit_globl(out, f.name, f.name_len, ta) != 0) {
+      driver_diagnostic_asm_fail_at(2);
+      return -1;
+    }
+    if (arch_emit_label(out, f.name, f.name_len, ta) != 0) {
+      driver_diagnostic_asm_fail_at(3);
+      return -1;
+    }
     let frame_sz: i32 = 0;
     if (f.body_ref != 0) {
       let blk: Block = ast_arena_block_get(arena, f.body_ref);
-      frame_sz = compute_frame_size(&blk);
+      frame_sz = compute_frame_size(f.num_params, &blk);
       fill_local_slots(&ctx, &blk);
     }
-    if (arch_emit_prologue(out, frame_sz, ta) != 0) { return -1; }
+    if (arch_emit_prologue(out, frame_sz, ta) != 0) {
+      driver_diagnostic_asm_fail_at(4);
+      return -1;
+    }
     if (f.body_ref != 0) {
       let blk: Block = ast_arena_block_get(arena, f.body_ref);
       if (blk.num_stmt_order > 0) {
-        if (emit_block_body(arena, out, &blk, &ctx, ta) != 0) { return -1; }
+        if (emit_block_body(arena, out, &blk, &ctx, ta) != 0) {
+          driver_diagnostic_asm_fail_at(5);
+          return -1;
+        }
       } else {
-        if (emit_block_inits(arena, out, &blk, &ctx, ta) != 0) { return -1; }
+        let slot_base: i32 = ctx.num_locals - blk.num_consts - blk.num_lets;
+        if (slot_base < 0) { driver_diagnostic_asm_fail_at(6); return -1; }
+        if (emit_block_inits(arena, out, &blk, &ctx, ta, slot_base) != 0) {
+          driver_diagnostic_asm_fail_at(6);
+          return -1;
+        }
       }
     }
     let result_ref: i32 = get_return_expr_ref(arena, &f);
     if (result_ref != 0) {
-      if (emit_expr(arena, out, result_ref, &ctx, ta) != 0) { return -1; }
+      if (emit_expr(arena, out, result_ref, &ctx, ta) != 0) {
+        driver_diagnostic_asm_fail_at(7);
+        return -1;
+      }
     }
-    if (arch_emit_epilogue(out, frame_sz, ta) != 0) { return -1; }
+    if (arch_emit_epilogue(out, frame_sz, ta) != 0) {
+      driver_diagnostic_asm_fail_at(8);
+      return -1;
+    }
     i = i + 1;
   }
   return 0;
@@ -2111,12 +2294,14 @@ function asm_codegen_ast_to_elf(module: *Module, arena: *ASTArena, elf_ctx: *pla
       i = i + 1;
       continue;
     }
+    driver_diagnostic_asm_set_current_func(f.name, f.name_len);
     ctx_reset(&ctx);
+    fill_param_slots(&ctx, &f);
     if (enc_label_arch(elf_ctx, f.name, f.name_len, 1, ta) != 0) { return -1; }
     let frame_sz: i32 = 0;
     if (f.body_ref != 0) {
       let blk: Block = ast_arena_block_get(arena, f.body_ref);
-      frame_sz = compute_frame_size(&blk);
+      frame_sz = compute_frame_size(f.num_params, &blk);
       fill_local_slots(&ctx, &blk);
     }
     if (enc_prologue_arch(elf_ctx, frame_sz, ta) != 0) { return -1; }
@@ -2125,7 +2310,9 @@ function asm_codegen_ast_to_elf(module: *Module, arena: *ASTArena, elf_ctx: *pla
       if (blk.num_stmt_order > 0) {
         if (emit_block_body_elf(arena, elf_ctx, &blk, &ctx, ta) != 0) { return -1; }
       } else {
-        if (emit_block_inits_elf(arena, elf_ctx, &blk, &ctx, ta) != 0) { return -1; }
+        let slot_base: i32 = ctx.num_locals - blk.num_consts - blk.num_lets;
+        if (slot_base < 0) { return -1; }
+        if (emit_block_inits_elf(arena, elf_ctx, &blk, &ctx, ta, slot_base) != 0) { return -1; }
       }
     }
     let result_ref: i32 = get_return_expr_ref(arena, &f);

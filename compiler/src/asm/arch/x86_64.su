@@ -5,7 +5,7 @@
 // 参考：AMD64 ABI、Intel SDM Vol.2。
 
 import codegen;
-import types;
+import asm.types;
 
 /** 函数入口：pushq %rbp; movq %rsp, %rbp; subq $frame_size, %rsp。frame_size 为 16 的倍数（字节）。 */
 function emit_prologue(out: *CodegenOutBuf, frame_size: i32): i32 {

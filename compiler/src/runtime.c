@@ -87,7 +87,7 @@ static int write_io_net_abi_inline(FILE *cf) {
         "extern int io_register_buffer(uint8_t *ptr, size_t len);\n",
         "extern int io_register_buffers_4(uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2, size_t l2, uint8_t *p3, size_t l3, unsigned nr);\n",
         "extern int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);\n",
-        "static inline int io_register_buffers_buf_i32(int32_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n",
+        "static inline int io_register_buffers_buf_i32(intptr_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n",
         "#define io_register_buffers_buf(bufs, nr) io_register_buffers_buf_i32((bufs), (nr))\n",
         "extern void io_unregister_buffers(void);\n",
         "extern ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms);\n",
@@ -107,16 +107,16 @@ static int write_io_net_abi_inline(FILE *cf) {
         "extern uint8_t *shu_io_read_ptr(size_t handle, unsigned timeout_ms);\n",
         "extern int32_t shu_io_read_ptr_len(void);\n",
         "typedef struct { void *ptr; size_t len; size_t handle; } shu_buffer_abi_t;\n",
-        "static inline int32_t shu_io_register_buf(int32_t buf) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_register((uint8_t *)b->ptr, b->len, b->handle); }\n",
-        "static inline int32_t shu_io_submit_read_buf(int32_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_read)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
-        "static inline int32_t shu_io_submit_write_buf(int32_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_write)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
+        "static inline int32_t shu_io_register_buf(intptr_t buf) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_register((uint8_t *)b->ptr, b->len, b->handle); }\n",
+        "static inline int32_t shu_io_submit_read_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_read)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
+        "static inline int32_t shu_io_submit_write_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return (shu_io_submit_write)((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n",
         "#define shu_io_register(buf) shu_io_register_buf(buf)\n",
         "#define shu_io_submit_read(buf, timeout_m) shu_io_submit_read_buf(buf, timeout_m)\n",
         "#define shu_io_submit_write(buf, timeout_m) shu_io_submit_write_buf(buf, timeout_m)\n",
         "struct std_io_driver_Buffer { void *ptr; size_t len; size_t handle; };\n",
-        "extern int32_t std_io_driver_submit_read(int32_t buf, int32_t timeout_m);\n",
-        "extern int32_t std_io_driver_submit_write(int32_t buf, int32_t timeout_m);\n",
-        "extern int32_t std_io_driver_submit_register_fixed_buffers_buf(int32_t bufs, int32_t nr);\n",
+        "extern int32_t std_io_driver_submit_read(ptrdiff_t buf, uint32_t timeout_ms);\n",
+        "extern int32_t std_io_driver_submit_write(ptrdiff_t buf, uint32_t timeout_ms);\n",
+        "extern int32_t std_io_driver_submit_register_fixed_buffers_buf(struct std_io_driver_Buffer * bufs, uint32_t nr);\n",
         "#define std_io_driver_driver_read_ptr_len shu_io_read_ptr_len\n",
         "#define std_io_driver_driver_read_ptr shu_io_read_ptr\n",
         "#define driver_read_ptr_len std_io_driver_driver_read_ptr_len\n",
@@ -1275,6 +1275,14 @@ static void resolve_import_file_path_multi(const char **lib_roots, int n_lib_roo
         const char *lib_root = lib_roots[r] && lib_roots[r][0] ? lib_roots[r] : ".";
         import_path_to_file_path(lib_root, import_path, path, path_size);
         if (access(path, R_OK) == 0) return;
+        /* 单段 import（如 preprocess）：再试 lib_root/import/import.su，与 pipeline.su 内 resolve 一致 */
+        if (strchr(import_path, '.') == NULL && path_size >= 16) {
+            int n = (int)strlen(import_path);
+            if (n > 0 && n < 64) {
+                (void)snprintf(path, path_size, "%s/%.64s/%.64s.su", lib_root, import_path, import_path);
+                if (access(path, R_OK) == 0) return;
+            }
+        }
         if (strchr(import_path, '.') != NULL && path_size >= 16) {
             size_t off = (size_t)snprintf(path, path_size, "%s/", lib_root);
             for (const char *s = import_path; *s && off + 1 < path_size; s++)
@@ -2499,6 +2507,19 @@ int RUN_CC_FUNC(int argc, char **argv) {
             fprintf(stdout, "  if (has_msg) (void)fprintf(stderr, \"%%d\\n\", msg_val);\n");
             fprintf(stdout, "  abort();\n");
             fprintf(stdout, "}\n");
+            /* pipeline.su 及可能拉入 std.io 的 parser/typeck/codegen/preprocess 等 -E 产出均需 _buf 声明，以便单文件编译通过；main.su 产出 driver_gen.c 不调这些，不输出以免 -Wunused-function。 */
+            if (input_path && (strstr(input_path, "pipeline.su") != NULL || strstr(input_path, "parser.su") != NULL || strstr(input_path, "typeck.su") != NULL || strstr(input_path, "codegen.su") != NULL || strstr(input_path, "preprocess.su") != NULL)) {
+                fprintf(stdout, "extern int32_t shu_io_register(uint8_t *ptr, size_t len, size_t handle);\n");
+                fprintf(stdout, "extern int32_t shu_io_submit_read(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n");
+                fprintf(stdout, "extern int32_t shu_io_submit_write(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n");
+                fprintf(stdout, "typedef struct { void *ptr; size_t len; size_t handle; } shu_buffer_abi_t;\n");
+                fprintf(stdout, "static inline int32_t shu_io_register_buf(intptr_t buf) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_register((uint8_t *)b->ptr, b->len, b->handle); }\n");
+                fprintf(stdout, "static inline int32_t shu_io_submit_read_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_submit_read((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n");
+                fprintf(stdout, "static inline int32_t shu_io_submit_write_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_submit_write((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n");
+                fprintf(stdout, "typedef struct { uint8_t *ptr; size_t len; size_t handle; } shu_batch_buf_t;\n");
+                fprintf(stdout, "extern int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);\n");
+                fprintf(stdout, "static inline int io_register_buffers_buf_i32(intptr_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n");
+            }
             if (emit_extern_imports) {
                 if (codegen_emit_dep_types_only(all_dep_mods, (const char **)all_dep_paths, n_all, stdout) != 0) {
                     ec = -1;
@@ -2659,6 +2680,17 @@ int RUN_CC_FUNC(int argc, char **argv) {
             /* driver 的 read_ptr/read_ptr_len 由 core/io.o 提供，与 pipeline 内联 ABI 一致 */
             fprintf(cf, "#define std_io_driver_driver_read_ptr_len shu_io_read_ptr_len\n");
             fprintf(cf, "#define std_io_driver_driver_read_ptr shu_io_read_ptr\n");
+            /* std.io.driver 的 register/submit_read/submit_write 体需调 _buf 包装；io_register_buffers_buf_i32 供 submit_register_fixed_buffers_buf 体 */
+            fprintf(cf, "extern int32_t shu_io_register(uint8_t *ptr, size_t len, size_t handle);\n");
+            fprintf(cf, "extern int32_t shu_io_submit_read(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n");
+            fprintf(cf, "extern int32_t shu_io_submit_write(uint8_t *ptr, size_t len, size_t handle, uint32_t timeout_m);\n");
+            fprintf(cf, "typedef struct { void *ptr; size_t len; size_t handle; } shu_buffer_abi_t;\n");
+            fprintf(cf, "static inline int32_t shu_io_register_buf(intptr_t buf) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_register((uint8_t *)b->ptr, b->len, b->handle); }\n");
+            fprintf(cf, "static inline int32_t shu_io_submit_read_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_submit_read((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n");
+            fprintf(cf, "static inline int32_t shu_io_submit_write_buf(intptr_t buf, int32_t timeout_m) { const shu_buffer_abi_t *b = (const shu_buffer_abi_t *)(uintptr_t)buf; return shu_io_submit_write((uint8_t *)b->ptr, b->len, b->handle, (uint32_t)timeout_m); }\n");
+            fprintf(cf, "typedef struct { uint8_t *ptr; size_t len; size_t handle; } shu_batch_buf_t;\n");
+            fprintf(cf, "extern int io_register_buffers_buf_c(const shu_batch_buf_t *bufs, int nr);\n");
+            fprintf(cf, "static inline int io_register_buffers_buf_i32(intptr_t bufs, int nr) { return io_register_buffers_buf_c((const shu_batch_buf_t *)(uintptr_t)bufs, nr); }\n");
             /* 自举：入口为 parser.su 时需 parser_slice_from_buf；前向声明使调用处可编译，定义在文件末尾追加 */
             if (input_path && strstr(input_path, "parser.su") != NULL)
                 fprintf(cf, "static struct shulang_slice_uint8_t parser_slice_from_buf(uint8_t *data, int32_t len);\n");
@@ -3197,6 +3229,59 @@ void driver_diagnostic_after_dep_codegen(int32_t j, int32_t out_len) {
 void driver_diagnostic_codegen_fail(int32_t dep_index, int32_t is_dep) {
     (void)dep_index;
     (void)is_dep;
+}
+
+/** asm 后端：不支持的 ExprKind 时由 backend.su 调用，便于定位 rc=-6；kind 为 ast_ExprKind 枚举值。 */
+void driver_diagnostic_asm_unsupported_expr(int32_t kind) {
+    fprintf(stderr, "shu: asm codegen unsupported ExprKind=%d\n", (int)kind);
+    fflush(stderr);
+}
+
+/** asm 后端：记录当前正在 emit 的 ExprKind 序数，供 fail_at 时打印。 */
+static int driver_diagnostic_asm_last_expr_kind = -1;
+void driver_diagnostic_asm_set_last_expr_kind(int32_t k) {
+    driver_diagnostic_asm_last_expr_kind = (int)k;
+}
+
+/** asm 后端：记录当前正在 codegen 的函数名，供 var_not_found 时打印。 */
+static uint8_t driver_diagnostic_asm_current_func[72];
+static int driver_diagnostic_asm_current_func_len = 0;
+void driver_diagnostic_asm_set_current_func(const uint8_t *name, int32_t len) {
+    driver_diagnostic_asm_current_func_len = (len > 0 && len <= 64) ? (int)len : 0;
+    if (name && driver_diagnostic_asm_current_func_len > 0) {
+        for (int i = 0; i < driver_diagnostic_asm_current_func_len; i++)
+            driver_diagnostic_asm_current_func[i] = name[i];
+    }
+}
+
+/** asm 后端：EXPR_VAR 在 local_offset 未找到时由 backend.su 调用；若 num_locals>0 可传首槽名 first_slot/first_len 便于对比。 */
+void driver_diagnostic_asm_var_not_found(const uint8_t *name, int32_t len, int32_t num_locals,
+    const uint8_t *first_slot, int32_t first_len) {
+    fprintf(stderr, "shu: asm codegen EXPR_VAR not in ctx: \"");
+    if (name && len > 0 && len <= 64) {
+        for (int i = 0; i < len; i++) fputc((char)name[i], stderr);
+    }
+    fprintf(stderr, "\" (func: ");
+    if (driver_diagnostic_asm_current_func_len > 0) {
+        for (int i = 0; i < driver_diagnostic_asm_current_func_len; i++)
+            fputc((char)driver_diagnostic_asm_current_func[i], stderr);
+    } else {
+        fprintf(stderr, "?");
+    }
+    fprintf(stderr, ", num_locals=%d", (int)num_locals);
+    if (num_locals > 0 && first_slot && first_len > 0 && first_len <= 64) {
+        fprintf(stderr, ", first_slot=\"");
+        for (int i = 0; i < first_len; i++) fputc((char)first_slot[i], stderr);
+        fprintf(stderr, "\" len=%d", (int)first_len);
+    }
+    fprintf(stderr, ")\n");
+    fflush(stderr);
+}
+
+/** asm 后端：返回 -1 前调用，loc 表示失败位置（1=section_text 2=globl 3=label 4=prologue 5=block_body 6=block_inits 7=emit_expr 8=epilogue），便于定位 rc=-6。 */
+void driver_diagnostic_asm_fail_at(int32_t loc) {
+    fprintf(stderr, "shu: asm codegen fail_at=%d (last_expr_kind=%d)\n", (int)loc, driver_diagnostic_asm_last_expr_kind);
+    fflush(stderr);
 }
 
 /** -o 可执行文件路径：非 0 时 pipeline 跳过 dep 0 的 codegen（driver 由 io.o 提供）；避免与 ctx 布局耦合。 */
