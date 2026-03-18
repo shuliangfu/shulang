@@ -1353,10 +1353,11 @@ function emit_expr(arena: *ASTArena, out: *CodegenOutBuf, expr_ref: i32, ctx: *P
         return -1;
       }
     } else {
+      /* 非 slice 数组字面量：(elem_ty[]){ ... }；elem_type_ref 为空时须输出类型否则 C 报错 ([]){ } */
       if (append_byte(out, 40) != 0) {
         return -1;
       }
-      if (!ref_is_null(elem_type_ref) && emit_type(arena, out, elem_type_ref) != 0) {
+      if (ref_is_null(elem_type_ref) || emit_type(arena, out, elem_type_ref) != 0) {
         let fallback: [9]u8 = [117, 105, 110, 116, 56, 95, 116, 0, 0];
         if (emit_bytes_9(out, fallback, 7) != 0) {
           return -1;

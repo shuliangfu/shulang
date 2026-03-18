@@ -3220,12 +3220,14 @@ int driver_current_dep_path_is_std_io_core(void) {
     return (driver_current_dep_path_for_codegen && strcmp(driver_current_dep_path_for_codegen, "std.io.core") == 0) ? 1 : 0;
 }
 
-/** 返回 1 当应跳过生成该函数（当前为 std.io.driver 且名为 driver_read_ptr_len/driver_read_ptr）；无条件跳过，避免与 core 的 shu_io_* 重定义。 */
+/** 返回 1 当应跳过生成该函数（当前为 std.io.driver 且名为 driver_read_ptr_len/driver_read_ptr 或 submit_*_batch_buf）；无条件跳过，避免与 preamble 的 extern 签名冲突。 */
 int driver_should_skip_emit_func(const uint8_t *name, int name_len) {
     if (!driver_current_dep_path_for_codegen || strcmp(driver_current_dep_path_for_codegen, "std.io.driver") != 0)
         return 0;
     if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
     if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    if (name_len == 24 && name && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
+    if (name_len == 25 && name && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
     return 0;
 }
 
@@ -3234,6 +3236,8 @@ int driver_should_skip_emit_func_for_dep_path(const uint8_t *path, const uint8_t
     if (!path || strcmp((const char *)path, "std.io.driver") != 0) return 0;
     if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
     if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    if (name_len == 24 && name && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
+    if (name_len == 25 && name && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
     return 0;
 }
 
