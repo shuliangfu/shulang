@@ -3220,24 +3220,29 @@ int driver_current_dep_path_is_std_io_core(void) {
     return (driver_current_dep_path_for_codegen && strcmp(driver_current_dep_path_for_codegen, "std.io.core") == 0) ? 1 : 0;
 }
 
-/** 返回 1 当应跳过生成该函数（当前为 std.io.driver 且名为 driver_read_ptr_len/driver_read_ptr 或 submit_*_batch_buf）；无条件跳过，避免与 preamble 的 extern 签名冲突。 */
+/** 返回 1 当应跳过生成该函数（当前为 std.io.driver 或 std.io 且名为 driver_read_ptr_len/driver_read_ptr 或 submit_*_batch_buf）；无条件跳过，避免与 preamble 的 extern 签名冲突。 */
 int driver_should_skip_emit_func(const uint8_t *name, int name_len) {
-    if (!driver_current_dep_path_for_codegen || strcmp(driver_current_dep_path_for_codegen, "std.io.driver") != 0)
-        return 0;
-    if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
-    if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
-    if (name_len == 24 && name && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
-    if (name_len == 25 && name && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
+    if (!driver_current_dep_path_for_codegen || !name) return 0;
+    const char *p = driver_current_dep_path_for_codegen;
+    if (strcmp(p, "std.io.driver") != 0 && strcmp(p, "std.io") != 0) return 0;
+    if (name_len == 20 && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
+    if (name_len == 16 && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    if (name_len == 24 && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
+    if (name_len == 25 && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
     return 0;
 }
 
-/** 同上，但显式传入 dep 路径（*u8 以 NUL 结尾），供 codegen.su 在 dep_index>=0 时用 ctx.dep_paths[dep_index] 调用，避免依赖全局 path 未设置。 */
+/** 同上，但显式传入 dep 路径（*u8 以 NUL 结尾），供 codegen.su 在 dep_index>=0 时用 ctx.dep_paths[dep_index] 调用，避免依赖全局 path 未设置。
+ * 路径可能为 std.io.driver 或 std.io（单文件时 driver 为 std.io 子模块），两种均跳过 submit_*_batch_buf。 */
 int driver_should_skip_emit_func_for_dep_path(const uint8_t *path, const uint8_t *name, int name_len) {
-    if (!path || strcmp((const char *)path, "std.io.driver") != 0) return 0;
-    if (name_len == 20 && name && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
-    if (name_len == 16 && name && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
-    if (name_len == 24 && name && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
-    if (name_len == 25 && name && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
+    if (!path || !name) return 0;
+    const char *p = (const char *)path;
+    int is_io_driver = (strcmp(p, "std.io.driver") == 0) || (strcmp(p, "std.io") == 0);
+    if (!is_io_driver) return 0;
+    if (name_len == 20 && strncmp((const char *)name, "driver_read_ptr_len", 20) == 0) return 1;
+    if (name_len == 16 && strncmp((const char *)name, "driver_read_ptr", 16) == 0) return 1;
+    if (name_len == 24 && strncmp((const char *)name, "submit_read_batch_buf", 24) == 0) return 1;
+    if (name_len == 25 && strncmp((const char *)name, "submit_write_batch_buf", 25) == 0) return 1;
     return 0;
 }
 
