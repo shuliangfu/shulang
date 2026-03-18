@@ -470,7 +470,9 @@ check-7.2: bootstrap-self
 
 # 9.1 自举：纯 .su 流水线（parse_into → typeck_su_ast → codegen_su_ast）；生成 pipeline_gen.c 便于联调；-L 与 pipeline 依赖一致。
 # 必须用 $(SHU_C) 做 -E：C 解析器(parser.c) 会按源码顺序填充 stmt_order，codegen 按序输出；若用 $(TARGET) 走 .su 解析则 stmt_order 仅有 const+let 导致声明被提到函数首、顺序错乱。
-bootstrap-pipeline: $(SHU_C)
+# 依赖 pipeline 及 codegen/typeck/parser 等 .su，修改后须重新生成 pipeline_gen.c，否则 bootstrap 的 shu 仍用旧逻辑。
+PIPELINE_SU_DEPS = src/pipeline/pipeline.su src/codegen/codegen.su src/typeck/typeck.su src/parser/parser.su src/ast/ast.su src/lexer/lexer.su src/preprocess/preprocess.su src/asm/asm.su
+bootstrap-pipeline: $(SHU_C) $(PIPELINE_SU_DEPS)
 	./$(SHU_C) -L .. -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/asm -L src/preprocess src/pipeline/pipeline.su -E > pipeline_gen.c 2>/dev/null || true
 	@echo "bootstrap-pipeline: pipeline_gen.c generated (if failed check parser/typeck/codegen/ast/lexer/preprocess and std.fs paths)"
 
