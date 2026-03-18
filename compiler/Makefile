@@ -381,7 +381,7 @@ bootstrap-driver-seed: $(TARGET) $(SHU_C) pipeline_gen.c lsp_io_gen.c lsp_gen.c 
 	$(CC) $(CFLAGS) $(PIPELINE_GEN_CFLAGS) -I. -include src/lsp/lsp_gen_extern.h -c lsp_gen.c -o lsp_su.o
 	./$(SHU_C) -L .. -L src/lsp -L src/lexer -L src/ast -L src/parser -L src/typeck -L src/codegen -L src/preprocess src/main.su -E -E-extern > driver_gen.c
 	$(CC) $(CFLAGS) -c driver_gen.c -o driver_su.o
-	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_SEED_OBJS) driver_su.o pipeline_su.o lsp_su.o lsp_io_su.o src/lsp/lsp_diag.o src/lsp/lsp_state.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o
+	$(CC) $(CFLAGS) -DSHU_USE_SU_DRIVER -DSHU_USE_SU_PIPELINE -o $(TARGET) $(DRIVER_SEED_OBJS) driver_su.o pipeline_su.o lsp_su.o lsp_io_su.o src/lsp/lsp_diag.o src/lsp/lsp_state.o lsp_io_std_heap_su.o ../std/fs/fs.o ../std/io/io.o ../std/heap/heap.o $(PIPELINE_LIBS)
 	@echo "bootstrap-driver-seed OK (shu from generated C)"
 
 # 用汇编后端直接出机器码：不生成 pipeline_gen.c/driver_gen.c，用 $(TARGET) -backend asm 编全部 .su → build_asm/*.o 再链接。
