@@ -13768,7 +13768,7 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * emit_assign / emit_array_lit. Do not leftover rest U SAT local t
    * copy_large (glue_copy_large dest-in-rbx sz<8 rejects [2]u8). leftover
    * rest unique rec ASSIGN TYPE_ARRAY STRING_LIT (`*p = "hi"`) is leftover
-   * rest unique — not this wave. leftover unique leftover_emit_match_arm_result
+   * rest unique store iko==59. leftover unique leftover_emit_match_arm_result
    * remaining ADDR_OF (rko==51) skip unless proven (pointer dest). leftover
    * unique leftover_emit_match_arm_result remaining BINARY skip unless proven.
    * PLATFORM: WINDOWS leftover-PE. */
@@ -30125,7 +30125,11 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * global T (do not leftover rest T): DEREF dest calls SAT local t
      * struct_let_init which -2s TYPE_ARRAY 8B then 4B store (RUN=0).
      * POSIX .x calls glue_emit_fixed_array_type_let_init(-3). leftover rest
-     * unique rec first-wins; G.7 complete ASSIGN arm.
+     * unique rec first-wins; G.7 complete ASSIGN arm. STRING_LIT rhs
+     * (`*p = "hi"` of *[N]u8) is leftover rest unique store iko==59
+     * (let_init(-3)); do not leftover rest unique rec ASSIGN second
+     * intercept. leftover rest unique rec ASSIGN TYPE_SLICE STRING_LIT
+     * is leftover rest unique sibling.
      *
      * TYPE_ARRAY VAR dest MATCH `d = match 1 { 1 => [3, 4]; _ => [0, 0] }`
      * (arr_asg_match) is a sibling dest (VAR frame slot, not dest-in-rbx).
@@ -32383,6 +32387,28 @@ int32_t glue_try_index_rvalue_slice_once_elf_c(void *arena, void *elf_ctx, int32
  * leftover rest second glue_type_is_fixed_array (already T @34791).
  * Redirect table already lists both symbols. POSIX FROM_X stays ABSENT
  * (.x thin owns @43492 / thin.x @640).
+ *
+ * TYPE_ARRAY STRING_LIT `*p = "hi"` / `let y: [N]u8 = "hi"` previously
+ * returned -2 (iko==59 unhandled). leftover rest unique rec ASSIGN
+ * dest-in-rbx let_init(-3) then SAT emit_assign (SAT global T) stores
+ * the rodata ptr, dest bytes stay 0. typeck adopts STRING_LIT as
+ * TYPE_ARRAY; payload is the rodata bytes, not a fat pair. leftover
+ * rest rec ko==59 leftover unique rec leftover rest SAT T
+ * glue_asm_emit_string_lit_ptr_rax. G.7 complete leftover rest unique
+ * store iko==59: leftover unique rec leftover rest SAT T
+ * glue_asm_emit_string_lit_ptr_rax then copy min(n_arr*esz, slen) via
+ * leftover rest unique copy_from_e_star (same dest-in-rbx CALL E*
+ * copy). nbytes>8 uses esz=nbytes chunked 8/4/1; nbytes<=8 uses esz=1
+ * byte copy so skip-string rodata is not over-read past slen
+ * (load_i32 of [2]u8 would read following instructions). Do not
+ * leftover unique leftover_emit_string twin. Do not leftover rest
+ * remaining-wave. Do not leftover rest T SAT emit_assign /
+ * emit_array_lit. Do not leftover rest U SAT local t copy_large
+ * (glue_copy_large dest-in-rbx sz<8 rejects [2]u8). leftover rest
+ * unique rec ASSIGN TYPE_SLICE STRING_LIT (`*p = "hi"` dest_tk==11)
+ * is leftover rest unique sibling. leftover rest unique rec ASSIGN
+ * VAR dest TYPE_ARRAY STRING_LIT (`d = "hi"`) stays SAT emit_assign
+ * (do not intercept VAR dest TYPE_ARRAY non-MATCH rhs).
  * PLATFORM: WINDOWS leftover-PE hybrid / POSIX -E unchanged.
  */
 #if defined(XLANG_RUNTIME_PIPELINE_ABI_FROM_X) \
@@ -32431,6 +32457,9 @@ extern int32_t backend_enc_store_rax_to_rbx_offset_arch(void *elf_ctx, int32_t o
 extern int32_t backend_enc_mov_imm64_to_rax_arch(void *elf_ctx, int32_t lo, int32_t hi, int32_t ta);
 extern int32_t pipeline_asm_emit_match_elf_c(void *arena, void *elf_ctx, int32_t expr_ref, void *ctx,
                                             int32_t ta);
+extern int32_t glue_asm_emit_string_lit_ptr_rax_elf_c(void *arena, void *elf_ctx, int32_t str_expr_ref,
+                                                     int32_t ta);
+extern int32_t glue_asm_string_lit_len(void *arena, int32_t expr_ref);
 
 int32_t glue_struct_field_frame_mag_c(int32_t base_off, int32_t foff, int32_t ta) {
   int32_t mag;
@@ -32659,6 +32688,82 @@ int32_t glue_struct_lit_store_fixed_array_field_elf_c(void *arena, void *elf_ctx
     if (mrc != 0)
       return -1;
     return 0;
+  } else if (iko == 59) {
+    /* TYPE_ARRAY STRING_LIT `*p = "hi"` / `let y: [N]u8 = "hi"`.
+     * leftover rest unique store previously returned -2; leftover rest
+     * unique rec ASSIGN dest-in-rbx let_init(-3) then SAT emit_assign
+     * (SAT global T) stores the rodata ptr, dest bytes stay 0. typeck
+     * adopts STRING_LIT as TYPE_ARRAY; payload is the rodata bytes, not
+     * a fat pair. leftover rest rec ko==59 leftover unique rec leftover
+     * rest SAT T glue_asm_emit_string_lit_ptr_rax. G.7 complete leftover
+     * rest unique store iko==59: leftover unique rec leftover rest SAT T
+     * glue_asm_emit_string_lit_ptr_rax then copy min(n_arr*esz, slen)
+     * via leftover rest unique copy_from_e_star (same dest-in-rbx CALL
+     * E* copy). nbytes>8 uses esz=nbytes chunked 8/4/1; nbytes<=8 uses
+     * esz=1 byte copy so skip-string rodata is not over-read past slen
+     * (load_i32 of [2]u8 would read following instructions). Park dest
+     * CPU stack when dest-in-rbx (emit clobbers rax; dest-in-rbx CALL
+     * parks the same way). Do not leftover unique leftover_emit_string
+     * twin. Do not leftover rest remaining-wave. Do not leftover rest T
+     * SAT emit_assign / emit_array_lit. Do not leftover rest U SAT local
+     * t copy_large (glue_copy_large dest-in-rbx sz<8 rejects [2]u8).
+     * leftover rest unique rec ASSIGN TYPE_SLICE STRING_LIT
+     * (`*p = "hi"` dest_tk==11) is leftover rest unique sibling.
+     * leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY STRING_LIT
+     * (`d = "hi"`) stays SAT emit_assign. PLATFORM: WINDOWS leftover-PE. */
+    int32_t nbytes;
+    int32_t slen;
+    int32_t copy_n;
+    int32_t copy_esz;
+    nbytes = n_arr * esz;
+    if (nbytes <= 0)
+      nbytes = n_arr;
+    if (dest_in_rbx) {
+      next_off = *(int32_t *)((uint8_t *)ctx + 4);
+      if (next_off + 16 < next_off)
+        return -1;
+      next_off = next_off + 16;
+      *(int32_t *)((uint8_t *)ctx + 4) = next_off;
+      dest_park = next_off;
+      if (backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta) != 0)
+        return -1;
+      if (backend_enc_store_rax_to_rbp_arch(elf_ctx, dest_park, ta) != 0)
+        return -1;
+    }
+    if (glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, init_ref, ta) != 0)
+      return -1;
+    slen = glue_asm_string_lit_len(arena, init_ref);
+    if (slen < 0)
+      slen = 0;
+    if (slen > 0 && nbytes > slen)
+      nbytes = slen;
+    if (nbytes <= 0)
+      return 0;
+    if (nbytes > 4096)
+      return -1;
+    next_off = *(int32_t *)((uint8_t *)ctx + 4);
+    if (next_off + 16 < next_off)
+      return -1;
+    next_off = next_off + 16;
+    *(int32_t *)((uint8_t *)ctx + 4) = next_off;
+    spill_off = next_off;
+    if (backend_enc_store_rax_to_rbp_arch(elf_ctx, spill_off, ta) != 0)
+      return -1;
+    if (dest_in_rbx) {
+      if (backend_enc_load_rbp_to_rax_arch(elf_ctx, dest_park, ta) != 0)
+        return -1;
+      if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+        return -1;
+    }
+    if (nbytes > 8) {
+      copy_n = 1;
+      copy_esz = nbytes;
+    } else {
+      copy_n = nbytes;
+      copy_esz = 1;
+    }
+    return win_leftover_fixed_array_copy_from_e_star(elf_ctx, spill_off, copy_n, copy_esz,
+                                                    sret_direct, dest_in_rbx, field_mag, foff, ta);
   } else if (iko == 46 && elem_tr > 0 &&
              pipeline_type_kind_ord_at(arena, elem_tr) == 11) {
     /* TYPE_ARRAY of TYPE_SLICE. SAT emit_array_lit flattens to i32
