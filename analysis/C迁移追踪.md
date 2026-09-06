@@ -195,6 +195,7 @@
   - ✅ leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF `*p = if true { P { x: 3, y: 4 } } else { P { x: 0, y: 0 } }`／`*p = if true { mk() } else { P { x: 0, y: 0 } }` leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`e23bea56e`
   - ✅ leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK `*p = { P { x: 3, y: 4 } }`／`*p = { mk() }`／dest-region `{ unsafe { P { x: 3, y: 4 } } }` leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`85d56dcdf`
   - ✅ leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD／INDEX `*p = s.inner`／`*p = arr[0]` leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`2eb2b7aee`
+  - ✅ leftover rest unique rec ASSIGN VAR dest TYPE_NAMED CAST `d = P { x: 3 } as P`／`d = mk() as P` leftover rest unique rec ASSIGN TYPE_NAMED CAST 扩 VAR dest park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`9ee0aa35a`
 - ✅ **L4＠1174c5bb3 bstrict** — Ubuntu shuffle 后 **select SIGILL**：`vpxor ymm3` 写 `C5 F5 77`（EMMS #UD）；`vpand`／`vpandn`／`vpor` VEX.vvvv 误用 ymm3。i32 ymm 编码器已补（Ubuntu L4＠`6c0fdeebf` shuffle-select **OK**）；f32 ymm select 编码器亦已补全（`vxorps` `C5 E4 57 DB`、`vcmpgtps` `C5 EC C2 D3 0E`、`vandps` `C5 FC 54 C2`、`vandnps` `C5 EC 55 D1`、`vorps` `C5 FC 56 C2`）
 
 ---
