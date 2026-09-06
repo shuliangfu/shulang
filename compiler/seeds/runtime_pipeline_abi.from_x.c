@@ -13513,7 +13513,10 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * of leftover unique emit_as_impl (SAT rec operand). leftover unique
    * leftover_emit_match_arm_result remaining ADDR_OF (rko==51) skip unless
    * proven (pointer dest). leftover unique leftover_emit_match_arm_result
-   * remaining BINARY skip unless proven. MATCH nested (rko==43) dest-parks
+   * remaining BINARY skip unless proven. leftover rest unique rec ASSIGN
+   * TYPE_SLICE dest-in-rbx CAST is leftover rest unique rec ASSIGN (park dest
+   * + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==11).
+   * MATCH nested (rko==43) dest-parks
    * via leftover unique emit_match recurse. MATCH arm STRING_LIT (rko==59)
    * dest-parks TYPE_SLICE dest_tk==11 via leftover unique rec leftover rest
    * SAT T glue_asm_emit_string_lit_ptr_rax then store data@0 + slen@8 (same
@@ -13725,7 +13728,9 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * operand (identity ARRAY_LIT as [N]T / STRUCT_LIT as Named) so parked
    * dest stays 0. Peel operand; leftover_emit_match_arm_result dest-parks
    * ARRAY_LIT/STRUCT_LIT/VAR/CALL/FIELD/DEREF/BLOCK/IF. Do not leftover_emit_as
-   * twin. PLATFORM: WINDOWS leftover-PE. */
+   * twin. leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST
+   * parks dest then leftover unique leftover_emit_match_arm_result of CAST.
+   * PLATFORM: WINDOWS leftover-PE. */
   if (rko == 54) {
     int32_t op;
     op = pipeline_expr_as_operand_ref_at(arena, result_ref);
@@ -30136,6 +30141,13 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax
      * then store fat data@0+slen@8 (same leftover unique leftover_emit_match_arm_result
      * dest_tk==11 / leftover rest unique rec ASSIGN TYPE_SLICE ARRAY_LIT).
+     * TYPE_SLICE dest-in-rbx CAST `*p = "hi" as []u8` / `*p = [3, 4] as []i32`
+     * is leftover rest unique rec ASSIGN (park dest + leftover unique
+     * leftover_emit_match_arm_result dest-parked dest_tk==11). leftover
+     * unique leftover_emit_match_arm_result rko==54 already peels operand.
+     * Do not leftover unique leftover_emit_as twin. leftover rest unique
+     * rec ASSIGN TYPE_ARRAY dest-in-rbx CAST is leftover rest unique store
+     * iko==54 (do not leftover rest unique rec ASSIGN second intercept).
      *
      * TYPE_ARRAY VAR dest MATCH `d = match 1 { 1 => [3, 4]; _ => [0, 0] }`
      * (arr_asg_match) is a sibling dest (VAR frame slot, not dest-in-rbx).
@@ -30541,8 +30553,10 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * emit_assign / emit_array_lit. leftover rest unique rec ASSIGN VAR
          * dest TYPE_SLICE STRING_LIT (`d = "hi"`) skip unless proven (SAT
          * emit_assign). leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY
-         * STRING_LIT (`d = "hi"`) stays SAT emit_assign. ADDR_OF (rko==51) /
-         * BINARY skip unless proven. PLATFORM: WINDOWS leftover-PE. */
+         * STRING_LIT (`d = "hi"`) stays SAT emit_assign. leftover rest unique
+         * rec ASSIGN TYPE_SLICE dest-in-rbx CAST wrapping STRING_LIT is leftover
+         * rest unique rec ASSIGN sibling. ADDR_OF (rko==51) / BINARY skip
+         * unless proven. PLATFORM: WINDOWS leftover-PE. */
         int32_t asg_slen;
         if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
           out_rc = -1;
@@ -30566,6 +30580,68 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
             out_rc = -1;
           else
             out_rc = 0;
+        }
+      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 54) {
+        /* TYPE_SLICE dest-in-rbx CAST `*p = "hi" as []u8` /
+         * `*p = [3, 4] as []i32` dest_tk==11. SAT emit_assign DEREF dest
+         * SAT local t struct_let_init -2 then leftover rest rec CAST
+         * leftover unique rec leftover unique emit_as_impl recs operand
+         * SAT implicit dest, parked dest stays 0 / 4B store through
+         * clobbered rbx (dest fat pair stays 0 / data-only without
+         * length). leftover unique leftover_emit_match_arm_result rko==54
+         * already peels operand then dest-parks STRING_LIT/ARRAY_LIT/
+         * VAR/CALL/FIELD/DEREF/BLOCK/IF/nested MATCH. G.7 complete leftover
+         * rest unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST: park dest
+         * CPU stack (same leftover rest unique rec ASSIGN TYPE_SLICE
+         * MATCH/STRING_LIT), leftover unique leftover_emit_match_arm_result
+         * of CAST dest-parked dest_tk==11. Bump next_offset past dest
+         * (TYPE_NAMED MATCH 8B lesson / leftover rest unique rec ASSIGN
+         * TYPE_SLICE MATCH). Do not leftover unique leftover_emit_as twin.
+         * Do not leftover rest remaining-wave. Do not leftover rest T SAT
+         * emit_as / emit_assign / emit_array_lit. leftover rest unique rec
+         * ASSIGN VAR dest TYPE_SLICE CAST (`d = "hi" as []u8`) skip unless
+         * proven (SAT emit_assign). leftover rest unique rec ASSIGN
+         * TYPE_ARRAY dest-in-rbx CAST (`*p = "hi" as [N]u8`) is leftover
+         * rest unique store iko==54 (do not leftover rest unique rec ASSIGN
+         * second intercept). leftover rest unique rec ASSIGN TYPE_NAMED
+         * dest-in-rbx CAST skip unless proven. leftover rest unique rec
+         * ASSIGN TYPE_SLICE dest-in-rbx IF/BLOCK skip this wave. leftover
+         * rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
+         * skip unless proven. ADDR_OF (rko==51) / BINARY skip unless proven.
+         * PLATFORM: WINDOWS leftover-PE. */
+        asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
+        if (asg_dop > 0) {
+          int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_dop);
+          int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
+          int32_t asg_next;
+          int32_t asg_past;
+          if (asg_p_off >= 0 && asg_ly_next) {
+            asg_next = *asg_ly_next;
+            asg_past = asg_p_off + 24;
+            if (asg_next < asg_past)
+              *asg_ly_next = asg_past;
+            glue_align_next_offset(ctx);
+          }
+        }
+        if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_push_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else {
+          g_leftover_match_dest_parked = 1;
+          g_leftover_match_dest_nbytes = 16;
+          g_leftover_match_dest_tk = 11;
+          if (leftover_emit_match_arm_result_elf_c(arena, elf_ctx, asg_right, ctx, ta) != 0)
+            out_rc = -1;
+          else
+            out_rc = 0;
+          g_leftover_match_dest_parked = 0;
+          g_leftover_match_dest_nbytes = 0;
+          g_leftover_match_dest_tk = 0;
+          if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
+            out_rc = -1;
         }
       } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 11 &&
                  asg_rko == 43) {
