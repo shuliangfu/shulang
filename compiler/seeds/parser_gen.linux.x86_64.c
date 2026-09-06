@@ -16,13 +16,14 @@ extern int32_t ast_pipeline_onefunc_const_type_ref(uint8_t * restrict out, int32
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #include <sys/uio.h>
 #include <poll.h>
 static inline ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {
-  return read((int)fd, (void *)buf, count);
+  return (ssize_t)xlang_io_read((int)fd, (void *)buf, count);
 }
 static inline ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {
-  return write((int)fd, (const void *)buf, count);
+  return (ssize_t)xlang_io_write((int)fd, (const void *)buf, count);
 }
 static inline ssize_t xlang_sys_readv(int32_t fd, uint8_t *iov, int32_t iovcnt) {
   return readv((int)fd, (const struct iovec *)(const void *)iov, (int)iovcnt);

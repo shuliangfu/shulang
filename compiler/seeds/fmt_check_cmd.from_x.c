@@ -33,6 +33,7 @@
  *            Historical #ifndef _WIN32 guard removed — shim is a no-op
  *            on POSIX and provides needed declarations on Windows. */
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #include "xlang_weak.h"
 /*
  * Stage 12.0.5 pure-asm hybrid residual (G.7 有则补全 — single exported authority):
@@ -1595,7 +1596,7 @@ static ck_spin_sh *g_ck_spin_sh = NULL;
  */
 static void check_interrupt_handler(int sig) {
     const char msg[] = "\ncheck: interrupted\n";
-    (void)write(2, msg, sizeof(msg) - 1);
+    (void)xlang_io_write(2, msg, sizeof(msg) - 1);
     g_ck_spin_run = 0;
     g_ck_spin_pause = 0;
 #ifndef _WIN32
@@ -1610,7 +1611,7 @@ static void check_interrupt_handler(int sig) {
     }
 #endif
     if (g_ck_spin_shown) {
-        (void)write(2, "\n", 1);
+        (void)xlang_io_write(2, "\n", 1);
         g_ck_spin_shown = 0;
     }
     /* 128+sig is shell convention for death-by-signal (SIGINT → 130). */
@@ -1723,7 +1724,7 @@ static void check_progress_spin_write_frame(void) {
     }
 
     if (at > 0) {
-        (void)write(2, buf, (size_t)at);
+        (void)xlang_io_write(2, buf, (size_t)at);
         g_ck_spin_shown = 1;
     }
 }
@@ -1849,7 +1850,7 @@ void check_progress_spin_stop(void) {
     check_progress_spin_join_only();
     /* Commit spinner line so the summary/next output starts on a new line. */
     if (g_ck_spin_shown) {
-        (void)write(2, "\n", 1);
+        (void)xlang_io_write(2, "\n", 1);
         g_ck_spin_shown = 0;
     }
 }
@@ -1932,7 +1933,7 @@ void check_progress_spin_pause(void) {
 #endif
     /* End the active spinner line so multi-line diagnostics are clean. */
     if (g_ck_spin_shown) {
-        (void)write(2, "\n", 1);
+        (void)xlang_io_write(2, "\n", 1);
         g_ck_spin_shown = 0;
     }
 }

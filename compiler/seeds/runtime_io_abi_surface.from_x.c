@@ -26,6 +26,8 @@ struct XlangRuntimeFileView {
   int32_t needs_munmap;
 };
 
+extern ssize_t xlang_sys_read(int32_t fd, uint8_t * buf, size_t count);
+extern ssize_t xlang_sys_write(int32_t fd, uint8_t * buf, size_t count);
 extern int32_t std_fs_fs_open_read(uint8_t * path);
 extern int32_t xlang_fs_open_write_flags(void);
 extern int32_t xlang_fs_open_write_mode(void);
@@ -101,7 +103,7 @@ ssize_t std_fs_fs_read(int32_t fd, uint8_t * buf, size_t count) {
     return neg;
   }
   {
-    ssize_t n = read(fd, buf, count);
+    ssize_t n = xlang_sys_read(fd, buf, count);
     return n;
   }
   ssize_t neg2 = ((ssize_t)((0 - 1)));
@@ -113,7 +115,7 @@ ssize_t std_fs_fs_write(int32_t fd, uint8_t * buf, size_t count) {
     return neg;
   }
   {
-    ssize_t n = write(fd, buf, count);
+    ssize_t n = xlang_sys_write(fd, buf, count);
     return n;
   }
   ssize_t neg2 = ((ssize_t)((0 - 1)));
@@ -230,7 +232,7 @@ int32_t xlang_read_fd_into_buf_impl(int32_t fd, uint8_t * buf, int64_t cap) {
   size_t cap_u = ((size_t)(cap));
   while ((off < cap_u)) {
     {
-      ssize_t n = read(fd, (buf + off), (cap_u - off));
+      ssize_t n = xlang_sys_read(fd, (buf + off), (cap_u - off));
       if ((n < 0)) {
         return -(1);
       }
@@ -257,7 +259,7 @@ int32_t xlang_runtime_file_view_read_malloc_impl(int32_t fd, int64_t size, uint8
   size_t off = ((size_t)(0));
   while ((off < size_u)) {
     {
-      ssize_t n = read(fd, (buf + off), (size_u - off));
+      ssize_t n = xlang_sys_read(fd, (buf + off), (size_u - off));
       if ((n < 0)) {
         (void)(free(buf));
         (void)(close(fd));
@@ -353,7 +355,7 @@ int32_t std_sys_os_read_file_into_impl(uint8_t * path, uint8_t * buf, int32_t ca
   while ((total < cap)) {
     int32_t chunk = (cap - total);
     {
-      ssize_t r = read(fd, (buf + ((size_t)(total))), ((size_t)(chunk)));
+      ssize_t r = xlang_sys_read(fd, (buf + ((size_t)(total))), ((size_t)(chunk)));
       if ((r < 0)) {
         (void)(close(fd));
         return -(1);

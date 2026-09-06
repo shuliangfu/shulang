@@ -1,7 +1,7 @@
 /**
  * Stage9 Cap residual 9.1.4 pipe probe: pipe() without libc pipe.
  * Creates a pipe, writes one byte, reads it back.
- * PLATFORM: LINUX|x86_64 gold.
+ * PLATFORM: SHARED gold (Linux + Darwin Cap 9.1.4).
  */
 const process = import("std.process");
 
@@ -19,9 +19,11 @@ function main(): i32 {
   if (rfd < 0 || wfd < 0) {
     return 1;
   }
-  /* Use spawn of /bin/true as secondary check that fork still works after pipe. */
-  let bin_true: u8[16] = [47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0];
-  let pid: i32 = process.spawn_simple(&bin_true[0]);
+  /* Use spawn of /usr/bin/true as secondary check that fork still works after pipe. */
+  let usr_true: u8[20] = [
+    47, 117, 115, 114, 47, 98, 105, 110, 47, 116, 114, 117, 101, 0, 0, 0, 0, 0, 0, 0
+  ];
+  let pid: i32 = process.spawn_simple(&usr_true[0]);
   if (pid <= 0) {
     return 2;
   }

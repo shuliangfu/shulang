@@ -1,21 +1,20 @@
 /*
- * xlang_sync_cap.h — Cap residual 10.6.3: Linux futex sync without libpthread
- * (x86_64 + aarch64).
+ * xlang_sync_cap.h — Cap residual 10.6.3: OS-agnostic sync primitives.
+ * - Linux: futex sync without libpthread (x86_64 + aarch64).
+ * - Darwin: POSIX pthread sync primitives.
+ * - Windows: Win32 synchronization primitives (CRITICAL_SECTION, CONDITION_VARIABLE,
+ *            SRWLOCK, and Semaphore).
  *
- * G.7: single authority for Cap sync primitives. Builds on xlang_thread_cap.h
- * futex faces only — no pthread_mutex_* / pthread_cond_* on the Cap path.
+ * G.7: single authority for Cap sync primitives across Linux, Darwin, and Windows.
  *
  * Slice0: non-recursive mutex (init/lock/trylock/unlock).
  * Slice1: condition variable (init/wait/signal/broadcast).
  * Slice2: counting semaphore (init/wait/trywait/post).
  * Slice3: runtime_sync_os Linux mutex/cond wired to Cap.
  * Slice4: reader-writer lock (rdlock/wrlock/unlock) + sync_os wire.
- * Later: Windows (10.6.2).
+ * Later: Windows Cap sync (10.6.3 full-closure).
  *
- * Darwin: Cap residual 10.6.3 POSIX pthread sync primitives.
- * Windows: not provided — callers keep OS mutex/cond/rwlock APIs.
- *
- * PLATFORM: LINUX primary (x86_64 + aarch64) · DARWIN Cap sync.
+ * PLATFORM: LINUX primary (x86_64 + aarch64) · DARWIN Cap sync · WINDOWS Cap sync.
  */
 
 #ifndef XLANG_SYNC_CAP_H
@@ -182,6 +181,38 @@ static inline int xlang_cap_cond_wait(struct xlang_cap_cond *cv, struct xlang_ca
   (void)xlang_futex(&cv->seq, XLANG_FUTEX_WAIT, seq, 0);
   if (xlang_cap_mutex_lock(m) != 0) {
     return -1;
+  }
+  return 0;
+}
+
+/**
+ * Wait on Cap condvar with a millisecond timeout.
+ * Atomically unlocks m, sleeps up to ms milliseconds, relocks m.
+ * @param cv condition variable
+ * @param m mutex held by caller
+ * @param ms timeout in milliseconds (<=0 returns immediately after unlocking & locking)
+ * @return 0 on wake; 1 on timeout; -1 on error
+ * PLATFORM: LINUX
+ */
+static inline int xlang_cap_cond_timedwait_ms(struct xlang_cap_cond *cv, struct xlang_cap_mutex *m, int32_t ms) {
+  uint32_t seq = 0;
+  long ret = 0;
+  if (cv == 0 || m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  seq = __atomic_load_n(&cv->seq, __ATOMIC_ACQUIRE);
+  if (xlang_cap_mutex_unlock(m) != 0) {
+    return -1;
+  }
+  if (ms > 0) {
+    ret = xlang_futex_wait_timeout_ns(&cv->seq, seq, (int64_t)ms * 1000000LL);
+  }
+  if (xlang_cap_mutex_lock(m) != 0) {
+    return -1;
+  }
+  if (ret < 0 && errno == ETIMEDOUT) {
+    return 1;
   }
   return 0;
 }
@@ -454,6 +485,8 @@ static inline int xlang_cap_rwlock_wrunlock(struct xlang_cap_rwlock *rw) {
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include <xlang_thread_cap.h>
 
@@ -540,6 +573,42 @@ static inline int xlang_cap_cond_wait(struct xlang_cap_cond *cv, struct xlang_ca
     return -1;
   }
   return (pthread_cond_wait(&cv->cv, &m->mu) == 0) ? 0 : -1;
+}
+
+/**
+ * Wait on Cap condvar with a millisecond timeout using pthread_cond_timedwait.
+ * @param cv condition variable
+ * @param m mutex held by caller
+ * @param ms timeout in milliseconds
+ * @return 0 on wake; 1 on timeout; -1 on error
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_cap_cond_timedwait_ms(struct xlang_cap_cond *cv, struct xlang_cap_mutex *m, int32_t ms) {
+  struct timespec ts;
+  struct timeval tv;
+  int r;
+  if (cv == 0 || m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (gettimeofday(&tv, NULL) != 0) {
+    return -1;
+  }
+  ts.tv_sec = tv.tv_sec + (long)(ms / 1000);
+  ts.tv_nsec = (long)(tv.tv_usec * 1000) + (long)((ms % 1000) * 1000000L);
+  if (ts.tv_nsec >= 1000000000L) {
+    ts.tv_sec += ts.tv_nsec / 1000000000L;
+    ts.tv_nsec %= 1000000000L;
+  }
+  r = pthread_cond_timedwait(&cv->cv, &m->mu, &ts);
+  if (r == ETIMEDOUT) {
+    return 1;
+  }
+  if (r != 0) {
+    errno = r;
+    return -1;
+  }
+  return 0;
 }
 
 static inline int xlang_cap_cond_signal(struct xlang_cap_cond *cv) {
@@ -695,6 +764,418 @@ static inline int xlang_cap_rwlock_wrunlock(struct xlang_cap_rwlock *rw) {
   return (pthread_rwlock_unlock(&rw->rw) == 0) ? 0 : -1;
 }
 
-#endif /* LINUX x86_64|aarch64 | DARWIN */
+#elif defined(_WIN32) || defined(_WIN64)
+
+/*
+ * Cap residual 10.6.3: Windows Win32 sync primitives.
+ * PLATFORM: WINDOWS
+ */
+
+#include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+/**
+ * Cap mutex wrapping Win32 CRITICAL_SECTION.
+ * PLATFORM: WINDOWS
+ */
+struct xlang_cap_mutex {
+  CRITICAL_SECTION cs;
+};
+
+/**
+ * Initialize Cap mutex using Win32 InitializeCriticalSection.
+ * @param m pointer to mutex
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_mutex_init(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  InitializeCriticalSection(&m->cs);
+  return 0;
+}
+
+/**
+ * Destroy Cap mutex using Win32 DeleteCriticalSection.
+ * @param m pointer to mutex
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_mutex_destroy(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  DeleteCriticalSection(&m->cs);
+  return 0;
+}
+
+/**
+ * Lock Cap mutex using Win32 EnterCriticalSection.
+ * @param m pointer to mutex
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_mutex_lock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  EnterCriticalSection(&m->cs);
+  return 0;
+}
+
+/**
+ * Try to lock Cap mutex using Win32 TryEnterCriticalSection.
+ * @param m pointer to mutex
+ * @return 0 if lock acquired, -1 on busy or error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_mutex_trylock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (TryEnterCriticalSection(&m->cs)) {
+    return 0;
+  }
+  errno = EBUSY;
+  return -1;
+}
+
+/**
+ * Unlock Cap mutex using Win32 LeaveCriticalSection.
+ * @param m pointer to mutex
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_mutex_unlock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  LeaveCriticalSection(&m->cs);
+  return 0;
+}
+
+/**
+ * Cap condition variable wrapping Win32 CONDITION_VARIABLE.
+ * PLATFORM: WINDOWS
+ */
+struct xlang_cap_cond {
+  CONDITION_VARIABLE cv;
+};
+
+/**
+ * Initialize Cap condition variable using Win32 InitializeConditionVariable.
+ * @param cv pointer to condition variable
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_init(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  InitializeConditionVariable(&cv->cv);
+  return 0;
+}
+
+/**
+ * Destroy Cap condition variable. Win32 condition variables require no explicit cleanup.
+ * @param cv pointer to condition variable
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_destroy(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Wait on Cap condition variable and associated Cap mutex.
+ * @param cv pointer to condition variable
+ * @param m pointer to locked Cap mutex
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_wait(struct xlang_cap_cond *cv, struct xlang_cap_mutex *m) {
+  if (cv == 0 || m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!SleepConditionVariableCS(&cv->cv, &m->cs, INFINITE)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Wait on Cap condvar with a millisecond timeout using Win32 SleepConditionVariableCS.
+ * @param cv pointer to condition variable
+ * @param m pointer to locked Cap mutex
+ * @param ms timeout in milliseconds
+ * @return 0 on wake; 1 on timeout; -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_timedwait_ms(struct xlang_cap_cond *cv, struct xlang_cap_mutex *m, int32_t ms) {
+  if (cv == 0 || m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!SleepConditionVariableCS(&cv->cv, &m->cs, (DWORD)(ms < 0 ? INFINITE : ms))) {
+    if (GetLastError() == ERROR_TIMEOUT) {
+      return 1;
+    }
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Wake single waiter on Cap condition variable using Win32 WakeConditionVariable.
+ * @param cv pointer to condition variable
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_signal(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  WakeConditionVariable(&cv->cv);
+  return 0;
+}
+
+/**
+ * Wake all waiters on Cap condition variable using Win32 WakeAllConditionVariable.
+ * @param cv pointer to condition variable
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_cond_broadcast(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  WakeAllConditionVariable(&cv->cv);
+  return 0;
+}
+
+/**
+ * Cap counting semaphore wrapping Win32 Semaphore HANDLE.
+ * PLATFORM: WINDOWS
+ */
+struct xlang_cap_sem {
+  HANDLE h;
+};
+
+/**
+ * Initialize Cap semaphore using Win32 CreateSemaphoreW.
+ * @param sem pointer to semaphore
+ * @param value initial semaphore count
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_sem_init(struct xlang_cap_sem *sem, uint32_t value) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  sem->h = CreateSemaphoreW(NULL, (LONG)value, 0x7fffffff, NULL);
+  if (sem->h == NULL) {
+    errno = ENOMEM;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Destroy Cap semaphore by closing the Win32 HANDLE.
+ * @param sem pointer to semaphore
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_sem_destroy(struct xlang_cap_sem *sem) {
+  if (sem == 0 || sem->h == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  CloseHandle(sem->h);
+  sem->h = NULL;
+  return 0;
+}
+
+/**
+ * Wait (decrement) on Cap semaphore using Win32 WaitForSingleObject.
+ * @param sem pointer to semaphore
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_sem_wait(struct xlang_cap_sem *sem) {
+  if (sem == 0 || sem->h == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (WaitForSingleObject(sem->h, INFINITE) != WAIT_OBJECT_0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Try to wait (decrement) on Cap semaphore without blocking.
+ * @param sem pointer to semaphore
+ * @return 0 if count decremented, -1 on busy or error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_sem_trywait(struct xlang_cap_sem *sem) {
+  DWORD res;
+  if (sem == 0 || sem->h == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  res = WaitForSingleObject(sem->h, 0);
+  if (res == WAIT_OBJECT_0) {
+    return 0;
+  }
+  if (res == WAIT_TIMEOUT) {
+    errno = EAGAIN;
+    return -1;
+  }
+  errno = EINVAL;
+  return -1;
+}
+
+/**
+ * Post (increment) Cap semaphore using Win32 ReleaseSemaphore.
+ * @param sem pointer to semaphore
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_sem_post(struct xlang_cap_sem *sem) {
+  if (sem == 0 || sem->h == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!ReleaseSemaphore(sem->h, 1, NULL)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Cap reader-writer lock wrapping Win32 SRWLOCK.
+ * PLATFORM: WINDOWS
+ */
+struct xlang_cap_rwlock {
+  SRWLOCK rw;
+};
+
+/**
+ * Initialize Cap reader-writer lock using Win32 InitializeSRWLock.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_init(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  InitializeSRWLock(&rw->rw);
+  return 0;
+}
+
+/**
+ * Destroy Cap reader-writer lock. Win32 SRWLOCK requires no explicit cleanup.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_destroy(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Acquire shared (reader) lock using Win32 AcquireSRWLockShared.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_rdlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  AcquireSRWLockShared(&rw->rw);
+  return 0;
+}
+
+/**
+ * Acquire exclusive (writer) lock using Win32 AcquireSRWLockExclusive.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_wrlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  AcquireSRWLockExclusive(&rw->rw);
+  return 0;
+}
+
+/**
+ * Release shared (reader) lock using Win32 ReleaseSRWLockShared.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_rdunlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  ReleaseSRWLockShared(&rw->rw);
+  return 0;
+}
+
+/**
+ * Release exclusive (writer) lock using Win32 ReleaseSRWLockExclusive.
+ * @param rw pointer to rwlock
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_cap_rwlock_wrunlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  ReleaseSRWLockExclusive(&rw->rw);
+  return 0;
+}
+
+#endif /* LINUX x86_64|aarch64 | DARWIN | WINDOWS */
 
 #endif /* XLANG_SYNC_CAP_H */

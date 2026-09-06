@@ -45,18 +45,13 @@ __asm__(".section .note.GNU-stack,\"\",%progbits");
 
 /**
  * Cap residual host getenv for user-linked runtime_panic.o (≡ product _impl).
- * Cap residual 9.1.1: POSIX environ walk (no libc getenv); Windows CRT getenv.
+ * Cap residual 9.1.1: unified xlang_environ_getenv (POSIX walk / Win32).
  * @param name NUL-terminated environment key; may be null
  * @return value pointer from process env block, or NULL
+ * PLATFORM: SHARED Cap (9.1.1).
  */
 const char *link_abi_getenv_impl(const char *name) {
-  if (!name || !name[0])
-    return NULL;
-#if defined(_WIN32) || defined(_WIN64)
-  return getenv(name);
-#else
   return xlang_environ_getenv(name);
-#endif
 }
 
 /**

@@ -3,8 +3,9 @@
  * (net_dns_fast → xlang_dns_cap.h).
  *
  * Contract: 127.0.0.1 and localhost → host-order 0x7f000001.
- * PLATFORM: LINUX|x86_64 gold.
+ * PLATFORM: SHARED Cap (LINUX raw syscall, MACOS|DARWIN raw syscall, WINDOWS Winsock Cap).
  */
+const net = import("std.net");
 
 extern function net_resolve_ipv4_ex_c(hostname: *u8, out_addr: *u32, out_err: *i32): i32;
 

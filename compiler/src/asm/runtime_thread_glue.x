@@ -11,7 +11,7 @@
 // (thin+rest ld -r pattern).
 //
 // PLATFORM: SHARED — LINUX Cap (futex); Darwin Cap (pthread residual);
-//           WINDOWS Cap CreateThread spawn/join (10.6.2).
+//           WINDOWS Cap (CreateThread spawn/join + Win32 pool 10.6.2/10.6.3).
 //
 // Wave513 (2026-07-27): R2 migration of runtime_thread_glue.from_x.c business
 // logic to .x. Previously the .c seed provided all public wrappers; now the
@@ -69,18 +69,20 @@ export extern "C" function thread_create_with_stack_impl(entry: *u8, arg: *u8, s
 export extern "C" function thread_join_impl(thread_id: i64): i32;
 
 /**
- * Bridge: bind current thread to a logical CPU (affinity).
- * Linux: pthread_setaffinity_np(self) / Windows: SetThreadAffinityMask /
+ * Bridge: bind current thread to a logical CPU (affinity via Cap).
+ * Linux: sched_setaffinity(0) / Windows: SetThreadAffinityMask /
  * macOS: unsupported (-1).
+ * PLATFORM: SHARED Cap (9.4.6).
  * @param cpu_index logical CPU index (0-based)
  * @return 0 success; -1 failure or unsupported
  */
 export extern "C" function thread_set_affinity_self_impl(cpu_index: i32): i32;
 
 /**
- * Bridge: bind a specific thread to a logical CPU.
- * Linux: pthread_setaffinity_np(tid) / Windows: SetThreadAffinityMask /
+ * Bridge: bind a specific thread to a logical CPU (affinity via Cap).
+ * Linux: sched_setaffinity(child_tid) / Windows: SetThreadAffinityMask /
  * macOS: unsupported (-1).
+ * PLATFORM: SHARED Cap (9.4.6).
  * @param thread_id target thread
  * @param cpu_index logical CPU index
  * @return 0 success; -1 failure or unsupported
@@ -88,7 +90,9 @@ export extern "C" function thread_set_affinity_self_impl(cpu_index: i32): i32;
 export extern "C" function thread_set_affinity_impl(thread_id: i64, cpu_index: i32): i32;
 
 /**
- * Bridge: set current thread QoS class (macOS only).
+ * Bridge: set current thread QoS class via Cap.
+ * macOS: pthread_set_qos_class_self_np / Linux & Windows: unsupported (-1).
+ * PLATFORM: SHARED Cap (9.4.6).
  * @param qos_class 0=default,1=user_interactive,2=user_initiated,3=utility,4=background
  * @return 0 success; -1 failure or unsupported
  */

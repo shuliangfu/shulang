@@ -241,7 +241,7 @@ int32_t drv_eq_minus_backend(uint8_t * buf, int32_t len) {
   return 1;
 }
 int32_t drv_eq_minus_target(uint8_t * buf, int32_t len) {
-  if ((len < 7)) {
+  if ((len != 7)) {
     return 0;
   }
   if (((buf)[0] !=45)) {
@@ -268,7 +268,7 @@ int32_t drv_eq_minus_target(uint8_t * buf, int32_t len) {
   return 1;
 }
 int32_t drv_eq_minus_target_cpu(uint8_t * buf, int32_t len) {
-  if ((len < 11)) {
+  if ((len != 11)) {
     return 0;
   }
   if (((buf)[0] !=45)) {

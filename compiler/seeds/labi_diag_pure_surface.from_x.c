@@ -27,6 +27,7 @@
 #include <string.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #else
 #include <io.h>
 #include <sys/types.h>
@@ -119,10 +120,10 @@ static inline int32_t fs_libc_open(uint8_t *path, int32_t flags, int32_t mode) {
 #define fs_note_last_error_posix std_fs_posix_fs_note_last_error_posix
 #endif
 static inline ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {
-  return read((int)fd, (void *)buf, count);
+  return (ssize_t)xlang_io_read((int)fd, (void *)buf, count);
 }
 static inline ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {
-  return write((int)fd, (const void *)buf, count);
+  return (ssize_t)xlang_io_write((int)fd, (const void *)buf, count);
 }
 #if !defined(_WIN32) && !defined(_WIN64)
 static inline ssize_t xlang_sys_readv(int32_t fd, uint8_t *iov, int32_t iovcnt) {

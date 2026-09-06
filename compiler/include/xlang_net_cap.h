@@ -1,29 +1,211 @@
 /*
  * xlang_net_cap.h — Cap residual 9.1.7: socket/connect/bind/listen/accept/poll/close
  * (slice0) + recvmmsg/sendmmsg (slice1) + sendto/recvfrom (slice2 DNS) without
- * libc those symbols on Linux (x86_64 + aarch64).
- * Cap residual 9.1.9: syscall asm via xlang_syscall_cap.h (G.7 single authority).
+ * libc those symbols on Linux and Darwin via raw syscalls, and Windows via Winsock Cap.
+ * Cap residual 9.1.9: syscall asm via xlang_syscall_cap.h on Linux.
  *
  * Single authority for runtime_net_sock_fast, runtime_net_udp_batch,
  * xlang_dns_cap.h, and xlang_sys_* net symbols.
  *
- * Windows: not used — call sites keep Winsock.
- * Other POSIX: thin libc wrappers (Darwin residual until later; mmsg ENOSYS).
- *
- * PLATFORM: LINUX primary; POSIX fallback elsewhere (non-Win).
+ * PLATFORM: SHARED Cap (LINUX raw syscall, MACOS|DARWIN raw syscall, WINDOWS Winsock).
  */
 
 #ifndef XLANG_NET_CAP_H
 #define XLANG_NET_CAP_H
 
-#if !defined(_WIN32) && !defined(_WIN64)
-
-#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#ifndef F_GETFL
+#define F_GETFL 3
+#endif
+#ifndef F_SETFL
+#define F_SETFL 4
+#endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 0x0004
+#endif
 
+/* ============================================================================
+ * PLATFORM: WINDOWS (Winsock Cap)
+ * ============================================================================ */
+#if defined(_WIN32) || defined(_WIN64)
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
+struct msghdr {
+  void         *msg_name;
+  int           msg_namelen;
+  struct {
+    void   *iov_base;
+    size_t  iov_len;
+  }            *msg_iov;
+  int           msg_iovlen;
+  void         *msg_control;
+  size_t        msg_controllen;
+  int           msg_flags;
+};
+
+struct mmsghdr {
+  struct msghdr msg_hdr;
+  unsigned int  msg_len;
+};
+
+/** Ensure WSAStartup has run once. PLATFORM: WINDOWS */
+static inline int xlang_net_ensure_wsa(void) {
+  static int wsa_inited = 0;
+  if (!wsa_inited) {
+    WSADATA d;
+    if (WSAStartup(MAKEWORD(2, 2), &d) == 0) {
+      wsa_inited = 1;
+    } else {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/** Cap socket for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_socket(int domain, int type, int protocol) {
+  if (xlang_net_ensure_wsa() != 0)
+    return -1;
+  SOCKET s = socket(domain, type, protocol);
+  return s == INVALID_SOCKET ? -1 : (int)s;
+}
+
+/** Cap connect for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_connect(int sockfd, const void *addr, unsigned int addrlen) {
+  if (connect((SOCKET)sockfd, (const struct sockaddr *)addr, (int)addrlen) != 0)
+    return -1;
+  return 0;
+}
+
+/** Cap bind for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_bind(int sockfd, const void *addr, unsigned int addrlen) {
+  if (bind((SOCKET)sockfd, (const struct sockaddr *)addr, (int)addrlen) != 0)
+    return -1;
+  return 0;
+}
+
+/** Cap listen for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_listen(int sockfd, int backlog) {
+  if (listen((SOCKET)sockfd, backlog) != 0)
+    return -1;
+  return 0;
+}
+
+/** Cap accept for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_accept(int sockfd, void *addr, unsigned int *addrlen) {
+  int al = addrlen ? (int)(*addrlen) : 0;
+  SOCKET s = accept((SOCKET)sockfd, (struct sockaddr *)addr, addrlen ? &al : NULL);
+  if (addrlen)
+    *addrlen = (unsigned int)al;
+  return s == INVALID_SOCKET ? -1 : (int)s;
+}
+
+/** Cap setsockopt for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_setsockopt(int sockfd, int level, int optname, const void *optval,
+                                      unsigned int optlen) {
+  return setsockopt((SOCKET)sockfd, level, optname, (const char *)optval, (int)optlen) == 0 ? 0 : -1;
+}
+
+/** Cap close (closesocket) for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_close(int fd) {
+  if (fd < 0)
+    return 0;
+  return closesocket((SOCKET)fd) == 0 ? 0 : -1;
+}
+
+/** Cap poll (WSAPoll) for Windows. PLATFORM: WINDOWS */
+static inline int xlang_net_poll(void *fds, unsigned int nfds, int timeout_ms) {
+  if (!fds && nfds != 0)
+    return -1;
+  return WSAPoll((WSAPOLLFD *)fds, (ULONG)nfds, timeout_ms);
+}
+
+/** Cap sendto for Windows. PLATFORM: WINDOWS */
+static inline long xlang_net_sendto(int sockfd, const void *buf, size_t len, int flags,
+                                   const void *addr, unsigned int addrlen) {
+  int r = sendto((SOCKET)sockfd, (const char *)buf, (int)len, flags,
+                 (const struct sockaddr *)addr, (int)addrlen);
+  return (long)r;
+}
+
+/** Cap recvfrom for Windows. PLATFORM: WINDOWS */
+static inline long xlang_net_recvfrom(int sockfd, void *buf, size_t len, int flags, void *addr,
+                                     unsigned int *addrlen) {
+  int al = addrlen ? (int)(*addrlen) : 0;
+  int r = recvfrom((SOCKET)sockfd, (char *)buf, (int)len, flags,
+                   (struct sockaddr *)addr, addrlen ? &al : NULL);
+  if (addrlen)
+    *addrlen = (unsigned int)al;
+  return (long)r;
+}
+
+/** Cap fcntl simulation for Windows (O_NONBLOCK via ioctlsocket FIONBIO). PLATFORM: WINDOWS */
+static inline int xlang_net_fcntl(int fd, int cmd, long arg) {
+  if (cmd == F_SETFL) {
+    u_long mode = (arg & O_NONBLOCK) ? 1UL : 0UL;
+    return ioctlsocket((SOCKET)fd, FIONBIO, &mode) == 0 ? 0 : -1;
+  }
+  return 0;
+}
+
+/** Cap recvmmsg simulation for Windows via recvfrom loop. PLATFORM: WINDOWS */
+static inline int xlang_net_recvmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags,
+                                     void *timeout) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  (void)timeout;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *from = m[i].msg_hdr.msg_name;
+    unsigned int fromlen = (unsigned int)m[i].msg_hdr.msg_namelen;
+    long r = xlang_net_recvfrom(sockfd, buf, len, flags, from, &fromlen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_hdr.msg_namelen = (int)fromlen;
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
+}
+
+/** Cap sendmmsg simulation for Windows via sendto loop. PLATFORM: WINDOWS */
+static inline int xlang_net_sendmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *to = m[i].msg_hdr.msg_name;
+    unsigned int tolen = (unsigned int)m[i].msg_hdr.msg_namelen;
+    long r = xlang_net_sendto(sockfd, buf, len, flags, to, tolen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
+}
+
+/* ============================================================================
+ * PLATFORM: LINUX (Raw Syscall)
+ * ============================================================================ */
+#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+
+#include <errno.h>
 #include <xlang_syscall_cap.h>
 
 /** Cap residual 9.1.9: aliases → single syscall authority. */
@@ -38,6 +220,11 @@ static inline int xlang_net_ret(long r) {
     return -1;
   }
   return (int)r;
+}
+
+/** No-op WSA startup on Linux. PLATFORM: LINUX */
+static inline int xlang_net_ensure_wsa(void) {
+  return 0;
 }
 
 /**
@@ -191,7 +378,6 @@ static inline int xlang_net_poll(void *fds, unsigned int nfds, int timeout_ms) {
   return xlang_net_ret(r);
 }
 
-
 /**
  * Cap residual recvmmsg(2).
  * x86_64 SYS_recvmmsg=299; aarch64 SYS_recvmmsg=243.
@@ -286,13 +472,6 @@ static inline long xlang_net_recvfrom(int sockfd, void *buf, size_t len, int fla
   return r;
 }
 
-#ifndef F_GETFL
-#define F_GETFL 3
-#endif
-#ifndef F_SETFL
-#define F_SETFL 4
-#endif
-
 /**
  * Cap residual fcntl F_GETFL / F_SETFL (nonblock dial).
  * Only cmd F_GETFL (arg ignored) and F_SETFL (arg = flags) are supported.
@@ -314,12 +493,386 @@ static inline int xlang_net_fcntl(int fd, int cmd, long arg) {
   return (int)r;
 }
 
-#else /* !LINUX Cap — POSIX libc thin wrappers (Darwin residual) */
+/* ============================================================================
+ * PLATFORM: MACOS|DARWIN (Raw Syscall)
+ * ============================================================================ */
+#elif defined(__APPLE__) && (defined(__x86_64__) || defined(__aarch64__))
 
+#include <errno.h>
+#include <sys/socket.h>
+#include <poll.h>
+
+#ifndef _MMSGHDR_DEFINED
+#define _MMSGHDR_DEFINED
+struct mmsghdr {
+  struct msghdr msg_hdr;
+  unsigned int   msg_len;
+};
+#endif
+
+#if defined(__aarch64__)
+
+static inline long xlang_darwin_net_syscall1(long num, long a1) {
+  register long x16 __asm__("x16") = num;
+  register long x0 __asm__("x0") = a1;
+  register long failed __asm__("x9");
+  __asm__ __volatile__(
+      "svc #0x80\n\t"
+      "cset %1, cs"
+      : "+r"(x0), "=r"(failed)
+      : "r"(x16)
+      : "memory", "cc"
+  );
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_net_syscall3(long num, long a1, long a2, long a3) {
+  register long x16 __asm__("x16") = num;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long failed __asm__("x9");
+  __asm__ __volatile__(
+      "svc #0x80\n\t"
+      "cset %3, cs"
+      : "+r"(x0), "+r"(x1), "+r"(x2), "=r"(failed)
+      : "r"(x16)
+      : "memory", "cc"
+  );
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_net_syscall5(long num, long a1, long a2, long a3, long a4, long a5) {
+  register long x16 __asm__("x16") = num;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long x3 __asm__("x3") = a4;
+  register long x4 __asm__("x4") = a5;
+  register long failed __asm__("x9");
+  __asm__ __volatile__(
+      "svc #0x80\n\t"
+      "cset %5, cs"
+      : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "=r"(failed)
+      : "r"(x16)
+      : "memory", "cc"
+  );
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_net_syscall6(long num, long a1, long a2, long a3, long a4, long a5, long a6) {
+  register long x16 __asm__("x16") = num;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long x3 __asm__("x3") = a4;
+  register long x4 __asm__("x4") = a5;
+  register long x5 __asm__("x5") = a6;
+  register long failed __asm__("x9");
+  __asm__ __volatile__(
+      "svc #0x80\n\t"
+      "cset %6, cs"
+      : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "=r"(failed)
+      : "r"(x16)
+      : "memory", "cc"
+  );
+  return failed ? -x0 : x0;
+}
+
+#elif defined(__x86_64__)
+
+static inline long xlang_darwin_net_syscall1(long num, long a1) {
+  long ret;
+  __asm__ __volatile__(
+      "syscall\n\t"
+      "jnc 1f\n\t"
+      "negq %%rax\n\t"
+      "1:"
+      : "=a"(ret)
+      : "0"(0x2000000L + num), "D"(a1)
+      : "rcx", "r11", "memory", "cc"
+  );
+  return ret;
+}
+
+static inline long xlang_darwin_net_syscall3(long num, long a1, long a2, long a3) {
+  long ret;
+  __asm__ __volatile__(
+      "syscall\n\t"
+      "jnc 1f\n\t"
+      "negq %%rax\n\t"
+      "1:"
+      : "=a"(ret)
+      : "0"(0x2000000L + num), "D"(a1), "S"(a2), "d"(a3)
+      : "rcx", "r11", "memory", "cc"
+  );
+  return ret;
+}
+
+static inline long xlang_darwin_net_syscall5(long num, long a1, long a2, long a3, long a4, long a5) {
+  long ret;
+  register long r10 __asm__("r10") = a4;
+  register long r8  __asm__("r8")  = a5;
+  __asm__ __volatile__(
+      "syscall\n\t"
+      "jnc 1f\n\t"
+      "negq %%rax\n\t"
+      "1:"
+      : "=a"(ret)
+      : "0"(0x2000000L + num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8)
+      : "rcx", "r11", "memory", "cc"
+  );
+  return ret;
+}
+
+static inline long xlang_darwin_net_syscall6(long num, long a1, long a2, long a3, long a4, long a5, long a6) {
+  long ret;
+  register long r10 __asm__("r10") = a4;
+  register long r8  __asm__("r8")  = a5;
+  register long r9  __asm__("r9")  = a6;
+  __asm__ __volatile__(
+      "syscall\n\t"
+      "jnc 1f\n\t"
+      "negq %%rax\n\t"
+      "1:"
+      : "=a"(ret)
+      : "0"(0x2000000L + num), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
+      : "rcx", "r11", "memory", "cc"
+  );
+  return ret;
+}
+
+#endif
+
+/** Map negative kernel ret to -1 + errno. PLATFORM: MACOS|DARWIN. */
+static inline int xlang_darwin_net_ret(long r) {
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
+}
+
+/** No-op WSA startup on Darwin. PLATFORM: MACOS|DARWIN */
+static inline int xlang_net_ensure_wsa(void) {
+  return 0;
+}
+
+/**
+ * Cap residual socket(2) for Darwin.
+ * SYS_socket = 97.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_socket(int domain, int type, int protocol) {
+  long r = xlang_darwin_net_syscall3(97, (long)domain, (long)type, (long)protocol);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual connect(2) for Darwin.
+ * SYS_connect = 98.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_connect(int sockfd, const void *addr, unsigned int addrlen) {
+  if (!addr && addrlen != 0)
+    return -1;
+  long r = xlang_darwin_net_syscall3(98, (long)sockfd, (long)addr, (long)addrlen);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual bind(2) for Darwin.
+ * SYS_bind = 104.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_bind(int sockfd, const void *addr, unsigned int addrlen) {
+  if (!addr && addrlen != 0)
+    return -1;
+  long r = xlang_darwin_net_syscall3(104, (long)sockfd, (long)addr, (long)addrlen);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual listen(2) for Darwin.
+ * SYS_listen = 106.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_listen(int sockfd, int backlog) {
+  long r = xlang_darwin_net_syscall3(106, (long)sockfd, (long)backlog, 0);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual accept(2) for Darwin.
+ * SYS_accept = 30.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_accept(int sockfd, void *addr, unsigned int *addrlen) {
+  long r = xlang_darwin_net_syscall3(30, (long)sockfd, (long)addr, (long)addrlen);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual setsockopt(2) for Darwin.
+ * SYS_setsockopt = 105.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_setsockopt(int sockfd, int level, int optname, const void *optval,
+                                      unsigned int optlen) {
+  long r = xlang_darwin_net_syscall5(105, (long)sockfd, (long)level, (long)optname,
+                                     (long)optval, (long)optlen);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual close(2) for Darwin.
+ * SYS_close = 6.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_close(int fd) {
+  long r = xlang_darwin_net_syscall1(6, (long)fd);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual poll(2) for Darwin.
+ * SYS_poll = 230.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_poll(void *fds, unsigned int nfds, int timeout_ms) {
+  if (!fds && nfds != 0)
+    return -1;
+  long r = xlang_darwin_net_syscall3(230, (long)fds, (long)nfds, (long)timeout_ms);
+  return xlang_darwin_net_ret(r);
+}
+
+/**
+ * Cap residual sendto(2) for Darwin.
+ * SYS_sendto = 133.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline long xlang_net_sendto(int sockfd, const void *buf, size_t len, int flags,
+                                   const void *addr, unsigned int addrlen) {
+  if (!buf && len != 0)
+    return -1;
+  long r = xlang_darwin_net_syscall6(133, (long)sockfd, (long)buf, (long)len, (long)flags,
+                                     (long)addr, (long)addrlen);
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return r;
+}
+
+/**
+ * Cap residual recvfrom(2) for Darwin.
+ * SYS_recvfrom = 29.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline long xlang_net_recvfrom(int sockfd, void *buf, size_t len, int flags, void *addr,
+                                     unsigned int *addrlen) {
+  if (!buf && len != 0)
+    return -1;
+  long r = xlang_darwin_net_syscall6(29, (long)sockfd, (long)buf, (long)len, (long)flags,
+                                     (long)addr, (long)addrlen);
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return r;
+}
+
+/**
+ * Cap residual fcntl for Darwin.
+ * SYS_fcntl = 92.
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_net_fcntl(int fd, int cmd, long arg) {
+  long r = xlang_darwin_net_syscall3(92, (long)fd, (long)cmd, arg);
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
+}
+
+/**
+ * Cap residual recvmmsg simulation for Darwin via recvfrom loop.
+ * PLATFORM: MACOS|DARWIN Cap
+ */
+static inline int xlang_net_recvmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags,
+                                     void *timeout) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  (void)timeout;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *from = m[i].msg_hdr.msg_name;
+    unsigned int fromlen = (unsigned int)m[i].msg_hdr.msg_namelen;
+    long r = xlang_net_recvfrom(sockfd, buf, len, flags, from, &fromlen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_hdr.msg_namelen = (socklen_t)fromlen;
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
+}
+
+/**
+ * Cap residual sendmmsg simulation for Darwin via sendto loop.
+ * PLATFORM: MACOS|DARWIN Cap
+ */
+static inline int xlang_net_sendmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *to = m[i].msg_hdr.msg_name;
+    unsigned int tolen = (unsigned int)m[i].msg_hdr.msg_namelen;
+    long r = xlang_net_sendto(sockfd, buf, len, flags, to, tolen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
+}
+
+/* ============================================================================
+ * PLATFORM: Generic POSIX fallback
+ * ============================================================================ */
+#else
+
+#include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef _MMSGHDR_DEFINED
+#define _MMSGHDR_DEFINED
+struct mmsghdr {
+  struct msghdr msg_hdr;
+  unsigned int   msg_len;
+};
+#endif
+
+/** No-op WSA startup on generic POSIX. PLATFORM: POSIX */
+static inline int xlang_net_ensure_wsa(void) {
+  return 0;
+}
 
 /** PLATFORM: POSIX fallback — libc socket. */
 static inline int xlang_net_socket(int domain, int type, int protocol) {
@@ -362,41 +915,51 @@ static inline int xlang_net_poll(void *fds, unsigned int nfds, int timeout_ms) {
   return poll((struct pollfd *)fds, (nfds_t)nfds, timeout_ms);
 }
 
-
-/**
- * Cap residual recvmmsg — libc on non-Apple POSIX; ENOSYS on Darwin.
- * PLATFORM: POSIX fallback
- */
-static inline int xlang_net_recvmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags,
-                                     void *timeout) {
-#if defined(__APPLE__)
-  (void)sockfd;
-  (void)msgvec;
-  (void)vlen;
-  (void)flags;
-  (void)timeout;
-  errno = ENOSYS;
-  return -1;
-#else
-  return recvmmsg(sockfd, (struct mmsghdr *)msgvec, vlen, flags, (struct timespec *)timeout);
-#endif
+/** PLATFORM: POSIX fallback — sendto loop simulation. */
+static inline int xlang_net_sendmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *to = m[i].msg_hdr.msg_name;
+    socklen_t tolen = (socklen_t)m[i].msg_hdr.msg_namelen;
+    long r = (long)sendto(sockfd, buf, len, flags, (const struct sockaddr *)to, tolen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
 }
 
-/**
- * Cap residual sendmmsg — libc on non-Apple POSIX; ENOSYS on Darwin.
- * PLATFORM: POSIX fallback
- */
-static inline int xlang_net_sendmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags) {
-#if defined(__APPLE__)
-  (void)sockfd;
-  (void)msgvec;
-  (void)vlen;
-  (void)flags;
-  errno = ENOSYS;
-  return -1;
-#else
-  return sendmmsg(sockfd, (struct mmsghdr *)msgvec, vlen, flags);
-#endif
+/** PLATFORM: POSIX fallback — recvfrom loop simulation. */
+static inline int xlang_net_recvmmsg(int sockfd, void *msgvec, unsigned int vlen, int flags,
+                                     void *timeout) {
+  struct mmsghdr *m = (struct mmsghdr *)msgvec;
+  unsigned int i;
+  (void)timeout;
+  if (!msgvec && vlen != 0)
+    return -1;
+  for (i = 0; i < vlen; i++) {
+    void *buf = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_base : NULL;
+    size_t len = m[i].msg_hdr.msg_iov ? m[i].msg_hdr.msg_iov[0].iov_len : 0;
+    void *from = m[i].msg_hdr.msg_name;
+    socklen_t fromlen = (socklen_t)m[i].msg_hdr.msg_namelen;
+    long r = (long)recvfrom(sockfd, buf, len, flags, (struct sockaddr *)from, &fromlen);
+    if (r < 0) {
+      if (i > 0)
+        return (int)i;
+      return -1;
+    }
+    m[i].msg_hdr.msg_namelen = fromlen;
+    m[i].msg_len = (unsigned int)r;
+  }
+  return (int)vlen;
 }
 
 /** PLATFORM: POSIX fallback — libc sendto. */
@@ -415,21 +978,11 @@ static inline long xlang_net_recvfrom(int sockfd, void *buf, size_t len, int fla
   return r;
 }
 
-/** PLATFORM: POSIX fallback — libc fcntl.
- * Callers that include this header on Darwin must already have a fcntl
- * prototype: KEEP_C leftover is 3-arg i32 (tcp/udp/sock/ipv6.x); C seeds
- * (ipv6_fast/sock_fast/http_glue) include <fcntl.h> (variadic). Do NOT
- * declare fcntl here — a prototype cannot match both, and <fcntl.h> in
- * this header also declares open() which clashes with X static open in
- * formal_mod KEEP_C. dns_fast is the seed that was missing <fcntl.h>.
- * Linux Cap (above) uses syscall and never reaches this wrapper.
- */
+/** PLATFORM: POSIX fallback — libc fcntl. */
 static inline int xlang_net_fcntl(int fd, int cmd, long arg) {
   return fcntl(fd, cmd, arg);
 }
 
-#endif /* LINUX Cap vs POSIX fallback */
-
-#endif /* !_WIN32 */
+#endif /* Platform branches */
 
 #endif /* XLANG_NET_CAP_H */

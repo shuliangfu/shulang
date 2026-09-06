@@ -4,21 +4,14 @@
  * are provided by runtime_queue_contention.x when XLANG_RUNTIME_QUEUE_CONTENTION_FROM_X
  * is defined (R2 path); otherwise this seed provides both _impl and _c wrappers.
  *
- * PLATFORM: SHARED — Windows uses CRITICAL_SECTION + _beginthreadex (stdcall);
- *           POSIX uses pthread_mutex_t + pthread_create.
+ * PLATFORM: SHARED Cap (Linux futex / Darwin pthread / Windows Win32 sync_cap + thread_cap).
  */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-#include <process.h>
-#include <windows.h>
-#define XLANG_QUEUE_WIN 1
-#else
-#include <pthread.h>
-#define XLANG_QUEUE_WIN 0
-#endif
+#include <xlang_sync_cap.h>   /* Cap residual 9.4.4 / 9.4.5: full-closure tri-platform sync primitives */
+#include <xlang_thread_cap.h> /* Cap residual 9.4.4 / 9.4.5: full-closure tri-platform thread primitives */
 
 /* Smoke state matching QueueSmokeState layout in runtime_queue_contention.x. */
 typedef struct {
@@ -29,13 +22,9 @@ typedef struct {
   int32_t head;
 } QueueSmokeState;
 
-#if XLANG_QUEUE_WIN
-typedef CRITICAL_SECTION queue_os_mutex_t;
-#else
-typedef pthread_mutex_t queue_os_mutex_t;
-#endif
+typedef struct xlang_cap_mutex queue_os_mutex_t;
 
-/* POSIX pthread start routine: public trampoline exists in both hybrid thin
+/* POSIX / Cap thread start routine: public trampoline exists in both hybrid thin
  * (runtime_queue_contention.x) and cold seed. Rest must not U the thin-only
  * queue_os_worker_trampoline_impl (mac run-queue Darwin UNDEF after L4). */
 void *queue_os_worker_trampoline(void *arg);
@@ -55,19 +44,15 @@ int32_t sync_queue_contention_smoke_c(void);
 
 /* ----- OS _impl bridges (always compiled, provide _impl symbols). ----- */
 
-/** Create mutex (pthread_mutex_init / InitializeCriticalSection). Returns opaque ptr or NULL. */
+/** Create mutex (xlang_cap_mutex_init). Returns opaque ptr or NULL. */
 void *queue_os_mutex_create_impl(void) {
     queue_os_mutex_t *m = (queue_os_mutex_t *)malloc(sizeof(queue_os_mutex_t));
     if (!m)
         return NULL;
-#if XLANG_QUEUE_WIN
-    InitializeCriticalSection(m);
-#else
-    if (pthread_mutex_init(m, NULL) != 0) {
+    if (xlang_cap_mutex_init(m) != 0) {
         free(m);
         return NULL;
     }
-#endif
     return (void *)m;
 }
 
@@ -75,62 +60,41 @@ void *queue_os_mutex_create_impl(void) {
 void queue_os_mutex_destroy_impl(void *mu) {
     if (!mu)
         return;
-#if XLANG_QUEUE_WIN
-    DeleteCriticalSection((queue_os_mutex_t *)mu);
-#else
-    pthread_mutex_destroy((queue_os_mutex_t *)mu);
-#endif
+    (void)xlang_cap_mutex_destroy((queue_os_mutex_t *)mu);
     free(mu);
 }
 
-/** Lock mutex (pthread_mutex_lock / EnterCriticalSection). */
+/** Lock mutex (xlang_cap_mutex_lock). */
 void queue_os_mutex_lock_impl(void *mu) {
     if (!mu)
         return;
-#if XLANG_QUEUE_WIN
-    EnterCriticalSection((queue_os_mutex_t *)mu);
-#else
-    pthread_mutex_lock((queue_os_mutex_t *)mu);
-#endif
+    (void)xlang_cap_mutex_lock((queue_os_mutex_t *)mu);
 }
 
-/** Unlock mutex (pthread_mutex_unlock / LeaveCriticalSection). */
+/** Unlock mutex (xlang_cap_mutex_unlock). */
 void queue_os_mutex_unlock_impl(void *mu) {
     if (!mu)
         return;
-#if XLANG_QUEUE_WIN
-    LeaveCriticalSection((queue_os_mutex_t *)mu);
-#else
-    pthread_mutex_unlock((queue_os_mutex_t *)mu);
-#endif
+    (void)xlang_cap_mutex_unlock((queue_os_mutex_t *)mu);
 }
 
-/** Launch two worker threads via _beginthreadex / pthread_create, join both.
+/** Launch two worker threads via Cap spawn, join both.
  *  Returns 0 on success, -1 on failure.
- *  On POSIX, start routine is queue_os_worker_trampoline (thin or cold).
- *  On Windows, trampoline is queue_os_worker_trampoline_win_impl (rest-provided, stdcall). */
+ *  Start routine is queue_os_worker_trampoline across all platforms. */
 int32_t queue_os_run_two_workers_impl(void *ctx) {
-#if XLANG_QUEUE_WIN
-    uintptr_t h0, h1;
-    h0 = _beginthreadex(NULL, 0, queue_os_worker_trampoline_win_impl, ctx, 0, NULL);
-    h1 = _beginthreadex(NULL, 0, queue_os_worker_trampoline_win_impl, ctx, 0, NULL);
-    if (h0 == 0 || h1 == 0)
+    struct xlang_thread_join j0, j1;
+    if (xlang_thread_spawn((xlang_thread_start_fn)queue_os_worker_trampoline, ctx, &j0, 65536u) != 0)
         return -1;
-    WaitForSingleObject((HANDLE)h0, INFINITE);
-    WaitForSingleObject((HANDLE)h1, INFINITE);
-    CloseHandle((HANDLE)h0);
-    CloseHandle((HANDLE)h1);
-#else
-    pthread_t t0, t1;
-    if (pthread_create(&t0, NULL, (void *(*)(void *))queue_os_worker_trampoline, ctx) != 0)
-        return -1;
-    if (pthread_create(&t1, NULL, (void *(*)(void *))queue_os_worker_trampoline, ctx) != 0) {
-        pthread_join(t0, NULL);
+    if (xlang_thread_spawn((xlang_thread_start_fn)queue_os_worker_trampoline, ctx, &j1, 65536u) != 0) {
+        (void)xlang_thread_join(&j0);
         return -1;
     }
-    pthread_join(t0, NULL);
-    pthread_join(t1, NULL);
-#endif
+    if (xlang_thread_join(&j0) != 0) {
+        (void)xlang_thread_join(&j1);
+        return -1;
+    }
+    if (xlang_thread_join(&j1) != 0)
+        return -1;
     return 0;
 }
 
@@ -160,18 +124,6 @@ int32_t queue_os_run_two_workers_c(void *ctx) {
 }
 
 #endif /* !XLANG_RUNTIME_QUEUE_CONTENTION_FROM_X */
-
-/* ----- Windows-only stdcall trampoline (required by _beginthreadex). ----- */
-
-#if XLANG_QUEUE_WIN
-/** Windows-only stdcall trampoline for _beginthreadex. Calls worker_push via
- *  queue_contention_worker_push_c (provided by .x thin in R2, or by this seed
- *  in cold path via forward declaration above). */
-static unsigned __stdcall queue_os_worker_trampoline_win_impl(void *arg) {
-    (void)queue_contention_worker_push_c(arg);
-    return 0;
-}
-#endif
 
 /* ----- Smoke test helpers (guarded in R2: provided by .x thin). ----- */
 
@@ -240,10 +192,10 @@ int32_t queue_contention_worker_push_c(void *ctx) {
     return 0;
 }
 
-#if !XLANG_QUEUE_WIN
-/* POSIX trampoline (cold path only: thin provides this in R2).
+/* Trampoline (cold path only: thin provides this in R2).
  * Marked static to avoid symbol collision with thin-provided
- * queue_os_worker_trampoline_impl in ld -r merge. */
+ * queue_os_worker_trampoline_impl in ld -r merge.
+ * PLATFORM: SHARED Cap. */
 static void *queue_os_worker_trampoline_impl_cold(void *arg) {
     (void)queue_contention_worker_push_c(arg);
     return NULL;
@@ -252,7 +204,6 @@ static void *queue_os_worker_trampoline_impl_cold(void *arg) {
 void *queue_os_worker_trampoline(void *arg) {
     return queue_os_worker_trampoline_impl_cold(arg);
 }
-#endif
 
 /** STD-048 sync_queue_contention_smoke_c (cold path). */
 int32_t sync_queue_contention_smoke_c(void) {

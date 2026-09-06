@@ -12,9 +12,10 @@
  * moved to .x (thin); this file now provides _impl OS bridge implementations
  * only, with cold-mode fallback wrappers under #ifndef XLANG_RUNTIME_RANDOM_FILL_FROM_X.
  *
- * PLATFORM: SHARED (Windows BCrypt / Linux Cap getrandom / macOS getentropy)
+ * PLATFORM: SHARED Cap (9.1.6)
  *
- * Cap residual 9.1.6: Linux getrandom via xlang_random_cap.h (no libc getrandom).
+ * Cap residual 9.1.6: SHARED Cap convergence (Linux raw syscall getrandom /
+ * Darwin raw syscall getentropy / Windows BCrypt via xlang_random_cap.h; no libc).
  */
 
 #include <stdint.h>
@@ -30,9 +31,8 @@ int32_t random_fill_bytes_c(uint8_t *buf, int32_t len);
 #include <bcrypt.h>
 #include <synchapi.h>
 #pragma comment(lib, "bcrypt.lib")
-#else
-#include <xlang_random_cap.h>
 #endif
+#include <xlang_random_cap.h>
 
 /* ========== random_get_alg_impl (Windows: BCrypt lazy init; non-Windows: stub) ========== */
 #if defined(_WIN32) || defined(_WIN64)
@@ -71,26 +71,14 @@ void *random_get_alg(void) {
 
 /* ========== random_fill_bytes_impl ========== */
 /**
- * OS bridge: fill buffer with CSPRNG bytes.
- * Windows: BCryptGenRandom
- * Linux: Cap getrandom (xlang_random_cap.h)
- * Darwin／other POSIX: Cap getentropy wrapper
- * PLATFORM: SHARED
+ * OS bridge: fill buffer with CSPRNG bytes via unified Cap xlang_random_fill_bytes.
+ * Windows: BCryptGenRandom (xlang_random_cap.h)
+ * Linux: Cap raw syscall getrandom (xlang_random_cap.h, no libc)
+ * Darwin: Cap raw syscall getentropy (xlang_random_cap.h, no libc)
+ * PLATFORM: SHARED Cap (9.1.6)
  */
 int32_t random_fill_bytes_impl(uint8_t *buf, int32_t len) {
-    if (!buf || len < 0) return -1;
-    if (len == 0) return 0;
-
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        BCRYPT_ALG_HANDLE alg = random_get_alg_impl();
-        if (!alg) return -1;
-        return (BCryptGenRandom(alg, buf, (ULONG)(size_t)len, 0) == 0) ? len : -1;
-    }
-#else
-    /* PLATFORM: LINUX Cap / Darwin getentropy via xlang_random_fill_bytes */
     return xlang_random_fill_bytes(buf, len);
-#endif
 }
 
 #ifndef XLANG_RUNTIME_RANDOM_FILL_FROM_X

@@ -17,6 +17,7 @@
  *            macOS/Linux delegate to system headers via #include_next.
  *            Historical #ifndef _WIN32 guard removed for safe includes. */
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #include <fcntl.h>
 #include <errno.h>
 extern int32_t rt_entry_strlen(uint8_t * s);
@@ -161,7 +162,7 @@ void rt_entry_write_str(int32_t fd, uint8_t * s) {
     return;
   }
   {
-    (void)(write(fd, s, ((size_t)(n))));
+    (void)(xlang_io_write(fd, s, ((size_t)(n))));
   }
 }
 void rt_entry_write_nl(int32_t fd) {

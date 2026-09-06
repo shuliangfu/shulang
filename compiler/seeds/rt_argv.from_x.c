@@ -45,11 +45,11 @@ int drv_eq_minus_backend(const char *buf, int len) {
 }
 
 int drv_eq_minus_target(const char *buf, int len) {
-  return len >= 7 && !memcmp(buf, "-target", 7);
+  return len == 7 && !memcmp(buf, "-target", 7);
 }
 
 int drv_eq_minus_target_cpu(const char *buf, int len) {
-  return len >= 11 && !memcmp(buf, "-target-cpu", 11);
+  return len == 11 && !memcmp(buf, "-target-cpu", 11);
 }
 
 int drv_eq_print_target_cpu(const char *buf, int len) {

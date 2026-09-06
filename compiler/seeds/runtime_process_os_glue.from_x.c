@@ -71,8 +71,9 @@
 #include <fcntl.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
-#endif
+#else
 extern char **environ;
+#endif
 #endif
 
 /* thin+rest：thin 函数在 rest 模式下由 .x 提供，前向声明供 rest 函数调用 */
@@ -116,32 +117,14 @@ uint8_t *process_getenv_c(uint8_t *name) {
 
 /**
  * Set environment variable name=value; overwrite != 0 replaces existing.
- * Cap residual 9.1.1: POSIX xlang_environ_setenv (no libc setenv).
- * Windows: _putenv("name=value").
+ * Cap residual 9.1.1: xlang_environ_setenv (POSIX walk / Win32 dual block).
  * @return 0 success, -1 failure.
- * PLATFORM: POSIX Cap residual; WIN32 _putenv.
+ * PLATFORM: SHARED Cap (9.1.1).
  */
 int32_t process_setenv_impl(uint8_t *name, uint8_t *value, int32_t overwrite) {
     if (name == NULL) return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    (void)overwrite;
-    {
-        char buf[1024];
-        size_t n = 0;
-        while (n < sizeof(buf) - 2 && name[n]) { buf[n] = (char)name[n]; n++; }
-        if (n >= sizeof(buf) - 2) return -1;
-        buf[n++] = '=';
-        if (value) {
-            size_t j = 0;
-            while (value[j] && n < sizeof(buf) - 1) { buf[n++] = (char)value[j++]; }
-        }
-        buf[n] = '\0';
-        return _putenv(buf) == 0 ? 0 : -1;
-    }
-#else
     return xlang_environ_setenv((const char *)name, value ? (const char *)value : "",
                                 overwrite ? 1 : 0);
-#endif
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -152,26 +135,13 @@ int32_t process_setenv_c(uint8_t *name, uint8_t *value, int32_t overwrite) {
 
 /**
  * Delete environment variable name.
- * Cap residual 9.1.1: POSIX xlang_environ_unsetenv (no libc unsetenv).
- * Windows: _putenv("name=").
+ * Cap residual 9.1.1: xlang_environ_unsetenv (POSIX walk / Win32 dual block).
  * @return 0 success, -1 failure.
- * PLATFORM: POSIX Cap residual; WIN32 _putenv.
+ * PLATFORM: SHARED Cap (9.1.1).
  */
 int32_t process_unsetenv_impl(uint8_t *name) {
     if (name == NULL) return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        char buf[512];
-        size_t n = 0;
-        while (n < sizeof(buf) - 2 && name[n]) { buf[n] = (char)name[n]; n++; }
-        if (n >= sizeof(buf) - 2) return -1;
-        buf[n++] = '=';
-        buf[n] = '\0';
-        return _putenv(buf) == 0 ? 0 : -1;
-    }
-#else
     return xlang_environ_unsetenv((const char *)name);
-#endif
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -180,25 +150,12 @@ int32_t process_unsetenv_c(uint8_t *name) {
 }
 #endif
 
-/** Stage10 Cap residual 9.1.3: Linux getpid via raw syscall (no libc getpid).
- * x86_64 nr=39; aarch64 nr=172. Windows: GetCurrentProcessId. Other POSIX: libc.
- * PLATFORM: LINUX|x86_64 + LINUX|aarch64 primary; WIN32; else POSIX fallback.
+/** Cap residual 9.1.3: process_getpid_impl via Cap xlang_proc_getpid (no libc getpid).
+ * Linux: raw syscall (nr 39/172); Darwin: raw syscall (nr 0x2000014/20); Windows: GetCurrentProcessId.
+ * PLATFORM: SHARED Cap (9.1.3).
  */
 int32_t process_getpid_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return (int32_t)(intptr_t)GetCurrentProcessId();
-#elif defined(__linux__) && defined(__x86_64__)
-    long r;
-    __asm__ __volatile__("syscall" : "=a"(r) : "a"((long)39) : "rcx", "r11", "memory");
-    return (int32_t)r;
-#elif defined(__linux__) && defined(__aarch64__)
-    register long x8 __asm__("x8") = 172;
-    register long x0 __asm__("x0");
-    __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
-    return (int32_t)x0;
-#else
-    return (int32_t)getpid();
-#endif
+    return (int32_t)xlang_proc_getpid();
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -207,26 +164,12 @@ int32_t process_getpid_c(void) {
 }
 #endif
 
-/** Stage10 Cap residual 9.1.3: Linux getppid via raw syscall (no libc getppid).
- * x86_64 nr=110; aarch64 nr=173. Windows: -1 (no portable parent pid). Else POSIX.
- * PLATFORM: LINUX|x86_64 + LINUX|aarch64 primary; WIN32; else POSIX fallback.
+/** Cap residual 9.1.3: process_getppid_impl via Cap xlang_proc_getppid (no libc getppid).
+ * Linux: raw syscall (nr 110/173); Darwin: raw syscall (nr 0x2000027/39); Windows: -1.
+ * PLATFORM: SHARED Cap (9.1.3).
  */
 int32_t process_getppid_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    (void)0;
-    return -1;
-#elif defined(__linux__) && defined(__x86_64__)
-    long r;
-    __asm__ __volatile__("syscall" : "=a"(r) : "a"((long)110) : "rcx", "r11", "memory");
-    return (int32_t)r;
-#elif defined(__linux__) && defined(__aarch64__)
-    register long x8 __asm__("x8") = 173;
-    register long x0 __asm__("x0");
-    __asm__ __volatile__("svc #0" : "=r"(x0) : "r"(x8) : "memory");
-    return (int32_t)x0;
-#else
-    return (int32_t)getppid();
-#endif
+    return (int32_t)xlang_proc_getppid();
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -241,118 +184,25 @@ static char process_cwd_cache[PROCESS_CWD_CACHE_SIZE];
 static int32_t process_cwd_cache_len = 0; /* 0 表示未缓存或已失效 */
 
 /**
- * Stage10 Cap residual 9.1.3: Linux getcwd/chdir without libc.
- * x86_64: getcwd=79 chdir=80; aarch64: getcwd=17 chdir=49.
- * getcwd syscall returns bytes placed including NUL, or -errno.
- * PLATFORM: LINUX|x86_64 + LINUX|aarch64.
- */
-#if defined(__linux__) && defined(__x86_64__)
-static long process_linux_sys2(long nr, long a1, long a2) {
-  long r;
-  __asm__ __volatile__("syscall"
-                       : "=a"(r)
-                       : "a"(nr), "D"(a1), "S"(a2)
-                       : "rcx", "r11", "memory");
-  return r;
-}
-static long process_linux_sys1(long nr, long a1) {
-  long r;
-  __asm__ __volatile__("syscall"
-                       : "=a"(r)
-                       : "a"(nr), "D"(a1)
-                       : "rcx", "r11", "memory");
-  return r;
-}
-static int process_linux_fill_cwd_cache(void) {
-  long r = process_linux_sys2(79, (long)(intptr_t)process_cwd_cache, (long)sizeof(process_cwd_cache));
-  if (r <= 0)
-    return -1;
-  process_cwd_cache_len = (int32_t)r - 1;
-  if (process_cwd_cache_len < 0)
-    return -1;
-  return 0;
-}
-static int process_linux_chdir(const char *path) {
-  long r = process_linux_sys1(80, (long)(intptr_t)path);
-  return (r == 0) ? 0 : -1;
-}
-#elif defined(__linux__) && defined(__aarch64__)
-static long process_linux_sys2(long nr, long a1, long a2) {
-  register long x8 __asm__("x8") = nr;
-  register long x0 __asm__("x0") = a1;
-  register long x1 __asm__("x1") = a2;
-  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8), "r"(x1) : "memory");
-  return x0;
-}
-static long process_linux_sys1(long nr, long a1) {
-  register long x8 __asm__("x8") = nr;
-  register long x0 __asm__("x0") = a1;
-  __asm__ __volatile__("svc #0" : "+r"(x0) : "r"(x8) : "memory");
-  return x0;
-}
-static int process_linux_fill_cwd_cache(void) {
-  long r = process_linux_sys2(17, (long)(intptr_t)process_cwd_cache, (long)sizeof(process_cwd_cache));
-  if (r <= 0)
-    return -1;
-  process_cwd_cache_len = (int32_t)r - 1;
-  if (process_cwd_cache_len < 0)
-    return -1;
-  return 0;
-}
-static int process_linux_chdir(const char *path) {
-  long r = process_linux_sys1(49, (long)(intptr_t)path);
-  return (r == 0) ? 0 : -1;
-}
-#endif
-
-/**
  * Write cwd into buf (NUL-terminated), at most buf_size bytes including NUL.
  * Returns bytes written excluding NUL, or -1 on failure.
  * Cache: first call / after chdir hits syscall; later calls memcpy only.
- * Stage10 Cap residual 9.1.3: Linux uses raw getcwd syscall (no libc getcwd).
+ * Cap residual 9.1.3: uses Cap xlang_proc_getcwd (no libc getcwd).
+ * PLATFORM: SHARED Cap (9.1.3).
  */
 int32_t process_getcwd_impl(uint8_t *buf, int32_t buf_size) {
     if (buf == NULL || buf_size <= 0) return -1;
-#if defined(_WIN32) || defined(_WIN64)
     if (process_cwd_cache_len > 0) {
         if ((int32_t)process_cwd_cache_len >= buf_size) return -1;
-        size_t n = (size_t)process_cwd_cache_len + 1u;
-        memcpy(buf, process_cwd_cache, n);
-        return process_cwd_cache_len;
-    }
-    {
-        DWORD n = GetCurrentDirectoryA((DWORD)buf_size, (char *)buf);
-        if (n == 0 || n >= (DWORD)buf_size) return -1;
-        process_cwd_cache_len = (int32_t)n;
-        memcpy(process_cwd_cache, buf, (size_t)n + 1u);
-        return (int32_t)n;
-    }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-    if (process_cwd_cache_len > 0) {
-        if (process_cwd_cache_len >= buf_size) return -1;
         memcpy(buf, process_cwd_cache, (size_t)process_cwd_cache_len + 1u);
         return process_cwd_cache_len;
     }
-    if (process_linux_fill_cwd_cache() != 0) return -1;
+    long n = xlang_proc_getcwd(process_cwd_cache, sizeof(process_cwd_cache));
+    if (n <= 1) return -1;
+    process_cwd_cache_len = (int32_t)n - 1;
     if (process_cwd_cache_len >= buf_size) return -1;
     memcpy(buf, process_cwd_cache, (size_t)process_cwd_cache_len + 1u);
     return process_cwd_cache_len;
-#else
-    if (process_cwd_cache_len > 0) {
-        if (process_cwd_cache_len >= buf_size) return -1;
-        memcpy(buf, process_cwd_cache, (size_t)process_cwd_cache_len + 1u);
-        return process_cwd_cache_len;
-    }
-    {
-        char *p = getcwd(process_cwd_cache, sizeof(process_cwd_cache));
-        if (p == NULL) return -1;
-        size_t n = strlen(process_cwd_cache);
-        process_cwd_cache_len = (int32_t)n;
-        if ((int32_t)n >= buf_size) return -1;
-        memcpy(buf, process_cwd_cache, n + 1u);
-        return (int32_t)n;
-    }
-#endif
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -364,35 +214,17 @@ int32_t process_getcwd_c(uint8_t *buf, int32_t buf_size) {
 /**
  * Zero-copy: pointer to internal cwd cache (NUL-terminated).
  * Fills cache on miss. Caller must not write; valid until next chdir/getcwd fill.
- * Stage10 Cap residual 9.1.3: Linux raw getcwd syscall (no libc).
+ * Cap residual 9.1.3: uses Cap xlang_proc_getcwd (no libc getcwd).
+ * PLATFORM: SHARED Cap (9.1.3).
  */
 uint8_t *process_getcwd_ptr_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
     if (process_cwd_cache_len > 0)
         return (uint8_t *)process_cwd_cache;
-    {
-        DWORD n = GetCurrentDirectoryA((DWORD)sizeof(process_cwd_cache), process_cwd_cache);
-        if (n == 0 || n >= (DWORD)sizeof(process_cwd_cache)) return NULL;
-        process_cwd_cache[n] = '\0';
-        process_cwd_cache_len = (int32_t)n;
-        return (uint8_t *)process_cwd_cache;
-    }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-    if (process_cwd_cache_len > 0)
-        return (uint8_t *)process_cwd_cache;
-    if (process_linux_fill_cwd_cache() != 0)
+    long n = xlang_proc_getcwd(process_cwd_cache, sizeof(process_cwd_cache));
+    if (n <= 1)
         return NULL;
+    process_cwd_cache_len = (int32_t)n - 1;
     return (uint8_t *)process_cwd_cache;
-#else
-    if (process_cwd_cache_len > 0)
-        return (uint8_t *)process_cwd_cache;
-    {
-        char *p = getcwd(process_cwd_cache, sizeof(process_cwd_cache));
-        if (p == NULL) return NULL;
-        process_cwd_cache_len = (int32_t)strlen(process_cwd_cache);
-        return (uint8_t *)process_cwd_cache;
-    }
-#endif
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -413,18 +245,14 @@ int32_t process_getcwd_cached_len_c(void) {
 #endif
 
 /** Change cwd to path (NUL-terminated). Returns 0 ok, -1 fail. Invalidates getcwd cache.
- * Stage10 Cap residual 9.1.3: Linux raw chdir syscall (no libc chdir).
+ * Cap residual 9.1.3: uses Cap xlang_proc_chdir (no libc chdir).
+ * Linux: raw syscall (nr 80/49); Darwin: raw syscall (nr 0x200000c/12); Windows: SetCurrentDirectoryA.
+ * PLATFORM: SHARED Cap (9.1.3).
  */
 int32_t process_chdir_impl(uint8_t *path) {
     if (path == NULL) return -1;
     process_cwd_cache_len = 0;
-#if defined(_WIN32) || defined(_WIN64)
-    return SetCurrentDirectoryA((const char *)path) ? 0 : -1;
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-    return process_linux_chdir((const char *)path);
-#else
-    return chdir((const char *)path) == 0 ? 0 : -1;
-#endif
+    return xlang_proc_chdir((const char *)path);
 }
 
 #ifndef XLANG_RUNTIME_PROCESS_OS_GLUE_FROM_X
@@ -590,7 +418,7 @@ int32_t process_spawn_impl(uint8_t *program, uint8_t *argv_ptr) {
         CloseHandle(pi.hProcess);
         return (int32_t)(intptr_t)pi.dwProcessId;
     }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#else
     {
         void (*saved_sigchld)(int) = signal(SIGCHLD, process_nop_sigchld);
         if (saved_sigchld == SIG_ERR) saved_sigchld = SIG_DFL;
@@ -607,23 +435,6 @@ int32_t process_spawn_impl(uint8_t *program, uint8_t *argv_ptr) {
         signal(SIGCHLD, saved_sigchld);
         return (int32_t)pid;
     }
-#else
-    {
-        void (*saved_sigchld)(int) = signal(SIGCHLD, process_nop_sigchld);
-        if (saved_sigchld == SIG_ERR) saved_sigchld = SIG_DFL;
-        pid_t pid = fork();
-        if (pid < 0) {
-            signal(SIGCHLD, saved_sigchld);
-            return -1;
-        }
-        if (pid == 0) {
-            signal(SIGCHLD, saved_sigchld);
-            execve((const char *)program, (char *const *)argv, environ);
-            _exit(127);
-        }
-        signal(SIGCHLD, saved_sigchld);
-        return (int32_t)pid;
-    }
 #endif
 }
 
@@ -635,10 +446,10 @@ int32_t process_spawn_c(uint8_t *program, uint8_t *argv_ptr) {
 
 /**
  * Replace current process with program (does not return on success).
- * Cap residual 9.1.4: Linux execve via xlang_process_cap.
- * Windows: unsupported (-1). Other POSIX: libc execve.
+ * Cap residual 9.1.4: Linux/Darwin raw execve via xlang_process_cap (no libc execve).
+ * Windows: unsupported (-1).
  * @return -1 on failure
- * PLATFORM: LINUX Cap residual; WIN32 -1; else POSIX.
+ * PLATFORM: SHARED Cap residual; WIN32 -1.
  */
 int32_t process_exec_impl(uint8_t *program, uint8_t *argv_ptr) {
     if (program == NULL || argv_ptr == NULL) return -1;
@@ -646,15 +457,9 @@ int32_t process_exec_impl(uint8_t *program, uint8_t *argv_ptr) {
     (void)program;
     (void)argv_ptr;
     return -1;
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-    {
-        char **argv = (char **)(void *)argv_ptr;
-        (void)xlang_proc_execve((const char *)program, (char *const *)argv, environ);
-        return -1;
-    }
 #else
     char **argv = (char **)(void *)argv_ptr;
-    execve((const char *)program, (char *const *)argv, environ);
+    (void)xlang_proc_execve((const char *)program, (char *const *)argv, environ);
     return -1;
 #endif
 }
@@ -667,9 +472,9 @@ int32_t process_exec_c(uint8_t *program, uint8_t *argv_ptr) {
 
 /**
  * Wait for child pid; return exit code (low 8 bits) or -1.
- * Cap residual 9.1.4: Linux wait4 via xlang_process_cap (no libc waitpid).
- * Windows: OpenProcess + WaitForSingleObject. Other POSIX: libc waitpid.
- * PLATFORM: LINUX Cap residual; WIN32; else POSIX.
+ * Cap residual 9.1.4: Linux/Darwin wait4 via xlang_process_cap (no libc waitpid).
+ * Windows: OpenProcess + WaitForSingleObject.
+ * PLATFORM: SHARED Cap residual; WIN32.
  */
 int32_t process_waitpid_impl(int32_t pid) {
     if (pid <= 0) return -1;
@@ -689,18 +494,11 @@ int32_t process_waitpid_impl(int32_t pid) {
         CloseHandle(h);
         return (int32_t)(uint32_t)code;
     }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#else
     {
         int status = 0;
         long w = xlang_proc_waitpid((long)pid, &status, 0);
         if (w != (long)pid) return -1;
-        if (WIFEXITED(status)) return (int32_t)(uint8_t)WEXITSTATUS(status);
-        return -1;
-    }
-#else
-    {
-        int status = 0;
-        if (waitpid((pid_t)pid, &status, 0) != (pid_t)pid) return -1;
         if (WIFEXITED(status)) return (int32_t)(uint8_t)WEXITSTATUS(status);
         return -1;
     }
@@ -738,17 +536,13 @@ typedef struct {
 #if !defined(_WIN32) && !defined(_WIN64)
 /**
  * dup2 fd → slot for spawn_io stdio redirect.
- * Cap residual 9.1.4: Linux dup2/dup3 via xlang_process_cap.
+ * Cap residual 9.1.4: Linux/Darwin raw syscall via xlang_proc_dup2 (no libc dup2).
  * @return 0 ok, -1 fail
- * PLATFORM: LINUX Cap residual; else POSIX libc dup2.
+ * PLATFORM: SHARED Cap residual.
  */
 int32_t process_dup_stdio_posix_impl(int32_t fd, int32_t slot) {
     if (fd < 0) return 0;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
     if (xlang_proc_dup2(fd, slot) < 0) return -1;
-#else
-    if (dup2(fd, slot) < 0) return -1;
-#endif
     return 0;
 }
 
@@ -820,7 +614,6 @@ int32_t process_spawn_io_impl(uint8_t *program, uint8_t *argv_ptr, void *io_void
     {
         void (*saved_sigchld)(int) = signal(SIGCHLD, process_nop_sigchld);
         if (saved_sigchld == SIG_ERR) saved_sigchld = SIG_DFL;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
         long pid = xlang_proc_fork();
         if (pid < 0) {
             signal(SIGCHLD, saved_sigchld);
@@ -836,23 +629,6 @@ int32_t process_spawn_io_impl(uint8_t *program, uint8_t *argv_ptr, void *io_void
         }
         signal(SIGCHLD, saved_sigchld);
         return (int32_t)pid;
-#else
-        pid_t pid = fork();
-        if (pid < 0) {
-            signal(SIGCHLD, saved_sigchld);
-            return -1;
-        }
-        if (pid == 0) {
-            signal(SIGCHLD, saved_sigchld);
-            if (in_fd >= 0 && process_dup_stdio_posix(in_fd, STDIN_FILENO) != 0) _exit(127);
-            if (out_fd >= 0 && process_dup_stdio_posix(out_fd, STDOUT_FILENO) != 0) _exit(127);
-            if (err_fd >= 0 && process_dup_stdio_posix(err_fd, STDERR_FILENO) != 0) _exit(127);
-            execve((const char *)program, (char *const *)argv, environ);
-            _exit(127);
-        }
-        signal(SIGCHLD, saved_sigchld);
-        return (int32_t)pid;
-#endif
     }
 #endif
 }
@@ -880,10 +656,10 @@ int32_t process_exec_simple_c(uint8_t *program) {
 
 /**
  * Create a pipe; on success *read_fd readable, *write_fd writable.
- * Cap residual 9.1.4: Linux pipe/pipe2 via xlang_process_cap (no libc pipe).
+ * Cap residual 9.1.4: Linux/Darwin raw syscall via xlang_process_cap (no libc pipe).
  * Windows: CreatePipe. Other POSIX: libc pipe.
  * @return 0 ok, -1 fail
- * PLATFORM: LINUX Cap residual; WIN32; else POSIX.
+ * PLATFORM: SHARED Cap residual; WIN32.
  */
 int32_t process_pipe_impl(int32_t *read_fd, int32_t *write_fd) {
     if (read_fd == NULL || write_fd == NULL) return -1;
@@ -902,7 +678,7 @@ int32_t process_pipe_impl(int32_t *read_fd, int32_t *write_fd) {
         if (*read_fd < 0 || *write_fd < 0) return -1;
         return 0;
     }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#else
     {
         int fd[2];
         if (xlang_proc_pipe(fd) != 0) return -1;
@@ -910,12 +686,6 @@ int32_t process_pipe_impl(int32_t *read_fd, int32_t *write_fd) {
         *write_fd = (int32_t)fd[1];
         return 0;
     }
-#else
-    int fd[2];
-    if (pipe(fd) != 0) return -1;
-    *read_fd = (int32_t)fd[0];
-    *write_fd = (int32_t)fd[1];
-    return 0;
 #endif
 }
 

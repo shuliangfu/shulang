@@ -620,7 +620,7 @@ int32_t driver_eq_minus_backend(uint8_t * buf, int32_t len) {
   return 0;
 }
 int32_t driver_eq_minus_target(uint8_t * buf, int32_t len) {
-  if ((len < 7)) {
+  if ((len != 7)) {
     return 0;
   }
   if (((((((((buf)[0] ==45) && ((buf)[1] ==116)) && ((buf)[2] ==97)) && ((buf)[3] ==114)) && ((buf)[4] ==103)) && ((buf)[5] ==101)) && ((buf)[6] ==116))) {

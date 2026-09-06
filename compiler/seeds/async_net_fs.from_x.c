@@ -12,6 +12,7 @@
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <xlang_weak.h>
 #include <string.h>
+#include <xlang_io_cap.h>
 /* PLATFORM: SHARED — include/unistd.h shim provides POSIX wrappers on MinGW
  *            (read/write/close/lseek/open/pread/pwrite/setenv/unsetenv).
  *            macOS/Linux delegate to system <unistd.h> via #include_next.
@@ -65,7 +66,7 @@ int32_t xlang_async_net_fs_smoke_c(void) {
     /* read async：pipe 写端 → read_async → complete */
     if (pipe(pv) != 0)
         return 1;
-    if (write(pv[1], wbuf, 3) != 3) {
+    if (xlang_io_write(pv[1], wbuf, 3) != 3) {
         close(pv[0]);
         close(pv[1]);
         return 2;
@@ -98,7 +99,7 @@ int32_t xlang_async_net_fs_smoke_c(void) {
         close(pv[1]);
         return 8;
     }
-    if (read(pv[0], rbuf, 3) != 3) {
+    if (xlang_io_read(pv[0], rbuf, 3) != 3) {
         close(pv[0]);
         close(pv[1]);
         return 9;

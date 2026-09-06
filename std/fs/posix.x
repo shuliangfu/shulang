@@ -127,19 +127,10 @@ extern "C" function mkdir(path: *u8, mode: u32): i32;
 extern "C" function xlang_fs_unlink(path: *u8): i32;
 extern "C" function xlang_fs_rmdir(path: *u8): i32;
 extern "C" function umask(mask: u32): u32;
-/* Cap residual 9.1.10: Linux dir via xlang_dir_cap.h (no libc opendir). */
-#[cfg(target_os = "linux")]
+/* Cap residual 9.1.10: POSIX (Linux and Darwin) dir via xlang_dir_cap.h (no libc opendir). */
 extern "C" function xlang_dir_opendir(name: *u8): *u8;
-#[cfg(target_os = "linux")]
 extern "C" function xlang_dir_readdir(dirp: *u8): *u8;
-#[cfg(target_os = "linux")]
 extern "C" function xlang_dir_closedir(dirp: *u8): i32;
-#[cfg(target_os = "macos")]
-extern "C" function opendir(name: *u8): *u8;
-#[cfg(target_os = "macos")]
-extern "C" function readdir(dirp: *u8): *u8;
-#[cfg(target_os = "macos")]
-extern "C" function closedir(dirp: *u8): i32;
 extern "C" function malloc(size: usize): *u8;
 extern "C" function free(ptr: *u8): void;
 extern "C" function memcpy(dst: *u8, src: *u8, n: usize): *u8;
@@ -437,48 +428,30 @@ export function fs_libc_writev(fd: i32, iov: *Iovec, iovcnt: i32): isize {
   return 0 as isize; // unreachable — typeck workaround
 }
 /** Exported function `fs_libc_opendir`.
- * Cap residual 9.1.10: Linux → xlang_dir_opendir; Darwin → libc opendir.
+ * Cap residual 9.1.10: POSIX (Linux and Darwin) → xlang_dir_opendir (no libc opendir).
  * @param name *u8
  * @return *u8
  */
-#[cfg(target_os = "linux")]
 export function fs_libc_opendir(name: *u8): *u8 {
   unsafe { return xlang_dir_opendir(name); }
   return 0 as *u8; // unreachable — typeck workaround
 }
-#[cfg(target_os = "macos")]
-export function fs_libc_opendir(name: *u8): *u8 {
-  unsafe { return opendir(name); }
-  return 0 as *u8; // unreachable — typeck workaround
-}
 /** Exported function `fs_libc_readdir`.
- * Cap residual 9.1.10: Linux → xlang_dir_readdir; Darwin → libc readdir.
+ * Cap residual 9.1.10: POSIX (Linux and Darwin) → xlang_dir_readdir (no libc readdir).
  * @param dirp *u8
  * @return *u8
  */
-#[cfg(target_os = "linux")]
 export function fs_libc_readdir(dirp: *u8): *u8 {
   unsafe { return xlang_dir_readdir(dirp); }
   return 0 as *u8; // unreachable — typeck workaround
 }
-#[cfg(target_os = "macos")]
-export function fs_libc_readdir(dirp: *u8): *u8 {
-  unsafe { return readdir(dirp); }
-  return 0 as *u8; // unreachable — typeck workaround
-}
 /** Exported function `fs_libc_closedir`.
- * Cap residual 9.1.10: Linux → xlang_dir_closedir; Darwin → libc closedir.
+ * Cap residual 9.1.10: POSIX (Linux and Darwin) → xlang_dir_closedir (no libc closedir).
  * @param dirp *u8
  * @return i32
  */
-#[cfg(target_os = "linux")]
 export function fs_libc_closedir(dirp: *u8): i32 {
   unsafe { return xlang_dir_closedir(dirp); }
-  return 0; // unreachable — typeck workaround
-}
-#[cfg(target_os = "macos")]
-export function fs_libc_closedir(dirp: *u8): i32 {
-  unsafe { return closedir(dirp); }
   return 0; // unreachable — typeck workaround
 }
 /** Exported function `fs_libc_malloc`.

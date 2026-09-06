@@ -2285,14 +2285,14 @@ export function labi_od_queue_contention_rel(): *u8 {
 
 /**
  * Count of UNDEF symbols that pull std/net/net.o on product asm on_demand.
- * @return i32 — 28 (std_net_* + net_*_c surface + wave956 std_net_resolve_*
+ * @return i32 — 34 (std_net_* + net_*_c surface + wave956 std_net_resolve_*
  *                + std_net_close_stream/connect_blocking/write_batch/tcp_pool_*
- *                + unique close_listener)
+ *                + unique close_listener + Cap 9.1.7 net_resolve_ipv4/ipv6_ex_c)
  * PLATFORM: SHARED — must match formal net.o export / C glue mangles
  */
 #[no_mangle]
 export function labi_od_net_sym_count(): i32 {
-  return 32;
+  return 34;
 }
 
 /**
@@ -2456,6 +2456,15 @@ export function labi_od_net_sym_at(i: i32): *u8 {
   }
   if (i == 31) {
     let p: *u8 = "std_net_tcp_pool_release";
+    return p;
+  }
+  /* Cap residual 9.1.7: DNS raw resolve face. */
+  if (i == 32) {
+    let p: *u8 = "net_resolve_ipv4_ex_c";
+    return p;
+  }
+  if (i == 33) {
+    let p: *u8 = "net_resolve_ipv6_ex_c";
     return p;
   }
   return 0 as *u8;

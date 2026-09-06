@@ -79,6 +79,14 @@ struct xlang_clone_args {
   uint64_t tls;
 };
 
+#ifndef __NR_sched_setaffinity
+#if defined(__x86_64__)
+#define __NR_sched_setaffinity 203
+#elif defined(__aarch64__)
+#define __NR_sched_setaffinity 122
+#endif
+#endif
+
 /**
  * Join handle filled by xlang_thread_spawn; wait with xlang_thread_join.
  * PLATFORM: LINUX
@@ -452,6 +460,81 @@ static inline int xlang_thread_join(struct xlang_thread_join *join) {
   return 0;
 }
 
+/**
+ * Set CPU affinity of the calling thread.
+ * @param cpu_index 0-based CPU index
+ * @return 0 on success, -1 on error
+ * PLATFORM: LINUX
+ */
+static inline int xlang_thread_set_affinity_self(int32_t cpu_index) {
+  if (cpu_index < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  unsigned long mask[1024 / (8 * sizeof(unsigned long))];
+  size_t idx;
+  size_t bit;
+  if ((size_t)cpu_index >= sizeof(mask) * 8) {
+    errno = EINVAL;
+    return -1;
+  }
+  for (idx = 0; idx < sizeof(mask) / sizeof(mask[0]); idx++) {
+    mask[idx] = 0;
+  }
+  idx = (size_t)cpu_index / (8 * sizeof(unsigned long));
+  bit = (size_t)cpu_index % (8 * sizeof(unsigned long));
+  mask[idx] |= (1UL << bit);
+  long r = xlang_syscall3(__NR_sched_setaffinity, 0, (long)sizeof(mask), (long)(void *)mask);
+  if (r < 0) {
+    errno = (int)-r;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Set CPU affinity of a Cap-spawned thread.
+ * @param join pointer to xlang_thread_join handle
+ * @param cpu_index 0-based CPU index
+ * @return 0 on success, -1 on error
+ * PLATFORM: LINUX
+ */
+static inline int xlang_thread_set_affinity(struct xlang_thread_join *join, int32_t cpu_index) {
+  if (join == 0 || join->child_tid <= 0 || cpu_index < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  unsigned long mask[1024 / (8 * sizeof(unsigned long))];
+  size_t idx;
+  size_t bit;
+  if ((size_t)cpu_index >= sizeof(mask) * 8) {
+    errno = EINVAL;
+    return -1;
+  }
+  for (idx = 0; idx < sizeof(mask) / sizeof(mask[0]); idx++) {
+    mask[idx] = 0;
+  }
+  idx = (size_t)cpu_index / (8 * sizeof(unsigned long));
+  bit = (size_t)cpu_index % (8 * sizeof(unsigned long));
+  mask[idx] |= (1UL << bit);
+  long r = xlang_syscall3(__NR_sched_setaffinity, (long)join->child_tid, (long)sizeof(mask), (long)(void *)mask);
+  if (r < 0) {
+    errno = (int)-r;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Set QoS class on Linux (unsupported; returns -1).
+ * PLATFORM: LINUX
+ */
+static inline int xlang_thread_set_qos_self(int32_t qos_class) {
+  (void)qos_class;
+  errno = ENOSYS;
+  return -1;
+}
+
 #elif defined(_WIN32) || defined(_WIN64)
 
 /*
@@ -565,6 +648,55 @@ static inline int xlang_thread_join(struct xlang_thread_join *join) {
   return 0;
 }
 
+/**
+ * Set CPU affinity on Windows using SetThreadAffinityMask.
+ * @param cpu_index 0-based CPU index
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_thread_set_affinity_self(int32_t cpu_index) {
+  if (cpu_index < 0 || cpu_index >= 64) {
+    errno = EINVAL;
+    return -1;
+  }
+  DWORD_PTR mask = (DWORD_PTR)(1ULL << (unsigned)cpu_index);
+  if (SetThreadAffinityMask(GetCurrentThread(), mask) == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Set CPU affinity of a Cap-spawned thread on Windows.
+ * @param join pointer to xlang_thread_join handle
+ * @param cpu_index 0-based CPU index
+ * @return 0 on success, -1 on error
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_thread_set_affinity(struct xlang_thread_join *join, int32_t cpu_index) {
+  if (join == 0 || join->handle == 0 || cpu_index < 0 || cpu_index >= 64) {
+    errno = EINVAL;
+    return -1;
+  }
+  DWORD_PTR mask = (DWORD_PTR)(1ULL << (unsigned)cpu_index);
+  if (SetThreadAffinityMask((HANDLE)join->handle, mask) == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Set QoS class on Windows (unsupported; returns -1).
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_thread_set_qos_self(int32_t qos_class) {
+  (void)qos_class;
+  errno = ENOSYS;
+  return -1;
+}
+
 #elif defined(__APPLE__)
 
 /*
@@ -579,6 +711,7 @@ static inline int xlang_thread_join(struct xlang_thread_join *join) {
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/qos.h>
 
 typedef void *(*xlang_thread_start_fn)(void *arg);
 
@@ -649,6 +782,51 @@ static inline int xlang_thread_join(struct xlang_thread_join *join) {
   join->handle = (pthread_t)0;
   if (ret != 0) {
     errno = ret;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Set CPU affinity on Darwin (unsupported on macOS; returns -1).
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_thread_set_affinity_self(int32_t cpu_index) {
+  (void)cpu_index;
+  errno = ENOTSUP;
+  return -1;
+}
+
+/**
+ * Set CPU affinity of a thread on Darwin (unsupported on macOS; returns -1).
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_thread_set_affinity(struct xlang_thread_join *join, int32_t cpu_index) {
+  (void)join;
+  (void)cpu_index;
+  errno = ENOTSUP;
+  return -1;
+}
+
+/**
+ * Set QoS class on Darwin using pthread_set_qos_class_self_np.
+ * @param qos_class 0=default, 1=user_interactive, 2=user_initiated, 3=utility, 4=background
+ * @return 0 on success, -1 on error
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_thread_set_qos_self(int32_t qos_class) {
+  qos_class_t q = QOS_CLASS_DEFAULT;
+  switch (qos_class) {
+    case 0: q = QOS_CLASS_DEFAULT; break;
+    case 1: q = QOS_CLASS_USER_INTERACTIVE; break;
+    case 2: q = QOS_CLASS_USER_INITIATED; break;
+    case 3: q = QOS_CLASS_UTILITY; break;
+    case 4: q = QOS_CLASS_BACKGROUND; break;
+    default:
+      errno = EINVAL;
+      return -1;
+  }
+  if (pthread_set_qos_class_self_np(q, 0) != 0) {
     return -1;
   }
   return 0;

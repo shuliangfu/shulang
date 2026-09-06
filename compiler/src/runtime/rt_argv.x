@@ -188,7 +188,7 @@ export function drv_eq_minus_backend(buf: *u8, len: i32): i32 {
  */
 #[no_mangle]
 export function drv_eq_minus_target(buf: *u8, len: i32): i32 {
-  if (len < 7) { return 0; }
+  if (len != 7) { return 0; }
   if (buf[0] != 45) { return 0; }
   if (buf[1] != 116) { return 0; }
   if (buf[2] != 97) { return 0; }
@@ -208,7 +208,7 @@ export function drv_eq_minus_target(buf: *u8, len: i32): i32 {
  */
 #[no_mangle]
 export function drv_eq_minus_target_cpu(buf: *u8, len: i32): i32 {
-  if (len < 11) { return 0; }
+  if (len != 11) { return 0; }
   if (buf[0] != 45) { return 0; }
   if (buf[1] != 116) { return 0; }
   if (buf[2] != 97) { return 0; }

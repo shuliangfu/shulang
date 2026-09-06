@@ -16,7 +16,13 @@ export extern "C" function link_abi_getenv(name: *u8): *u8;
  * not raw libc system. Cap residual host system stays only link_abi_system_impl. */
 export extern "C" function link_abi_system(cmd: *u8): i32;
 export extern "C" function strcmp(a: *u8, b: *u8): i32;
-export extern "C" function write(fd: i32, buf: *u8, n: usize): isize;
+/** Cap residual 9.1.8: raw write via Cap abstraction xlang_sys_write.
+ * @param fd i32 file descriptor
+ * @param buf *u8 buffer pointer
+ * @param n usize bytes to write
+ * @return isize bytes written or negative on error
+ */
+export extern "C" function xlang_sys_write(fd: i32, buf: *u8, n: usize): isize;
 export extern "C" function driver_get_argv_i(argc: i32, argv: **u8, i: i32, buf: *u8, max: i32): i32;
 export extern "C" function diag_report_with_code(
   file: *u8, line: i32, col: i32, kind: *u8, code: *u8, msg: *u8, detail: *u8): void;
@@ -165,7 +171,7 @@ function rt_entry_write_str(fd: i32, s: *u8): void {
     return;
   }
   unsafe {
-    write(fd, s, n as usize);
+    xlang_sys_write(fd, s, n as usize);
   }
 }
 

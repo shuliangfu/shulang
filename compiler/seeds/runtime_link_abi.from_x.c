@@ -300,7 +300,6 @@ int xlang_cc_compile_sync_ex(const char *src, const char *out_o,
     }
 #else
     {
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
         long pid = xlang_proc_fork();
         if (pid < 0)
             return -1;
@@ -308,15 +307,6 @@ int xlang_cc_compile_sync_ex(const char *src, const char *out_o,
             (void)xlang_proc_execvp("cc", (char *const *)argv);
             xlang_proc_exit(127);
         }
-#else
-        pid_t pid = fork();
-        if (pid < 0)
-            return -1;
-        if (pid == 0) {
-            execvp("cc", (char *const *)argv);
-            _exit(127);
-        }
-#endif
         {
             int st;
             if (xlang_waitpid_retry((pid_t)pid, &st) != 0)
@@ -400,7 +390,7 @@ int xlang_spawn_sync_impl(const char *prog, const char *const *argv) {
             return -1;
         return (int)rc;
     }
-#elif defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#else
     {
         long pid = xlang_proc_fork();
         if (pid < 0)
@@ -412,24 +402,6 @@ int xlang_spawn_sync_impl(const char *prog, const char *const *argv) {
         {
             int st;
             if (xlang_waitpid_retry((pid_t)pid, &st) != 0)
-                return -1;
-            if (!WIFEXITED(st) || WEXITSTATUS(st) != 0)
-                return -1;
-        }
-    }
-    return 0;
-#else
-    {
-        pid_t pid = fork();
-        if (pid < 0)
-            return -1;
-        if (pid == 0) {
-            execvp(prog, (char *const *)argv);
-            _exit(127);
-        }
-        {
-            int st;
-            if (xlang_waitpid_retry(pid, &st) != 0)
                 return -1;
             if (!WIFEXITED(st) || WEXITSTATUS(st) != 0)
                 return -1;
@@ -495,18 +467,12 @@ void invoke_cc_strip_out_x(const char *out_path);
 /**
  * Cap residual (wave222 + 9.1.1): host env lookup → value pointer or NULL.
  * Pure orch (wave222 labi_diag_pure L1) owns null/empty name gates; _impl is always mega.
- * PLATFORM: SHARED — POSIX walk environ (xlang_environ_cap); Windows CRT getenv.
+ * PLATFORM: SHARED Cap (9.1.1) — unified xlang_environ_getenv.
  * Product ensure orch (formal_std XLANG / XLANG_FORMAL_STD_ENSURE; ensure_std_net XLANG_NET_TLS).
  */
 #include <xlang_environ_cap.h>
 const char *link_abi_getenv_impl(const char *name) {
-    if (!name || !name[0])
-        return NULL;
-#if defined(_WIN32) || defined(_WIN64)
-    return getenv(name);
-#else
     return xlang_environ_getenv(name);
-#endif
 }
 
 /* wave222: link_abi_getenv pure orch lives in labi_diag_pure.x (hybrid L1);
@@ -527,14 +493,14 @@ const char *link_abi_getenv(const char *name);
 /**
  * Cap residual (wave224 + 9.1.4): host system(cmd) → shell status or -1.
  * Pure orch (wave224 labi_diag_pure L1) owns null/empty cmd gates; _impl is always mega.
- * Linux: fork+execve(/bin/sh -c)+wait4 (no libc system). Else libc system.
- * PLATFORM: LINUX Cap residual; SHARED face; other POSIX libc system.
+ * Linux/Darwin: fork+execve(/bin/sh -c)+wait4 (no libc system).
+ * PLATFORM: SHARED Cap residual (POSIX fork+execve+waitpid; Windows system).
  * Product ensure orch (ensure_std_net net-o-*; formal_std XLANG make).
  */
 int link_abi_system_impl(const char *cmd) {
     if (!cmd || !cmd[0])
         return -1;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#if !defined(_WIN32) && !defined(_WIN64)
     {
         char *argv[4];
         long pid;
@@ -1062,7 +1028,7 @@ void xlang_debug_hello_stage1_report(const char *hypothesis_id, const char *loca
         strncpy(url, "http://127.0.0.1:7777/event", sizeof(url) - 1);
     if (!session[0])
         strncpy(session, "hello-stage1-segv", sizeof(session) - 1);
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#if !defined(_WIN32) && !defined(_WIN64)
     if (xlang_proc_fork() == 0) {
         char body[768];
         char *cargv[12];
@@ -1083,17 +1049,6 @@ void xlang_debug_hello_stage1_report(const char *hypothesis_id, const char *loca
         cargv[9] = NULL;
         (void)xlang_proc_execvp("curl", cargv);
         xlang_proc_exit(0);
-    }
-#else
-    if (fork() == 0) {
-        char body[768];
-        (void)snprintf(body, sizeof(body),
-            "{\"sessionId\":\"%s\",\"runId\":\"pre-fix\",\"hypothesisId\":\"%s\",\"location\":\"%s\","
-            "\"msg\":\"[DEBUG] %s\",\"data\":{\"v1\":%d,\"v2\":%d,\"v3\":%d}}",
-            session, hypothesis_id ? hypothesis_id : "A", location ? location : "runtime_link_abi.c",
-            msg ? msg : "hello-stage1", v1, v2, v3);
-        execlp("curl", "curl", "-s", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", body, (char *)NULL);
-        _exit(0);
     }
 #endif
 }
@@ -6178,19 +6133,7 @@ int xlang_asm_invoke_ld_platform(const char *o_path, const char *exe_path, const
             }
         }
 #else
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
         pid = (pid_t)xlang_proc_fork();
-        if (pid < 0) {
-            perror("fork (ld)");
-            return -1;
-        }
-        if (pid == 0) {
-            xlang_linux_ld_child_path();
-            (void)xlang_proc_execvp(argv[0], (char *const *)argv);
-            xlang_proc_exit(127);
-        }
-#else
-        pid = fork();
         if (pid < 0) {
             perror("fork (ld)");
             return -1;
@@ -6198,15 +6141,10 @@ int xlang_asm_invoke_ld_platform(const char *o_path, const char *exe_path, const
         if (pid == 0) {
 #if defined(__linux__)
             xlang_linux_ld_child_path();
-            execvp(argv[0], (char *const *)argv);
-            perror("gcc");
-#else
-            execvp("ld", (char *const *)argv);
-            perror("ld");
 #endif
-            _exit(127);
+            (void)xlang_proc_execvp(argv[0], (char *const *)argv);
+            xlang_proc_exit(127);
         }
-#endif
         {
             int status;
             if (xlang_waitpid_retry(pid, &status) != 0)
@@ -6372,7 +6310,7 @@ int labi_gates_count(void);
  */
 int xlang_waitpid_retry_impl(pid_t pid, int *status_out) {
     int st = 0;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#if !defined(_WIN32) && !defined(_WIN64)
     for (;;) {
         long w = xlang_proc_waitpid((long)pid, &st, 0);
         if (w == (long)pid) {

@@ -13,6 +13,7 @@
  *            macOS/Linux delegate to system headers via #include_next.
  *            Historical #ifndef _WIN32 guard removed for safe includes. */
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/uio.h>
@@ -26,10 +27,10 @@
  * PLATFORM: SHARED — cold/surface twin of fmt_check_cmd_thin.x. */
 extern uint8_t * link_abi_getenv(uint8_t * name);
 static inline ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {
-  return read((int)fd, (void *)buf, count);
+  return (ssize_t)xlang_io_read((int)fd, (void *)buf, count);
 }
 static inline ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {
-  return write((int)fd, (const void *)buf, count);
+  return (ssize_t)xlang_io_write((int)fd, (const void *)buf, count);
 }
 static inline ssize_t xlang_sys_readv(int32_t fd, uint8_t *iov, int32_t iovcnt) {
   return readv((int)fd, (const struct iovec *)(const void *)iov, (int)iovcnt);

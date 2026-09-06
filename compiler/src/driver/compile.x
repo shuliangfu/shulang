@@ -255,7 +255,7 @@ export function eq_minus_backend(buf: *u8, len: i32): i32 {
  * @return i32
  */
 export function eq_minus_target(buf: *u8, len: i32): i32 {
-  if (len < 7) {
+  if (len != 7) {
     return 0;
   }
   if (buf[0] == 45 && buf[1] == 116 && buf[2] == 97 && buf[3] == 114 && buf[4] == 103 && buf[5] ==

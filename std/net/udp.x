@@ -40,12 +40,9 @@ allow(padding) struct SockAddrIn {
 #[cfg(not(target_os = "windows"))]
 allow(padding) struct PollFd { fd: i32; events: i16; revents: i16; }
 
-extern "C" function socket(domain: i32, sock_type: i32, protocol: i32): i32;
-extern "C" function bind(fd: i32, addr: *u8, addrlen: u32): i32;
-extern "C" function setsockopt(fd: i32, level: i32, optname: i32, optval: *i32, optlen: u32): i32;
-extern "C" function sendto(fd: i32, buf: *u8, len: usize, flags: i32, addr: *u8, addrlen: u32): i32;
-extern "C" function recvfrom(fd: i32, buf: *u8, len: usize, flags: i32, addr: *u8, addrlen: *u32): i32;
-extern "C" function close(fd: i32): i32;
+/* Cap residual 9.1.7: SHARED product face via sock_fast Cap bodies (not libc sendto/recvfrom). */
+extern function xlang_sys_sendto(sockfd: i32, buf: *u8, len: i32, flags: i32, addr: *u8, addrlen: i32): i32;
+extern function xlang_sys_recvfrom(sockfd: i32, buf: *u8, len: i32, flags: i32, addr: *u8, addrlen: *u32): i32;
 extern "C" function htonl(hostlong: u32): u32;
 extern "C" function htons(hostshort: u16): u16;
 extern "C" function ntohl(netlong: u32): u32;
@@ -243,7 +240,7 @@ export function net_udp_send_to_c(fd: i32, addr_u32: u32, port_u32: u32, buf: *u
   let sin_ptr: *u8 = net_udp_sin_buf_ptr_c(&sin_mem[0]);
   let n: i32 = 0;
   unsafe { net_udp_set_addr_port_buf_c(sin_ptr, addr_u32, port_u32); }
-  unsafe { n = sendto(fd, buf, len, 0, sin_ptr, 16 as u32); }
+  unsafe { n = xlang_sys_sendto(fd, buf, len as i32, 0, sin_ptr, 16); }
   if (n >= 0) {
     return n;
   }
@@ -266,7 +263,7 @@ export function net_udp_recv_from_c(fd: i32, buf: *u8, len: usize, timeout_ms: u
       return -1;
     }
   }
-  unsafe { n = recvfrom(fd, buf, len, 0, peer_ptr, &peer_len); }
+  unsafe { n = xlang_sys_recvfrom(fd, buf, len as i32, 0, peer_ptr, &peer_len); }
   if (n < 0) {
     if (net_udp_recv_is_eagain_c() != 0) {
       return 0;

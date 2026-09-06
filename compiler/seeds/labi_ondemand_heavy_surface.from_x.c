@@ -409,7 +409,8 @@ int32_t labi_fk0_sym_count(int32_t k) {
   }
   if ((k ==15)) {
     /* Cap residual 9.1.2: +std_fs_stat (mirror heavy.x). */
-    return 12;
+    /* Cap residual 9.1.10: +std_fs_dir_{open,read,close} (mirror heavy.x). */
+    return 15;
   }
   if ((k ==16)) {
     return 7;
@@ -1109,6 +1110,19 @@ uint8_t * labi_fk0_sym_at(int32_t k, int32_t i) {
     /* Cap residual 9.1.2: stat-only users must pull formal fs.o. */
     if ((i ==11)) {
       uint8_t * p = ((uint8_t *)"std_fs_stat");
+      return p;
+    }
+    /* Cap residual 9.1.10: dir-only users must pull formal fs.o. */
+    if ((i ==12)) {
+      uint8_t * p = ((uint8_t *)"std_fs_dir_open");
+      return p;
+    }
+    if ((i ==13)) {
+      uint8_t * p = ((uint8_t *)"std_fs_dir_read");
+      return p;
+    }
+    if ((i ==14)) {
+      uint8_t * p = ((uint8_t *)"std_fs_dir_close");
       return p;
     }
     return ((uint8_t *)(0));

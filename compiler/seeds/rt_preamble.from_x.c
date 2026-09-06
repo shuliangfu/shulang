@@ -94,39 +94,27 @@ const char *const driver_preamble_io_net_lines[] = {
         "}\n"
         "#define fs_note_last_error_posix std_fs_posix_fs_note_last_error_posix\n"
         "#endif\n",
-        /* Cap residual 9.1.8: read/write/writev via xlang_io_cap.h on Linux
-         * (no libc write). Windows keeps host write/_write. Generated user C
-         * needs -I…/compiler/include (Cap 10.7.1 slice11: invoke_cc second -I). */
-        "#if !defined(_WIN32) && !defined(_WIN64)\n"
+        /* Cap residual 9.1.8: read/write/writev via xlang_io_cap.h (no libc write).
+         * Generated user C needs -I…/compiler/include (Cap 10.7.1 slice11: invoke_cc second -I).
+         * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS | POSIX). */
         "#include <xlang_io_cap.h>\n"
         "static inline ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {\n"
         "  return (ssize_t)xlang_io_read((int)fd, (void *)buf, count);\n"
         "}\n"
         "static inline ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {\n"
         "  return (ssize_t)xlang_io_write((int)fd, (const void *)buf, count);\n"
-        "}\n"
-        "#else\n"
-        "static inline ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {\n"
-        "  return read((int)fd, (void *)buf, count);\n"
-        "}\n"
-        "static inline ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {\n"
-        "  return write((int)fd, (const void *)buf, count);\n"
-        "}\n"
-        "#endif\n",
-        /* PLATFORM: POSIX — MinGW lacks readv/writev/poll/pread/pwrite and the types
-         * struct iovec, struct pollfd, nfds_t. Gate each inline behind _WIN32. Windows
-         * std.io.sync / std.net use xlang_sys_read/write (provided by MinGW io.h).
-         * Cap residual 9.1.8: writev via xlang_io_cap.h on Linux. */
+        "}\n",
+        /* PLATFORM: POSIX — MinGW lacks readv/poll/pread/pwrite and the types
+         * struct pollfd, nfds_t. Gate each inline behind _WIN32.
+         * Cap residual 9.1.8: writev via xlang_io_cap.h on all platforms. */
         "#if !defined(_WIN32) && !defined(_WIN64)\n"
         "static inline ssize_t xlang_sys_readv(int32_t fd, uint8_t *iov, int32_t iovcnt) {\n"
         "  return readv((int)fd, (const struct iovec *)(const void *)iov, (int)iovcnt);\n"
         "}\n"
         "#endif\n",
-        "#if !defined(_WIN32) && !defined(_WIN64)\n"
         "static inline ssize_t xlang_sys_writev(int32_t fd, uint8_t *iov, int32_t iovcnt) {\n"
         "  return (ssize_t)xlang_io_writev((int)fd, (const void *)iov, (int)iovcnt);\n"
-        "}\n"
-        "#endif\n",
+        "}\n",
         /* Cap residual 9.1.7/9.1.9: poll via xlang_net_cap.h (no libc poll).
          * Co-emit into std.net must not leave U poll (net.o residual). */
         "#if !defined(_WIN32) && !defined(_WIN64)\n"

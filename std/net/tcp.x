@@ -50,14 +50,10 @@ allow(padding) struct SockAddrIn {
 #[cfg(not(target_os = "windows"))]
 allow(padding) struct PollFd { fd: i32; events: i16; revents: i16; }
 
-extern "C" function socket(domain: i32, sock_type: i32, protocol: i32): i32;
-extern "C" function connect(fd: i32, addr: *u8, addrlen: u32): i32;
-/* Cap residual 9.1.7: Linux product face via sock_fast Cap bodies (not libc socket). */
+/* Cap residual 9.1.7: SHARED product face via sock_fast Cap bodies (not libc socket/connect/accept). */
 extern function xlang_sys_socket(domain: i32, sock_type: i32, protocol: i32): i32;
 extern function xlang_sys_connect(sockfd: i32, addr: *u8, addrlen: i32): i32;
-extern "C" function bind(fd: i32, addr: *u8, addrlen: u32): i32;
-extern "C" function listen(fd: i32, backlog: i32): i32;
-extern "C" function accept(fd: i32, addr: *u8, addrlen: *u32): i32;
+extern function xlang_sys_accept(sockfd: i32, addr: *u8, addrlen: *u32): i32;
 extern "C" function setsockopt(fd: i32, level: i32, optname: i32, optval: *i32, optlen: u32): i32;
 extern "C" function getsockopt(fd: i32, level: i32, optname: i32, optval: *i32, optlen: *u32): i32;
 extern "C" function htonl(hostlong: u32): u32;
@@ -347,7 +343,7 @@ export function net_tcp_connect_c(addr_u32: u32, port_u32: u32, timeout_ms: u32)
     return -1;
   }
   unsafe { net_tcp_set_addr_port_buf_c(sin_ptr, addr_u32, port_u32); }
-  unsafe { fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); }
+  unsafe { fd = xlang_sys_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); }
   if (fd < 0) {
     return -1;
   }
@@ -355,7 +351,7 @@ export function net_tcp_connect_c(addr_u32: u32, port_u32: u32, timeout_ms: u32)
     unsafe { net_close_socket_c(fd); }
     return -1;
   }
-  unsafe { if (connect(fd, sin_ptr, 16 as u32) != 0) {
+  unsafe { if (xlang_sys_connect(fd, sin_ptr, 16) != 0) {
     if (net_tcp_connect_not_inprogress_c() != 0) {
       net_close_socket_c(fd);
       return -1;
@@ -434,11 +430,11 @@ export function net_tcp_connect_blocking_c(addr_u32: u32, port_u32: u32, timeout
     net_tcp_prefetch_fd_c(fd);
     return fd;
   }
-  unsafe { fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); }
+  unsafe { fd = xlang_sys_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); }
   if (fd < 0) {
     return -1;
   }
-  unsafe { if (connect(fd, sin_ptr, 16 as u32) != 0) {
+  unsafe { if (xlang_sys_connect(fd, sin_ptr, 16) != 0) {
     net_close_socket_c(fd);
     return -1;
   } }
@@ -477,7 +473,7 @@ export function net_accept_c(listener_fd: i32, timeout_ms: u32): i32 {
       return -1;
     }
   }
-  unsafe { fd = accept(listener_fd, peer_ptr, &peer_len); }
+  unsafe { fd = xlang_sys_accept(listener_fd, peer_ptr, &peer_len); }
   if (fd < 0) {
     return -1;
   }

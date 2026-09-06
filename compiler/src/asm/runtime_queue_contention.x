@@ -16,8 +16,8 @@ export extern "C" function malloc(size: usize): *u8;
 export extern "C" function free(ptr: *u8): void;
 
 /* OS bridge declarations — OS-specific _impl functions in runtime_queue_contention.from_x.c.
- * PLATFORM: SHARED — Windows uses CRITICAL_SECTION + _beginthreadex;
- *           POSIX uses pthread_mutex_t + pthread_create. */
+ * PLATFORM: SHARED Cap — unified xlang_cap_mutex + xlang_thread_spawn/join across
+ *           Linux, Darwin, and Windows. */
 export extern "C" function queue_os_mutex_create_impl(): *u8;
 export extern "C" function queue_os_mutex_destroy_impl(mu: *u8): void;
 export extern "C" function queue_os_mutex_lock_impl(mu: *u8): void;
@@ -34,10 +34,10 @@ allow(padding) struct QueueSmokeState {
 }
 
 /* Public API — thin wrappers that delegate to _impl OS bridges.
- * PLATFORM: SHARED — same public API on all platforms; platform-specific logic
- *           isolated in _impl functions in the C seed. */
+ * PLATFORM: SHARED — same public API on all platforms; unified Cap primitives
+ *           implemented in the C seed. */
 
-/** Create OS mutex (pthread_mutex_t / CRITICAL_SECTION). Returns opaque pointer or null. */
+/** Create OS mutex (xlang_cap_mutex). Returns opaque pointer or null. */
 #[no_mangle]
 export function queue_os_mutex_create_c(): *u8 {
   unsafe { return queue_os_mutex_create_impl(); }

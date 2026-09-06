@@ -1,13 +1,13 @@
 /*
  * xlang_path_cap.h — Cap residual 9.1.2: path access/stat/fstat/realpath without
- * libc access/stat/fstat/realpath on Linux.
+ * libc access/stat/fstat/realpath on Linux and Darwin.
  *
  * Single authority for host mega Cap residual path probes:
  *   link_abi_path_readable_impl / path_executable_impl / realpath_cap_impl,
- *   xlang_path_is_nonempty_regular_file_impl, ELF fstat scan, host gcc probe.
+ *   xlang_path_is_nonempty_regular_file_impl, ELF/Mach-O fstat scan, host gcc probe.
  *
  * Linux: faccessat / newfstatat|fstatat / fstat / open+readlink(/proc/self/fd/N).
- * Other POSIX: thin wrappers over libc (Darwin residual until later).
+ * Darwin: raw syscalls access / stat64 / fstat64 / open+fcntl(F_GETPATH)+close.
  * Windows (MinGW/MSYS leftover PE SAT): _access / stat / fstat / _fullpath.
  *   Call sites in runtime_link_abi.from_x.c use xlang_path_access / xlang_path_stat
  *   unconditionally (path_readable_impl / path_executable_impl /
@@ -17,8 +17,7 @@
  *   (xlang_link_capture_opt_level_from_argv unique). G.7 有则补全 this header —
  *   do not add a second Windows path probe in the seed.
  *
- * PLATFORM: LINUX primary (x86_64 + aarch64); POSIX fallback elsewhere;
- *           WINDOWS MinGW CRT wrappers (leftover-PE SAT).
+ * PLATFORM: SHARED Cap (9.1.2).
  */
 
 #ifndef XLANG_PATH_CAP_H
@@ -177,9 +176,181 @@ static inline const char *xlang_path_realpath(const char *path, char *out) {
   return out;
 }
 
-#else /* !LINUX primary ISA — Darwin / other POSIX residual */
+#elif defined(__APPLE__) && (defined(__x86_64__) || defined(__aarch64__))
 
-#include <stdlib.h> /* realpath(3); PLATFORM: POSIX (Darwin residual). Linux Cap path above does not call libc realpath. */
+#ifndef F_GETPATH
+#define F_GETPATH 50
+#endif
+
+#ifndef O_RDONLY
+#define O_RDONLY 0
+#endif
+
+#if defined(__aarch64__)
+static inline long xlang_darwin_path_sys1(long nr, long a1) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_path_sys2(long nr, long a1, long a2) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16), "r"(x1)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_path_sys3(long nr, long a1, long a2, long a3) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16), "r"(x1), "r"(x2)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+#elif defined(__x86_64__)
+static inline long xlang_darwin_path_sys1(long nr, long a1) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+
+static inline long xlang_darwin_path_sys2(long nr, long a1, long a2) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1), "S"(a2)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+
+static inline long xlang_darwin_path_sys3(long nr, long a1, long a2, long a3) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1), "S"(a2), "d"(a3)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+#endif
+
+/**
+ * Cap residual access(2) on Darwin via raw syscall 33 (no libc access).
+ * @return 0 ok, -1 fail
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline int xlang_path_access(const char *path, int mode) {
+  long r;
+  if (!path || !path[0])
+    return -1;
+#if defined(__x86_64__)
+  r = xlang_darwin_path_sys2(0x2000021L, (long)path, (long)mode);
+#elif defined(__aarch64__)
+  r = xlang_darwin_path_sys2(33, (long)path, (long)mode);
+#endif
+  return (r == 0) ? 0 : -1;
+}
+
+/**
+ * Cap residual stat(2) on Darwin via raw syscall 338 (SYS_stat64, no libc stat).
+ * @return 0 ok, -1 fail
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline int xlang_path_stat(const char *path, struct stat *st) {
+  long r;
+  if (!path || !path[0] || !st)
+    return -1;
+#if defined(__x86_64__)
+  r = xlang_darwin_path_sys2(0x2000152L, (long)path, (long)st);
+#elif defined(__aarch64__)
+  r = xlang_darwin_path_sys2(338, (long)path, (long)st);
+#endif
+  return (r == 0) ? 0 : -1;
+}
+
+/**
+ * Cap residual fstat(2) on Darwin via raw syscall 339 (SYS_fstat64, no libc fstat).
+ * @return 0 ok, -1 fail
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline int xlang_path_fstat(int fd, struct stat *st) {
+  long r;
+  if (fd < 0 || !st)
+    return -1;
+#if defined(__x86_64__)
+  r = xlang_darwin_path_sys2(0x2000153L, (long)fd, (long)st);
+#elif defined(__aarch64__)
+  r = xlang_darwin_path_sys2(339, (long)fd, (long)st);
+#endif
+  return (r == 0) ? 0 : -1;
+}
+
+/**
+ * Cap residual realpath on Darwin via raw syscall open + fcntl(F_GETPATH) + close (no libc realpath).
+ * Requires path to exist (≡ common libc realpath success case for files/dirs).
+ * @param out caller buffer (typically PATH_MAX); written NUL-terminated on success
+ * @return out on success, NULL on failure
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline const char *xlang_path_realpath(const char *path, char *out) {
+  long fd;
+  long r;
+  if (!path || !path[0] || !out)
+    return NULL;
+#if defined(__x86_64__)
+  fd = xlang_darwin_path_sys3(0x2000005L, (long)path, O_RDONLY, 0);
+  if (fd < 0)
+    return NULL;
+  r = xlang_darwin_path_sys3(0x200005cL, fd, F_GETPATH, (long)out);
+  (void)xlang_darwin_path_sys1(0x2000006L, fd);
+#elif defined(__aarch64__)
+  fd = xlang_darwin_path_sys3(5, (long)path, O_RDONLY, 0);
+  if (fd < 0)
+    return NULL;
+  r = xlang_darwin_path_sys3(92, fd, F_GETPATH, (long)out);
+  (void)xlang_darwin_path_sys1(6, fd);
+#endif
+  if (r < 0)
+    return NULL;
+  return out;
+}
+
+#else /* POSIX fallback */
+
+#include <stdlib.h>
+#include <unistd.h>
 
 static inline int xlang_path_access(const char *path, int mode) {
   if (!path || !path[0])
@@ -200,13 +371,12 @@ static inline int xlang_path_fstat(int fd, struct stat *st) {
 }
 
 static inline const char *xlang_path_realpath(const char *path, char *out) {
-  /* PLATFORM: POSIX — libc realpath; Darwin needs stdlib.h (ISO C99 no implicit decl). */
   if (!path || !path[0] || !out)
     return NULL;
   return realpath(path, out);
 }
 
-#endif /* LINUX */
+#endif /* Platform branches */
 
 #else /* _WIN32|_WIN64 — leftover PE / MinGW SAT compiles link_abi rest */
 

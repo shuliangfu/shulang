@@ -19,19 +19,20 @@
 #include <string.h>
 #include <xlang_user_link_abi_getenv.h>
 #include <xlang_fmt_cap.h> /* Cap residual 10.7.2: log rotate path → xlang_snprintf */
+#include <xlang_io_cap.h>  /* Cap residual 9.1.8: log write fd → xlang_io_write */
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <io.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #define STDERR_FILENO 2
-int log_write_fd_impl(int fd, const void *buf, size_t len) { return (int)_write((int)fd, buf, (unsigned)len); }
 #else
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-int log_write_fd_impl(int fd, const void *buf, size_t len) { return (int)write(fd, buf, len); }
 #endif
+
+int log_write_fd_impl(int fd, const void *buf, size_t len) { return (int)xlang_io_write(fd, buf, len); }
 
 #ifndef XLANG_RUNTIME_LOG_OS_FROM_X
 int log_write_fd(int fd, const void *buf, size_t len) { return log_write_fd_impl(fd, buf, len); }

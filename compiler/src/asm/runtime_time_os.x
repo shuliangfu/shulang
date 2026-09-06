@@ -6,11 +6,11 @@
 // Provides monotonic/wall time, sleep, RFC3339 formatting, and local timezone offset.
 // The actual OS API calls (clock_gettime, nanosleep, gmtime_r, etc.) are delegated
 // to C bridge functions declared below as extern "C". These are implemented in
-// seeds/runtime_time_os.from_x.c via xlang_time_cap.h (Linux Cap residual 9.1.5)
+// seeds/runtime_time_os.from_x.c via xlang_time_cap.h (SHARED Cap 9.1.5)
 // and linked via the product pipeline.
 //
-// PLATFORM: SHARED — POSIX Cap clock (xlang_time_cap) + Cap fmt (xlang_snprintf);
-//           Windows QPC / gmtime_s + Cap snprintf via _impl.
+// PLATFORM: SHARED — Cap clock (xlang_time_cap) + Cap fmt (xlang_snprintf);
+//           Linux/Darwin raw syscalls + Windows Win32 Cap via _impl.
 //
 // Wave501 (2026-07-27): R2 migration of runtime_time_os.from_x.c business logic to .x.
 // Previously the .c seed provided all business logic; now the .x file is the

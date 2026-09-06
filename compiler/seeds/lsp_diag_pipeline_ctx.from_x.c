@@ -18,6 +18,7 @@
  *            macOS/Linux delegate to system headers via #include_next.
  *            Historical #ifndef _WIN32 guard removed for safe includes. */
 #include <unistd.h>
+#include <xlang_io_cap.h>
 
 /* wave244 G.7: env via public pure thin link_abi_getenv (wave222 → _impl host getenv);
  * not raw libc getenv. Cap residual host getenv stays only link_abi_getenv_impl.
@@ -299,7 +300,7 @@ int32_t lsp_write_all_impl(int32_t fd, const uint8_t *buf, int32_t len)
         return 0;
     }
     while (off < len) {
-        ssize_t n = write(fd, buf + (size_t)off, (size_t)(len - off));
+        ssize_t n = (ssize_t)xlang_io_write(fd, buf + (size_t)off, (size_t)(len - off));
         if (n < 0) {
             if (errno == EINTR) {
                 continue;

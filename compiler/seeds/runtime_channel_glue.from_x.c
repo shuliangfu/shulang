@@ -13,7 +13,7 @@
  *
  * 【所属模块/组件】
  * std.channel；与 channel.o 一并链入 exe；依赖 std.heap（malloc/realloc/free）；
- * Unix 需 -lpthread；Windows 使用 CRITICAL_SECTION + CONDITION_VARIABLE（Vista+）。
+ * PLATFORM: SHARED Cap (Linux futex / Darwin pthread / Windows Win32 sync_cap) — Cap mutex/cond for channel synchronization.
  */
 
 #include <stdint.h>
@@ -32,15 +32,7 @@
 #define UNBOUNDED_INIT_CAP 16
 #define SELECT_TIMEDWAIT_MS 5
 
-#if defined(_WIN32) || defined(_WIN64)
-#include <windows.h>
-#define CHAN_SYNC_WIN 1
-#else
-#include <pthread.h>
-#include <time.h>
-#include <xlang_time_cap.h> /* Cap residual 9.1.5 clock_gettime */
-#define CHAN_SYNC_WIN 0
-#endif
+#include <xlang_sync_cap.h> /* Cap residual 9.4.4 / 9.4.5: full-closure tri-platform sync primitives */
 
 /** 将 channel 句柄写入 i64 槽（64 位 LE，与 void* 布局兼容）。 */
 void channel_select_chs_set_c(int64_t *slots, int32_t idx, void *ch) {
@@ -54,17 +46,11 @@ void channel_select_dirs_set_c(int32_t *dirs, int32_t idx, int32_t dir) {
     dirs[idx] = dir;
 }
 
-/** i32 channel 内部实现：环形缓冲 + 同步原语。 */
+/** i32 channel 内部实现：环形缓冲 + 同步原语（统一使用 xlang_cap_*）。 */
 typedef struct {
-#if CHAN_SYNC_WIN
-    CRITICAL_SECTION mutex;
-    CONDITION_VARIABLE cond_not_empty;
-    CONDITION_VARIABLE cond_not_full;
-#else
-    pthread_mutex_t mutex;
-    pthread_cond_t  cond_not_empty;
-    pthread_cond_t  cond_not_full;
-#endif
+    struct xlang_cap_mutex mutex;
+    struct xlang_cap_cond  cond_not_empty;
+    struct xlang_cap_cond  cond_not_full;
     int32_t        *buf;
     int32_t         cap;       /* 有界为固定容量；无界为当前缓冲区大小，满时翻倍 */
     int32_t         length;
@@ -92,27 +78,21 @@ int32_t channel_select_send_case_live(void *ch);
 void channel_select_wait_recv_one(void *ch);
 void channel_select_wait_send_one(void *ch);
 
-/** 初始化 channel 同步原语；失败返回非 0。 */
+/** 初始化 channel 同步原语；失败返回非 0。
+ * PLATFORM: SHARED Cap (Linux futex / Darwin pthread / Windows Win32 sync_cap). */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 int32_t channel_sync_init_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    InitializeCriticalSection(&c->mutex);
-    InitializeConditionVariable(&c->cond_not_empty);
-    InitializeConditionVariable(&c->cond_not_full);
-    return 0;
-#else
-    if (pthread_mutex_init(&c->mutex, NULL) != 0) return -1;
-    if (pthread_cond_init(&c->cond_not_empty, NULL) != 0) {
-        pthread_mutex_destroy(&c->mutex);
+    if (xlang_cap_mutex_init(&c->mutex) != 0) return -1;
+    if (xlang_cap_cond_init(&c->cond_not_empty) != 0) {
+        (void)xlang_cap_mutex_destroy(&c->mutex);
         return -1;
     }
-    if (pthread_cond_init(&c->cond_not_full, NULL) != 0) {
-        pthread_cond_destroy(&c->cond_not_empty);
-        pthread_mutex_destroy(&c->mutex);
+    if (xlang_cap_cond_init(&c->cond_not_full) != 0) {
+        (void)xlang_cap_cond_destroy(&c->cond_not_empty);
+        (void)xlang_cap_mutex_destroy(&c->mutex);
         return -1;
     }
     return 0;
-#endif
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -123,16 +103,13 @@ int32_t channel_sync_init(channel_i32_impl_t *c) { return channel_sync_init_impl
 
 
 
-/** 销毁 channel 同步原语。 */
+/** 销毁 channel 同步原语。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_sync_destroy_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    DeleteCriticalSection(&c->mutex);
-#else
-    pthread_mutex_destroy(&c->mutex);
-    pthread_cond_destroy(&c->cond_not_empty);
-    pthread_cond_destroy(&c->cond_not_full);
-#endif
+    (void)xlang_cap_mutex_destroy(&c->mutex);
+    (void)xlang_cap_cond_destroy(&c->cond_not_empty);
+    (void)xlang_cap_cond_destroy(&c->cond_not_full);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -143,14 +120,11 @@ void channel_sync_destroy(channel_i32_impl_t *c) { channel_sync_destroy_impl(c);
 
 
 
-/** 加锁 channel。 */
+/** 加锁 channel。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_lock_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    EnterCriticalSection(&c->mutex);
-#else
-    pthread_mutex_lock(&c->mutex);
-#endif
+    (void)xlang_cap_mutex_lock(&c->mutex);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -161,14 +135,11 @@ void channel_lock(channel_i32_impl_t *c) { channel_lock_impl(c); }
 
 
 
-/** 解锁 channel。 */
+/** 解锁 channel。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_unlock_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    LeaveCriticalSection(&c->mutex);
-#else
-    pthread_mutex_unlock(&c->mutex);
-#endif
+    (void)xlang_cap_mutex_unlock(&c->mutex);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -179,14 +150,11 @@ void channel_unlock(channel_i32_impl_t *c) { channel_unlock_impl(c); }
 
 
 
-/** 唤醒一个等待 recv 的线程。 */
+/** 唤醒一个等待 recv 的线程。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_signal_not_empty_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    WakeConditionVariable(&c->cond_not_empty);
-#else
-    pthread_cond_signal(&c->cond_not_empty);
-#endif
+    (void)xlang_cap_cond_signal(&c->cond_not_empty);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -197,14 +165,11 @@ void channel_signal_not_empty(channel_i32_impl_t *c) { channel_signal_not_empty_
 
 
 
-/** 唤醒一个等待 send 的线程。 */
+/** 唤醒一个等待 send 的线程。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_signal_not_full_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    WakeConditionVariable(&c->cond_not_full);
-#else
-    pthread_cond_signal(&c->cond_not_full);
-#endif
+    (void)xlang_cap_cond_signal(&c->cond_not_full);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -215,14 +180,11 @@ void channel_signal_not_full(channel_i32_impl_t *c) { channel_signal_not_full_im
 
 
 
-/** 广播唤醒所有等待 recv 的线程。 */
+/** 广播唤醒所有等待 recv 的线程。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_broadcast_not_empty_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    WakeAllConditionVariable(&c->cond_not_empty);
-#else
-    pthread_cond_broadcast(&c->cond_not_empty);
-#endif
+    (void)xlang_cap_cond_broadcast(&c->cond_not_empty);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -233,14 +195,11 @@ void channel_broadcast_not_empty(channel_i32_impl_t *c) { channel_broadcast_not_
 
 
 
-/** 广播唤醒所有等待 send 的线程。 */
+/** 广播唤醒所有等待 send 的线程。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_broadcast_not_full_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    WakeAllConditionVariable(&c->cond_not_full);
-#else
-    pthread_cond_broadcast(&c->cond_not_full);
-#endif
+    (void)xlang_cap_cond_broadcast(&c->cond_not_full);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -251,14 +210,11 @@ void channel_broadcast_not_full(channel_i32_impl_t *c) { channel_broadcast_not_f
 
 
 
-/** 阻塞等待直到 buffer 非空或 channel 关闭。 */
+/** 阻塞等待直到 buffer 非空或 channel 关闭。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_wait_not_empty_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    SleepConditionVariableCS(&c->cond_not_empty, &c->mutex, INFINITE);
-#else
-    pthread_cond_wait(&c->cond_not_empty, &c->mutex);
-#endif
+    (void)xlang_cap_cond_wait(&c->cond_not_empty, &c->mutex);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -269,14 +225,11 @@ void channel_wait_not_empty(channel_i32_impl_t *c) { channel_wait_not_empty_impl
 
 
 
-/** 阻塞等待直到 buffer 有空间或 channel 关闭。 */
+/** 阻塞等待直到 buffer 有空间或 channel 关闭。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_wait_not_full_impl(channel_i32_impl_t *c) {
-#if CHAN_SYNC_WIN
-    SleepConditionVariableCS(&c->cond_not_full, &c->mutex, INFINITE);
-#else
-    pthread_cond_wait(&c->cond_not_full, &c->mutex);
-#endif
+    (void)xlang_cap_cond_wait(&c->cond_not_full, &c->mutex);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -287,22 +240,11 @@ void channel_wait_not_full(channel_i32_impl_t *c) { channel_wait_not_full_impl(c
 
 
 
-/** 限时等待 buffer 非空（select 轮询用）。 */
+/** 限时等待 buffer 非空（select 轮询用）。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_timedwait_not_empty_impl(channel_i32_impl_t *c, int32_t ms) {
-#if CHAN_SYNC_WIN
-    SleepConditionVariableCS(&c->cond_not_empty, &c->mutex, (DWORD)ms);
-#else
-    struct timespec ts;
-    /* PLATFORM: LINUX Cap / POSIX fallback — no libc clock_gettime */
-    (void)xlang_time_clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += (long)ms * 1000000L;
-    if (ts.tv_nsec >= 1000000000L) {
-        ts.tv_sec += ts.tv_nsec / 1000000000L;
-        ts.tv_nsec %= 1000000000L;
-    }
-    pthread_cond_timedwait(&c->cond_not_empty, &c->mutex, &ts);
-#endif
+    (void)xlang_cap_cond_timedwait_ms(&c->cond_not_empty, &c->mutex, ms);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X
@@ -313,22 +255,11 @@ void channel_timedwait_not_empty(channel_i32_impl_t *c, int32_t ms) { channel_ti
 
 
 
-/** 限时等待 buffer 有空间（select 轮询用）。 */
+/** 限时等待 buffer 有空间（select 轮询用）。
+ * PLATFORM: SHARED Cap. */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void channel_timedwait_not_full_impl(channel_i32_impl_t *c, int32_t ms) {
-#if CHAN_SYNC_WIN
-    SleepConditionVariableCS(&c->cond_not_full, &c->mutex, (DWORD)ms);
-#else
-    struct timespec ts;
-    /* PLATFORM: LINUX Cap / POSIX fallback — no libc clock_gettime */
-    (void)xlang_time_clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_nsec += (long)ms * 1000000L;
-    if (ts.tv_nsec >= 1000000000L) {
-        ts.tv_sec += ts.tv_nsec / 1000000000L;
-        ts.tv_nsec %= 1000000000L;
-    }
-    pthread_cond_timedwait(&c->cond_not_full, &c->mutex, &ts);
-#endif
+    (void)xlang_cap_cond_timedwait_ms(&c->cond_not_full, &c->mutex, ms);
 }
 
 #ifndef XLANG_RUNTIME_CHANNEL_GLUE_FROM_X

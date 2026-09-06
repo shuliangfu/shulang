@@ -1,34 +1,28 @@
 /* seeds/runtime_net_udp_batch.from_x.c — G-02f-20 product TU
  * G-02f-102 helper gates.
  * Product: runtime_net_udp_batch.o; logic still C until full .x port.
- */
-/**
- * runtime_net_udp_batch.c — Linux recvmmsg/sendmmsg glue (from std/net/udp_batch_glue.c).
  *
  * Cap residual 9.1.7 slice1: mmsg + poll via xlang_net_cap.h (no libc recvmmsg/sendmmsg).
- * mmsghdr/iovec batch syscalls still C; product paths in udp_batch.x.
- * Only __linux__ builds symbols; other platforms empty TU. Linked with net.o.
+ * mmsghdr/iovec batch syscalls; product paths in udp_batch.x.
+ * PLATFORM: SHARED Cap (LINUX raw syscall, MACOS|DARWIN raw syscall, WINDOWS Winsock Cap).
  */
-
-/* _GNU_SOURCE must be defined before any system header so that recvmmsg /
- * sendmmsg prototypes are exposed by <sys/socket.h>.
- *
- * 【根因修复】原代码 #if defined(__GLIBC__) 在 #include 之前检查，但
- * __GLIBC__ 由 <features.h> 定义，在 #include 前不可见 → 整个 TU 恒为空
- * → recvmmsg/sendmmsg 符号从未被编译。改为 _GNU_SOURCE + __linux__ 判断
- * （__linux__ 是编译器预定义，不需要 include）。 */
 #define _GNU_SOURCE
-
-#if defined(__linux__)
 
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
+
+#if defined(_WIN32) || defined(_WIN64)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <poll.h>
+#endif
+
 #include <xlang_net_cap.h>
 
 #ifndef XLANG_NET_UDP_GLUE_WEAK
@@ -55,6 +49,10 @@ int xlang_udp_batch_poll_readable(int fd, uint32_t timeout_ms);
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-20 thin+rest：_impl 实现；thin（src/asm/runtime_net_udp_batch.x）提供 public wrapper */
 void xlang_udp_batch_set_addr_port_impl(struct sockaddr_in *sin, uint32_t addr_u32, uint32_t port_u32) {
+    memset(sin, 0, sizeof(*sin));
+#if defined(__APPLE__)
+    sin->sin_len = (uint8_t)sizeof(*sin);
+#endif
     sin->sin_family = AF_INET;
     sin->sin_addr.s_addr = htonl(addr_u32);
     sin->sin_port = htons((uint16_t)(port_u32 & 0xFFFFu));
@@ -71,8 +69,11 @@ void xlang_udp_batch_set_addr_port(struct sockaddr_in *sin, uint32_t addr_u32, u
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-20 thin+rest：_impl 实现；thin（src/asm/runtime_net_udp_batch.x）提供 public wrapper */
 int xlang_udp_batch_poll_readable_impl(int fd, uint32_t timeout_ms) {
-    struct pollfd pfd = { fd, POLLIN, 0 };
-    /* Cap residual 9.1.7: poll via xlang_net_cap.h (slice0). PLATFORM: LINUX */
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    /* Cap residual 9.1.7: poll via xlang_net_cap.h (slice0). PLATFORM: SHARED Cap */
     int n = xlang_net_poll((void *)&pfd, 1u, (int)(timeout_ms ? timeout_ms : (-1)));
     if (n <= 0 || (pfd.revents & (POLLERR | POLLHUP)))
         return -1;
@@ -86,12 +87,10 @@ int xlang_udp_batch_poll_readable(int fd, uint32_t timeout_ms) {
 }
 #endif
 
-
-
-
 /**
- * Linux recvmmsg：最多 2 段；timeout_ms 非 0 时先 poll。
+ * recvmmsg：最多 2 段；timeout_ms 非 0 时先 poll。
  * 返回收到报文数；EAGAIN 返回 0；其它错误 -1。
+ * PLATFORM: SHARED Cap
  */
 XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg2_c(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, int n,
     uint32_t timeout_ms, int32_t *out_sizes, uint32_t *out_addrs, uint32_t *out_ports) {
@@ -104,7 +103,7 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg2_c(int32_t fd, uint8_t *p0, si
     if (n <= 0 || n > XLANG_UDP_BATCH_MAX || !out_sizes || !out_addrs || !out_ports)
         return -1;
     for (i = 0; i < (unsigned int)n; i++) {
-        socklen_t addrlen = sizeof(addrs[0]);
+        socklen_t addrlen = (socklen_t)sizeof(addrs[0]);
         iov[i].iov_base = (i == 0) ? p0 : p1;
         iov[i].iov_len  = (i == 0) ? l0 : l1;
         msgvec[i].msg_hdr.msg_name = &addrs[i];
@@ -133,7 +132,8 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg2_c(int32_t fd, uint8_t *p0, si
 }
 
 /**
- * Linux sendmmsg：最多 2 条目标报文。
+ * sendmmsg：最多 2 条目标报文。
+ * PLATFORM: SHARED Cap
  */
 XLANG_NET_UDP_GLUE_API int xlang_net_udp_sendmmsg2_c(int32_t fd, uint32_t a0, uint32_t port0, const uint8_t *p0, size_t l0,
     uint32_t a1, uint32_t port1, const uint8_t *p1, size_t l1, int n) {
@@ -162,7 +162,8 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_sendmmsg2_c(int32_t fd, uint32_t a0, ui
 }
 
 /**
- * Linux recvmmsg：Buffer 切片，n 为 1..8。
+ * recvmmsg：Buffer 切片，n 为 1..8。
+ * PLATFORM: SHARED Cap
  */
 XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg_buf_c(int32_t fd, xlang_net_buf_t *bufs, int n, uint32_t timeout_ms,
     int32_t *out_sizes, uint32_t *out_addrs, uint32_t *out_ports) {
@@ -175,7 +176,7 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg_buf_c(int32_t fd, xlang_net_bu
     if (n <= 0 || n > XLANG_UDP_BATCH_BUF_MAX || !bufs || !out_sizes || !out_addrs || !out_ports)
         return -1;
     for (i = 0; i < (unsigned int)n; i++) {
-        socklen_t addrlen = sizeof(addrs[0]);
+        socklen_t addrlen = (socklen_t)sizeof(addrs[0]);
         iov[i].iov_base = bufs[i].ptr;
         iov[i].iov_len  = bufs[i].length;
         msgvec[i].msg_hdr.msg_name = &addrs[i];
@@ -204,11 +205,12 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_recvmmsg_buf_c(int32_t fd, xlang_net_bu
 }
 
 /**
- * Linux sendmmsg：Buffer 切片，n 为 1..8。
+ * sendmmsg：Buffer 切片，n 为 1..8。
+ * PLATFORM: SHARED Cap
  */
 XLANG_NET_UDP_GLUE_API int xlang_net_udp_sendmmsg_buf_c(int32_t fd, const uint32_t *addrs_u32, const uint32_t *ports,
     const xlang_net_buf_t *bufs, int n) {
-    struct sockaddr_in sa[XLANG_UDP_BATCH_BUF_MAX];
+    struct sockaddr_in addrs[XLANG_UDP_BATCH_BUF_MAX];
     struct iovec iov[XLANG_UDP_BATCH_BUF_MAX];
     struct mmsghdr msgvec[XLANG_UDP_BATCH_BUF_MAX];
     unsigned int i;
@@ -217,11 +219,11 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_sendmmsg_buf_c(int32_t fd, const uint32
     if (n <= 0 || n > XLANG_UDP_BATCH_BUF_MAX || !addrs_u32 || !ports || !bufs)
         return -1;
     for (i = 0; i < (unsigned int)n; i++) {
-        xlang_udp_batch_set_addr_port(&sa[i], addrs_u32[i], ports[i]);
-        iov[i].iov_base = (void *)bufs[i].ptr;
+        xlang_udp_batch_set_addr_port(&addrs[i], addrs_u32[i], ports[i]);
+        iov[i].iov_base = bufs[i].ptr;
         iov[i].iov_len  = bufs[i].length;
-        msgvec[i].msg_hdr.msg_name = &sa[i];
-        msgvec[i].msg_hdr.msg_namelen = sizeof(sa[i]);
+        msgvec[i].msg_hdr.msg_name = &addrs[i];
+        msgvec[i].msg_hdr.msg_namelen = sizeof(addrs[i]);
         msgvec[i].msg_hdr.msg_iov = &iov[i];
         msgvec[i].msg_hdr.msg_iovlen = 1;
         msgvec[i].msg_hdr.msg_control = NULL;
@@ -229,7 +231,5 @@ XLANG_NET_UDP_GLUE_API int xlang_net_udp_sendmmsg_buf_c(int32_t fd, const uint32
         msgvec[i].msg_hdr.msg_flags = 0;
     }
     r = xlang_net_sendmmsg((int)fd, (void *)msgvec, (unsigned int)n, 0);
-    return (r >= 0) ? r : -1;
+    return (r < 0) ? -1 : r;
 }
-
-#endif /* __linux__ && __GLIBC__ */

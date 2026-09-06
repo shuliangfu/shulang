@@ -5,7 +5,7 @@
 // Thin layer: #[no_mangle] wrappers delegate to _impl OS bridges in
 // runtime_env_os.from_x.c (rest.o). Pure computation (env_build_key) stays
 // here; all OS syscalls remain in C _impl functions.
-// PLATFORM: SHARED — Windows GetEnvironmentVariableA vs POSIX getenv branching
+// PLATFORM: SHARED Cap (9.1.1) — Cap xlang_environ_* convergence (no libc getenv/setenv/unsetenv)
 //           is encapsulated in _impl functions.
 
 export extern "C" function env_getenv_c_impl(key: *u8, key_len: i32, out: *u8, out_cap: i32): i32;

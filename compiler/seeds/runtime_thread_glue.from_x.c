@@ -23,6 +23,7 @@
 #endif
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* ========== Linux: cpu_set_t bitmap helpers ========== */
 #if defined(__linux__)
@@ -58,6 +59,18 @@ void xlang_cpu_set(unsigned int cpu, cpu_set_t *set) {
     xlang_cpu_set_impl(cpu, set);
 }
 #endif
+#else
+/* Non-Linux fallback stubs for CPU set helpers */
+void xlang_cpu_zero_impl(void *set) {
+    if (set) memset(set, 0, 128);
+}
+void xlang_cpu_set_impl(unsigned int cpu, void *set) {
+    (void)cpu; (void)set;
+}
+#ifndef XLANG_RUNTIME_THREAD_GLUE_FROM_X
+void xlang_cpu_zero(void *set) { xlang_cpu_zero_impl(set); }
+void xlang_cpu_set(unsigned int cpu, void *set) { xlang_cpu_set_impl(cpu, set); }
+#endif
 #endif /* __linux__ */
 
 /* ========== Platform threading base ========== */
@@ -65,6 +78,7 @@ void xlang_cpu_set(unsigned int cpu, cpu_set_t *set) {
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xlang_sync_cap.h> /* Cap residual 10.6.2 / 10.6.3: Win32 sync/thread cap */
 #include <xlang_thread_cap.h> /* Cap residual 10.6.2: CreateThread spawn/join */
 /* Windows Cap: thread_id is heap `struct xlang_thread_join *` (owned until join). */
 #define XLANG_THREAD_ID_INVALID ((int64_t)0)
@@ -243,28 +257,9 @@ int32_t thread_join_impl(int64_t thread_id) {
 int32_t thread_join_c(int64_t thread_id) { return thread_join_impl(thread_id); }
 #endif
 
-/* ========== _impl: thread_set_affinity_self ========== */
+/* ========== _impl: thread_set_affinity_self (Cap residual 9.4.6) ========== */
 int32_t thread_set_affinity_self_impl(int32_t cpu_index) {
-    if (cpu_index < 0) return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        DWORD_PTR mask = (DWORD_PTR)(1ULL << (unsigned)cpu_index);
-        if (SetThreadAffinityMask(GetCurrentThread(), mask) == 0) return -1;
-        return 0;
-    }
-#elif defined(__linux__)
-    {
-        /* PLATFORM: LINUX — sched_setaffinity(0) (no pthread_setaffinity_np). */
-        cpu_set_t set;
-        xlang_cpu_zero(&set);
-        xlang_cpu_set((unsigned)cpu_index, &set);
-        if (sched_setaffinity(0, sizeof(set), &set) != 0) return -1;
-        return 0;
-    }
-#else
-    (void)cpu_index;
-    return -1; /* macOS/BSD: unsupported */
-#endif
+    return xlang_thread_set_affinity_self(cpu_index);
 }
 #ifndef XLANG_RUNTIME_THREAD_GLUE_FROM_X
 int32_t thread_set_affinity_self_c(int32_t cpu_index) {
@@ -272,34 +267,11 @@ int32_t thread_set_affinity_self_c(int32_t cpu_index) {
 }
 #endif
 
-/* ========== _impl: thread_set_affinity ========== */
+/* ========== _impl: thread_set_affinity (Cap residual 9.4.6) ========== */
 int32_t thread_set_affinity_impl(int64_t thread_id, int32_t cpu_index) {
-    if (thread_id == XLANG_THREAD_ID_INVALID || cpu_index < 0) return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    {
-        /* PLATFORM: WINDOWS — Cap join handle → CreateThread HANDLE. */
-        struct xlang_thread_join *join = (struct xlang_thread_join *)(uintptr_t)thread_id;
-        DWORD_PTR mask = (DWORD_PTR)(1ULL << (unsigned)cpu_index);
-        if (join == NULL || join->handle == 0) return -1;
-        if (SetThreadAffinityMask((HANDLE)join->handle, mask) == 0) return -1;
-        return 0;
-    }
-#elif defined(__linux__)
-    {
-        /* PLATFORM: LINUX — affinity via Cap join child_tid + sched_setaffinity. */
-        struct xlang_thread_join *join = (struct xlang_thread_join *)(uintptr_t)thread_id;
-        cpu_set_t set;
-        if (join == NULL || join->child_tid <= 0) return -1;
-        xlang_cpu_zero(&set);
-        xlang_cpu_set((unsigned)cpu_index, &set);
-        if (sched_setaffinity(join->child_tid, sizeof(set), &set) != 0) return -1;
-        return 0;
-    }
-#else
-    (void)thread_id;
-    (void)cpu_index;
-    return -1;
-#endif
+    if (thread_id == XLANG_THREAD_ID_INVALID) return -1;
+    struct xlang_thread_join *join = (struct xlang_thread_join *)(uintptr_t)thread_id;
+    return xlang_thread_set_affinity(join, cpu_index);
 }
 #ifndef XLANG_RUNTIME_THREAD_GLUE_FROM_X
 int32_t thread_set_affinity_c(int64_t thread_id, int32_t cpu_index) {
@@ -307,24 +279,9 @@ int32_t thread_set_affinity_c(int64_t thread_id, int32_t cpu_index) {
 }
 #endif
 
-/* ========== _impl: thread_set_qos_class_self (macOS only) ========== */
+/* ========== _impl: thread_set_qos_class_self (Cap residual 9.4.6) ========== */
 int32_t thread_set_qos_class_self_impl(int32_t qos_class) {
-#if defined(__APPLE__)
-    qos_class_t q = QOS_CLASS_DEFAULT;
-    switch (qos_class) {
-        case 0: q = QOS_CLASS_DEFAULT; break;
-        case 1: q = QOS_CLASS_USER_INTERACTIVE; break;
-        case 2: q = QOS_CLASS_USER_INITIATED; break;
-        case 3: q = QOS_CLASS_UTILITY; break;
-        case 4: q = QOS_CLASS_BACKGROUND; break;
-        default: return -1;
-    }
-    if (pthread_set_qos_class_self_np(q, 0) != 0) return -1;
-    return 0;
-#else
-    (void)qos_class;
-    return -1;
-#endif
+    return xlang_thread_set_qos_self(qos_class);
 }
 #ifndef XLANG_RUNTIME_THREAD_GLUE_FROM_X
 int32_t thread_set_qos_class_self_c(int32_t qos_class) {
@@ -404,9 +361,7 @@ int32_t std_thread_thread_set_qos_class_self_c(int32_t qos_class) {
 uintptr_t std_thread_thread_dummy_entry_ptr_c(void) { return thread_dummy_entry_ptr_c(); }
 #endif /* XLANG_RUNTIME_THREAD_GLUE_FROM_X */
 
-/* ========== Worker thread pool (non-Windows only; global state in rest C) ========== */
-
-#if !defined(_WIN32) && !defined(_WIN64)
+/* ========== Worker thread pool (global state in rest C) ========== */
 
 #define XLANG_THREAD_POOL_CAP 128
 #define XLANG_THREAD_POOL_MAX_WORKERS 8
@@ -416,8 +371,8 @@ typedef struct {
     void *arg;
 } xlang_pool_job_t;
 
-#if defined(__linux__) || defined(__APPLE__)
-/* PLATFORM: SHARED Cap (Linux futex / Darwin pthread sync_cap) — Cap mutex/cond + Cap spawn workers. */
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
+/* PLATFORM: SHARED Cap (Linux futex / Darwin pthread / Windows Win32 sync_cap) — Cap mutex/cond + Cap spawn workers. */
 static struct xlang_cap_mutex g_pool_mu;
 static struct xlang_cap_cond g_pool_not_empty;
 static struct xlang_cap_cond g_pool_idle;
@@ -505,19 +460,22 @@ static void *xlang_thread_pool_worker(void *arg) {
     }
     return NULL;
 }
-#endif /* __linux__ vs POSIX pool */
-#endif /* !Windows */
+#endif /* Cap vs POSIX fallback pool */
 
 /* _impl: thread_pool_start */
 int32_t thread_pool_start_impl(int32_t workers) {
-#if defined(_WIN32) || defined(_WIN64)
-    (void)workers;
-    return -1;
-#elif defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
     {
+        static int g_pool_init_once = 0;
         int i;
         if (workers < 1 || workers > XLANG_THREAD_POOL_MAX_WORKERS) {
             return -1;
+        }
+        if (!g_pool_init_once) {
+            (void)xlang_cap_mutex_init(&g_pool_mu);
+            (void)xlang_cap_cond_init(&g_pool_not_empty);
+            (void)xlang_cap_cond_init(&g_pool_idle);
+            g_pool_init_once = 1;
         }
         (void)xlang_cap_mutex_lock(&g_pool_mu);
         if (g_pool_started) {
@@ -590,11 +548,7 @@ int32_t thread_pool_start_c(int32_t workers) { return thread_pool_start_impl(wor
 
 /* _impl: thread_pool_submit */
 int32_t thread_pool_submit_impl(uintptr_t entry, uintptr_t arg) {
-#if defined(_WIN32) || defined(_WIN64)
-    (void)entry;
-    (void)arg;
-    return -1;
-#elif defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
     {
         xlang_pool_job_t job;
         if (!g_pool_started || entry == 0) {
@@ -648,9 +602,7 @@ int32_t thread_pool_submit_c(uintptr_t entry, uintptr_t arg) {
 
 /* _impl: thread_pool_drain */
 int32_t thread_pool_drain_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return -1;
-#elif defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
     if (!g_pool_started) {
         return -1;
     }
@@ -678,9 +630,7 @@ int32_t thread_pool_drain_c(void) { return thread_pool_drain_impl(); }
 
 /* _impl: thread_pool_stop */
 int32_t thread_pool_stop_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return -1;
-#elif defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
     {
         int i;
         if (!g_pool_started) {
@@ -734,9 +684,7 @@ int32_t thread_pool_stop_c(void) { return thread_pool_stop_impl(); }
 
 /* _impl: thread_pool_pending */
 int32_t thread_pool_pending_impl(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return -1;
-#elif defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__APPLE__) || defined(_WIN32) || defined(_WIN64)
     {
         int32_t n;
         if (!g_pool_started) {

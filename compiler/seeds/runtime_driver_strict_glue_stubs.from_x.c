@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <xlang_io_cap.h>
 
 #include "token.h"
 #include "codegen/codegen.h"
@@ -113,7 +114,7 @@ XLANG_WEAK char *preprocess(const char *source, size_t source_len, const char **
 
 XLANG_WEAK void driver_print_usage_c(void) {
   static const char msg[] = "Xlang (stub)\nUsage: xlang [options] file.x\n";
-  (void)write(STDOUT_FILENO, msg, sizeof(msg) - 1u);
+  (void)xlang_io_write(STDOUT_FILENO, msg, sizeof(msg) - 1u);
 }
 
 XLANG_WEAK int xlang_c_resolve_and_load_imports(ASTModule *mod, const char **lib_roots, int n_lib_roots,

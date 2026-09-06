@@ -47,17 +47,11 @@ extern "C" {
  * Cap residual host getenv (legacy in-header weak twin; prefer runtime_link_abi_user_env.o).
  * @param name NUL-terminated environment key; may be null
  * @return value pointer from process env block, or NULL
- * PLATFORM: POSIX environ walk; Windows CRT getenv.
+ * PLATFORM: SHARED Cap (9.1.1) — unified xlang_environ_getenv.
  */
 XLANG_USER_ENV_WEAK
 const char *link_abi_getenv_impl(const char *name) {
-  if (!name || !name[0])
-    return NULL;
-#if defined(_WIN32) || defined(_WIN64)
-  return getenv(name);
-#else
   return xlang_environ_getenv(name);
-#endif
 }
 
 /**

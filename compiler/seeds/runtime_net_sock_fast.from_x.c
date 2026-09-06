@@ -2,20 +2,47 @@
  * G-02f-104 helper gates.
  * Product: ../std/net/net_sock_fast.o; logic still C until full .x port.
  *
- * Cap residual 9.1.7 slice0: Linux socket/connect/bind/listen/accept/poll/close
- * via xlang_net_cap.h (no libc those symbols). Completes xlang_sys_* net bodies.
+ * Cap residual 9.1.7: Linux, Darwin, and Windows socket/connect/bind/listen/accept/poll/close
+ * via xlang_net_cap.h (zero libc net symbols on Linux & Darwin). Completes xlang_sys_* net bodies.
+ *
+ * PLATFORM: SHARED Cap (LINUX raw syscall, MACOS|DARWIN raw syscall, WINDOWS Winsock Cap).
  */
 #include <xlang_weak.h>
 #include <stdint.h>
-
-#if defined(_WIN32) || defined(_WIN64)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #include <xlang_net_cap.h>
+
+#ifndef AF_INET
+#define AF_INET 2
+#endif
+#ifndef SOCK_STREAM
+#define SOCK_STREAM 1
+#endif
+#ifndef SOCK_DGRAM
+#define SOCK_DGRAM 2
+#endif
+#ifndef IPPROTO_TCP
+#define IPPROTO_TCP 6
+#endif
+#ifndef IPPROTO_UDP
+#define IPPROTO_UDP 17
+#endif
+#ifndef SOL_SOCKET
+#if defined(__APPLE__)
+#define SOL_SOCKET 0xffff
+#elif defined(_WIN32) || defined(_WIN64)
+#define SOL_SOCKET 0xffff
+#else
+#define SOL_SOCKET 1
+#endif
+#endif
+#ifndef SO_REUSEADDR
+#if defined(_WIN32) || defined(_WIN64)
+#define SO_REUSEADDR 0x0004
+#elif defined(__APPLE__)
+#define SO_REUSEADDR 0x0004
+#else
+#define SO_REUSEADDR 2
+#endif
 #endif
 
 /* 前向声明：net_tcp_set_addr_port_buf_c / net_udp_set_addr_port_buf_c 由 runtime_net_addr_fast.c 提供。 */
@@ -52,110 +79,92 @@ XLANG_WEAK int32_t *net_ipv6_errno_ptr_c(void) { return xlang_net_errno_ptr(); }
  * 【Why 根源】std/net 下 .x 经 -backend asm 出 .o 时，extern xlang_sys_poll 为真 U 符号；
  * C 前端 user TU 靠 preamble static inline，不会导出给 net.o。
  * 权威体放 net.o 合并的 sock_fast（与 net_close_socket_c 同层），asm/C 两路径可链。
- * Cap residual 9.1.7: Linux poll via xlang_net_cap.h (aarch64 uses ppoll).
+ * Cap residual 9.1.7: poll via xlang_net_cap.h (raw syscall on Linux & Darwin, WSAPoll on Windows).
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_poll(uint8_t *fds, int32_t nfds, int32_t timeout) {
-#if defined(_WIN32) || defined(_WIN64)
-    /* Winsock：WSAPoll；nfds/timeout 与 POSIX poll 对齐（timeout ms，-1 无限）。 */
     if (fds == 0 || nfds <= 0)
         return -1;
-    return (int32_t)WSAPoll((WSAPOLLFD *)(void *)fds, (ULONG)nfds, (INT)timeout);
-#else
-    if (fds == 0 || nfds <= 0)
-        return -1;
-    /* PLATFORM: LINUX Cap / POSIX fallback */
     return (int32_t)xlang_net_poll((void *)fds, (unsigned int)nfds, (int)timeout);
-#endif
 }
 
 /**
  * Cap residual 9.1.7: complete xlang_sys_socket body for std.sys.linux wrappers.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows Winsock.
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_socket(int32_t domain, int32_t sock_type, int32_t protocol) {
-#if defined(_WIN32) || defined(_WIN64)
-    return (int32_t)socket((int)domain, (int)sock_type, (int)protocol);
-#else
     return (int32_t)xlang_net_socket((int)domain, (int)sock_type, (int)protocol);
-#endif
 }
 
 /**
  * Cap residual 9.1.7: complete xlang_sys_connect body.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows Winsock.
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_connect(int32_t sockfd, uint8_t *addr, int32_t addrlen) {
     if (addr == 0 || addrlen <= 0)
         return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    return connect((SOCKET)sockfd, (const struct sockaddr *)(void *)addr, (int)addrlen) == 0
-               ? 0
-               : -1;
-#else
     return xlang_net_connect((int)sockfd, (const void *)addr, (unsigned int)addrlen);
-#endif
 }
 
 /**
  * Cap residual 9.1.7: complete xlang_sys_bind body.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows Winsock.
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_bind(int32_t sockfd, uint8_t *addr, int32_t addrlen) {
     if (addr == 0 || addrlen <= 0)
         return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    return bind((SOCKET)sockfd, (const struct sockaddr *)(void *)addr, (int)addrlen) == 0 ? 0
-                                                                                           : -1;
-#else
     return xlang_net_bind((int)sockfd, (const void *)addr, (unsigned int)addrlen);
-#endif
 }
 
 /**
  * Cap residual 9.1.7: complete xlang_sys_listen body.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows Winsock.
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_listen(int32_t sockfd, int32_t backlog) {
-#if defined(_WIN32) || defined(_WIN64)
-    return listen((SOCKET)sockfd, (int)backlog) == 0 ? 0 : -1;
-#else
     return xlang_net_listen((int)sockfd, (int)backlog);
-#endif
 }
 
 /**
  * Cap residual 9.1.7: complete xlang_sys_accept body.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows Winsock.
+ * PLATFORM: SHARED Cap
  */
 int32_t xlang_sys_accept(int32_t sockfd, uint8_t *addr, int32_t *addrlen) {
-#if defined(_WIN32) || defined(_WIN64)
-    int al = addrlen ? (int)(*addrlen) : 0;
-    SOCKET s = accept((SOCKET)sockfd, (struct sockaddr *)(void *)addr, addrlen ? &al : NULL);
-    if (addrlen)
-        *addrlen = (int32_t)al;
-    return s == INVALID_SOCKET ? -1 : (int32_t)s;
-#else
     unsigned int al = addrlen ? (unsigned int)(*addrlen) : 0;
     int r = xlang_net_accept((int)sockfd, (void *)addr, addrlen ? &al : NULL);
     if (addrlen)
         *addrlen = (int32_t)al;
     return (int32_t)r;
-#endif
+}
+
+/**
+ * Cap residual 9.1.7: complete xlang_sys_sendto body.
+ * PLATFORM: SHARED Cap
+ */
+int32_t xlang_sys_sendto(int32_t sockfd, const uint8_t *buf, int32_t len, int32_t flags, const uint8_t *addr, int32_t addrlen) {
+    if (len < 0) return -1;
+    return (int32_t)xlang_net_sendto((int)sockfd, (const void *)buf, (size_t)len, (int)flags, (const void *)addr, (unsigned int)addrlen);
+}
+
+/**
+ * Cap residual 9.1.7: complete xlang_sys_recvfrom body.
+ * PLATFORM: SHARED Cap
+ */
+int32_t xlang_sys_recvfrom(int32_t sockfd, uint8_t *buf, int32_t len, int32_t flags, uint8_t *addr, int32_t *addrlen) {
+    if (len < 0) return -1;
+    unsigned int al = addrlen ? (unsigned int)(*addrlen) : 0;
+    long r = xlang_net_recvfrom((int)sockfd, (void *)buf, (size_t)len, (int)flags, (void *)addr, addrlen ? &al : NULL);
+    if (addrlen)
+        *addrlen = (int32_t)al;
+    return (int32_t)r;
 }
 
 /* 【Why 根源】Windows Winsock 须先 WSAStartup 才能 socket/bind/listen。
  * 从 net_import_alias.c 迁入（F-闭合消除 *_import_alias.c 命名）。
- * 【Invariant】net_wsa_done 防重复初始化；WSACleanup 由 OS 在进程退出时自动回收。
- * 【Asm/Perf】constructor 仅执行一次，热路径无开销。 */
-#if defined(_WIN32) || defined(_WIN64)
-static int net_wsa_done = 0;
-/* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
-/* G-02f-20 thin+rest：_impl 实现；thin（src/asm/runtime_net_sock_fast.x）提供 public wrapper */
+ * 【Invariant】net_ensure_wsa 防重复初始化；由 Cap 统一维护。
+ * 【Asm/Perf】constructor 仅执行一次，热路径无开销。
+ * PLATFORM: SHARED Cap */
 void net_ensure_wsa_impl_c(void) {
-    WSADATA data;
-    if (net_wsa_done) return;
-    if (WSAStartup(MAKEWORD(2, 2), &data) == 0)
-        net_wsa_done = 1;
+    xlang_net_ensure_wsa();
 }
 
 #ifndef XLANG_RUNTIME_NET_SOCK_FAST_FROM_X
@@ -165,90 +174,49 @@ void net_ensure_wsa(void) {
 }
 #endif
 
-
-
 __attribute__((constructor(65534)))
-/* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
-void net_wsa_ctor_impl_c(void) { net_ensure_wsa_impl_c(); }
+void net_wsa_ctor_impl_c(void) {
+    net_ensure_wsa_impl_c();
+}
 
 #ifndef XLANG_RUNTIME_NET_SOCK_FAST_FROM_X
 /* 完整模式（未定义 thin 宏）：public wrapper 由 seed 提供 */
-void net_wsa_ctor(void) { net_ensure_wsa(); }
-#endif
-
-
-
-#else
-/* Non-Windows: WSAStartup not needed; provide no-op stubs for R2 thin link.
- * PLATFORM: POSIX — Windows Winsock init is Windows-only; POSIX sockets need no init. */
-void net_ensure_wsa_impl_c(void) { }
-void net_wsa_ctor_impl_c(void) { }
+void net_wsa_ctor(void) {
+    net_ensure_wsa();
+}
 #endif
 
 int32_t net_set_blocking_c(int32_t fd, int32_t blocking) {
     if (fd < 0)
         return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    u_long mode = blocking == 0 ? 1UL : 0UL;
-    return ioctlsocket(fd, FIONBIO, &mode) == 0 ? 0 : -1;
-#else
-    /* fcntl residual (not 9.1.7 slice0 KPI); keep libc fcntl for O_NONBLOCK. */
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags < 0)
-        return -1;
-    if (blocking != 0)
-        flags &= ~O_NONBLOCK;
-    else
-        flags |= O_NONBLOCK;
-    return fcntl(fd, F_SETFL, flags) == 0 ? 0 : -1;
-#endif
+    long flags = blocking != 0 ? 0 : O_NONBLOCK;
+    return xlang_net_fcntl((int)fd, F_SETFL, flags) == 0 ? 0 : -1;
 }
 
 /* 【Why 根源】sock.x 单文件 co-emit 时 net_close_socket_c 可能被 WPO 剔除；C 实现保证 net.o 可链。
- * Cap residual 9.1.7: POSIX close via xlang_net_cap.h.
- * 【Invariant】fd < 0 时 no-op 返回 0；成功返回 0，失败返回 -1。 */
+ * Cap residual 9.1.7: close via xlang_net_cap.h.
+ * 【Invariant】fd < 0 时 no-op 返回 0；成功返回 0，失败返回 -1。
+ * PLATFORM: SHARED Cap */
 int32_t net_close_socket_c(int32_t fd) {
     if (fd < 0)
         return 0;
-#if defined(_WIN32) || defined(_WIN64)
-    return closesocket(fd) == 0 ? 0 : -1;
-#else
     return xlang_net_close((int)fd) == 0 ? 0 : -1;
-#endif
 }
 
 /* 【Why 根源】asm codegen 对 socket/bind/listen/setsockopt 字面量实参有误；listen 烟测须走 C。
- * Cap residual 9.1.7: socket/bind/listen/setsockopt via xlang_net_cap.h on Linux.
+ * Cap residual 9.1.7: socket/bind/listen/setsockopt via xlang_net_cap.h.
  * 【Invariant】fd < 0 表示失败；成功返回的 fd 已设为非阻塞。
- * 【Asm/Perf】setsockopt(SO_REUSEADDR) 仅 listen 前一次调用，非热路径。 */
+ * 【Asm/Perf】setsockopt(SO_REUSEADDR) 仅 listen 前一次调用，非热路径。
+ * PLATFORM: SHARED Cap */
 int32_t net_tcp_listen_c(uint32_t addr_u32, uint32_t port_u32) {
     uint8_t sin[16];
     int32_t fd;
     int one = 1;
     net_tcp_set_addr_port_buf_c(sin, addr_u32, port_u32);
-#if defined(_WIN32) || defined(_WIN64)
-    fd = (int32_t)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#else
     fd = (int32_t)xlang_net_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#endif
     if (fd < 0)
         return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, (socklen_t)sizeof(one)) != 0) {
-        net_close_socket_c(fd);
-        return -1;
-    }
-    if (bind(fd, (struct sockaddr *)(void *)sin, (socklen_t)16) != 0) {
-        net_close_socket_c(fd);
-        return -1;
-    }
-    if (listen(fd, 128) != 0) {
-        net_close_socket_c(fd);
-        return -1;
-    }
-#else
-    if (xlang_net_setsockopt((int)fd, SOL_SOCKET, SO_REUSEADDR, &one, (unsigned int)sizeof(one)) !=
-        0) {
+    if (xlang_net_setsockopt((int)fd, SOL_SOCKET, SO_REUSEADDR, &one, (unsigned int)sizeof(one)) != 0) {
         net_close_socket_c(fd);
         return -1;
     }
@@ -260,44 +228,26 @@ int32_t net_tcp_listen_c(uint32_t addr_u32, uint32_t port_u32) {
         net_close_socket_c(fd);
         return -1;
     }
-    {
-        int fl = fcntl(fd, F_GETFL, 0);
-        if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) != 0) {
-            net_close_socket_c(fd);
-            return -1;
-        }
+    if (xlang_net_fcntl((int)fd, F_SETFL, O_NONBLOCK) != 0) {
+        net_close_socket_c(fd);
+        return -1;
     }
-#endif
     return fd;
 }
 
 /* 【Why 根源】asm codegen 对 socket/bind/setsockopt 字面量实参有误；UDP bind 须走 C。
- * Cap residual 9.1.7: socket/bind/setsockopt via xlang_net_cap.h on Linux.
- * 【Invariant】fd < 0 表示失败；成功返回的 fd 已设为非阻塞。 */
+ * Cap residual 9.1.7: socket/bind/setsockopt via xlang_net_cap.h.
+ * 【Invariant】fd < 0 表示失败；成功返回的 fd 已设为非阻塞。
+ * PLATFORM: SHARED Cap */
 int32_t net_udp_bind_c(uint32_t addr_u32, uint32_t port_u32) {
     uint8_t sin[16];
     int32_t fd;
     int one = 1;
     net_udp_set_addr_port_buf_c(sin, addr_u32, port_u32);
-#if defined(_WIN32) || defined(_WIN64)
-    fd = (int32_t)socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-#else
     fd = (int32_t)xlang_net_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-#endif
     if (fd < 0)
         return -1;
-#if defined(_WIN32) || defined(_WIN64)
-    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&one, (socklen_t)sizeof(one)) != 0) {
-        net_close_socket_c(fd);
-        return -1;
-    }
-    if (bind(fd, (struct sockaddr *)(void *)sin, (socklen_t)16) != 0) {
-        net_close_socket_c(fd);
-        return -1;
-    }
-#else
-    if (xlang_net_setsockopt((int)fd, SOL_SOCKET, SO_REUSEADDR, &one, (unsigned int)sizeof(one)) !=
-        0) {
+    if (xlang_net_setsockopt((int)fd, SOL_SOCKET, SO_REUSEADDR, &one, (unsigned int)sizeof(one)) != 0) {
         net_close_socket_c(fd);
         return -1;
     }
@@ -305,13 +255,9 @@ int32_t net_udp_bind_c(uint32_t addr_u32, uint32_t port_u32) {
         net_close_socket_c(fd);
         return -1;
     }
-    {
-        int fl = fcntl(fd, F_GETFL, 0);
-        if (fl < 0 || fcntl(fd, F_SETFL, fl | O_NONBLOCK) != 0) {
-            net_close_socket_c(fd);
-            return -1;
-        }
+    if (xlang_net_fcntl((int)fd, F_SETFL, O_NONBLOCK) != 0) {
+        net_close_socket_c(fd);
+        return -1;
     }
-#endif
     return fd;
 }

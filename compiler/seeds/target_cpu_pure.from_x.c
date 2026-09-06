@@ -295,10 +295,9 @@ int target_cpu_pure_slice_marker(void) {
 
 /* --- G-02f-5：print（stdio / FILE* 语言限制，逻辑与原 target_cpu.inc 一致）--- */
 
-#if (defined(__linux__) || defined(__APPLE__)) && (defined(__x86_64__) || defined(__aarch64__))
+/* PLATFORM: SHARED (LINUX | DARWIN | WINDOWS | POSIX) Cap 9.1.12 / 9.5.2 */
 #include <xlang_io_cap.h>
 #define HAVE_XLANG_IO_PRINT_CAP 1
-#endif
 
 #if defined(HAVE_XLANG_IO_PRINT_CAP)
 
@@ -307,7 +306,7 @@ int target_cpu_pure_slice_marker(void) {
  * @param fd   stdout=1
  * @param buf  bytes to emit
  * @param len  byte count
- * PLATFORM: LINUX|DARWIN Cap residual 9.5.2
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS) Cap residual 9.5.2
  */
 static void tcp_cap_write_all(int fd, const char *buf, size_t len) {
   size_t off = 0;
@@ -427,10 +426,8 @@ void xlang_target_cpu_print(FILE *out, uint32_t features) {
  *            Historical #ifndef _WIN32 guard removed — shim is a no-op
  *            on POSIX and provides needed declarations on Windows. */
 #include <unistd.h>
-#if defined(__x86_64__) || defined(__aarch64__)
 #include <xlang_proc_cap.h>
 #define HAVE_XLANG_PROC_CAP 1
-#endif
 #endif
 #if defined(__APPLE__)
 #if defined(__x86_64__)
@@ -472,7 +469,7 @@ uint32_t xlang_target_cpu_detect_x86_macro_fallback(void) {
 }
 #if defined(__linux__)
 /**
- * Linux x86：解析 /proc/cpuinfo 首条 flags 行。
+ * Linux x86：解析 /proc/cpuinfo 首条 flags 行（Cap 9.1.12，无 libc fopen/fgets）。
  */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 uint32_t xlang_target_cpu_detect_x86_linux(void) {
@@ -482,7 +479,6 @@ uint32_t xlang_target_cpu_detect_x86_linux(void) {
     long n;
     uint32_t f = 0;
 
-#if defined(HAVE_XLANG_PROC_CAP)
     n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
     if (n <= 0)
         return xlang_target_cpu_detect_x86_macro_fallback();
@@ -510,37 +506,6 @@ uint32_t xlang_target_cpu_detect_x86_linux(void) {
         }
         line = next;
     }
-#else
-    {
-    FILE *fp;
-    char linebuf[512];
-    fp = fopen("/proc/cpuinfo", "r");
-    if (!fp)
-        return xlang_target_cpu_detect_x86_macro_fallback();
-    while (fgets(linebuf, (int)sizeof(linebuf), fp)) {
-        if (strncmp(linebuf, "flags", 5) != 0)
-            continue;
-        if (flags_has_token(linebuf, "sse2"))
-            f |= XLANG_CPU_FEAT_SSE2;
-        if (flags_has_token(linebuf, "sse4_1"))
-            f |= XLANG_CPU_FEAT_SSE41;
-        if (flags_has_token(linebuf, "avx"))
-            f |= XLANG_CPU_FEAT_AVX;
-        if (flags_has_token(linebuf, "avx2"))
-            f |= XLANG_CPU_FEAT_AVX2;
-        if (flags_has_token(linebuf, "avx512f"))
-            f |= XLANG_CPU_FEAT_AVX512F;
-        if (flags_has_token(linebuf, "popcnt"))
-            f |= XLANG_CPU_FEAT_POPCNT;
-        if (flags_has_token(linebuf, "bmi2"))
-            f |= XLANG_CPU_FEAT_BMI2;
-        if (flags_has_token(linebuf, "fma"))
-            f |= XLANG_CPU_FEAT_FMA;
-        break;
-    }
-    fclose(fp);
-    }
-#endif
     if (f == 0)
         f = xlang_target_cpu_detect_x86_macro_fallback();
     return f;
@@ -603,7 +568,7 @@ uint32_t xlang_target_cpu_detect_x86(void) {
 
 #if defined(__linux__)
 /**
- * Linux arm64：/proc/cpuinfo Features 行（asimd=NEON，sve=SVE）。
+ * Linux arm64：/proc/cpuinfo Features 行（asimd=NEON，sve=SVE，Cap 9.1.12，无 libc fopen/fgets）。
  */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 uint32_t xlang_target_cpu_detect_arm64_linux(void) {
@@ -613,7 +578,6 @@ uint32_t xlang_target_cpu_detect_arm64_linux(void) {
     long n;
     uint32_t f = XLANG_CPU_FEAT_NEON;
 
-#if defined(HAVE_XLANG_PROC_CAP)
     n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
     if (n <= 0)
         return f;
@@ -629,25 +593,6 @@ uint32_t xlang_target_cpu_detect_arm64_linux(void) {
         }
         line = next;
     }
-#else
-    {
-    FILE *fp;
-    char linebuf[512];
-    fp = fopen("/proc/cpuinfo", "r");
-    if (!fp)
-        return f;
-    while (fgets(linebuf, (int)sizeof(linebuf), fp)) {
-        if (strncmp(linebuf, "Features", 8) != 0)
-            continue;
-        if (flags_has_token(linebuf, "asimd") || flags_has_token(linebuf, "neon"))
-            f |= XLANG_CPU_FEAT_NEON;
-        if (flags_has_token(linebuf, "sve"))
-            f |= XLANG_CPU_FEAT_SVE;
-        break;
-    }
-    fclose(fp);
-    }
-#endif
     return f;
 }
 #endif
@@ -679,7 +624,7 @@ uint32_t xlang_target_cpu_detect_arm64(void) {
 #if defined(__riscv) && __riscv_xlen == 64
 
 #if defined(__linux__)
-/** Linux riscv64：isa 行含 'v' 时认为有 RVV。 */
+/** Linux riscv64：isa 行含 'v' 时认为有 RVV（Cap 9.1.12，无 libc fopen/fgets）。 */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 uint32_t xlang_target_cpu_detect_riscv64_linux(void) {
     char buf[4096];
@@ -688,7 +633,6 @@ uint32_t xlang_target_cpu_detect_riscv64_linux(void) {
     long n;
     uint32_t f = 0;
 
-#if defined(HAVE_XLANG_PROC_CAP)
     n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
     if (n <= 0)
         return 0;
@@ -709,30 +653,6 @@ uint32_t xlang_target_cpu_detect_riscv64_linux(void) {
         }
         line = next;
     }
-#else
-    {
-    FILE *fp;
-    char linebuf[256];
-    fp = fopen("/proc/cpuinfo", "r");
-    if (!fp)
-        return 0;
-    while (fgets(linebuf, (int)sizeof(linebuf), fp)) {
-        const char *isa;
-        if (strncmp(linebuf, "isa", 3) != 0)
-            continue;
-        isa = strchr(linebuf, ':');
-        if (!isa)
-            break;
-        isa++;
-        while (*isa == ' ' || *isa == '\t')
-            isa++;
-        if (strchr(isa, 'v') != NULL)
-            f |= XLANG_CPU_FEAT_RVV;
-        break;
-    }
-    fclose(fp);
-    }
-#endif
     return f;
 }
 #endif

@@ -1,15 +1,11 @@
 /**
- * Stage9 Cap residual 9.1.10 probe: Linux directory walk without libc opendir
- * (std.fs → fs formal merge → xlang_dir_cap.h getdents64).
+ * Stage9 Cap residual 9.1.10 probe: directory walk without libc opendir
+ * (std.fs → fs formal merge → xlang_dir_cap.h).
  *
  * Contract: open "." ; read at least one entry; close succeeds.
- * PLATFORM: LINUX|x86_64 gold.
+ * PLATFORM: SHARED gold (Linux + Darwin Cap 9.1.10).
  */
 const fs = import("std.fs");
-
-extern function fs_dir_open_c(path: *u8): i64;
-extern function fs_dir_read_c(handle: i64, name_out: *u8, name_cap: i32, is_dir_out: *i32): i32;
-extern function fs_dir_close_c(handle: i64): i32;
 
 /**
  * Probe entry for Cap residual 9.1.10 dir face.
@@ -24,24 +20,16 @@ export function main(): i32 {
   let path: [2]u8;
   path[0] = 46; /* '.' */
   path[1] = 0;
-  unsafe {
-    h = fs_dir_open_c(&path[0]);
-  }
+  h = fs.dir_open(&path[0]);
   if (h < 0) {
     return 1;
   }
-  unsafe {
-    nread = fs_dir_read_c(h, &name[0], 256, &is_dir);
-  }
+  nread = fs.dir_read(h, &name[0], 256, &is_dir);
   if (nread < 1) {
-    unsafe {
-      rc = fs_dir_close_c(h);
-    }
+    rc = fs.dir_close(h);
     return 2;
   }
-  unsafe {
-    rc = fs_dir_close_c(h);
-  }
+  rc = fs.dir_close(h);
   if (rc != 0) {
     return 3;
   }

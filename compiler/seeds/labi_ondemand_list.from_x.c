@@ -1216,8 +1216,8 @@ const char *labi_od_queue_contention_rel(void) {
 }
 
 /* wave118: net UNDEF table + needs_std_net pure orch. PLATFORM: SHARED.
- * Count 32: +new/smoke/acquire/release unique tcp_pool wrappers. */
-int labi_od_net_sym_count(void) { return 32; }
+ * Count 34: +new/smoke/acquire/release unique tcp_pool wrappers + net_resolve_ipv4/ipv6_ex_c (9.1.7). */
+int labi_od_net_sym_count(void) { return 34; }
 const char *labi_od_net_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -1301,6 +1301,11 @@ const char *labi_od_net_sym_at(int i) {
     return "std_net_tcp_pool_acquire";
   if (i == 31)
     return "std_net_tcp_pool_release";
+  /* Cap residual 9.1.7: DNS raw resolve face. */
+  if (i == 32)
+    return "net_resolve_ipv4_ex_c";
+  if (i == 33)
+    return "net_resolve_ipv6_ex_c";
   return NULL;
 }
 
@@ -2792,9 +2797,9 @@ int labi_fk0_sym_count(int k) {
     return 12;
   if (k == 14)
     return 15;
-  /* PLATFORM: SHARED — fs fk0 complete (mirror heavy.x): +readv_buf/writev_buf +stat. */
+  /* PLATFORM: SHARED — fs fk0 complete (mirror heavy.x): +readv_buf/writev_buf +stat +dir_{open,read,close}. */
   if (k == 15)
-    return 12;
+    return 15;
   /* PLATFORM: SHARED — tar/unicode/runtime formal public surface (mirror heavy). */
   if (k == 16)
     return 7;
@@ -3311,6 +3316,13 @@ const char *labi_fk0_sym_at(int k, int i) {
     /* Cap residual 9.1.2: stat-only users must pull formal fs.o. */
     if (i == 11)
       return "std_fs_stat";
+    /* Cap residual 9.1.10: dir-only users must pull formal fs.o. */
+    if (i == 12)
+      return "std_fs_dir_open";
+    if (i == 13)
+      return "std_fs_dir_read";
+    if (i == 14)
+      return "std_fs_dir_close";
     return NULL;
   }
   /* PLATFORM: SHARED — std/tar/tar.o exact UNDEF needles (fk0 k==16; mirror heavy). */

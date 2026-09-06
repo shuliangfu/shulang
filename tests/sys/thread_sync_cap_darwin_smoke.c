@@ -187,6 +187,22 @@ int main(void) {
     xlang_cap_rwlock_destroy(&g_rw);
   }
 
+  /* Step 6: Cap residual 9.4.6 — Affinity & QoS class */
+  {
+    /* Darwin does not support thread affinity */
+    if (xlang_thread_set_affinity_self(0) != -1) return 28;
+    if (errno != ENOTSUP) return 29;
+
+    /* QoS class on Darwin */
+    if (xlang_thread_set_qos_self(0) != 0) return 30; /* default */
+    if (xlang_thread_set_qos_self(1) != 0) return 31; /* user_interactive */
+    if (xlang_thread_set_qos_self(2) != 0) return 32; /* user_initiated */
+    if (xlang_thread_set_qos_self(3) != 0) return 33; /* utility */
+    if (xlang_thread_set_qos_self(4) != 0) return 34; /* background */
+    if (xlang_thread_set_qos_self(99) != -1) return 35; /* invalid */
+    if (errno != EINVAL) return 36;
+  }
+
   return 0;
 }
 #endif

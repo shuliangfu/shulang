@@ -1,14 +1,14 @@
 /**
  * Stage9 Cap residual 9.1.5 probe: std.time monotonic/wall/sleep/rfc3339
  * without libc clock_gettime/nanosleep/gmtime_r on the product path
- * (runtime_time_os.o → xlang_time_cap.h Linux syscalls + civil gmtime).
+ * (runtime_time_os.o → xlang_time_cap.h Linux/Darwin raw syscalls + civil gmtime).
  *
  * Contract:
  *  - monotonic advances across a short sleep
  *  - wall seconds look like a Unix epoch (after 2020)
  *  - RFC3339 format writes a trailing Z and length >= 20
  *
- * PLATFORM: LINUX|x86_64 gold.
+ * PLATFORM: SHARED gold (Linux + Darwin + Windows Cap 9.1.5).
  */
 const time = import("std.time");
 

@@ -128,8 +128,13 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       char tmp[64];
       int tn = 0;
       int width = 0;
+      int pad_zero = 0;
       int prec = -1;
       int longmod = 0;
+      if (*fmt == '0') {
+        pad_zero = 1;
+        fmt++;
+      }
       if (*fmt == '*') {
         width = xlang_va_arg(ap, int);
         fmt++;
@@ -195,6 +200,12 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
           ib[in++] = (char)('0' + (v % 10));
           v /= 10;
         }
+        if (pad_zero) {
+          int target = neg ? (width - 1) : width;
+          while (in < target && in < (int)sizeof(ib) - 1) {
+            ib[in++] = '0';
+          }
+        }
         if (neg && in < (int)sizeof(ib)) {
           ib[in++] = '-';
         }
@@ -214,6 +225,11 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
         while (v > 0) {
           ib[in++] = (char)('0' + (v % 10));
           v /= 10;
+        }
+        if (pad_zero) {
+          while (in < width && in < (int)sizeof(ib) - 1) {
+            ib[in++] = '0';
+          }
         }
         while (in > 0 && tn < (int)sizeof(tmp) - 1) {
           tmp[tn++] = ib[--in];

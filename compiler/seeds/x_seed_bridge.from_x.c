@@ -20,6 +20,7 @@
  *            #include_next (no behavior change).
  * PLATFORM: SHARED (include always; was Windows-skipped before). */
 #include <unistd.h>
+#include <xlang_io_cap.h>
 #include <stdio.h>
 /* sys/types for ssize_t if not from unistd */
 #include <sys/types.h>
@@ -210,7 +211,7 @@ ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
   (void)timeout_ms;
   if (!buf || count == 0)
     return 0;
-  n = read(fd, buf, count);
+  n = (ssize_t)xlang_io_read(fd, buf, count);
   return n >= 0 ? (ptrdiff_t)n : -1;
 }
 
@@ -219,7 +220,7 @@ ptrdiff_t io_write(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
   (void)timeout_ms;
   if (!buf || count == 0)
     return 0;
-  n = write(fd, buf, count);
+  n = (ssize_t)xlang_io_write(fd, buf, count);
   return n >= 0 ? (ptrdiff_t)n : -1;
 }
 

@@ -102,6 +102,20 @@ int main(void) {
     return 8;
   }
 
+  /* Step5: Cap residual 9.4.6 — Linux affinity and QoS */
+  if (xlang_thread_set_affinity_self(0) != 0) {
+    fprintf(stderr, "affinity self(0) failed errno=%d\n", errno);
+    return 9;
+  }
+  if (xlang_thread_set_affinity_self(-1) == 0 || errno != EINVAL) {
+    fprintf(stderr, "affinity self(-1) want EINVAL\n");
+    return 10;
+  }
+  if (xlang_thread_set_qos_self(0) == 0 || errno != ENOSYS) {
+    fprintf(stderr, "qos self(0) want ENOSYS\n");
+    return 11;
+  }
+
   return 0;
 }
 

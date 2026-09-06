@@ -534,8 +534,9 @@ export function labi_fk0_sym_count(k: i32): i32 {
   // Sole callers of readv_buf/writev_buf never opened the gate → UNDEF at ld
   // (run-fs readv_writev_buf). G.7 complete surface: public readv/writev faces.
   // Cap residual 9.1.2: +std_fs_stat so stat-only users pull formal fs.o.
+  // Cap residual 9.1.10: +std_fs_dir_{open,read,close} so dir-only users pull formal fs.o.
   if (k == 15) {
-    return 12;
+    return 15;
   }
   // PLATFORM: SHARED — tar formal public surface (std_tar_*).
   if (k == 16) {
@@ -1514,6 +1515,19 @@ export function labi_fk0_sym_at(k: i32, i: i32): *u8 {
       // Cap residual 9.1.2: stat-only pure-asm must open fs.o gate.
       if (i == 11) {
         let p: *u8 = "std_fs_stat";
+        return p;
+      }
+      // Cap residual 9.1.10: dir-only pure-asm must open fs.o gate.
+      if (i == 12) {
+        let p: *u8 = "std_fs_dir_open";
+        return p;
+      }
+      if (i == 13) {
+        let p: *u8 = "std_fs_dir_read";
+        return p;
+      }
+      if (i == 14) {
+        let p: *u8 = "std_fs_dir_close";
         return p;
       }
       return 0 as *u8;

@@ -1,9 +1,9 @@
 /**
- * Stage9 Cap residual 9.1.7 slice0 probe: Linux listen/close without libc socket
+ * Stage9 Cap residual 9.1.7 slice0 probe: listen/close without libc socket
  * (std.net → net.o merge → net_sock_fast Cap xlang_net_cap.h).
  *
  * Contract: net_tcp_listen_c succeeds; net_close_socket_c succeeds.
- * PLATFORM: LINUX|x86_64 gold.
+ * PLATFORM: SHARED Cap (LINUX raw syscall, MACOS|DARWIN raw syscall, WINDOWS Winsock Cap).
  */
 const net = import("std.net");
 

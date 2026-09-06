@@ -23,16 +23,14 @@
  *            on POSIX and provides needed declarations on Windows. */
 #include <unistd.h>
 #endif
-#if !defined(_WIN32) && !defined(_WIN64)
 #include <xlang_io_cap.h>
-#endif
+#include <xlang_proc_cap.h>
 
 /**
  * Cap residual 9.1.8: seed_io_syscall_* → xlang_io_cap.h (G.7 single authority).
  * F-03 无 std/io/io.o 时供 nostdlib / gcc 链；timeout 在 seed 桩 v1 忽略。
- * PLATFORM: LINUX Cap (x86_64+aarch64); POSIX fallback elsewhere.
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS | POSIX).
  */
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-20 thin+rest：_impl 实现；thin（src/asm/runtime_asm_io_stubs.x）提供 public wrapper */
 long seed_io_syscall_write_impl(int fd, const void *buf, unsigned long count) {
@@ -44,19 +42,15 @@ long seed_io_syscall_read_impl(int fd, void *buf, unsigned long count) {
   return xlang_io_read(fd, buf, (size_t)count);
 }
 
-#endif
-
 #ifndef XLANG_RUNTIME_ASM_IO_STUBS_FROM_X
 /* 完整模式（未定义 thin 宏）：public wrapper 由 seed 提供
- * Cap residual 9.1.8: Linux x86_64 + aarch64 emit wrappers. */
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+ * Cap residual 9.1.8: emit wrappers on all platforms. */
 long seed_io_syscall_write(int fd, const void *buf, unsigned long count) {
   return seed_io_syscall_write_impl(fd, buf, count);
 }
 long seed_io_syscall_read(int fd, void *buf, unsigned long count) {
   return seed_io_syscall_read_impl(fd, buf, count);
 }
-#endif
 #endif
 
 /* thin+rest：thin 函数在 rest 模式下由 .x 提供，前向声明供 rest 函数调用 */
@@ -68,18 +62,19 @@ int32_t seed_io_write_fd1(uint8_t *ptr, size_t len, uint32_t timeout_ms);
  * Cap residual 9.1.8: complete xlang_sys_write/read/writev for -backend asm
  * std.io / std.fs (preamble static inline does not export into those .o).
  * Weak so freestanding_io.o strong twin wins when both are linked.
- * PLATFORM: LINUX Cap / POSIX fallback; Windows omitted (MinGW write).
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS | POSIX).
  */
-#if !defined(_WIN32) && !defined(_WIN64)
-__attribute__((weak)) ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {
+XLANG_WEAK ssize_t xlang_sys_write(int32_t fd, uint8_t *buf, size_t count) {
   return (ssize_t)xlang_io_write((int)fd, (const void *)buf, count);
 }
-__attribute__((weak)) ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {
+XLANG_WEAK ssize_t xlang_sys_read(int32_t fd, uint8_t *buf, size_t count) {
   return (ssize_t)xlang_io_read((int)fd, (void *)buf, count);
 }
-__attribute__((weak)) ssize_t xlang_sys_writev(int32_t fd, uint8_t *iov, int32_t iovcnt) {
+XLANG_WEAK ssize_t xlang_sys_writev(int32_t fd, uint8_t *iov, int32_t iovcnt) {
   return (ssize_t)xlang_io_writev((int)fd, (const void *)iov, (int)iovcnt);
 }
+
+#if !defined(_WIN32) && !defined(_WIN64)
 
 /*
  * Cap residual 9.1.11: weak backtrace_capture_c for -backend asm probes.
@@ -108,8 +103,6 @@ __attribute__((weak)) int32_t backtrace_capture_c(uint8_t *buf, int32_t max_fram
 }
 
 #if defined(__linux__)
-
-#include <xlang_proc_cap.h>
 
 #define XLANG_BT_STUB_SYM_NAME_LEN 128
 
@@ -169,54 +162,6 @@ __attribute__((weak)) int32_t backtrace_symbolicate_c(const uint8_t *buf, int32_
     }
   }
   return ok;
-}
-
-/*
- * Cap residual 9.1.12: weak xlang_target_cpu_detect_host for probes.
- * Strong twin in src/driver/target_cpu.o wins on full product link.
- */
-__attribute__((weak)) uint32_t xlang_target_cpu_detect_host(void) {
-  char buf[8192];
-  char *line;
-  char *next;
-  long n;
-#if defined(__x86_64__)
-  uint32_t f = 0;
-  n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
-  if (n <= 0)
-    return 1u; /* XLANG_CPU_FEAT_SSE2 macro fallback minimum */
-  line = buf;
-  while (line) {
-    next = xlang_proc_next_line(line);
-    if (strncmp(line, "flags", 5) == 0) {
-      if (strstr(line, " sse2") || strstr(line, "\tsse2"))
-        f |= 1u;
-      if (strstr(line, " avx2"))
-        f |= 8u;
-      break;
-    }
-    line = next;
-  }
-  return f != 0 ? f : 1u;
-#elif defined(__aarch64__)
-  uint32_t f = 256u; /* XLANG_CPU_FEAT_NEON */
-  n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
-  if (n <= 0)
-    return f;
-  line = buf;
-  while (line) {
-    next = xlang_proc_next_line(line);
-    if (strncmp(line, "Features", 8) == 0) {
-      if (strstr(line, " sve"))
-        f |= 512u;
-      break;
-    }
-    line = next;
-  }
-  return f;
-#else
-  return 0;
-#endif
 }
 
 #elif defined(__APPLE__)
@@ -281,41 +226,97 @@ __attribute__((weak)) int32_t backtrace_symbolicate_c(const uint8_t *buf, int32_
   return ok;
 }
 
-#endif /* __linux__ | __APPLE__ symbolicate (+ linux target_cpu) stubs */
+#endif /* __linux__ | __APPLE__ symbolicate stubs */
 
 #endif /* LINUX|DARWIN backtrace capture stub */
 #endif /* !_WIN32 */
 
+/*
+ * Cap residual 9.1.12: weak xlang_target_cpu_detect_host for probes and runtime.
+ * Strong twin in src/driver/target_cpu.o wins on full product link.
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS).
+ */
+__attribute__((weak)) uint32_t xlang_target_cpu_detect_host(void) {
+#if defined(__linux__)
+  char buf[8192];
+  char *line;
+  char *next;
+  long n;
+#if defined(__x86_64__)
+  uint32_t f = 0;
+  n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
+  if (n <= 0)
+    return 1u; /* XLANG_CPU_FEAT_SSE2 macro fallback minimum */
+  line = buf;
+  while (line) {
+    next = xlang_proc_next_line(line);
+    if (strncmp(line, "flags", 5) == 0) {
+      if (strstr(line, " sse2") || strstr(line, "\tsse2"))
+        f |= 1u;
+      if (strstr(line, " avx2"))
+        f |= 8u;
+      break;
+    }
+    line = next;
+  }
+  return f != 0 ? f : 1u;
+#elif defined(__aarch64__)
+  uint32_t f = 256u; /* XLANG_CPU_FEAT_NEON */
+  n = xlang_proc_read_file("/proc/cpuinfo", buf, sizeof(buf));
+  if (n <= 0)
+    return f;
+  line = buf;
+  while (line) {
+    next = xlang_proc_next_line(line);
+    if (strncmp(line, "Features", 8) == 0) {
+      if (strstr(line, " sve"))
+        f |= 512u;
+      break;
+    }
+    line = next;
+  }
+  return f;
+#else
+  return 0;
+#endif
+
+#elif defined(__APPLE__)
+#if defined(__aarch64__)
+  return 256u; /* XLANG_CPU_FEAT_NEON */
+#elif defined(__x86_64__)
+  return 1u | 2u; /* XLANG_CPU_FEAT_SSE2 | XLANG_CPU_FEAT_SSE41 */
+#else
+  return 0;
+#endif
+
+#elif defined(_WIN32) || defined(_WIN64)
+#if defined(__x86_64__) || defined(_M_X64)
+  return 1u; /* XLANG_CPU_FEAT_SSE2 */
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  return 256u; /* XLANG_CPU_FEAT_NEON */
+#else
+  return 0;
+#endif
+
+#else
+  return 0;
+#endif
+}
+
 /** F-03：sync.x 机器码不在 io.o；本 TU 提供 io_write/io_read 同步 ABI。 */
 ptrdiff_t io_write(int fd, const uint8_t *buf, size_t count, unsigned timeout_ms) {
-  long n;
   (void)timeout_ms;
   if (!buf && count > 0)
     return (ptrdiff_t)-1;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-  n = seed_io_syscall_write(fd, buf, (unsigned long)count);
-#elif defined(__unix__) || defined(__APPLE__)
-  n = (long)write(fd, buf, count);
-#else
-  n = -1;
-#endif
-  return (ptrdiff_t)n;
+  return (ptrdiff_t)seed_io_syscall_write(fd, buf, (unsigned long)count);
 }
 
 /** 同步读；hello 等仅写 stdout 时 read 路径可为空实现。 */
 ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
-  long n;
   (void)timeout_ms;
   if (!buf && count > 0)
     return (ptrdiff_t)-1;
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-  n = seed_io_syscall_read(fd, buf, (unsigned long)count);
-#elif defined(__unix__) || defined(__APPLE__)
-  n = (long)read(fd, buf, count);
-#else
-  n = -1;
-#endif
-  return (ptrdiff_t)n;
+  return (ptrdiff_t)seed_io_syscall_read(fd, buf, (unsigned long)count);
 }
 
 /** 与 io_read_ptr 配套的 TLS 缓冲（F-03 seed 桩：单线程单缓冲）。 */

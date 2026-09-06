@@ -1,6 +1,6 @@
 /*
  * xlang_dir_cap.h — Cap residual 9.1.10: opendir/readdir/closedir without libc
- * those symbols on Linux (x86_64 + aarch64).
+ * those symbols on Linux and Darwin.
  *
  * Single authority for:
  *   std.fs posix fs_libc_{opendir,readdir,closedir},
@@ -9,7 +9,8 @@
  *
  * Linux: open(O_DIRECTORY) + getdents64 into a heap DIR stream; readdir fills a
  * glibc-layout dirent so DIRENT_D_NAME_OFF=19 stays valid for std.fs.
- * Other POSIX: thin libc wrappers (Darwin residual until later).
+ * Darwin: open + getdirentries64 into a heap DIR stream; readdir fills a
+ * Darwin-layout dirent so DIRENT_D_NAME_OFF=21 stays valid for std.fs.
  * Windows (MinGW/MSYS leftover PE SAT): _findfirst / _findnext / _findclose.
  *   fmt_check_cmd.from_x.c previously kept a second _findfirst copy
  *   (opendir_win / closedir_win returning void). Casting that void closedir
@@ -24,8 +25,7 @@
  * Heap: malloc/free still host (Cap residual for allocator is separate).
  * Cap residual 9.1.9: syscall asm via xlang_syscall_cap.h (G.7).
  *
- * PLATFORM: LINUX primary; POSIX fallback elsewhere;
- *           WINDOWS MinGW CRT wrappers (leftover-PE SAT).
+ * PLATFORM: SHARED Cap (9.1.10).
  */
 
 #ifndef XLANG_DIR_CAP_H
@@ -242,7 +242,228 @@ static inline int xlang_dir_close(void *dirp) {
   return 0;
 }
 
-#else /* !LINUX Cap — POSIX libc thin wrappers */
+#elif defined(__APPLE__) && (defined(__x86_64__) || defined(__aarch64__))
+
+#include <fcntl.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifndef O_RDONLY
+#define O_RDONLY 0
+#endif
+
+#if defined(__aarch64__)
+static inline long xlang_darwin_dir_sys1(long nr, long a1) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_dir_sys3(long nr, long a1, long a2, long a3) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16), "r"(x1), "r"(x2)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+
+static inline long xlang_darwin_dir_sys4(long nr, long a1, long a2, long a3, long a4) {
+  register long x16 __asm__("x16") = nr;
+  register long x0 __asm__("x0") = a1;
+  register long x1 __asm__("x1") = a2;
+  register long x2 __asm__("x2") = a3;
+  register long x3 __asm__("x3") = a4;
+  register long failed __asm__("x9");
+  __asm__ __volatile__("svc #0x80\n\t"
+                       "cset %1, cs"
+                       : "+r"(x0), "=r"(failed)
+                       : "r"(x16), "r"(x1), "r"(x2), "r"(x3)
+                       : "memory", "cc");
+  return failed ? -x0 : x0;
+}
+#elif defined(__x86_64__)
+static inline long xlang_darwin_dir_sys1(long nr, long a1) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+
+static inline long xlang_darwin_dir_sys3(long nr, long a1, long a2, long a3) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1), "S"(a2), "d"(a3)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+
+static inline long xlang_darwin_dir_sys4(long nr, long a1, long a2, long a3, long a4) {
+  long r;
+  long sys_nr = (nr >= 0x2000000L) ? nr : (0x2000000L | nr);
+  register long r10 __asm__("r10") = a4;
+  __asm__ __volatile__("syscall\n\t"
+                       "jnc 1f\n\t"
+                       "neg %%rax\n\t"
+                       "1:"
+                       : "=a"(r)
+                       : "a"(sys_nr), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
+                       : "rcx", "r11", "memory", "cc");
+  return r;
+}
+#endif
+
+/** Darwin 64-bit kernel dirent layout. d_name at offset 21 (matches DIRENT_D_NAME_OFF on Darwin). PLATFORM: MACOS|DARWIN */
+struct xlang_darwin_dirent64 {
+  uint64_t d_ino;
+  uint64_t d_seekoff;
+  uint16_t d_reclen;
+  uint16_t d_namlen;
+  uint8_t  d_type;
+  char     d_name[1024];
+};
+
+/** Opaque DIR stream on Darwin (heap). PLATFORM: MACOS|DARWIN */
+struct xlang_dir_stream {
+  int fd;
+  unsigned char *buf;
+  size_t buf_cap;
+  size_t buf_len;
+  size_t buf_pos;
+  long basep;
+  struct xlang_darwin_dirent64 ent;
+};
+
+/**
+ * Cap residual opendir(3) on Darwin via raw syscall open (no libc opendir).
+ * @return opaque DIR* or NULL
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline void *xlang_dir_open(const char *name) {
+  struct xlang_dir_stream *d;
+  long fd;
+  if (!name || !name[0])
+    return NULL;
+  d = (struct xlang_dir_stream *)calloc(1, sizeof(*d));
+  if (!d)
+    return NULL;
+#if defined(__x86_64__)
+  fd = xlang_darwin_dir_sys3(0x2000005L, (long)name, O_RDONLY, 0);
+#elif defined(__aarch64__)
+  fd = xlang_darwin_dir_sys3(5, (long)name, O_RDONLY, 0);
+#endif
+  if (fd < 0) {
+    free(d);
+    return NULL;
+  }
+  d->fd = (int)fd;
+  d->buf_cap = 8192;
+  d->buf = (unsigned char *)malloc(d->buf_cap);
+  if (!d->buf) {
+#if defined(__x86_64__)
+    (void)xlang_darwin_dir_sys1(0x2000006L, d->fd);
+#elif defined(__aarch64__)
+    (void)xlang_darwin_dir_sys1(6, d->fd);
+#endif
+    free(d);
+    return NULL;
+  }
+  d->basep = 0;
+  return (void *)d;
+}
+
+/**
+ * Cap residual readdir(3) on Darwin via raw syscall 344 (SYS_getdirentries64, no libc readdir).
+ * d_name at byte 21 (matches std.fs DIRENT_D_NAME_OFF on Darwin).
+ * @return pointer to struct with d_name at offset 21, or NULL at EOF/error
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline void *xlang_dir_read(void *dirp) {
+  struct xlang_dir_stream *d = (struct xlang_dir_stream *)dirp;
+  if (!d || d->fd < 0)
+    return NULL;
+  for (;;) {
+    if (d->buf_pos >= d->buf_len) {
+      long nr;
+#if defined(__x86_64__)
+      nr = xlang_darwin_dir_sys4(0x2000158L, (long)d->fd, (long)d->buf, (long)d->buf_cap, (long)&d->basep);
+#elif defined(__aarch64__)
+      nr = xlang_darwin_dir_sys4(344, (long)d->fd, (long)d->buf, (long)d->buf_cap, (long)&d->basep);
+#endif
+      if (nr <= 0)
+        return NULL;
+      d->buf_len = (size_t)nr;
+      d->buf_pos = 0;
+    }
+    if (d->buf_pos >= d->buf_len)
+      return NULL;
+    struct xlang_darwin_dirent64 *de = (struct xlang_darwin_dirent64 *)(d->buf + d->buf_pos);
+    if (de->d_reclen == 0)
+      return NULL;
+    d->buf_pos += de->d_reclen;
+    if (de->d_ino == 0 || de->d_name[0] == '\0')
+      continue;
+    memcpy(&d->ent, de, (size_t)de->d_reclen < sizeof(d->ent) ? (size_t)de->d_reclen : sizeof(d->ent));
+    d->ent.d_name[sizeof(d->ent.d_name) - 1] = '\0';
+    return (void *)&d->ent;
+  }
+}
+
+/**
+ * Cap residual readdir name only on Darwin (valid until next read/close).
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline char *xlang_dir_readdir_name(void *dirp) {
+  struct xlang_darwin_dirent64 *ent = (struct xlang_darwin_dirent64 *)xlang_dir_read(dirp);
+  return ent ? ent->d_name : (char *)0;
+}
+
+/**
+ * Cap residual closedir(3) on Darwin via raw syscall close (no libc closedir).
+ * @return 0 ok, -1 error
+ * PLATFORM: MACOS|DARWIN
+ */
+static inline int xlang_dir_close(void *dirp) {
+  struct xlang_dir_stream *d = (struct xlang_dir_stream *)dirp;
+  if (!d)
+    return -1;
+  if (d->fd >= 0) {
+#if defined(__x86_64__)
+    (void)xlang_darwin_dir_sys1(0x2000006L, d->fd);
+#elif defined(__aarch64__)
+    (void)xlang_darwin_dir_sys1(6, d->fd);
+#endif
+  }
+  free(d->buf);
+  free(d);
+  return 0;
+}
+
+#else /* !LINUX && !DARWIN — POSIX libc thin wrappers fallback */
 
 #include <dirent.h>
 
@@ -276,7 +497,7 @@ static inline int xlang_dir_close(void *dirp) {
   return closedir((DIR *)dirp);
 }
 
-#endif /* LINUX Cap vs POSIX */
+#endif /* LINUX vs DARWIN vs POSIX fallback */
 
 #else /* _WIN32|_WIN64 — leftover PE / MinGW SAT compiles fmt rest */
 

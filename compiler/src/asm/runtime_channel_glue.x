@@ -1,6 +1,8 @@
 // Copyright (C) 2026 ShuLiangfu <admin@shuliangfu.com>
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
+// PLATFORM: SHARED — Cap sync (Linux futex / Darwin pthread / Windows Win32 via xlang_sync_cap).
+// Channel sync primitives (mutex/cond) unified across all platforms.
 // See implementation.
 // See implementation.
 // See implementation.
