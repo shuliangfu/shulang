@@ -141,6 +141,23 @@ export extern "C" function arch_arm64_enc_enc_svc(elf_ctx: *u8): i32;
 export extern "C" function arch_arm64_enc_enc_mov_rax_to_x8(elf_ctx: *u8): i32;
 /* stage10 10.2.1 slice10: lateout/out("x8") → x0. */
 export extern "C" function arch_arm64_enc_enc_mov_x8_to_rax(elf_ctx: *u8): i32;
+/* stage10 10.2.2 slice3: x9..x15 aarch64 volatile scratch in/lateout registers.
+ * Bodies in seeds/backend_arm64_enc_c.from_x.c and compiler/src/asm/arch/arm64_enc.x.
+ * PLATFORM: SHARED emit · LINUX|aarch64 / MACOS|arm64. */
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x9(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x9_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x10(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x10_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x11(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x11_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x12(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x12_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x13(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x13_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x14(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x14_to_rax(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_rax_to_x15(elf_ctx: *u8): i32;
+export extern "C" function arch_arm64_enc_enc_mov_x15_to_rax(elf_ctx: *u8): i32;
 /* 10.4.1–2 arm64: fence + i32 atomic encoders (seed LIVE + arm64_enc.x twin). */
 export extern "C" function arch_arm64_enc_enc_dmb_ish(elf_ctx: *u8): i32;
 export extern "C" function arch_arm64_enc_enc_dmb_ishld(elf_ctx: *u8): i32;
@@ -5671,14 +5688,15 @@ function try_emit_simd_lang_builtin_call_elf_c(
 }
 
 /**
- * Stage10 10.2.1 slice2 / 10.2.3: map in-reg spelling to post-emit move from rax/x0.
+ * Stage10 10.2.1 slice2 / 10.2.2 slice3 / 10.2.3: map in-reg spelling to post-emit move from rax/x0.
  * @param reg *u8 Null-terminated register name string.
  * @param ta i32 Target architecture (0 = x86_64, 1 = arm64).
  * @return i32 — 0 = already in rax/x0 (no mov); 1..6 = SysV/AAPCS arg index
  *   for backend_enc_mov_rax_to_arg_reg_arch (0=rdi/x0…); 100 = rbx;
- *   101 = r10; 102 = x8; 103 = r11 (Windows x64 / SysV volatile scratch);
+ *   101 = r10; 102 = x8/w8; 103 = r11 (Windows x64 / SysV volatile scratch);
+ *   109..115 = x9..x15/w9..w15 (AAPCS volatile scratch);
  *   -1 = unsupported spelling.
- * PLATFORM: SHARED · LINUX|x86_64 (rax/rdi/…) · aarch64 (x0..x7) · WINDOWS x64 (rcx/rdx/r8/r9/r10/r11).
+ * PLATFORM: SHARED · LINUX|x86_64 (rax/rdi/…) · aarch64 (x0..x15 / w0..w15) · WINDOWS x64 (rcx/rdx/r8/r9/r10/r11).
  */
 function pipeline_asm_inline_in_reg_mov_kind(reg: *u8, ta: i32): i32 {
   unsafe {
@@ -5777,34 +5795,31 @@ function pipeline_asm_inline_in_reg_mov_kind(reg: *u8, ta: i32): i32 {
       return 0 - 1;
     }
     if (ta == 1) {
-      /* x0 already; x1..x7 → mk 2..8 (k=mk-1); x8 → syscall nr (102). */
-      if (reg[0] == (120 as u8) && reg[1] == (48 as u8) && reg[2] == (0 as u8)) {
-        return 0;
+      /* Stage10 10.2.2 slice1-3: aarch64 x0..x15 and w0..w15 registers. */
+      let is_x: i32 = 0;
+      if (reg[0] == (120 as u8) || reg[0] == (119 as u8)) {
+        is_x = 1;
       }
-      if (reg[0] == (120 as u8) && reg[1] == (49 as u8) && reg[2] == (0 as u8)) {
-        return 2;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (50 as u8) && reg[2] == (0 as u8)) {
-        return 3;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (51 as u8) && reg[2] == (0 as u8)) {
-        return 4;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (52 as u8) && reg[2] == (0 as u8)) {
-        return 5;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (53 as u8) && reg[2] == (0 as u8)) {
-        return 6;
-      }
-      /* Slice2: x6/x7 AAPCS arg homes (mk 7/8 → k 6/7). */
-      if (reg[0] == (120 as u8) && reg[1] == (54 as u8) && reg[2] == (0 as u8)) {
-        return 7;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (55 as u8) && reg[2] == (0 as u8)) {
-        return 8;
-      }
-      if (reg[0] == (120 as u8) && reg[1] == (56 as u8) && reg[2] == (0 as u8)) {
-        return 102;
+      if (is_x != 0) {
+        if (reg[2] == (0 as u8)) {
+          if (reg[1] == (48 as u8)) { return 0; }   /* x0 / w0 */
+          if (reg[1] == (49 as u8)) { return 2; }   /* x1 / w1 */
+          if (reg[1] == (50 as u8)) { return 3; }   /* x2 / w2 */
+          if (reg[1] == (51 as u8)) { return 4; }   /* x3 / w3 */
+          if (reg[1] == (52 as u8)) { return 5; }   /* x4 / w4 */
+          if (reg[1] == (53 as u8)) { return 6; }   /* x5 / w5 */
+          if (reg[1] == (54 as u8)) { return 7; }   /* x6 / w6 */
+          if (reg[1] == (55 as u8)) { return 8; }   /* x7 / w7 */
+          if (reg[1] == (56 as u8)) { return 102; } /* x8 / w8 */
+          if (reg[1] == (57 as u8)) { return 109; } /* x9 / w9 */
+        } else if (reg[3] == (0 as u8) && reg[1] == (49 as u8)) {
+          if (reg[2] == (48 as u8)) { return 110; } /* x10 / w10 */
+          if (reg[2] == (49 as u8)) { return 111; } /* x11 / w11 */
+          if (reg[2] == (50 as u8)) { return 112; } /* x12 / w12 */
+          if (reg[2] == (51 as u8)) { return 113; } /* x13 / w13 */
+          if (reg[2] == (52 as u8)) { return 114; } /* x14 / w14 */
+          if (reg[2] == (53 as u8)) { return 115; } /* x15 / w15 */
+        }
       }
       return 0 - 1;
     }
@@ -6020,6 +6035,27 @@ export function pipeline_asm_try_emit_inline_asm_expr_elf_c(
             return 0 - 1;
           }
         }
+        /* Stage10 10.2.2 slice3: x9..x15 aarch64 volatile scratch in-reg */
+        if (mk >= 109 && mk <= 115) {
+          if (ta != 1) {
+            return 0 - 1;
+          }
+          if (mk == 109) {
+            if (arch_arm64_enc_enc_mov_rax_to_x9(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 110) {
+            if (arch_arm64_enc_enc_mov_rax_to_x10(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 111) {
+            if (arch_arm64_enc_enc_mov_rax_to_x11(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 112) {
+            if (arch_arm64_enc_enc_mov_rax_to_x12(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 113) {
+            if (arch_arm64_enc_enc_mov_rax_to_x13(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 114) {
+            if (arch_arm64_enc_enc_mov_rax_to_x14(elf_ctx) != 0) { return 0 - 1; }
+          } else if (mk == 115) {
+            if (arch_arm64_enc_enc_mov_rax_to_x15(elf_ctx) != 0) { return 0 - 1; }
+          }
+        }
         i = i + 1;
       }
       /* Slice14–16: nomem/readonly/pure forbid out/lateout stores to locals. */
@@ -6196,6 +6232,27 @@ export function pipeline_asm_try_emit_inline_asm_expr_elf_c(
         }
         if (arch_x86_64_enc_enc_mov_r11_to_rax(elf_ctx) != 0) {
           return 0 - 1;
+        }
+      }
+      /* Stage10 10.2.2 slice3: lateout/out("x9".."x15") → x0 before store */
+      if (mk >= 109 && mk <= 115) {
+        if (ta != 1) {
+          return 0 - 1;
+        }
+        if (mk == 109) {
+          if (arch_arm64_enc_enc_mov_x9_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 110) {
+          if (arch_arm64_enc_enc_mov_x10_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 111) {
+          if (arch_arm64_enc_enc_mov_x11_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 112) {
+          if (arch_arm64_enc_enc_mov_x12_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 113) {
+          if (arch_arm64_enc_enc_mov_x13_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 114) {
+          if (arch_arm64_enc_enc_mov_x14_to_rax(elf_ctx) != 0) { return 0 - 1; }
+        } else if (mk == 115) {
+          if (arch_arm64_enc_enc_mov_x15_to_rax(elf_ctx) != 0) { return 0 - 1; }
         }
       }
       if (backend_enc_store_rax_to_rbp_arch(elf_ctx, voff, ta) != 0) {

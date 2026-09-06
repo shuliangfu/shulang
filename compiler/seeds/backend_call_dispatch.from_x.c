@@ -4239,6 +4239,21 @@ extern int32_t arch_arm64_enc_enc_svc(struct platform_elf_ElfCodegenCtx *elf_ctx
 extern int32_t arch_arm64_enc_enc_mov_rax_to_x8(struct platform_elf_ElfCodegenCtx *elf_ctx);
 /* stage10 10.2.1 slice10: lateout/out("x8") → x0. */
 extern int32_t arch_arm64_enc_enc_mov_x8_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+/* stage10 10.2.2 slice3: x9..x15 aarch64 volatile scratch in/lateout registers. */
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x9(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x9_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x10(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x10_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x11(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x11_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x12(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x12_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x13(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x13_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x14(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x14_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_rax_to_x15(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_arm64_enc_enc_mov_x15_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_arm64_enc_enc_dmb_ish(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_arm64_enc_enc_dmb_ishld(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_arm64_enc_enc_dmb_ishst(struct platform_elf_ElfCodegenCtx *elf_ctx);
@@ -5270,25 +5285,28 @@ static int32_t pipeline_asm_inline_in_reg_mov_kind_c(const uint8_t *reg, int32_t
     return -1;
   }
   if (ta == 1) {
-    if (reg[0] == 'x' && reg[1] == '0' && reg[2] == 0)
-      return 0;
-    if (reg[0] == 'x' && reg[1] == '1' && reg[2] == 0)
-      return 2;
-    if (reg[0] == 'x' && reg[1] == '2' && reg[2] == 0)
-      return 3;
-    if (reg[0] == 'x' && reg[1] == '3' && reg[2] == 0)
-      return 4;
-    if (reg[0] == 'x' && reg[1] == '4' && reg[2] == 0)
-      return 5;
-    if (reg[0] == 'x' && reg[1] == '5' && reg[2] == 0)
-      return 6;
-    /* Stage10 10.2.2 slice2: x6/x7 AAPCS (mk 7/8 → k 6/7). */
-    if (reg[0] == 'x' && reg[1] == '6' && reg[2] == 0)
-      return 7;
-    if (reg[0] == 'x' && reg[1] == '7' && reg[2] == 0)
-      return 8;
-    if (reg[0] == 'x' && reg[1] == '8' && reg[2] == 0)
-      return 102;
+    /* Stage10 10.2.2 slice1-3: aarch64 x0..x15 and w0..w15 registers. */
+    if (reg[0] == 'x' || reg[0] == 'w') {
+      if (reg[2] == 0) {
+        if (reg[1] == '0') return 0;
+        if (reg[1] == '1') return 2;
+        if (reg[1] == '2') return 3;
+        if (reg[1] == '3') return 4;
+        if (reg[1] == '4') return 5;
+        if (reg[1] == '5') return 6;
+        if (reg[1] == '6') return 7;
+        if (reg[1] == '7') return 8;
+        if (reg[1] == '8') return 102;
+        if (reg[1] == '9') return 109;
+      } else if (reg[3] == 0 && reg[1] == '1') {
+        if (reg[2] == '0') return 110;
+        if (reg[2] == '1') return 111;
+        if (reg[2] == '2') return 112;
+        if (reg[2] == '3') return 113;
+        if (reg[2] == '4') return 114;
+        if (reg[2] == '5') return 115;
+      }
+    }
     return -1;
   }
   return -1;
@@ -5443,6 +5461,26 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
         if (arch_x86_64_enc_enc_mov_rax_to_r11(elf_ctx) != 0)
           return -1;
       }
+      /* Stage10 10.2.2 slice3: x9..x15 aarch64 volatile scratch in-reg */
+      if (mk >= 109 && mk <= 115) {
+        if (ta != 1)
+          return -1;
+        if (mk == 109) {
+          if (arch_arm64_enc_enc_mov_rax_to_x9(elf_ctx) != 0) return -1;
+        } else if (mk == 110) {
+          if (arch_arm64_enc_enc_mov_rax_to_x10(elf_ctx) != 0) return -1;
+        } else if (mk == 111) {
+          if (arch_arm64_enc_enc_mov_rax_to_x11(elf_ctx) != 0) return -1;
+        } else if (mk == 112) {
+          if (arch_arm64_enc_enc_mov_rax_to_x12(elf_ctx) != 0) return -1;
+        } else if (mk == 113) {
+          if (arch_arm64_enc_enc_mov_rax_to_x13(elf_ctx) != 0) return -1;
+        } else if (mk == 114) {
+          if (arch_arm64_enc_enc_mov_rax_to_x14(elf_ctx) != 0) return -1;
+        } else if (mk == 115) {
+          if (arch_arm64_enc_enc_mov_rax_to_x15(elf_ctx) != 0) return -1;
+        }
+      }
     }
     /* Slice14–16: nomem/readonly/pure forbid out/lateout stores to locals. */
     if ((opt_bits & 28) != 0) {
@@ -5582,6 +5620,26 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
         return -1;
       if (arch_x86_64_enc_enc_mov_r11_to_rax(elf_ctx) != 0)
         return -1;
+    }
+    /* Stage10 10.2.2 slice3: lateout/out("x9".."x15") → x0 before store */
+    if (mk >= 109 && mk <= 115) {
+      if (ta != 1)
+        return -1;
+      if (mk == 109) {
+        if (arch_arm64_enc_enc_mov_x9_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 110) {
+        if (arch_arm64_enc_enc_mov_x10_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 111) {
+        if (arch_arm64_enc_enc_mov_x11_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 112) {
+        if (arch_arm64_enc_enc_mov_x12_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 113) {
+        if (arch_arm64_enc_enc_mov_x13_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 114) {
+        if (arch_arm64_enc_enc_mov_x14_to_rax(elf_ctx) != 0) return -1;
+      } else if (mk == 115) {
+        if (arch_arm64_enc_enc_mov_x15_to_rax(elf_ctx) != 0) return -1;
+      }
     }
     if (backend_enc_store_rax_to_rbp_arch(elf_ctx, voff, ta) != 0)
       return -1;

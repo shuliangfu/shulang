@@ -28,7 +28,7 @@
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
 | Cap residual 消灭（阶段 9） | 🟡 | **9.1.3** getpid／getppid／getcwd／chdir Linux raw ✅（WIP）；其余 9.1～9.7 仍开 |
-| 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅ · **10.3.*** Ubuntu ✅ · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 slice0–16**＋**10.2.2 slice0–2**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT／Darwin pin |
+| 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅ · **10.3.*** Ubuntu ✅ · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 slice0–16**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT／Darwin pin |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
 | 终局 MG+BC+PC+v2==v3（阶段 13） | 🟡 | MG 文件层 ✅；BC／PC／v2==v3 未终 |
@@ -327,7 +327,7 @@
 ### 10.2 inline asm
 
 - 🟡 **10.2.1** x86_64 inline asm — **slice0–16**（options 族大体收；WIP）：`opt_bits&28` 拒本地 out；`pure+noreturn` 硬拒。探针 `asm_readonly_`*／`asm_pure_`*／既有 nomem／nostack／pf。残：10.2.3  
-- 🟡 **10.2.2** arm64 inline asm — **slice0–2 ✅（Ubuntu encode）**：slice0 nop；slice1 `mov_arg_reg_to_rax` ta==1；slice2 开 x6／x7（mk 7／8）→ **AAPCS x0..x7**。探针 `asm_lateout_x{1,2,6,7}_arm64_smoke.x`。残：运行时 qemu  
+- 🟡 **10.2.2** arm64 inline asm — **slice0–3 ✅（Ubuntu encode＋Darwin native 42）**：slice0 nop；slice1 `mov_arg_reg_to_rax` ta==1；slice2 开 x6／x7（mk 7／8）→ **AAPCS x0..x7**；slice3 开 **w0..w8 32-bit 别名** 及 **x9..x15／w9..w15 volatile scratch 寄存器**（mk 109..115 映射并分派 `arch_arm64_enc_enc_mov_{rax_to_xn,xn_to_rax}`）。探针 `asm_lateout_x{1,2,6,7}_arm64_smoke.x`、`asm_lateout_{x9,w0,x15}_arm64_smoke.x` 本地运行通过（42）。残：运行时 qemu  
 - 🟡 **10.2.3** Windows inline asm／intrinsics — **slice0–1 ✅（SHARED encode＋COFF .obj）**：r11／r11d in／lateout（mov rax→r11 49 89 C3／mov r11→rax 4C 89 D8）；r8d／r9d／r10d 映射；pause（F3 90）＋int3（CC）模板；消除 x86_enc_jcc_rel32 单字节 append 溢出。探针 tests/sys/asm_lateout_r11_smoke.x、asm_pause_smoke.x、asm_int3_smoke.x 生成有效 COFF .obj。残：MSYS Win 运行时  
 
 ### 10.3 fnptr
