@@ -13755,7 +13755,7 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * operand (identity ARRAY_LIT as [N]T / STRUCT_LIT as Named) so parked
    * dest stays 0. Peel operand; leftover_emit_match_arm_result dest-parks
    * ARRAY_LIT/STRUCT_LIT/VAR/CALL/FIELD/DEREF/BLOCK/IF. Do not leftover_emit_as
-   * twin. leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST
+   * twin. leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST AND VAR dest CAST
    * parks dest then leftover unique leftover_emit_match_arm_result of CAST
    * dest-parked dest_tk==11. leftover rest unique rec ASSIGN TYPE_NAMED
    * dest-in-rbx CAST AND VAR dest CAST parks dest then leftover unique leftover_emit_match_arm_result
@@ -31037,12 +31037,11 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * leftover unique leftover_emit_match_arm_result rko==59 (MATCH
          * arm dest-parked). Do not leftover rest remaining-wave. Do not
          * leftover rest T SAT emit_assign / emit_array_lit. leftover rest
-         * unique rec ASSIGN VAR dest TYPE_SLICE CAST/IF/BLOCK skip unless
-         * proven. leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY
-         * STRING_LIT (`d = "hi"`) stays SAT emit_assign. leftover rest unique
-         * rec ASSIGN TYPE_SLICE dest-in-rbx CAST wrapping STRING_LIT is leftover
-         * rest unique rec ASSIGN sibling. ADDR_OF (rko==51) / BINARY skip
-         * unless proven. PLATFORM: WINDOWS leftover-PE. */
+         * unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST AND VAR dest CAST is leftover
+         * rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR dest
+         * TYPE_SLICE IF/BLOCK skip unless proven. leftover rest unique rec ASSIGN
+         * VAR dest TYPE_ARRAY STRING_LIT (`d = "hi"`) stays SAT emit_assign.
+         * ADDR_OF (rko==51) / BINARY skip unless proven. PLATFORM: WINDOWS leftover-PE. */
         int32_t asg_slen;
         if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
           out_rc = -1;
@@ -31067,42 +31066,52 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
           else
             out_rc = 0;
         }
-      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 54) {
+      } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 54) {
         /* TYPE_SLICE dest-in-rbx CAST `*p = "hi" as []u8` /
-         * `*p = [3, 4] as []i32` dest_tk==11. SAT emit_assign DEREF dest
-         * SAT local t struct_let_init -2 then leftover rest rec CAST
-         * leftover unique rec leftover unique emit_as_impl recs operand
-         * SAT implicit dest, parked dest stays 0 / 4B store through
-         * clobbered rbx (dest fat pair stays 0 / data-only without
-         * length). leftover unique leftover_emit_match_arm_result rko==54
+         * `*p = [3, 4] as []i32` dest_tk==11 AND VAR dest CAST
+         * `d = "hi" as []u8` / `d = [3, 4] as []i32`. SAT emit_assign
+         * DEREF dest SAT local t struct_let_init -2 then leftover rest rec
+         * CAST leftover unique rec leftover unique emit_as_impl recs
+         * operand SAT implicit dest, parked dest stays 0 / 4B store
+         * through clobbered rbx (dest fat pair stays 0 / data-only without
+         * length). VAR dest previously fell through SAT emit_assign (SAT
+         * global T): leftover unique emit_as_impl recs operand SAT implicit
+         * dest. CAST wrapping STRING_LIT leftover rest rec ko==59 leftover
+         * unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax
+         * puts data ptr in rax then SAT emit_assign stores rax+rdx into d
+         * (rdx garbage — same dest-in-rbx STRING_LIT / VAR dest STRING_LIT
+         * data-only without length). CAST wrapping ARRAY_LIT recs SAT
+         * emit_array_lit implicit dest (not VAR dest) so dest fat is not
+         * parked. leftover unique leftover_emit_match_arm_result rko==54
          * already peels operand then dest-parks STRING_LIT/ARRAY_LIT/
-         * VAR/CALL/FIELD/DEREF/BLOCK/IF/nested MATCH. G.7 complete leftover
-         * rest unique rec ASSIGN TYPE_SLICE dest-in-rbx CAST: park dest
-         * CPU stack (same leftover rest unique rec ASSIGN TYPE_SLICE
-         * MATCH/STRING_LIT), leftover unique leftover_emit_match_arm_result
-         * of CAST dest-parked dest_tk==11. Bump next_offset past dest
-         * (TYPE_NAMED MATCH 8B lesson / leftover rest unique rec ASSIGN
-         * TYPE_SLICE MATCH). Do not leftover unique leftover_emit_as twin.
-         * Do not leftover rest remaining-wave. Do not leftover rest T SAT
-         * emit_as / emit_assign / emit_array_lit. leftover rest unique rec
-         * ASSIGN VAR dest TYPE_SLICE CAST (`d = "hi" as []u8`) skip unless
-         * proven (SAT emit_assign). leftover rest unique rec ASSIGN
-         * TYPE_ARRAY dest-in-rbx CAST (`*p = "hi" as [N]u8`) is leftover
-         * rest unique store iko==54 (do not leftover rest unique rec ASSIGN
-         * second intercept). leftover rest unique rec ASSIGN TYPE_NAMED
-         * dest-in-rbx CAST is leftover rest unique rec ASSIGN (park dest +
-         * leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0).
-         * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF is leftover
+         * VAR/CALL/FIELD/DEREF/BLOCK/IF/nested MATCH dest_tk==11.
+         * leftover rest unique rec ASSIGN TYPE_SLICE MATCH already
+         * intercepts VAR dest (asg_lko==3). leftover rest unique rec
+         * ASSIGN TYPE_SLICE STRING_LIT already intercepts VAR dest.
+         * leftover rest unique rec ASSIGN TYPE_NAMED CAST already
+         * intercepts VAR dest. G.7 complete leftover rest unique rec
+         * ASSIGN TYPE_SLICE CAST: park dest CPU stack (lvalue of DEREF
+         * or VAR; same leftover rest unique rec ASSIGN TYPE_SLICE MATCH),
+         * leftover unique leftover_emit_match_arm_result of CAST
+         * dest-parked dest_tk==11. Bump next_offset past dest (TYPE_NAMED
+         * MATCH 8B lesson / leftover rest unique rec ASSIGN TYPE_SLICE
+         * MATCH). Do not leftover unique leftover_emit_as twin leftover
+         * unique leftover_emit_match_arm_result rko==54 (MATCH arm
+         * dest-parked). Do not leftover rest remaining-wave. Do not leftover
+         * rest T SAT emit_as / emit_assign / emit_array_lit. leftover rest
+         * unique rec ASSIGN TYPE_ARRAY dest-in-rbx CAST (`*p = "hi" as [N]u8`)
+         * is leftover rest unique store iko==54 (do not leftover rest unique
+         * rec ASSIGN second intercept). leftover rest unique rec ASSIGN
+         * TYPE_NAMED dest-in-rbx CAST AND VAR dest CAST is leftover rest
+         * unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
+         * TYPE_SLICE dest-in-rbx STRING_LIT AND VAR dest STRING_LIT is leftover
          * rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
-         * TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec
-         * ASSIGN TYPE_SLICE dest-in-rbx IF wrapping ARRAY_LIT/STRING_LIT is
-         * leftover rest unique rec ASSIGN sibling. leftover rest unique rec
-         * ASSIGN TYPE_SLICE dest-in-rbx BLOCK wrapping ARRAY_LIT/STRING_LIT
-         * is leftover rest unique rec ASSIGN sibling. leftover
-         * rest unique rec ASSIGN TYPE_SLICE dest-in-rbx STRING_LIT AND VAR dest
-         * STRING_LIT is leftover rest unique rec ASSIGN sibling. ADDR_OF (rko==51) / BINARY skip unless proven.
+         * VAR dest TYPE_SLICE IF/BLOCK skip unless proven. ADDR_OF (rko==51)
+         * / BINARY skip unless proven.
          * PLATFORM: WINDOWS leftover-PE. */
-        asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
+        asg_dop = asg_left;
+        if (asg_lko == 52)
+          asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
         if (asg_dop > 0) {
           int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_dop);
           int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
