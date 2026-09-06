@@ -4204,6 +4204,11 @@ static int32_t try_fold_size_align_of_call_elf(struct ast_ASTArena *arena,
 extern int32_t arch_x86_64_enc_enc_syscall(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_x86_64_enc_enc_mov_rax_to_r10(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_x86_64_enc_enc_mov_r10_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+/* stage10 10.2.3: Windows x64 volatile scratch r11 in/lateout, pause and int3. */
+extern int32_t arch_x86_64_enc_enc_mov_rax_to_r11(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_x86_64_enc_enc_mov_r11_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_x86_64_enc_enc_pause(struct platform_elf_ElfCodegenCtx *elf_ctx);
+extern int32_t arch_x86_64_enc_enc_int3(struct platform_elf_ElfCodegenCtx *elf_ctx);
 /* 10.4.1 slice1: atomic_load/store/cas i32 encoders (twin of backend_x86_64_enc_c.x). */
 extern int32_t arch_x86_64_enc_enc_movl_mem_rax_to_eax(struct platform_elf_ElfCodegenCtx *elf_ctx);
 extern int32_t arch_x86_64_enc_enc_movl_mem_rcx_to_eax(struct platform_elf_ElfCodegenCtx *elf_ctx);
@@ -5243,10 +5248,21 @@ static int32_t pipeline_asm_inline_in_reg_mov_kind_c(const uint8_t *reg, int32_t
       return 4;
     if (reg[0] == 'r' && reg[1] == '8' && reg[2] == 0)
       return 5;
+    if (reg[0] == 'r' && reg[1] == '8' && reg[2] == 'd' && reg[3] == 0)
+      return 5;
     if (reg[0] == 'r' && reg[1] == '9' && reg[2] == 0)
+      return 6;
+    if (reg[0] == 'r' && reg[1] == '9' && reg[2] == 'd' && reg[3] == 0)
       return 6;
     if (reg[0] == 'r' && reg[1] == '1' && reg[2] == '0' && reg[3] == 0)
       return 101;
+    if (reg[0] == 'r' && reg[1] == '1' && reg[2] == '0' && reg[3] == 'd' && reg[4] == 0)
+      return 101;
+    /* Stage10 10.2.3: r11 / r11d Windows x64 / SysV volatile scratch */
+    if (reg[0] == 'r' && reg[1] == '1' && reg[2] == '1' && reg[3] == 0)
+      return 103;
+    if (reg[0] == 'r' && reg[1] == '1' && reg[2] == '1' && reg[3] == 'd' && reg[4] == 0)
+      return 103;
     if (reg[0] == 'r' && reg[1] == 'b' && reg[2] == 'x' && reg[3] == 0)
       return 100;
     if (reg[0] == 'e' && reg[1] == 'b' && reg[2] == 'x' && reg[3] == 0)
@@ -5346,6 +5362,8 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
   int32_t erc;
   int32_t is_nop = 0;
   int32_t is_sys = 0;
+  int32_t is_pause = 0;
+  int32_t is_int3 = 0;
   int32_t pko;
   int32_t vlen;
   int32_t voff;
@@ -5363,7 +5381,13 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
       && tmpl[3] == (uint8_t)'c' && tmpl[4] == (uint8_t)'a' && tmpl[5] == (uint8_t)'l'
       && tmpl[6] == (uint8_t)'l' && tmpl[7] == 0)
     is_sys = 1;
-  if (!is_nop && !is_sys)
+  if (tmpl[0] == (uint8_t)'p' && tmpl[1] == (uint8_t)'a' && tmpl[2] == (uint8_t)'u'
+      && tmpl[3] == (uint8_t)'s' && tmpl[4] == (uint8_t)'e' && tmpl[5] == 0)
+    is_pause = 1;
+  if (tmpl[0] == (uint8_t)'i' && tmpl[1] == (uint8_t)'n' && tmpl[2] == (uint8_t)'t'
+      && tmpl[3] == (uint8_t)'3' && tmpl[4] == 0)
+    is_int3 = 1;
+  if (!is_nop && !is_sys && !is_pause && !is_int3)
     return -1;
   nargs = pipeline_expr_call_num_args_at(arena, expr_ref);
   if (nargs < 0 || nargs > 6)
@@ -5412,6 +5436,13 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
         if (arch_arm64_enc_enc_mov_rax_to_x8(elf_ctx) != 0)
           return -1;
       }
+      /* Stage10 10.2.3: r11 Windows x64 / SysV volatile scratch in-reg */
+      if (mk == 103) {
+        if (ta != 0)
+          return -1;
+        if (arch_x86_64_enc_enc_mov_rax_to_r11(elf_ctx) != 0)
+          return -1;
+      }
     }
     /* Slice14–16: nomem/readonly/pure forbid out/lateout stores to locals. */
     if ((opt_bits & 28) != 0) {
@@ -5447,6 +5478,36 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
       a64[1] = 0x20u;
       a64[2] = 0x03u;
       a64[3] = 0xd5u;
+      if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, a64, 4) != 0)
+        return -1;
+    } else {
+      return -1;
+    }
+  } else if (is_pause) {
+    if (ta == 0) {
+      if (arch_x86_64_enc_enc_pause(elf_ctx) != 0)
+        return -1;
+    } else if (ta == 1) {
+      /* aarch64 yield: 0xd503203f */
+      a64[0] = 0x3fu;
+      a64[1] = 0x20u;
+      a64[2] = 0x03u;
+      a64[3] = 0xd5u;
+      if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, a64, 4) != 0)
+        return -1;
+    } else {
+      return -1;
+    }
+  } else if (is_int3) {
+    if (ta == 0) {
+      if (arch_x86_64_enc_enc_int3(elf_ctx) != 0)
+        return -1;
+    } else if (ta == 1) {
+      /* aarch64 brk #0: 0xd4200000 */
+      a64[0] = 0x00u;
+      a64[1] = 0x00u;
+      a64[2] = 0x20u;
+      a64[3] = 0xd4u;
       if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, a64, 4) != 0)
         return -1;
     } else {
@@ -5513,6 +5574,13 @@ int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(struct ast_ASTArena *arena,
       if (ta != 1)
         return -1;
       if (arch_arm64_enc_enc_mov_x8_to_rax(elf_ctx) != 0)
+        return -1;
+    }
+    /* Stage10 10.2.3: lateout/out("r11") → rax before store */
+    if (mk == 103) {
+      if (ta != 0)
+        return -1;
+      if (arch_x86_64_enc_enc_mov_r11_to_rax(elf_ctx) != 0)
         return -1;
     }
     if (backend_enc_store_rax_to_rbp_arch(elf_ctx, voff, ta) != 0)

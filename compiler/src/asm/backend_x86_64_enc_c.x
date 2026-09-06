@@ -107,20 +107,10 @@ export function x86_enc_jcc_rel32(elf_ctx: *u8, opcode2: u8, label: *u8, label_l
   if (elf_ctx == 0) { return 0 - 1; }
   if (label == 0) { return 0 - 1; }
   if (label_len <= 0) { return 0 - 1; }
-  let b0: u8 = 15; // 0x0F
-  let b1: u8 = opcode2;
-  let z: u8 = 0;
-  // Block 1: append only. Must complete before any emit_code_len()-4 let.
+  let b: u8[6] = [15, 0, 0, 0, 0, 0];
+  b[1] = opcode2;
   unsafe {
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &b0, 1) != 0) { return 0 - 1; }
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &b1, 1) != 0) { return 0 - 1; }
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &z, 1) != 0) { return 0 - 1; }
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &z, 1) != 0) { return 0 - 1; }
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &z, 1) != 0) { return 0 - 1; }
-    if (pipeline_elf_ctx_append_bytes(elf_ctx, &z, 1) != 0) { return 0 - 1; }
-  }
-  // Block 2: rel32_at after appends (hoist stays inside this block only).
-  unsafe {
+    if (pipeline_elf_ctx_append_bytes(elf_ctx, &b[0], 6) != 0) { return 0 - 1; }
     let rel32_at: i32 = pipeline_elf_ctx_emit_code_len(elf_ctx) - 4;
     if (pipeline_elf_ctx_ensure_label(elf_ctx, label, label_len) != 0) { return 0 - 1; }
     return pipeline_elf_ctx_append_patch(elf_ctx, rel32_at, label, label_len, 0);
@@ -1557,6 +1547,63 @@ export function arch_x86_64_enc_enc_mov_r10_to_rax(elf_ctx: *u8): i32 {
   if (x86_enc_u8(elf_ctx, 76) != 0) { return 0 - 1; }
   if (x86_enc_u8(elf_ctx, 137) != 0) { return 0 - 1; }
   return x86_enc_u8(elf_ctx, 208);
+}
+
+/**
+ * mov %rax, %r11 (49 89 C3).
+ * Stage10 10.2.3: Windows x64 / SysV volatile scratch r11 in-reg operand.
+ * @param elf_ctx *u8 Pointer to ElfCodegenCtx.
+ * @return i32 0 on success, -1 on null ctx or write failure.
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function arch_x86_64_enc_enc_mov_rax_to_r11(elf_ctx: *u8): i32 {
+  if (elf_ctx == 0) { return 0 - 1; }
+  if (x86_enc_u8(elf_ctx, 73) != 0) { return 0 - 1; }
+  if (x86_enc_u8(elf_ctx, 137) != 0) { return 0 - 1; }
+  return x86_enc_u8(elf_ctx, 195);
+}
+
+/**
+ * mov %r11, %rax (4C 89 D8).
+ * Stage10 10.2.3: Windows x64 / SysV volatile scratch r11 lateout/out operand.
+ * @param elf_ctx *u8 Pointer to ElfCodegenCtx.
+ * @return i32 0 on success, -1 on null ctx or write failure.
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function arch_x86_64_enc_enc_mov_r11_to_rax(elf_ctx: *u8): i32 {
+  if (elf_ctx == 0) { return 0 - 1; }
+  if (x86_enc_u8(elf_ctx, 76) != 0) { return 0 - 1; }
+  if (x86_enc_u8(elf_ctx, 137) != 0) { return 0 - 1; }
+  return x86_enc_u8(elf_ctx, 216);
+}
+
+/**
+ * pause instruction (F3 90).
+ * Stage10 10.2.3: Windows / x86 spinloop pause hint.
+ * @param elf_ctx *u8 Pointer to ElfCodegenCtx.
+ * @return i32 0 on success, -1 on null ctx or write failure.
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function arch_x86_64_enc_enc_pause(elf_ctx: *u8): i32 {
+  if (elf_ctx == 0) { return 0 - 1; }
+  if (x86_enc_u8(elf_ctx, 243) != 0) { return 0 - 1; }
+  return x86_enc_u8(elf_ctx, 144);
+}
+
+/**
+ * int3 instruction (CC).
+ * Stage10 10.2.3: Windows __debugbreak / breakpoint trap.
+ * @param elf_ctx *u8 Pointer to ElfCodegenCtx.
+ * @return i32 0 on success, -1 on null ctx or write failure.
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function arch_x86_64_enc_enc_int3(elf_ctx: *u8): i32 {
+  if (elf_ctx == 0) { return 0 - 1; }
+  return x86_enc_u8(elf_ctx, 204);
 }
 
 /** mov imm32 to ebx (B8+reg form). Cap residual pure R2 wave2. PLATFORM: SHARED */

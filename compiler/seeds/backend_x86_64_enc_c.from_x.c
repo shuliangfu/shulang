@@ -1164,6 +1164,43 @@ int32_t arch_x86_64_enc_enc_mov_r10_to_rax(struct platform_elf_ElfCodegenCtx *el
   if (x86_enc_u8(elf_ctx, 137) != 0) return -1;
   return x86_enc_u8(elf_ctx, 208);
 }
+
+/* Stage10 10.2.3: mov %rax, %r11 (49 89 C3). Twin of
+ * arch_x86_64_enc_enc_mov_rax_to_r11 in backend_x86_64_enc_c.x.
+ * PLATFORM: SHARED. */
+int32_t arch_x86_64_enc_enc_mov_rax_to_r11(struct platform_elf_ElfCodegenCtx *elf_ctx) {
+  if (!elf_ctx) return -1;
+  if (x86_enc_u8(elf_ctx, 73) != 0) return -1;
+  if (x86_enc_u8(elf_ctx, 137) != 0) return -1;
+  return x86_enc_u8(elf_ctx, 195);
+}
+
+/* Stage10 10.2.3: mov %r11, %rax (4C 89 D8). Twin of
+ * arch_x86_64_enc_enc_mov_r11_to_rax in backend_x86_64_enc_c.x.
+ * PLATFORM: SHARED. */
+int32_t arch_x86_64_enc_enc_mov_r11_to_rax(struct platform_elf_ElfCodegenCtx *elf_ctx) {
+  if (!elf_ctx) return -1;
+  if (x86_enc_u8(elf_ctx, 76) != 0) return -1;
+  if (x86_enc_u8(elf_ctx, 137) != 0) return -1;
+  return x86_enc_u8(elf_ctx, 216);
+}
+
+/* Stage10 10.2.3: pause (F3 90). Twin of
+ * arch_x86_64_enc_enc_pause in backend_x86_64_enc_c.x.
+ * PLATFORM: SHARED. */
+int32_t arch_x86_64_enc_enc_pause(struct platform_elf_ElfCodegenCtx *elf_ctx) {
+  if (!elf_ctx) return -1;
+  if (x86_enc_u8(elf_ctx, 243) != 0) return -1;
+  return x86_enc_u8(elf_ctx, 144);
+}
+
+/* Stage10 10.2.3: int3 (CC). Twin of
+ * arch_x86_64_enc_enc_int3 in backend_x86_64_enc_c.x.
+ * PLATFORM: SHARED. */
+int32_t arch_x86_64_enc_enc_int3(struct platform_elf_ElfCodegenCtx *elf_ctx) {
+  if (!elf_ctx) return -1;
+  return x86_enc_u8(elf_ctx, 204);
+}
 #endif /* !XLANG_BACKEND_X86_64_ENC_C_FROM_X */
 
 #ifndef XLANG_BACKEND_X86_64_ENC_C_FROM_X
