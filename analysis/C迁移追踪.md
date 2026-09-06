@@ -188,6 +188,7 @@
   - ✅ TYPE_SLICE dest-in-rbx CAST `*p = "hi" as []u8`／`*p = [3, 4] as []i32` dest_tk==11 leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk=11＠`8a41c7898`
   - ✅ TYPE_SLICE dest-in-rbx IF `*p = if true { [3, 4] } else { [0, 0] }`／`*p = if true { "hi" } else { "" }` dest_tk==11 leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk=11＠`f591c65ed`
   - ✅ TYPE_SLICE dest-in-rbx BLOCK `*p = { [3, 4] }`／`*p = { "hi" }`／dest-region `{ unsafe { [3, 4] } }` dest_tk==11 leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk=11＠`95f727008`
+  - 🟡 leftover rest unique store iko==54 CAST wrapping STRING_LIT／ARRAY_LIT `*p = "hi" as [N]u8`／`*p = [3, 4] as [2]i32` leftover rest unique store peel operand recurse store（禁 leftover rest unique rec ASSIGN TYPE_ARRAY dest-in-rbx CAST 第二拦截；未勾 leftover 清单须 Windows leftover-PE hybrid L2）
 - ✅ **L4＠1174c5bb3 bstrict** — Ubuntu shuffle 后 **select SIGILL**：`vpxor ymm3` 写 `C5 F5 77`（EMMS #UD）；`vpand`／`vpandn`／`vpor` VEX.vvvv 误用 ymm3。i32 ymm 编码器已补（Ubuntu L4＠`6c0fdeebf` shuffle-select **OK**）；f32 ymm select 编码器亦已补全（`vxorps` `C5 E4 57 DB`、`vcmpgtps` `C5 EC C2 D3 0E`、`vandps` `C5 FC 54 C2`、`vandnps` `C5 EC 55 D1`、`vorps` `C5 FC 56 C2`）
 
 ---
