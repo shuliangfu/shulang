@@ -63414,6 +63414,26 @@ export function glue_asm_sum_block_call_spill_bytes(arena: *u8, block_ref: i32):
       }
       i = i + 1;
     }
+    // Labeled return expressions (C / .x parser).
+    // Without this walk, calls in return expressions (e.g. return f(a, b, c, d, e))
+    // are not counted in call_spill, leading to stack under-allocation in pure-asm frames.
+    unsafe {
+      n = pipeline_block_num_labeled_stmts(arena, cur);
+    }
+    i = 0;
+    while (i < n) {
+      unsafe {
+        if (pipeline_block_labeled_is_goto(arena, cur, i) == 0) {
+          er = pipeline_block_labeled_return_expr_ref(arena, cur, i);
+        } else {
+          er = 0;
+        }
+      }
+      if (er > 0) {
+        w157_sum_expr_call_spill_bytes(arena, er);
+      }
+      i = i + 1;
+    }
   }
   return g_w157_spill_total;
 }

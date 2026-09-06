@@ -185,7 +185,7 @@ export extern function pipeline_expr_int_val_at(arena: *ASTArena, expr_ref: i32)
 /** C-synced block-body stmt_order emit (runtime_pipeline_abi / backend seed; do not scan stmt_order in X while). Historical pipeline_glue.c left wave309. */
 export extern function backend_emit_block_body_sync_elf(arena: *ASTArena, elf_ctx: *ElfCodegenCtx, block_ref: i32, ctx: *AsmFuncCtx, ta: i32): i32;
 /* See implementation. */
-export extern function pipeline_asm_compute_frame_size_c(num_params: i32, arena: *ASTArena, block_ref: i32, mod: *Module): i32;
+export extern function pipeline_asm_compute_frame_size_c(num_params: i32, arena: *ASTArena, block_ref: i32, mod: *Module, func_index: i32): i32;
 export extern function pipeline_asm_fill_param_slots(ctx: *AsmFuncCtx, mod: *Module, func_index: i32): void;
 /* See implementation. */
 export extern function pipeline_asm_emit_param_home_elf_c(elf_ctx: *ElfCodegenCtx, ctx: *AsmFuncCtx, mod: *Module, func_index: i32, ta: i32): i32;
@@ -1433,12 +1433,13 @@ export function ctx_reset(ctx: *AsmFuncCtx, mod: *Module): void {
  * @param arena *ASTArena
  * @param block_ref i32
  * @param mod *Module
+ * @param func_index i32
  * @return i32
  */
-export function compute_frame_size(num_params: i32, arena: *ASTArena, block_ref: i32, mod: *Module): i32 {
+export function compute_frame_size(num_params: i32, arena: *ASTArena, block_ref: i32, mod: *Module, func_index: i32): i32 {
   // PLATFORM: SHARED — LANG-007 S0: extern FFI must be in unsafe.
   unsafe {
-    return pipeline_asm_compute_frame_size_c(num_params, arena, block_ref, mod);
+    return pipeline_asm_compute_frame_size_c(num_params, arena, block_ref, mod, func_index);
   }
 }
 
@@ -3916,7 +3917,7 @@ export function asm_codegen_ast_seed_mega(module: *Module, arena: *ASTArena, out
       let body_ref: i32 = pipeline_asm_module_func_body_ref_at(module, i);
       let frame_sz: i32 = 0;
       if (body_ref != 0) {
-        frame_sz = compute_frame_size(pipeline_asm_module_func_num_params_at(module, i), arena, body_ref, module);
+        frame_sz = compute_frame_size(pipeline_asm_module_func_num_params_at(module, i), arena, body_ref, module, i);
         fill_local_slots(&ctx, arena, body_ref);
       }
       if (arch_emit_prologue(out, frame_sz, ta) != 0) {
@@ -4049,7 +4050,7 @@ export function asm_codegen_ast_to_elf_seed_mega(module: *Module, arena: *ASTAre
       let body_ref: i32 = pipeline_asm_module_func_body_ref_at(module, i);
       let frame_sz: i32 = 0;
       if (body_ref != 0) {
-        frame_sz = compute_frame_size(pipeline_asm_module_func_num_params_at(module, i), arena, body_ref, module);
+        frame_sz = compute_frame_size(pipeline_asm_module_func_num_params_at(module, i), arena, body_ref, module, i);
         pipeline_debug_trace_body_x_mega_post_frame(module, arena);
         if (pipeline_asm_block_num_stmt_order_at(arena, body_ref) == 0) {
           fill_local_slots(&ctx, arena, body_ref);

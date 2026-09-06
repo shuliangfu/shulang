@@ -4207,7 +4207,8 @@ pipeline_abi_inject_assign_thin() {
       glue_emit_assign_rhs_to_rax_elf_c \
       pipeline_asm_emit_assign_elf_c \
       glue_field_assign_pair_base_ref_c \
-      glue_body_expr_stmt_at_c
+      glue_body_expr_stmt_at_c \
+      glue_asm_sum_block_call_spill_bytes
     do
       "$oc" --weaken-symbol="_$s" "$base_o" 2>/dev/null \
         || "$oc" --weaken-symbol="$s" "$base_o" 2>/dev/null \

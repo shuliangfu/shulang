@@ -18949,6 +18949,243 @@ int32_t glue_body_expr_stmt_at_c(void *arena, int32_t body_ref, int32_t si, int3
   *out_er = er;
   return 1;
 }
+
+/* ============================================================================
+ * wave157 call-spill calculation: w157_sum_expr_call_spill_bytes +
+ *   glue_asm_sum_block_call_spill_bytes.
+ * Walks AST block-tree to calculate call-argument spill bytes required.
+ * Accurately covers labeled return expressions (fixing pure-asm stack under-allocation).
+ * ============================================================================ */
+
+extern int32_t pipeline_expr_kind_ord_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_call_num_args_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_call_arg_ref(void *arena, int32_t expr_ref, int32_t i);
+extern int32_t pipeline_expr_method_call_base_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_method_call_num_args_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_method_call_arg_ref(void *arena, int32_t expr_ref, int32_t i);
+extern int32_t pipeline_expr_binop_left_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_binop_right_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_unary_operand_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_as_operand_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_index_base_ref(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_index_index_ref(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_field_access_base_ref(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_array_lit_num_elems_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_array_lit_elem_ref(void *arena, int32_t expr_ref, int32_t i);
+extern int32_t pipeline_expr_struct_lit_num_fields(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_struct_lit_init_ref(void *arena, int32_t expr_ref, int32_t i);
+extern int32_t pipeline_expr_if_cond_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_if_then_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_if_else_ref_at(void *arena, int32_t expr_ref);
+
+extern int32_t ast_ast_block_num_consts(void *arena, int32_t block_ref);
+extern int32_t ast_pipeline_block_const_init_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_num_lets(void *arena, int32_t block_ref);
+extern int32_t ast_pipeline_block_let_init_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_num_expr_stmts(void *arena, int32_t block_ref);
+extern int32_t ast_pipeline_block_expr_stmt_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_final_expr_ref(void *arena, int32_t block_ref);
+extern int32_t ast_ast_block_num_if_stmts(void *arena, int32_t block_ref);
+extern int32_t ast_pipeline_block_if_cond_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_pipeline_block_if_then_body_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_pipeline_block_if_else_body_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_num_loops(void *arena, int32_t block_ref);
+extern int32_t ast_ast_block_while_cond_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_while_body_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_num_for_loops(void *arena, int32_t block_ref);
+extern int32_t ast_ast_block_for_init_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_for_cond_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_for_step_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_for_body_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t ast_ast_block_num_regions(void *arena, int32_t block_ref);
+extern int32_t pipeline_block_region_body_ref(void *arena, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_num_labeled_stmts(void *arena, int32_t block_ref);
+extern int32_t pipeline_block_labeled_is_goto(void *arena, int32_t block_ref, int32_t li);
+extern int32_t pipeline_block_labeled_return_expr_ref(void *arena, int32_t block_ref, int32_t li);
+
+static int32_t g_w157_spill_total = 0;
+static int32_t g_w157_spill_visits = 0;
+static int32_t g_w157_walk_stack[256];
+
+static void w157_sum_expr_call_spill_bytes(void *arena, int32_t expr_ref) {
+  int32_t ko, n, i, arg_ref, op, as_op;
+  if (!arena || expr_ref <= 0) return;
+  g_w157_spill_visits++;
+  if (g_w157_spill_visits > 32768) return;
+  ko = pipeline_expr_kind_ord_at(arena, expr_ref);
+  if (ko == 48) { /* EXPR_CALL */
+    n = pipeline_expr_call_num_args_at(arena, expr_ref);
+    if (n < 0) n = 0;
+    if (n > 64) n = 64;
+    for (i = 0; i < n; i++) {
+      arg_ref = pipeline_expr_call_arg_ref(arena, expr_ref, i);
+      w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    }
+    g_w157_spill_total += n * 32;
+    return;
+  }
+  if (ko == 49) { /* EXPR_METHOD_CALL */
+    arg_ref = pipeline_expr_method_call_base_ref_at(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    n = pipeline_expr_method_call_num_args_at(arena, expr_ref);
+    if (n < 0) n = 0;
+    if (n > 64) n = 64;
+    for (i = 0; i < n; i++) {
+      arg_ref = pipeline_expr_method_call_arg_ref(arena, expr_ref, i);
+      w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    }
+    g_w157_spill_total += (n + 1) * 32;
+    return;
+  }
+  if ((ko >= 4 && ko <= 21) || ko == 25 || ko == 26 || (ko >= 28 && ko <= 38)) {
+    arg_ref = pipeline_expr_binop_left_ref_at(arena, expr_ref);
+    op = pipeline_expr_binop_right_ref_at(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+    return;
+  }
+  if (ko == 22 || ko == 23 || ko == 24 || ko == 41) {
+    op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+    return;
+  }
+  as_op = pipeline_expr_as_operand_ref_at(arena, expr_ref);
+  if (ko == 54 || as_op > 0) {
+    op = as_op;
+    if (op <= 0) {
+      op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
+    }
+    w157_sum_expr_call_spill_bytes(arena, op);
+    return;
+  }
+  if (ko == 47) { /* INDEX */
+    arg_ref = pipeline_expr_index_base_ref(arena, expr_ref);
+    op = pipeline_expr_index_index_ref(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+    return;
+  }
+  if (ko == 44) { /* FIELD_ACCESS */
+    op = pipeline_expr_field_access_base_ref(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+    return;
+  }
+  if (ko == 46) { /* ARRAY_LIT */
+    n = pipeline_expr_array_lit_num_elems_at(arena, expr_ref);
+    if (n > 1024) n = 1024;
+    for (i = 0; i < n; i++) {
+      arg_ref = pipeline_expr_array_lit_elem_ref(arena, expr_ref, i);
+      w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    }
+    return;
+  }
+  if (ko == 45) { /* STRUCT_LIT */
+    n = pipeline_expr_struct_lit_num_fields(arena, expr_ref);
+    if (n > 64) n = 64;
+    for (i = 0; i < n; i++) {
+      arg_ref = pipeline_expr_struct_lit_init_ref(arena, expr_ref, i);
+      w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    }
+    return;
+  }
+  arg_ref = pipeline_expr_if_cond_ref_at(arena, expr_ref);
+  if (arg_ref > 0) {
+    w157_sum_expr_call_spill_bytes(arena, arg_ref);
+    op = pipeline_expr_if_then_ref_at(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+    op = pipeline_expr_if_else_ref_at(arena, expr_ref);
+    w157_sum_expr_call_spill_bytes(arena, op);
+  }
+}
+
+int32_t glue_asm_sum_block_call_spill_bytes(void *arena, int32_t block_ref) {
+  int32_t sp = 0;
+  int32_t seen = 0;
+  int32_t cur = 0;
+  int32_t i, n, ch, fin, er;
+  if (!arena || block_ref <= 0) return 0;
+  g_w157_spill_total = 0;
+  g_w157_spill_visits = 0;
+  g_w157_walk_stack[0] = block_ref;
+  sp = 1;
+  while (sp > 0 && seen < 65536) {
+    seen++;
+    sp--;
+    cur = g_w157_walk_stack[sp];
+    if (cur <= 0) continue;
+    n = ast_ast_block_num_consts(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_pipeline_block_const_init_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+    }
+    n = ast_ast_block_num_lets(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_pipeline_block_let_init_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+    }
+    n = ast_ast_block_num_expr_stmts(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_pipeline_block_expr_stmt_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+    }
+    fin = ast_ast_block_final_expr_ref(arena, cur);
+    if (fin > 0) {
+      w157_sum_expr_call_spill_bytes(arena, fin);
+    }
+    n = ast_ast_block_num_if_stmts(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_pipeline_block_if_cond_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+      ch = ast_pipeline_block_if_then_body_ref(arena, cur, i);
+      if (ch > 0 && sp < 256) {
+        g_w157_walk_stack[sp++] = ch;
+      }
+      ch = ast_pipeline_block_if_else_body_ref(arena, cur, i);
+      if (ch > 0 && sp < 256) {
+        g_w157_walk_stack[sp++] = ch;
+      }
+    }
+    n = ast_ast_block_num_loops(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_ast_block_while_cond_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+      ch = pipeline_block_while_body_ref(arena, cur, i);
+      if (ch > 0 && sp < 256) {
+        g_w157_walk_stack[sp++] = ch;
+      }
+    }
+    n = ast_ast_block_num_for_loops(arena, cur);
+    for (i = 0; i < n; i++) {
+      er = ast_ast_block_for_init_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+      er = ast_ast_block_for_cond_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+      er = ast_ast_block_for_step_ref(arena, cur, i);
+      w157_sum_expr_call_spill_bytes(arena, er);
+      ch = pipeline_block_for_body_ref(arena, cur, i);
+      if (ch > 0 && sp < 256) {
+        g_w157_walk_stack[sp++] = ch;
+      }
+    }
+    n = ast_ast_block_num_regions(arena, cur);
+    for (i = 0; i < n; i++) {
+      ch = pipeline_block_region_body_ref(arena, cur, i);
+      if (ch > 0 && sp < 256) {
+        g_w157_walk_stack[sp++] = ch;
+      }
+    }
+    n = pipeline_block_num_labeled_stmts(arena, cur);
+    for (i = 0; i < n; i++) {
+      if (pipeline_block_labeled_is_goto(arena, cur, i) == 0) {
+        er = pipeline_block_labeled_return_expr_ref(arena, cur, i);
+        if (er > 0) {
+          w157_sum_expr_call_spill_bytes(arena, er);
+        }
+      }
+    }
+  }
+  return g_w157_spill_total;
+}
 /* XLANG_PABI_ASSIGN_THIN_END */
 
 
