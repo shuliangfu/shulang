@@ -199,6 +199,7 @@
   - ✅ leftover rest unique rec ASSIGN VAR dest TYPE_NAMED IF `d = if true { P { x: 3 } } else { P { x: 0 } }`／`d = if true { mk() } else { P { x: 0 } }` leftover rest unique rec ASSIGN TYPE_NAMED IF 扩 VAR dest park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`a7cb1103a`
   - ✅ leftover rest unique rec ASSIGN VAR dest TYPE_NAMED BLOCK `d = { P { x: 3 } }`／`d = { mk() }` leftover rest unique rec ASSIGN TYPE_NAMED BLOCK 扩 VAR dest park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`ecd6f4bdf`
   - ✅ leftover rest unique rec ASSIGN VAR dest TYPE_NAMED FIELD／INDEX `d = s.inner`／`d = arr[0]` leftover rest unique rec ASSIGN TYPE_NAMED FIELD／INDEX 扩 VAR dest park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0＠`9da478f51`
+  - ✅ leftover rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT `d = "hi"` leftover rest unique rec ASSIGN TYPE_SLICE STRING_LIT 扩 VAR dest park dest＋leftover unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax＋store fat data@0＋slen@8＠`573a0df68`
 - ✅ **L4＠1174c5bb3 bstrict** — Ubuntu shuffle 后 **select SIGILL**：`vpxor ymm3` 写 `C5 F5 77`（EMMS #UD）；`vpand`／`vpandn`／`vpor` VEX.vvvv 误用 ymm3。i32 ymm 编码器已补（Ubuntu L4＠`6c0fdeebf` shuffle-select **OK**）；f32 ymm select 编码器亦已补全（`vxorps` `C5 E4 57 DB`、`vcmpgtps` `C5 EC C2 D3 0E`、`vandps` `C5 FC 54 C2`、`vandnps` `C5 EC 55 D1`、`vorps` `C5 FC 56 C2`）
 
 ---
