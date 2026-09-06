@@ -12874,7 +12874,7 @@ extern int32_t pipeline_expr_resolved_type_ref(void *arena, int32_t expr_ref);
 extern int32_t pipeline_expr_kind_ord_at(void *arena, int32_t expr_ref);
 extern int32_t pipeline_expr_block_ref_at(void *arena, int32_t expr_ref);
 extern int32_t ast_ast_block_num_expr_stmts(void *arena, int32_t block_ref);
-extern int32_t ast_pipeline_block_expr_stmt_ref(void *arena, int32_t block_ref, int32_t ei);
+extern int32_t ast_pipeline_block_expr_stmt_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t ei);
 extern int32_t ast_ast_block_final_expr_ref(void *arena, int32_t block_ref);
 extern int32_t pipeline_expr_if_cond_ref_at(void *arena, int32_t expr_ref);
 extern int32_t pipeline_expr_if_then_ref_at(void *arena, int32_t expr_ref);
@@ -12906,9 +12906,9 @@ extern int32_t ast_ast_block_stmt_order_idx(void *arena, int32_t block_ref, int3
 extern int32_t ast_ast_block_num_loops(void *arena, int32_t block_ref);
 extern int32_t ast_ast_block_num_for_loops(void *arena, int32_t block_ref);
 extern int32_t ast_ast_block_num_if_stmts(void *arena, int32_t block_ref);
-extern int32_t ast_pipeline_block_if_cond_ref(void *arena, int32_t block_ref, int32_t if_idx);
-extern int32_t ast_pipeline_block_if_then_body_ref(void *arena, int32_t block_ref, int32_t if_idx);
-extern int32_t ast_pipeline_block_if_else_body_ref(void *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_cond_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_then_body_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_else_body_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
 extern int32_t ast_ast_block_num_regions(void *arena, int32_t block_ref);
 extern int32_t pipeline_block_region_body_ref(void *arena, int32_t block_ref, int32_t i);
 extern int32_t pipeline_block_region_with_arena_cap_ref(void *arena, int32_t block_ref, int32_t ri);
@@ -17093,7 +17093,7 @@ int32_t pipeline_asm_index_elem_byte_sz_c(void *arena, int32_t expr_ref) {
     } else {
       tr = pipeline_expr_resolved_type_ref(arena, base_ref);
     }
-    /* Base *T/**T: glue peels outer PTR once. Do not pre-peel then call glue
+    /* Base *T / **T: glue peels outer PTR once. Do not pre-peel then call glue
      * (double-peel **u8 → sizeof(u8)=1; pure-asm argv[i] scale1+ldrb SEGV).
      * PLATFORM: SHARED freestanding — seed cold twin of pure .x. */
     if (tr > 0 && pipeline_type_kind_ord_at(arena, tr) == 9) {
@@ -31458,8 +31458,29 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
           if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
             out_rc = -1;
         }
-      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 46) {
+      } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 46) {
         int32_t asg_n;
+        /* TYPE_SLICE dest-in-rbx ARRAY_LIT `*p = [3, 4]`
+         * AND VAR dest ARRAY_LIT `d = [3, 4]`. Park dest CPU stack
+         * (lvalue of DEREF or VAR), SAT emit_array_lit, store fat
+         * data@0 + length@8 into dest. Bump next_offset past dest.
+         * PLATFORM: WINDOWS leftover-PE. */
+        asg_dop = asg_left;
+        if (asg_lko == 52)
+          asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
+        if (asg_dop > 0) {
+          int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_dop);
+          int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
+          int32_t asg_next;
+          int32_t asg_past;
+          if (asg_p_off >= 0 && asg_ly_next) {
+            asg_next = *asg_ly_next;
+            asg_past = asg_p_off + 24;
+            if (asg_next < asg_past)
+              *asg_ly_next = asg_past;
+            glue_align_next_offset(ctx);
+          }
+        }
         asg_n = pipeline_expr_array_lit_num_elems_at(arena, asg_right);
         if (asg_n < 0)
           asg_n = 0;
@@ -31856,14 +31877,30 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
           if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
             out_rc = -1;
         }
-      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 11 &&
+      } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 11 &&
                  (asg_rko == 3 || asg_rko == 48 || asg_rko == 49 || asg_rko == 52)) {
-        /* TYPE_SLICE dest-in-rbx VAR/CALL/METHOD/DEREF. Park dest
+        /* TYPE_SLICE dest-in-rbx OR VAR dest VAR/CALL/METHOD/DEREF. Park dest
          * (emit_expr / lvalue clobbers rbx). VAR: leftover rest unique
          * lvalue qword-copy 16B (not rec ko==3 SAT slow). CALL/METHOD/
          * DEREF: leftover rest emit dual-GP then store rax@0 rdx@8.
-         * Do not leftover rest T SAT emit_assign. PLATFORM: WINDOWS
-         * leftover-PE. */
+         * Bump next_offset past dest. Do not leftover rest T SAT emit_assign.
+         * PLATFORM: WINDOWS leftover-PE. */
+        asg_dop = asg_left;
+        if (asg_lko == 52)
+          asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
+        if (asg_dop > 0) {
+          int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_dop);
+          int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
+          int32_t asg_next;
+          int32_t asg_past;
+          if (asg_p_off >= 0 && asg_ly_next) {
+            asg_next = *asg_ly_next;
+            asg_past = asg_p_off + 24;
+            if (asg_next < asg_past)
+              *asg_ly_next = asg_past;
+            glue_align_next_offset(ctx);
+          }
+        }
         if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
           out_rc = -1;
         else if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
@@ -32738,9 +32775,9 @@ extern void glue_wa_scope_pop_c(void);
 extern int32_t glue_emit_with_arena_init_elf(void *arena, void *elf_ctx, void *ctx, int32_t wa_off, int32_t cap_ref,
                                             int32_t ta);
 extern int32_t glue_emit_with_arena_deinit_elf(void *elf_ctx, int32_t wa_off, int32_t ta);
-extern int32_t ast_pipeline_block_if_cond_ref(void *arena, int32_t block_ref, int32_t if_idx);
-extern int32_t ast_pipeline_block_if_then_body_ref(void *arena, int32_t block_ref, int32_t if_idx);
-extern int32_t ast_pipeline_block_if_else_body_ref(void *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_cond_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_then_body_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
+extern int32_t ast_pipeline_block_if_else_body_ref(struct ast_ASTArena *arena, int32_t block_ref, int32_t if_idx);
 extern int32_t pipeline_asm_emit_next_label_c(void *ctx, uint8_t *buf, int32_t cap);
 extern int32_t glue_enc_jz_after_bool_in_eax(void *elf_ctx, uint8_t *label, int32_t label_len, int32_t ta);
 extern int glue_block_stmt_order_has_return(void *arena, int32_t block_ref);
@@ -42403,7 +42440,7 @@ int32_t pipeline_asm_index_elem_byte_sz_c(void *arena, int32_t expr_ref) {
     } else {
       tr = pipeline_expr_resolved_type_ref(arena, base_ref);
     }
-    /* Base *T/**T: glue peels outer PTR once. Do not pre-peel then call glue
+    /* Base *T / **T: glue peels outer PTR once. Do not pre-peel then call glue
      * (double-peel **u8 → sizeof(u8)=1; pure-asm argv[i] scale1+ldrb SEGV).
      * PLATFORM: SHARED freestanding — seed cold twin of pure .x. */
     if (tr > 0 && pipeline_type_kind_ord_at(arena, tr) == 9) {
