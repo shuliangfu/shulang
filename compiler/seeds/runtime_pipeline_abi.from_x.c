@@ -13761,7 +13761,7 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * dest-in-rbx CAST AND VAR dest CAST parks dest then leftover unique leftover_emit_match_arm_result
    * of CAST dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED
    * dest-in-rbx IF AND VAR dest IF parks dest then leftover unique leftover_emit_match_arm_result
-   * of IF dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK parks dest then leftover unique leftover_emit_match_arm_result of BLOCK dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_SLICE
+   * of IF dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK parks dest then leftover unique leftover_emit_match_arm_result of BLOCK dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_SLICE
    * dest-in-rbx IF parks dest
    * then leftover unique leftover_emit_match_arm_result of IF dest-parked
    * dest_tk==11. leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx
@@ -30198,7 +30198,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx CAST
      * `*p = P { x: 3, y: 4 } as P` / `*p = mk() as P` AND VAR dest CAST
      * `d = P { x: 3 } as P` / `d = mk() as P` parks dest then leftover
-     * unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF `*p = if true { P { x: 3, y: 4 } } else { P { x: 0, y: 0 } }` AND VAR dest IF `d = if true { P { x: 3 } } else { P { x: 0 } }` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK `*p = { P { x: 3, y: 4 } }` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX `*p = s.inner` / `*p = arr[0]` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0.
+     * unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF `*p = if true { P { x: 3, y: 4 } } else { P { x: 0, y: 0 } }` AND VAR dest IF `d = if true { P { x: 3 } } else { P { x: 0 } }` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK `*p = { P { x: 3, y: 4 } }` AND VAR dest BLOCK `d = { P { x: 3 } }` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX `*p = s.inner` / `*p = arr[0]` parks dest then leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0.
      * TYPE_SLICE dest-in-rbx IF `*p = if true { [3,4] } else { [0,0] }` /
      * `*p = if true { "hi" } else { "" }` dest_tk==11 is leftover rest unique
      * rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result
@@ -30616,10 +30616,10 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * remaining-wave. Do not leftover rest T SAT emit_as / emit_assign
          * / emit_struct_lit. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED IF is leftover
          * rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR
-         * dest TYPE_NAMED BLOCK/FIELD skip unless proven. leftover rest unique
+         * dest TYPE_NAMED FIELD skip unless proven. leftover rest unique
          * rec ASSIGN TYPE_NAMED dest-in-rbx IF AND VAR dest IF is leftover rest
          * unique rec ASSIGN sibling. leftover rest unique rec ASSIGN TYPE_NAMED
-         * dest-in-rbx BLOCK is leftover rest unique rec ASSIGN sibling.
+         * dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling.
          * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX
          * is leftover rest unique rec ASSIGN sibling. leftover rest unique
          * rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`) skip unless
@@ -30718,10 +30718,10 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * Bump next_offset past dest (TYPE_NAMED MATCH 8B lesson). Do not
          * leftover unique leftover_emit_if twin. Do not leftover rest
          * remaining-wave. Do not leftover rest T SAT emit_if / emit_assign /
-         * emit_struct_lit. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED
-         * BLOCK/FIELD skip unless proven. leftover rest unique rec ASSIGN
-         * TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN
-         * sibling. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx
+         * emit_struct_lit. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK
+         * AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling.
+         * leftover rest unique rec ASSIGN VAR dest TYPE_NAMED FIELD skip
+         * unless proven. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx
          * FIELD/INDEX is leftover rest unique rec ASSIGN sibling. leftover
          * rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
          * skip unless proven. ADDR_OF (rko==51) / BINARY skip unless proven.
@@ -30783,37 +30783,50 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
           if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
             out_rc = -1;
         }
-      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 8 && asg_rko == 26) {
+      } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 8 &&
+                 asg_rko == 26) {
         int32_t asg_nbytes;
         void *asg_mod;
         /* TYPE_NAMED dest-in-rbx BLOCK `*p = { P { x: 3, y: 4 } }` /
-         * `*p = { mk() }` / dest-region `{ unsafe { P { x: 3, y: 4 } } }`.
-         * SAT emit_assign DEREF dest SAT local t struct_let_init -2 then leftover
-         * rest rec BLOCK leftover unique rec leftover unique emit_block /
-         * leftover rest WIN leftover body_sync SAT implicit dest (BLOCK wrapping
-         * STRUCT_LIT same named_star_lit SEGV 139 / BLOCK wrapping CALL same
-         * star_call SEGV 139). leftover unique leftover_emit_match_arm_result
-         * rko==26 already dest-parks dest-region peel/IF/with_arena last
-         * STRUCT_LIT/CALL/VAR/FIELD/DEREF/CAST/IF/nested MATCH dest_tk==0.
-         * leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx BLOCK is leftover
-         * rest unique rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result
-         * dest-parked dest_tk==11). leftover rest unique rec ASSIGN TYPE_ARRAY
-         * dest-in-rbx BLOCK is leftover rest unique store iko==26 (do not leftover
-         * rest unique rec ASSIGN second intercept). leftover rest unique rec
-         * ASSIGN TYPE_NAMED dest-in-rbx CAST/IF is leftover rest unique rec ASSIGN
-         * (park dest + leftover unique leftover_emit_match_arm_result dest-parked
-         * dest_tk==0). G.7 complete leftover rest unique rec ASSIGN TYPE_NAMED
-         * dest-in-rbx BLOCK: park dest CPU stack (same leftover rest unique rec
-         * ASSIGN TYPE_NAMED MATCH/CAST/IF), leftover unique leftover_emit_match_arm_result
-         * of BLOCK dest-parked dest_tk==0. Bump next_offset past dest (TYPE_NAMED
-         * MATCH 8B lesson). Do not leftover unique leftover_emit_block twin leftover
-         * rest WIN leftover body_sync. Do not leftover rest remaining-wave. Do not
-         * leftover rest T SAT emit_block_body_sync / emit_assign / emit_struct_lit.
-         * leftover rest unique rec ASSIGN VAR dest TYPE_NAMED BLOCK
-         * (`d = { P { x: 3 } }`) skip unless proven (SAT emit_assign). leftover
-         * rest unique rec ASSIGN VAR dest TYPE_NAMED CAST is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED IF is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED BLOCK skip unless proven.
-         * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique rec ASSIGN sibling.
-         * leftover rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
+         * `*p = { mk() }` / dest-region `{ unsafe { P { x: 3, y: 4 } } }`
+         * AND VAR dest BLOCK `d = { P { x: 3 } }` / `d = { mk() }` /
+         * dest-region `d = { unsafe { P { x: 3 } } }`. SAT emit_assign
+         * DEREF dest SAT local t struct_let_init -2 then leftover rest rec
+         * BLOCK leftover unique rec leftover unique emit_block / leftover
+         * rest WIN leftover body_sync SAT implicit dest (BLOCK wrapping
+         * STRUCT_LIT same named_star_lit SEGV 139 / BLOCK wrapping CALL
+         * same star_call SEGV 139). VAR dest previously fell through SAT
+         * emit_assign (SAT global T): leftover unique emit_block / leftover
+         * rest WIN leftover body_sync SAT implicit dest then 8B store rax
+         * into d (BLOCK wrapping CALL 16B same match_asg_call16 RUN=0 /
+         * 24/32B same match_asg_call24/32 SEGV 139; BLOCK wrapping
+         * STRUCT_LIT same named_star_lit produce). leftover unique
+         * leftover_emit_match_arm_result rko==26 already dest-parks
+         * dest-region peel/IF/with_arena last STRUCT_LIT/CALL/VAR/FIELD/
+         * DEREF/CAST/IF/nested MATCH dest_tk==0. leftover rest unique rec
+         * ASSIGN TYPE_NAMED MATCH/CAST/IF already intercept VAR dest
+         * (asg_lko==3). leftover rest unique rec ASSIGN TYPE_SLICE
+         * dest-in-rbx BLOCK is leftover rest unique rec ASSIGN (park dest
+         * + leftover unique leftover_emit_match_arm_result dest-parked
+         * dest_tk==11). leftover rest unique rec ASSIGN TYPE_ARRAY
+         * dest-in-rbx BLOCK is leftover rest unique store iko==26 (do not
+         * leftover rest unique rec ASSIGN second intercept). leftover rest
+         * unique rec ASSIGN TYPE_NAMED dest-in-rbx CAST/IF AND VAR dest
+         * CAST/IF is leftover rest unique rec ASSIGN sibling. G.7 complete
+         * leftover rest unique rec ASSIGN TYPE_NAMED BLOCK: park dest CPU
+         * stack (lvalue of DEREF or VAR; same leftover rest unique rec
+         * ASSIGN TYPE_NAMED MATCH/CAST/IF), leftover unique
+         * leftover_emit_match_arm_result of BLOCK dest-parked dest_tk==0.
+         * Bump next_offset past dest (TYPE_NAMED MATCH 8B lesson). Do not
+         * leftover unique leftover_emit_block twin leftover rest WIN
+         * leftover body_sync. Do not leftover rest remaining-wave. Do not
+         * leftover rest T SAT emit_block_body_sync / emit_assign /
+         * emit_struct_lit. leftover rest unique rec ASSIGN VAR dest
+         * TYPE_NAMED FIELD skip unless proven. leftover rest unique rec
+         * ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique
+         * rec ASSIGN sibling. leftover rest unique rec ASSIGN TYPE_NAMED
+         * dest-in-rbx DEREF skip (named_star_deref GREEN). leftover rest
+         * unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
          * skip unless proven. ADDR_OF (rko==51) / BINARY skip unless proven.
          * PLATFORM: WINDOWS leftover-PE. */
         asg_mod = glue_emit_module_from_ctx(ctx);
@@ -30829,7 +30842,11 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
         }
         if (asg_nbytes <= 0)
           asg_nbytes = 8;
-        asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
+        /* DEREF dest: bump past pointer p. VAR dest: bump past d.
+         * PLATFORM: WINDOWS leftover-PE. */
+        asg_dop = asg_left;
+        if (asg_lko == 52)
+          asg_dop = pipeline_expr_unary_operand_ref_at(arena, asg_left);
         if (asg_dop > 0) {
           int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_dop);
           int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
@@ -30903,7 +30920,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * rest unique rec ASSIGN TYPE_NAMED dest-in-rbx DEREF (`*p = *q`)
          * skip (named_star_deref GREEN). leftover rest unique rec ASSIGN
          * VAR dest TYPE_NAMED CAST is leftover rest unique rec ASSIGN sibling.
-         * leftover rest unique rec ASSIGN VAR dest TYPE_NAMED IF is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED BLOCK skip unless proven. leftover
+         * leftover rest unique rec ASSIGN VAR dest TYPE_NAMED IF is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN VAR dest TYPE_NAMED BLOCK is leftover rest unique rec ASSIGN sibling. leftover
          * rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
          * skip unless proven. ADDR_OF (rko==51) / BINARY skip unless proven.
          * PLATFORM: WINDOWS leftover-PE. */
@@ -31055,7 +31072,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0).
          * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF is leftover
          * rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
-         * TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec
+         * TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec
          * ASSIGN TYPE_SLICE dest-in-rbx IF wrapping ARRAY_LIT/STRING_LIT is
          * leftover rest unique rec ASSIGN sibling. leftover rest unique rec
          * ASSIGN TYPE_SLICE dest-in-rbx BLOCK wrapping ARRAY_LIT/STRING_LIT
@@ -31123,7 +31140,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * catch-all let_init(-3) (do not leftover rest unique rec ASSIGN
          * second intercept). leftover rest unique rec ASSIGN TYPE_NAMED
          * dest-in-rbx IF is leftover rest unique rec ASSIGN sibling. leftover
-         * rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
+         * rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
          * TYPE_SLICE dest-in-rbx BLOCK wrapping ARRAY_LIT/STRING_LIT is leftover
          * rest unique rec ASSIGN sibling. leftover rest unique rec
          * ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`) skip unless
@@ -31193,7 +31210,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * ASSIGN TYPE_ARRAY dest-in-rbx BLOCK is leftover rest unique store
          * iko==26 via catch-all let_init(-3) (do not leftover rest unique rec
          * ASSIGN second intercept). leftover rest unique rec
-         * ASSIGN TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN sibling. leftover
+         * ASSIGN TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling. leftover
          * rest unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`)
          * skip unless proven. leftover rest unique store iko==54 CAST wrapping
          * STRING_LIT/ARRAY_LIT peels operand then recurse leftover rest unique
@@ -33155,7 +33172,7 @@ int32_t glue_try_index_rvalue_slice_once_elf_c(void *arena, void *elf_ctx, int32
  * CAST is leftover rest unique rec ASSIGN (park dest + leftover unique
  * leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique
  * rec ASSIGN TYPE_NAMED dest-in-rbx IF is leftover rest unique rec ASSIGN
- * (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_ARRAY
+ * (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique rec ASSIGN (park dest + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0). leftover rest unique rec ASSIGN TYPE_ARRAY
  * dest-in-rbx IF is leftover rest unique store iko==25/27 via catch-all
  * let_init(-3) (do not leftover rest unique rec ASSIGN second intercept).
  * leftover rest unique rec ASSIGN TYPE_ARRAY dest-in-rbx BLOCK is leftover
@@ -33699,7 +33716,7 @@ int32_t glue_struct_lit_store_fixed_array_field_elf_c(void *arena, void *elf_ctx
      * + leftover unique leftover_emit_match_arm_result dest-parked dest_tk==0).
      * leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF is leftover
      * rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN
-     * TYPE_NAMED dest-in-rbx BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique rec ASSIGN sibling. leftover rest
+     * TYPE_NAMED dest-in-rbx BLOCK AND VAR dest BLOCK is leftover rest unique rec ASSIGN sibling. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx FIELD/INDEX is leftover rest unique rec ASSIGN sibling. leftover rest
      * unique rec ASSIGN VAR dest TYPE_SLICE STRING_LIT (`d = "hi"`) skip
      * unless proven (SAT emit_assign). leftover rest unique rec ASSIGN VAR
      * dest TYPE_ARRAY STRING_LIT (`d = "hi"`) stays SAT emit_assign.
