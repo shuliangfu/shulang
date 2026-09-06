@@ -3198,6 +3198,7 @@ ensure_pipeline_abi_prefer_one() {
       pipeline_abi_inject_fnptr_as_thin "$o" || true
       pipeline_abi_inject_asm_expr_thin "$o" || true
       pipeline_abi_inject_fnptr_array_esz_thin "$o" || true
+      pipeline_abi_inject_assign_thin "$o" || true
       # ttc-thin only when seed/x is newer (inject-only below). Re-injecting
       # on every up-to-date g05 stacks static inner copies.
       return 0
@@ -3227,6 +3228,7 @@ ensure_pipeline_abi_prefer_one() {
       pipeline_abi_inject_fnptr_as_thin "$o" || return 1
       pipeline_abi_inject_asm_expr_thin "$o" || return 1
       pipeline_abi_inject_fnptr_array_esz_thin "$o" || return 1
+      pipeline_abi_inject_assign_thin "$o" || true
       return 0
     fi
   fi
@@ -3625,6 +3627,7 @@ ensure_pipeline_abi_prefer_one() {
     pipeline_abi_inject_fnptr_as_thin "$o" || true
     pipeline_abi_inject_asm_expr_thin "$o" || true
     pipeline_abi_inject_fnptr_array_esz_thin "$o" || true
+    pipeline_abi_inject_assign_thin "$o" || true
     return 0
   fi
 
@@ -3657,6 +3660,7 @@ ensure_pipeline_abi_prefer_one() {
         pipeline_abi_inject_fnptr_as_thin "$o" || true
         pipeline_abi_inject_asm_expr_thin "$o" || true
         pipeline_abi_inject_fnptr_array_esz_thin "$o" || true
+        pipeline_abi_inject_assign_thin "$o" || true
         return 0
       fi
     else
@@ -3673,6 +3677,7 @@ ensure_pipeline_abi_prefer_one() {
       pipeline_abi_inject_fnptr_as_thin "$o" || true
       pipeline_abi_inject_asm_expr_thin "$o" || true
       pipeline_abi_inject_fnptr_array_esz_thin "$o" || true
+      pipeline_abi_inject_assign_thin "$o" || true
       return 0
     fi
   fi
@@ -3697,6 +3702,7 @@ ensure_pipeline_abi_prefer_one() {
   pipeline_abi_inject_fnptr_as_thin "$o" || true
   pipeline_abi_inject_asm_expr_thin "$o" || true
   pipeline_abi_inject_fnptr_array_esz_thin "$o" || true
+  pipeline_abi_inject_assign_thin "$o" || true
   return 0
 }
 
@@ -4004,6 +4010,11 @@ pipeline_abi_inject_param_ptr_slot_thin() {
     rm -f "$gen_c" "$thin_o" "$base_o"
     return 1
   fi
+  if pipeline_abi_thin_already_defined "$o" "$thin_o"; then
+    log "pipeline_abi ptrslot-thin inject skip: already defined in $o"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 0
+  fi
   cp -f "$o" "$base_o"
   oc=""
   if [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]; then
@@ -4018,6 +4029,8 @@ pipeline_abi_inject_param_ptr_slot_thin() {
     # GNU objcopy may exit 0 on a missing Darwin-prefixed name.
     "$oc" --weaken-symbol=glue_local_var_slot_needs_ptr_load_elf_c "$base_o" 2>/dev/null || true
     "$oc" --weaken-symbol=_glue_local_var_slot_needs_ptr_load_elf_c "$base_o" 2>/dev/null || true
+    "$oc" --weaken-symbol=w189_stack_off_is_emit_param_ptr_slot "$base_o" 2>/dev/null || true
+    "$oc" --weaken-symbol=_w189_stack_off_is_emit_param_ptr_slot "$base_o" 2>/dev/null || true
   fi
   if pure_ld_partial_merge "$o" "$thin_o" "$base_o" 2>/dev/null; then
     log "pipeline_abi ptrslot-thin inject OK (first-wins over weakened leftover)"
@@ -4146,6 +4159,68 @@ pipeline_abi_inject_binop_block_peel_thin() {
   fi
   cp -f "$base_o" "$o"
   log "pipeline_abi blkpeel-thin inject: merge failed; restored base"
+  rm -f "$gen_c" "$thin_o" "$base_o"
+  return 1
+}
+
+# wave142 dest-in-rbx assign thin inject.
+# Seed rest holds strong assign cluster in leftover; weaken then first-wins.
+# G.7: one C body (markers in from_x.c). PLATFORM: SHARED shell · LINUX gold + MACOS.
+pipeline_abi_inject_assign_thin() {
+  local o="$1"
+  local seed="seeds/runtime_pipeline_abi.from_x.c"
+  local gen_c thin_o base_o oc
+  if [ ! -s "$o" ] || [ ! -f "$seed" ]; then
+    return 0
+  fi
+  gen_c="$(mktemp "${TMPDIR:-/tmp}/pabi_asg.XXXXXX.c")"
+  thin_o="$(mktemp "${TMPDIR:-/tmp}/pabi_asg.XXXXXX.o")"
+  base_o="$(mktemp "${TMPDIR:-/tmp}/pabi_asg_base.XXXXXX.o")"
+  if ! awk '
+    /XLANG_PABI_ASSIGN_THIN_BEGIN/ {p=1; next}
+    /XLANG_PABI_ASSIGN_THIN_END/ {p=0; next}
+    p {print}
+  ' "$seed" >"$gen_c" || [ ! -s "$gen_c" ]; then
+    log "pipeline_abi asg-thin inject: extract failed"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  if ! ${CC:-cc} ${BASE_CFLAGS:--Wall -I. -Iinclude -Isrc} -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused -c -o "$thin_o" "$gen_c" 2>/dev/null; then
+    log "pipeline_abi asg-thin inject: cc thin failed"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 1
+  fi
+  cp -f "$o" "$base_o"
+  oc=""
+  if [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]; then
+    oc=/opt/homebrew/opt/llvm/bin/llvm-objcopy
+  elif command -v llvm-objcopy >/dev/null 2>&1; then
+    oc=llvm-objcopy
+  elif command -v objcopy >/dev/null 2>&1; then
+    oc=objcopy
+  fi
+  if [ -n "$oc" ]; then
+    for s in \
+      glue_assign_lhs_f32_type_ref_elf_c \
+      glue_emit_assign_rhs_elf_c \
+      glue_emit_assign_rhs_to_rax_elf_c \
+      pipeline_asm_emit_assign_elf_c \
+      glue_field_assign_pair_base_ref_c \
+      glue_body_expr_stmt_at_c
+    do
+      "$oc" --weaken-symbol="_$s" "$base_o" 2>/dev/null \
+        || "$oc" --weaken-symbol="$s" "$base_o" 2>/dev/null \
+        || true
+    done
+  fi
+  if pure_ld_partial_merge "$o" "$thin_o" "$base_o" 2>/dev/null; then
+    log "pipeline_abi asg-thin inject OK (first-wins over weakened leftover)"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 0
+  fi
+  cp -f "$base_o" "$o"
+  log "pipeline_abi asg-thin inject: merge failed; restored base"
   rm -f "$gen_c" "$thin_o" "$base_o"
   return 1
 }

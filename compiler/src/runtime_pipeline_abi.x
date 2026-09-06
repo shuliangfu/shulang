@@ -37575,10 +37575,14 @@ export function pipeline_asm_emit_assign_elf_c(arena: *u8, elf_ctx: *u8, expr_re
               return 0;
             }
         }
-        /* TYPE_ARRAY CALL returns E* (8B). SLICE CALL is split:
-         * Darwin AAPCS64 take() returns E* to the incoming fat;
-         * x86 SysV take() loads *E* into rax+rdx dual-GP.
-         * PLATFORM: SHARED dest / LINUX+MACOS x86 dual-GP / MACOS|ARM64 E*. */
+        /* dest-in-rbx TYPE_ARRAY / TYPE_SLICE CALL: park dest before emit.
+         * Callee clobbers rbx / AAPCS64 x19 (unsaved in prologue).
+         * For TYPE_SLICE (16B): CALL returns dual-GP {data, len} in rax+rdx
+         * (x0+x1 on ARM64). Spill to a frame temp, restore dest, then copy 16B.
+         * For TYPE_ARRAY: CALL returns payload pointer in rax (x0 on ARM64).
+         * Spill payload pointer, restore dest, reload pointer into rax,
+         * then copy nbytes via glue_copy_large_struct_from_rax_ptr_elf_c.
+         * PLATFORM: SHARED dest-in-rbx CALL · LINUX x86_64 SysV · MACOS|ARM64. */
         if ((ltk == 10 || ltk == 11) && (rko_pre == 48 || rko_pre == 49)) {
           unsafe {
             mod = glue_emit_module_from_ctx(ctx);
@@ -37593,23 +37597,115 @@ export function pipeline_asm_emit_assign_elf_c(arena: *u8, elf_ctx: *u8, expr_re
             }
           }
           if (nbytes >= 8) {
+            glue_align_next_offset(ctx);
+            dst_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+            if (ta == 1) {
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dst_spill + 8);
+            } else {
+              dst_spill = dst_spill + 8;
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dst_spill);
+            }
+            if (ta == 1) {
+              rc = glue_arm64_mov_x19_to_x0_elf_c(elf_ctx);
+            } else {
+              unsafe {
+                rc = backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+              }
+            }
+            if (rc != 0) {
+              return 0 - 1;
+            }
+            unsafe {
+              rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, dst_spill, ta);
+            }
+            if (rc != 0) {
+              return 0 - 1;
+            }
             unsafe {
               rc = pipeline_asm_emit_expr_elf_c(arena, elf_ctx, right_ref, ctx, ta);
             }
             if (rc != 0) {
               return 0 - 1;
             }
-            if (ltk == 11 && ta == 0) {
-              unsafe {
-                rc = backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, 0, 8, ta);
+            if (ltk == 11) {
+              glue_align_next_offset(ctx);
+              src_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+              if (ta == 1) {
+                pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill + 16);
+              } else {
+                src_spill = src_spill + 16;
+                pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill);
               }
-              if (rc == 0) {
-                rc = glue_x86_store_rdx_to_rbx8_elf_c(elf_ctx);
+              unsafe {
+                rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, src_spill, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              unsafe {
+                rc = backend_enc_store_rdx_to_rbp_arch(
+                    elf_ctx, glue_slice_dual_gp_length_off_c(src_spill, ta), ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              unsafe {
+                rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, dst_spill, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              unsafe {
+                rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              unsafe {
+                rc = backend_enc_lea_rbp_to_rax_arch(elf_ctx, src_spill, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              unsafe {
+                rc = glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, 0 - 3, 16, ta);
               }
               if (rc != 0) {
                 return 0 - 1;
               }
               return 0;
+            }
+            glue_align_next_offset(ctx);
+            src_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+            if (ta == 1) {
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill + 8);
+            } else {
+              src_spill = src_spill + 8;
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill);
+            }
+            unsafe {
+              rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, src_spill, ta);
+            }
+            if (rc != 0) {
+              return 0 - 1;
+            }
+            unsafe {
+              rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, dst_spill, ta);
+            }
+            if (rc != 0) {
+              return 0 - 1;
+            }
+            unsafe {
+              rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+            }
+            if (rc != 0) {
+              return 0 - 1;
+            }
+            unsafe {
+              rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, src_spill, ta);
+            }
+            if (rc != 0) {
+              return 0 - 1;
             }
             unsafe {
               rc = glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, 0 - 3, nbytes, ta);

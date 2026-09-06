@@ -17817,6 +17817,12 @@ void pipeline_asm_fill_local_slots(void *ctx, void *arena, int32_t block_ref) {
  * PLATFORM: SHARED freestanding · continues same #ifndef FROM_X as wave141.
  */
 
+/* XLANG_PABI_ASSIGN_THIN_BEGIN */
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
+
 #ifndef GLUE_STRUCT_LIT_DEST_IN_RBX
 #define GLUE_STRUCT_LIT_DEST_IN_RBX (-3)
 #endif
@@ -18797,6 +18803,14 @@ int32_t pipeline_asm_emit_assign_elf_c(void *arena, void *elf_ctx, int32_t expr_
             }
           }
         }
+        /* dest-in-rbx TYPE_ARRAY / TYPE_SLICE CALL: park dest before emit.
+         * Callee clobbers rbx / AAPCS64 x19 (unsaved in prologue).
+         * For TYPE_SLICE (16B): CALL returns dual-GP {data, len} in rax+rdx
+         * (x0+x1 on ARM64). Spill to a frame temp, restore dest, then copy 16B.
+         * For TYPE_ARRAY: CALL returns payload pointer in rax (x0 on ARM64).
+         * Spill payload pointer, restore dest, reload pointer into rax,
+         * then copy nbytes via glue_copy_large_struct_from_rax_ptr_elf_c.
+         * PLATFORM: SHARED dest-in-rbx CALL · LINUX x86_64 SysV · MACOS|ARM64. */
         if ((deref_tk == 10 || deref_tk == 11) && (deref_rko == 48 || deref_rko == 49)) {
           deref_mod = glue_emit_module_from_ctx(ctx);
           deref_nbytes = glue_type_size_simple(deref_mod, arena, deref_tr, 0);
@@ -18805,18 +18819,79 @@ int32_t pipeline_asm_emit_assign_elf_c(void *arena, void *elf_ctx, int32_t expr_
           if (deref_nbytes < 8)
             deref_nbytes = glue_fixed_array_total_bytes_c(arena, deref_tr, 0);
           if (deref_nbytes >= 8) {
+            int32_t dst_spill;
+            int32_t src_spill;
+            extern void glue_align_next_offset(void *ctx);
+            extern int32_t pipe_asm_ctx_off_next_offset(void);
+            extern int32_t pipe_load_i32_le(void *p, int32_t off);
+            extern void pipe_store_i32_le(void *p, int32_t off, int32_t v);
+            extern int32_t glue_arm64_mov_x19_to_x0_elf_c(void *elf_ctx);
+            extern int32_t backend_enc_mov_rbx_to_rax_arch(void *elf_ctx, int32_t ta);
+            extern int32_t backend_enc_store_rax_to_rbp_arch(void *elf_ctx, int32_t off, int32_t ta);
+            extern int32_t backend_enc_store_rdx_to_rbp_arch(void *elf_ctx, int32_t slot_off, int32_t ta);
+            extern int32_t glue_slice_dual_gp_length_off_c(int32_t data_home, int32_t ta);
+            extern int32_t backend_enc_load_rbp_to_rax_arch(void *elf_ctx, int32_t off, int32_t ta);
+            extern int32_t backend_enc_mov_rax_to_rbx_arch(void *elf_ctx, int32_t ta);
+            extern int32_t backend_enc_lea_rbp_to_rax_arch(void *elf_ctx, int32_t offset, int32_t ta);
+            glue_align_next_offset(ctx);
+            dst_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+            if (ta == 1) {
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dst_spill + 8);
+            } else {
+              dst_spill = dst_spill + 8;
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dst_spill);
+            }
+            if (ta == 1) {
+              if (glue_arm64_mov_x19_to_x0_elf_c(elf_ctx) != 0)
+                return -1;
+            } else {
+              if (backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta) != 0)
+                return -1;
+            }
+            if (backend_enc_store_rax_to_rbp_arch(elf_ctx, dst_spill, ta) != 0)
+              return -1;
             if (pipeline_asm_emit_expr_elf_c(arena, elf_ctx, right_ref, ctx, ta) != 0)
               return -1;
-            /* x86 SysV SLICE CALL is rax+rdx; Darwin AAPCS64 is E*. */
-            if (deref_tk == 11 && ta == 0) {
-              if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, 0, 8, ta) != 0)
+            if (deref_tk == 11) {
+              glue_align_next_offset(ctx);
+              src_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+              if (ta == 1) {
+                pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill + 16);
+              } else {
+                src_spill = src_spill + 16;
+                pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill);
+              }
+              if (backend_enc_store_rax_to_rbp_arch(elf_ctx, src_spill, ta) != 0)
                 return -1;
-              if (glue_x86_store_rdx_to_rbx8_elf_c(elf_ctx) != 0)
+              if (backend_enc_store_rdx_to_rbp_arch(elf_ctx, glue_slice_dual_gp_length_off_c(src_spill, ta), ta) != 0)
+                return -1;
+              if (backend_enc_load_rbp_to_rax_arch(elf_ctx, dst_spill, ta) != 0)
+                return -1;
+              if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+                return -1;
+              if (backend_enc_lea_rbp_to_rax_arch(elf_ctx, src_spill, ta) != 0)
+                return -1;
+              if (glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, GLUE_STRUCT_LIT_DEST_IN_RBX, 16, ta) != 0)
                 return -1;
               return 0;
             }
-            if (glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, GLUE_STRUCT_LIT_DEST_IN_RBX,
-                                                          deref_nbytes, ta) != 0)
+            glue_align_next_offset(ctx);
+            src_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+            if (ta == 1) {
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill + 8);
+            } else {
+              src_spill = src_spill + 8;
+              pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), src_spill);
+            }
+            if (backend_enc_store_rax_to_rbp_arch(elf_ctx, src_spill, ta) != 0)
+              return -1;
+            if (backend_enc_load_rbp_to_rax_arch(elf_ctx, dst_spill, ta) != 0)
+              return -1;
+            if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+              return -1;
+            if (backend_enc_load_rbp_to_rax_arch(elf_ctx, src_spill, ta) != 0)
+              return -1;
+            if (glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, GLUE_STRUCT_LIT_DEST_IN_RBX, deref_nbytes, ta) != 0)
               return -1;
             return 0;
           }
@@ -18874,6 +18949,7 @@ int32_t glue_body_expr_stmt_at_c(void *arena, int32_t body_ref, int32_t si, int3
   *out_er = er;
   return 1;
 }
+/* XLANG_PABI_ASSIGN_THIN_END */
 
 
 
