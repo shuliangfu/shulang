@@ -27666,24 +27666,30 @@ export function glue_emit_struct_type_let_init_elf_c(arena: *u8, elf_ctx: *u8, i
   /* EXPR_FIELD (44) / EXPR_INDEX (47) / EXPR_DEREF (52):
    * `let h: Holder = w.h` / dest-in-rbx `*p = w.h` /
    * dest-in-rbx INDEX whole `*p = arr[i]` / dest-in-rbx DEREF
-   * source `*p = *q` of a 9B+ named struct (Holder / Wrap).
-   * VAR 16B returns -2 so emit_expr + store_retval_pair dual-GP
-   * fall-through stays; FIELD / INDEX emit_expr only loads the
-   * first 8B so that fall-through leaves lanes 2–3 (Darwin 30 / 12).
-   * dest-in-rbx DEREF 9–16B used to return -2; emit_deref dual-GP
-   * then dest re-lea overwrites hi in x1 (Darwin leftover 30).
+   * source `*p = *q` of a named struct (Holder / Wrap) or 8B
+   * TYPE_ARRAY (`[2]i32` MATCH arm `s.a` / `rows[1]` / `*q`).
+   * VAR dest-in-rbx already memcpy at let_sz >= 8 (`[2]i32`).
+   * FIELD / INDEX emit_expr only loads the first 8B so that
+   * fall-through leaves lanes 2–3 (Darwin 30 / 12). dest-in-rbx
+   * DEREF 9–16B used to return -2; emit_deref dual-GP then dest
+   * re-lea overwrites hi in x1 (Darwin leftover 30).
    * G.7: same let-init authority — lea via lvalue_eff_addr, then
    * deref_struct16 + store_retval_pair for 9–16B frame dest (memcpy
    * rejects frame ≤16). >16B frame uses the VAR memcpy twin.
-   * dest-in-rbx: same VAR dest-in-rbx twin (lea src + glue_copy).
+   * dest-in-rbx: same VAR dest-in-rbx twin (lea src + glue_copy),
+   * including 8B TYPE_ARRAY (MATCH arm FIELD used to hit let_sz < 9
+   * → CG002; leftover unique leftover_emit_match_arm_result
+   * rko==44/47/52 dest_tk==10 already dest-parks leftover-PE).
    * FIELD-on-VAR / DEREF-of-VAR lvalue is rax-only (dest rbx/x19
    * stays). INDEX / INDEX-base FIELD / DEREF-of-INDEX var-index
    * / slice lvalue uses rbx — park dest then src addr (VECTOR CALL
    * dest polarity) and restore dest to rbx before memcpy.
    * deref_struct16 mov_rax_to_rbx would clobber dest / x19.
    * Do not change FIELD / INDEX / DEREF emit_expr. Do not lower
-   * frame dest ≤16 memcpy.
-   * PLATFORM: SHARED — Ubuntu gold; Darwin ARM64 dest-shadow hid rbx. */
+   * frame dest ≤16 memcpy. Do not leftover unique leftover_emit_field
+   * twin. Do not leftover rest unique rec ASSIGN second intercept.
+   * PLATFORM: SHARED dest-in-rbx FIELD 8B ARRAY · LINUX gold ·
+   * MACOS|ARM64 dest-shadow. */
   if ((ko == 44 || ko == 47 || ko == 52) && (ta == 0 || ta == 1)) {
     ty_ref = let_ty_ref;
     if (ty_ref <= 0) {
@@ -27702,7 +27708,16 @@ export function glue_emit_struct_type_let_init_elf_c(arena: *u8, elf_ctx: *u8, i
     if (named_sz > let_sz) {
       let_sz = named_sz;
     }
-    if (let_sz < 9) {
+    /* dest-in-rbx 8B TYPE_ARRAY FIELD/INDEX/DEREF. VAR dest-in-rbx
+     * memcpy already accepts let_sz >= 8 (`[2]i32`). FIELD/INDEX/DEREF
+     * used let_sz < 9 for 9B+ named structs → MATCH arm `s.a` /
+     * `rows[1]` / `*q` of `[2]i32` returned -2 (arr_asg_match_field
+     * CG002). Frame dest 8B FIELD stays emit_expr fall-through.
+     * PLATFORM: SHARED dest-in-rbx FIELD 8B ARRAY. */
+    if (let_sz < 8) {
+      return 0 - 2;
+    }
+    if (dest_in_rbx == 0 && let_sz < 9) {
       return 0 - 2;
     }
     /* dest-in-rbx + INDEX / INDEX-base FIELD / DEREF (`*p = arr[i]` /
@@ -44353,6 +44368,89 @@ export function glue_emit_fixed_array_type_let_init_elf_c(arena: *u8, elf_ctx: *
       }
       unsafe {
         rc = backend_enc_lea_rbp_to_rax_arch(elf_ctx, src_off, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = glue_copy_large_struct_from_rax_ptr_elf_c(elf_ctx, 0 - 3, nbytes, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      return 0;
+    }
+    /* dest-in-rbx FIELD/INDEX/DEREF `*p = s.a` / `*p = rows[0]` /
+     * `*p = *q`. Previously returned -2 then SAT emit_assign 4B-store
+     * (arr_star_field / arr_star_index / arr_star_deref RUN=0). ARRAY_LIT
+     * elem FIELD already dest-in-rbx lvalue + memcpy (`*p = [w.h]`).
+     * VAR dest FIELD/INDEX/DEREF stay store_fixed_array_field
+     * (arr_asg_field GREEN). leftover rest unique store iko==44 is
+     * WIN_LEFTOVER only. G.7 complete: park dest_spill (INDEX lvalue
+     * clobbers rbx), lvalue_eff_addr, restore dest, copy dest-in-rbx
+     * nbytes. FIELD-on-VAR lvalue is rax-only but park is uniform with
+     * dest-in-rbx IF. Do not leftover unique leftover_emit_slice_lvalue
+     * twin. Do not leftover rest unique rec ASSIGN TYPE_ARRAY dest-in-rbx
+     * FIELD second intercept. Do not pass -3 into store_fixed_array_field
+     * (frame mag of -3). PLATFORM: SHARED dest-in-rbx TYPE_ARRAY FIELD
+     * · MACOS|ARM64 dest-shadow. */
+    if ((iko == 44 || iko == 47 || iko == 52) && (ta == 0 || ta == 1)) {
+      unsafe {
+        nbytes = glue_fixed_array_total_bytes_c(arena, type_ref, 0);
+      }
+      if (nbytes < 8) {
+        return 0 - 2;
+      }
+      glue_align_next_offset(ctx);
+      dest_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+      if (ta == 1) {
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill + 8);
+      } else {
+        dest_spill = dest_spill + 8;
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill);
+      }
+      if (ta == 1) {
+        rc = glue_arm64_mov_x19_to_x0_elf_c(elf_ctx);
+      } else {
+        unsafe {
+          rc = backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+        }
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, src, ctx, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_push_rax_arch(elf_ctx, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_pop_rax_arch(elf_ctx, ta);
       }
       if (rc != 0) {
         return 0 - 1;

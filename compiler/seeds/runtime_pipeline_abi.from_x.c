@@ -30224,7 +30224,11 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * leftover rest unique rec ASSIGN
      * TYPE_ARRAY dest-in-rbx IF is leftover rest unique store iko==25/27
      * via catch-all let_init(-3) (do not leftover rest unique rec ASSIGN
-     * second intercept).
+     * second intercept). POSIX product .x let-init dest-in-rbx FIELD/
+     * INDEX/DEREF (`*p = s.a` / `*p = rows[0]` / `*p = *q`) parks
+     * dest_spill then lvalue + memcpy (same ARRAY_LIT elem FIELD). Do
+     * not leftover rest unique rec ASSIGN TYPE_ARRAY dest-in-rbx FIELD
+     * second intercept (leftover rest unique store iko==44 leftover-PE).
      *
      * TYPE_ARRAY VAR dest MATCH `d = match 1 { 1 => [3, 4]; _ => [0, 0] }`
      * (arr_asg_match) is a sibling dest (VAR frame slot, not dest-in-rbx).
