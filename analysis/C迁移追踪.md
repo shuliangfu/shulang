@@ -338,8 +338,8 @@
 
 ### 10.4–10.7
 
-- ✅ **10.4.1** atomic_load／store／cas — **Ubuntu ✅**＠`a2277e5e3`：x86 i16/i32/i64＋aarch64 i16/i32/i64（`ldar`*／`stlr`*／`casal*`）。残：Darwin
-- ✅ **10.4.2** 内存屏障内建 — **Ubuntu ✅** x86 fence＠`d39f619ee`＋aarch64 `dmb ish/ishld/ishst`＠`f2cc0d8d6`  
+- ✅ **10.4.1** atomic_load／store／cas — **Ubuntu＋Darwin ✅**：x86 i16/i32/i64＋aarch64 i16/i32/i64（`ldar`*／`stlr`*／`casal*`）；补齐 fk==6 (std.atomic) 全部 32 个 widen 符号在 `labi_std_fk_gate_sym_at` 中的门控；`run-f-atomic-v1-gate.sh` run=1 obs=0 全绿。
+- ✅ **10.4.2** 内存屏障内建 — **Ubuntu＋Darwin ✅** x86 fence＠`d39f619ee`＋aarch64 `dmb ish/ishld/ishst`＠`f2cc0d8d6`＋`atomic_lang_fence_smoke.x` 双端 42 全绿。  
 - ✅ **10.5.1** x86 AVX／SSE + aarch64 NEON 内建 — **slice0–10 ✅** · **slice10 ✅（Ubuntu host-C）**＠`0609c4a05`：`builtin.x` 标量 fallthrough（无 panic）。cold seed 孪生 hsum／dot／fsub **本波补**（SSE lanes==4；ARM／AVX 仍在 `simd_enc.x`）。残：MSYS Win 实机 · 双端 L4 未重跑
 - 🟡 **10.5.2** ARM SVE 内建 — **slice0–2 ✅（Ubuntu）**＠`2e03ae24c`：f32x4／fma／hsum／dot／i32x8／f32x8 双半 VL4。残：真宽 VL／MSYS Win  
 - 🟡 **10.6.1** Linux futex／clone／mmap 栈 — **slice0–2 ✅（Ubuntu）**＠`e8777cb6b`：futex／mmap／clone trampoline＋**product `runtime_thread_glue` Linux Cap**（pool／create／join；nm 无 pthread；STD-043 run=2）。残：Darwin pthread · TLS  

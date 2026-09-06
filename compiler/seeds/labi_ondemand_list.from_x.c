@@ -3716,7 +3716,8 @@ int labi_std_fk_gate_sym_count(int fk) {
   if (fk == 3) return 5;
   if (fk == 4) return 3;
   if (fk == 5) return 5;
-  if (fk == 6) return 5;
+  /* PLATFORM: SHARED — std/atomic complete surface (10.4.1 widen i16/u16/i64/u64 support). */
+  if (fk == 6) return 32;
   if (fk == 7) return 4;
   if (fk == 8) return 2;
   if (fk == 9) return 29;
@@ -3813,6 +3814,33 @@ const char *labi_std_fk_gate_sym_at(int fk, int i) {
     if (i == 2) return "std_atomic_fetch_add_i32_ptr_i32";
     if (i == 3) return "std_atomic_store_i64_ptr_i64";
     if (i == 4) return "atomic_store_i32_c";
+    if (i == 5) return "std_atomic_store_i16_ptr_i16";
+    if (i == 6) return "std_atomic_store_u16_ptr_u16";
+    if (i == 7) return "std_atomic_store_u32_ptr_u32";
+    if (i == 8) return "std_atomic_store_u64_ptr_u64";
+    if (i == 9) return "std_atomic_load_i16_ptr";
+    if (i == 10) return "std_atomic_load_u16_ptr";
+    if (i == 11) return "std_atomic_load_u32_ptr";
+    if (i == 12) return "std_atomic_load_i64_ptr";
+    if (i == 13) return "std_atomic_load_u64_ptr";
+    if (i == 14) return "std_atomic_fetch_add_i16_ptr_i16";
+    if (i == 15) return "std_atomic_fetch_add_u16_ptr_u16";
+    if (i == 16) return "std_atomic_fetch_add_u32_ptr_u32";
+    if (i == 17) return "std_atomic_fetch_add_i64_ptr_i64";
+    if (i == 18) return "std_atomic_fetch_add_u64_ptr_u64";
+    if (i == 19) return "std_atomic_fetch_sub_i32_ptr_i32";
+    if (i == 20) return "std_atomic_fetch_sub_i64_ptr_i64";
+    if (i == 21) return "std_atomic_fetch_sub_u64_ptr_u64";
+    if (i == 22) return "std_atomic_compare_exchange_i16_ptr_i16_ptr_i16";
+    if (i == 23) return "std_atomic_compare_exchange_i32_ptr_i32_ptr_i32";
+    if (i == 24) return "std_atomic_compare_exchange_i64_ptr_i64_ptr_i64";
+    if (i == 25) return "std_atomic_compare_exchange_u16_ptr_u16_ptr_u16";
+    if (i == 26) return "std_atomic_compare_exchange_u32_ptr_u32_ptr_u32";
+    if (i == 27) return "std_atomic_compare_exchange_u64_ptr_u64_ptr_u64";
+    if (i == 28) return "std_atomic_fence_acquire";
+    if (i == 29) return "std_atomic_fence_release";
+    if (i == 30) return "std_atomic_fence_seq_cst";
+    if (i == 31) return "atomic_load_i32_c";
     return NULL;
   }
   if (fk == 7) {

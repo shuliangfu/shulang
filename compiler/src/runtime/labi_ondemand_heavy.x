@@ -2302,8 +2302,9 @@ export function labi_std_fk_gate_sym_count(fk: i32): i32 {
   if (fk == 5) {
     return 5;
   }
+  // PLATFORM: SHARED — std/atomic complete surface (10.4.1 widen i16/u16/i64/u64 support).
   if (fk == 6) {
-    return 5;
+    return 32;
   }
   // PLATFORM: SHARED — channel product face complete (pure-asm std_channel_*).
   // Was only send/recv + bare channel_send/recv; sole callers of bounded/close/
@@ -2486,6 +2487,114 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
       }
       if (i == 4) {
         let p: *u8 = "atomic_store_i32_c";
+        return p;
+      }
+      if (i == 5) {
+        let p: *u8 = "std_atomic_store_i16_ptr_i16";
+        return p;
+      }
+      if (i == 6) {
+        let p: *u8 = "std_atomic_store_u16_ptr_u16";
+        return p;
+      }
+      if (i == 7) {
+        let p: *u8 = "std_atomic_store_u32_ptr_u32";
+        return p;
+      }
+      if (i == 8) {
+        let p: *u8 = "std_atomic_store_u64_ptr_u64";
+        return p;
+      }
+      if (i == 9) {
+        let p: *u8 = "std_atomic_load_i16_ptr";
+        return p;
+      }
+      if (i == 10) {
+        let p: *u8 = "std_atomic_load_u16_ptr";
+        return p;
+      }
+      if (i == 11) {
+        let p: *u8 = "std_atomic_load_u32_ptr";
+        return p;
+      }
+      if (i == 12) {
+        let p: *u8 = "std_atomic_load_i64_ptr";
+        return p;
+      }
+      if (i == 13) {
+        let p: *u8 = "std_atomic_load_u64_ptr";
+        return p;
+      }
+      if (i == 14) {
+        let p: *u8 = "std_atomic_fetch_add_i16_ptr_i16";
+        return p;
+      }
+      if (i == 15) {
+        let p: *u8 = "std_atomic_fetch_add_u16_ptr_u16";
+        return p;
+      }
+      if (i == 16) {
+        let p: *u8 = "std_atomic_fetch_add_u32_ptr_u32";
+        return p;
+      }
+      if (i == 17) {
+        let p: *u8 = "std_atomic_fetch_add_i64_ptr_i64";
+        return p;
+      }
+      if (i == 18) {
+        let p: *u8 = "std_atomic_fetch_add_u64_ptr_u64";
+        return p;
+      }
+      if (i == 19) {
+        let p: *u8 = "std_atomic_fetch_sub_i32_ptr_i32";
+        return p;
+      }
+      if (i == 20) {
+        let p: *u8 = "std_atomic_fetch_sub_i64_ptr_i64";
+        return p;
+      }
+      if (i == 21) {
+        let p: *u8 = "std_atomic_fetch_sub_u64_ptr_u64";
+        return p;
+      }
+      if (i == 22) {
+        let p: *u8 = "std_atomic_compare_exchange_i16_ptr_i16_ptr_i16";
+        return p;
+      }
+      if (i == 23) {
+        let p: *u8 = "std_atomic_compare_exchange_i32_ptr_i32_ptr_i32";
+        return p;
+      }
+      if (i == 24) {
+        let p: *u8 = "std_atomic_compare_exchange_i64_ptr_i64_ptr_i64";
+        return p;
+      }
+      if (i == 25) {
+        let p: *u8 = "std_atomic_compare_exchange_u16_ptr_u16_ptr_u16";
+        return p;
+      }
+      if (i == 26) {
+        let p: *u8 = "std_atomic_compare_exchange_u32_ptr_u32_ptr_u32";
+        return p;
+      }
+      if (i == 27) {
+        let p: *u8 = "std_atomic_compare_exchange_u64_ptr_u64_ptr_u64";
+        return p;
+      }
+      if (i == 28) {
+        let p: *u8 = "std_atomic_fence_acquire";
+        return p;
+      }
+      if (i == 29) {
+        let p: *u8 = "std_atomic_fence_release";
+        return p;
+      }
+      if (i == 30) {
+        let p: *u8 = "std_atomic_fence_seq_cst";
+        return p;
+      }
+      if (i == 31) {
+        let p: *u8 = "atomic_load_i32_c";
         return p;
       }
       return 0 as *u8;

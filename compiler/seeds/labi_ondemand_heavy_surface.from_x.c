@@ -1222,7 +1222,7 @@ int32_t labi_std_fk_gate_sym_count(int32_t fk) {
     return 5;
   }
   if ((fk ==6)) {
-    return 5;
+    return 32;
   }
   if ((fk ==7)) {
     return 10;
@@ -1352,23 +1352,131 @@ uint8_t * labi_std_fk_gate_sym_at(int32_t fk, int32_t i) {
   }
   if ((fk ==6)) {
     if ((i ==0)) {
-      uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x61\x74\x6f\x6d\x69\x63\x5f\x73\x74\x6f\x72\x65\x5f\x69\x33\x32\x5f\x70\x74\x72\x5f\x69\x33\x32");
+      uint8_t * p = ((uint8_t *)"std_atomic_store_i32_ptr_i32");
       return p;
     }
     if ((i ==1)) {
-      uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x61\x74\x6f\x6d\x69\x63\x5f\x6c\x6f\x61\x64\x5f\x69\x33\x32\x5f\x70\x74\x72");
+      uint8_t * p = ((uint8_t *)"std_atomic_load_i32_ptr");
       return p;
     }
     if ((i ==2)) {
-      uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x61\x74\x6f\x6d\x69\x63\x5f\x66\x65\x74\x63\x68\x5f\x61\x64\x64\x5f\x69\x33\x32\x5f\x70\x74\x72\x5f\x69\x33\x32");
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_i32_ptr_i32");
       return p;
     }
     if ((i ==3)) {
-      uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x61\x74\x6f\x6d\x69\x63\x5f\x73\x74\x6f\x72\x65\x5f\x69\x36\x34\x5f\x70\x74\x72\x5f\x69\x36\x34");
+      uint8_t * p = ((uint8_t *)"std_atomic_store_i64_ptr_i64");
       return p;
     }
     if ((i ==4)) {
-      uint8_t * p = ((uint8_t *)"\x61\x74\x6f\x6d\x69\x63\x5f\x73\x74\x6f\x72\x65\x5f\x69\x33\x32\x5f\x63");
+      uint8_t * p = ((uint8_t *)"atomic_store_i32_c");
+      return p;
+    }
+    if ((i ==5)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_store_i16_ptr_i16");
+      return p;
+    }
+    if ((i ==6)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_store_u16_ptr_u16");
+      return p;
+    }
+    if ((i ==7)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_store_u32_ptr_u32");
+      return p;
+    }
+    if ((i ==8)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_store_u64_ptr_u64");
+      return p;
+    }
+    if ((i ==9)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_load_i16_ptr");
+      return p;
+    }
+    if ((i ==10)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_load_u16_ptr");
+      return p;
+    }
+    if ((i ==11)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_load_u32_ptr");
+      return p;
+    }
+    if ((i ==12)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_load_i64_ptr");
+      return p;
+    }
+    if ((i ==13)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_load_u64_ptr");
+      return p;
+    }
+    if ((i ==14)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_i16_ptr_i16");
+      return p;
+    }
+    if ((i ==15)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_u16_ptr_u16");
+      return p;
+    }
+    if ((i ==16)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_u32_ptr_u32");
+      return p;
+    }
+    if ((i ==17)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_i64_ptr_i64");
+      return p;
+    }
+    if ((i ==18)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_add_u64_ptr_u64");
+      return p;
+    }
+    if ((i ==19)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_sub_i32_ptr_i32");
+      return p;
+    }
+    if ((i ==20)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_sub_i64_ptr_i64");
+      return p;
+    }
+    if ((i ==21)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fetch_sub_u64_ptr_u64");
+      return p;
+    }
+    if ((i ==22)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_i16_ptr_i16_ptr_i16");
+      return p;
+    }
+    if ((i ==23)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_i32_ptr_i32_ptr_i32");
+      return p;
+    }
+    if ((i ==24)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_i64_ptr_i64_ptr_i64");
+      return p;
+    }
+    if ((i ==25)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_u16_ptr_u16_ptr_u16");
+      return p;
+    }
+    if ((i ==26)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_u32_ptr_u32_ptr_u32");
+      return p;
+    }
+    if ((i ==27)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_compare_exchange_u64_ptr_u64_ptr_u64");
+      return p;
+    }
+    if ((i ==28)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fence_acquire");
+      return p;
+    }
+    if ((i ==29)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fence_release");
+      return p;
+    }
+    if ((i ==30)) {
+      uint8_t * p = ((uint8_t *)"std_atomic_fence_seq_cst");
+      return p;
+    }
+    if ((i ==31)) {
+      uint8_t * p = ((uint8_t *)"atomic_load_i32_c");
       return p;
     }
     return ((uint8_t *)(0));
