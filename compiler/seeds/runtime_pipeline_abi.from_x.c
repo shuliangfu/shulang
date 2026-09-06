@@ -30253,6 +30253,13 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * (same leftover rest rec sret copy). A frame spill at next_offset
      * overlaps SAT implicit dest (named_star_lit dump: SAT wrote x=3
      * over the dest pointer at rbp-0x38 → copy through 3 → SEGV 139).
+     * TYPE_NAMED VAR dest STRUCT_LIT `d = P { x: 3 }` / 16B Q / 24B R /
+     * 32B S (named_asg_lit / named_asg_lit16 / 24 / 32 RUN=4/4/6/8) is
+     * GREEN via SAT emit_assign dest_off=var slot — different produce
+     * from dest-in-rbx (SAT local t fields_elf(-3)). Do not leftover
+     * rest unique rec ASSIGN VAR dest TYPE_NAMED STRUCT_LIT second
+     * intercept (asg_lko==3 rko==45 stays SAT). dest-in-rbx STRUCT_LIT
+     * stays DEREF dest (asg_lko==52).
      *
      * TYPE_SLICE dest-in-rbx VAR `*p = xs` / CALL `*p = mk()` / DEREF
      * `*p = *q` fell through SAT emit_assign (SAT local t memcpy data
@@ -30447,7 +30454,9 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * unique DEST_IN_RBX field stores (same helper as MATCH 16B
          * dest-parked rec ko==45). Do not leftover rest T SAT
          * emit_struct_lit. Do not leftover rest U SAT local t
-         * fields_elf. PLATFORM: WINDOWS leftover-PE. */
+         * fields_elf. Do not expand asg_lko==3: VAR dest STRUCT_LIT
+         * named_asg_lit 8/16/24/32B GREEN via SAT emit_assign
+         * dest_off=var slot (2026-09-06 prove). PLATFORM: WINDOWS leftover-PE. */
         if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
           out_rc = -1;
         else if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
