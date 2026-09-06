@@ -30400,7 +30400,12 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * ASSIGN TYPE_ARRAY MATCH: VAR dest parks dest via lvalue then
          * glue_emit_fixed_array_type_let_init(-3) (same store MATCH
          * dest_tk=10 nbytes=n_arr*esz as DEREF dest / let-init MATCH).
-         * Bump next_offset past d so SAT arm dest cannot clobber it
+         * POSIX product authority is .x let-init dest-in-rbx MATCH
+         * (iko==43 park dest_spill + glue_emit_match_dest_in_rbx) plus
+         * frame dest park recurse -3 — hybrid thin emit_assign first-wins
+         * so this intercept is leftover-PE (do not leftover rest unique
+         * rec ASSIGN second intercept of dest-in-rbx MATCH). Bump
+         * next_offset past d so SAT arm dest cannot clobber it
          * (TYPE_NAMED MATCH 8B lesson). Match arms use `;` not `,`.
          * Do not leftover rest T SAT emit_assign / emit_array_lit.
          * Do not leftover rest remaining-wave. Do not leftover rest U

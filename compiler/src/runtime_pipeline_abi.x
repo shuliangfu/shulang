@@ -44522,11 +44522,54 @@ export function glue_emit_fixed_array_type_let_init_elf_c(arena: *u8, elf_ctx: *
       }
       return 0;
     }
+    /* dest-in-rbx MATCH `*p = match 1 { 1 => [3, 4]; _ => [0, 0] }` AND
+     * VAR dest `d = match 1 { 1 => [3, 4]; _ => [0, 0] }` (frame dest
+     * parks then recurse dest-in-rbx). leftover rest unique rec ASSIGN
+     * VAR dest TYPE_ARRAY MATCH already calls this at mag=-3 (leftover-PE
+     * first-wins). POSIX hybrid thin emit_assign first-wins: SAT frame
+     * dest then this let-init previously returned -2 (iko==43 unhandled)
+     * then store_fixed_array_field / SAT 4B-store (arr_asg_match RUN=1;
+     * arr_match_let CG002). G.7 complete: park dest_spill then
+     * glue_emit_match_dest_in_rbx (same struct let-init MATCH; arms
+     * reuse dest-in-rbx ARRAY_LIT via glue_emit_if_arm). Do not
+     * leftover unique leftover_emit_match twin. Do not emit_match (8B).
+     * PLATFORM: SHARED dest-in-rbx TYPE_ARRAY MATCH · MACOS|ARM64 dest-shadow. */
+    if (iko == 43 && (ta == 0 || ta == 1)) {
+      glue_align_next_offset(ctx);
+      dest_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+      if (ta == 1) {
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill + 8);
+      } else {
+        dest_spill = dest_spill + 8;
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill);
+      }
+      if (ta == 1) {
+        rc = glue_arm64_mov_x19_to_x0_elf_c(elf_ctx);
+      } else {
+        unsafe {
+          rc = backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+        }
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      arm_rc = glue_emit_match_dest_in_rbx_elf_c(arena, elf_ctx, src, ctx, ta, type_ref, dest_spill);
+      if (arm_rc != 0) {
+        return 0 - 1;
+      }
+      return 0;
+    }
     return 0 - 2;
   }
-  /* Frame dest TYPE_ARRAY IF/BLOCK: park dest in rbx then dest-in-rbx.
+  /* Frame dest TYPE_ARRAY IF/BLOCK/MATCH: park dest in rbx then dest-in-rbx.
    * G.7 complete leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY
-   * IF/BLOCK sibling on POSIX product .x (leftover rest unique store
+   * IF/BLOCK/MATCH sibling on POSIX product .x (leftover rest unique store
    * WIN_LEFTOVER only). ARRAY_LIT/CALL/FIELD stay store_fixed_array_field.
    * PLATFORM: SHARED. */
   src = glue_peel_as_array_slice_ascription_c(arena, init_ref);
@@ -44536,7 +44579,7 @@ export function glue_emit_fixed_array_type_let_init_elf_c(arena: *u8, elf_ctx: *
   unsafe {
     iko = pipeline_expr_kind_ord_at(arena, src);
   }
-  if ((iko == 25 || iko == 27 || iko == 26) && (ta == 0 || ta == 1) && stack_slot_off >= 0) {
+  if ((iko == 25 || iko == 27 || iko == 26 || iko == 43) && (ta == 0 || ta == 1) && stack_slot_off >= 0) {
     unsafe {
       rc = backend_enc_lea_rbp_to_rax_arch(elf_ctx, stack_slot_off, ta);
     }
