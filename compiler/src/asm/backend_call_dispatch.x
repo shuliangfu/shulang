@@ -3087,10 +3087,20 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
             }
             ff_fi = ff_fi + 1;
           }
-          if (backend_enc_load_rbp_to_rax_arch(elf_ctx, ff_spill, ta) != 0) {
-            return 0 - 1;
+          /* PLATFORM: MACOS|ARM64 uses non-arg volatile scratch x9 (ta==1)
+           * so reloading the fn ptr does not clobber argument x0. SysV x86_64
+           * uses rax (ta==0) as rax is not an argument register. */
+          if (ta == 1) {
+            if (backend_enc_ldr_xreg_xreg_imm_arch(elf_ctx, 9, 29, ff_spill, ta) != 0) {
+              return 0 - 1;
+            }
+            if (backend_enc_blr_arch(elf_ctx, 9, ta) != 0) { return 0 - 1; }
+          } else {
+            if (backend_enc_load_rbp_to_rax_arch(elf_ctx, ff_spill, ta) != 0) {
+              return 0 - 1;
+            }
+            if (backend_enc_blr_arch(elf_ctx, 0, ta) != 0) { return 0 - 1; }
           }
-          if (backend_enc_blr_arch(elf_ctx, 0, ta) != 0) { return 0 - 1; }
           return 0;
         }
       }
@@ -6386,10 +6396,20 @@ export function pipeline_asm_emit_call_elf_c(arena: *u8, elf_ctx: *u8, expr_ref:
               if (pipeline_asm_emit_call_args_elf_c(arena, elf_ctx, expr_ref, ctx, ta, cap_nargs) != 0) {
                 return 0 - 1;
               }
-              if (backend_enc_load_rbp_to_rax_arch(elf_ctx, cap_fn_off, ta) != 0) {
-                return 0 - 1;
+              /* PLATFORM: MACOS|ARM64 uses non-arg volatile scratch x9 (ta==1)
+               * so reloading the fn ptr does not clobber argument x0. SysV x86_64
+               * uses rax (ta==0) as rax is not an argument register. */
+              if (ta == 1) {
+                if (backend_enc_ldr_xreg_xreg_imm_arch(elf_ctx, 9, 29, cap_fn_off, ta) != 0) {
+                  return 0 - 1;
+                }
+                if (backend_enc_blr_arch(elf_ctx, 9, ta) != 0) { return 0 - 1; }
+              } else {
+                if (backend_enc_load_rbp_to_rax_arch(elf_ctx, cap_fn_off, ta) != 0) {
+                  return 0 - 1;
+                }
+                if (backend_enc_blr_arch(elf_ctx, 0, ta) != 0) { return 0 - 1; }
               }
-              if (backend_enc_blr_arch(elf_ctx, 0, ta) != 0) { return 0 - 1; }
               return 0;
         }
       }

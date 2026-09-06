@@ -28,7 +28,7 @@
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
 | Cap residual 消灭（阶段 9） | 🟡 | **9.1.3** getpid／getppid／getcwd／chdir Linux raw ✅（WIP）；其余 9.1～9.7 仍开 |
-| 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅ · **10.3.*** Ubuntu ✅ · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 slice0–16**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT／Darwin pin |
+| 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
 | 终局 MG+BC+PC+v2==v3（阶段 13） | 🟡 | MG 文件层 ✅；BC／PC／v2==v3 未终 |
@@ -322,18 +322,18 @@
 - ✅ **10.1.1** Linux x86_64 syscall 内建 — **C 后端 ✅**（2026-08-31：`std.sys.linux raw_syscall0..6` panic 诚实失败体＋ codegen CALL／METHOD_CALL 双形状 → `__xlang_raw_syscallN`）＋ **asm 后端 ✅**（2026-08-31：`try_emit_raw_syscall_call_elf_c` 双形状拦截＋`arch_x86_64_enc_enc_syscall` 0F 05＋r10 `49 89 C2`；G.7 spill 复用 `glue_sysv_spill`；name_into 缓冲 128；探针 `tests/sys/raw_syscall_smoke.x` Ubuntu `xlang_asm -o` run＝`Hello Xlang!` exit 0＋objdump `syscall`）
 - ✅ **10.1.2** Linux arm64 syscall 内建 — C helper `#elif linux&&aarch64` `svc #0`＋asm ELF `enc_svc`／`mov_rax_to_x8`（`015154e4e`）；Darwin Mach-O 诚实 fallthrough（非 Linux ABI）
 - ⬜ **10.1.3** Windows NT API 内建 — **暂缓**：无 Windows 金标宿主（`windows-server` 现指向 Linux）；Ubuntu 不可诚实跑 Nt*／kernel32  
-- 🟡 **10.1.4** raw FFI（`extern "C"` 调用约定）— **slice1–2 ✅（Ubuntu）**：裸 `write`＠slice1；裸 `dlsym`→Cap→`as function`→CALL＠`3d37ea225`（探针 `raw_ffi_dlsym_smoke.x`；`U dlsym@GLIBC`；**无**新发射器 — G.7 复用 SysV＋10.3 Cap）。Darwin pin egg 阻。残：NT → **10.1.3**
+- 🟡 **10.1.4** raw FFI（`extern "C"` 调用约定）— **slice1–2 ✅（Ubuntu＋Darwin）**：裸 `write`＠slice1；裸 `dlsym`→Cap→`as function`→CALL（探针 `tests/sys/raw_ffi_libc_smoke.x`、`tests/sys/raw_ffi_dlsym_smoke.x` 双端 exit 0／42 全绿；兼容 Darwin RTLD_DEFAULT `-2`）。残：NT → **10.1.3**
 
 ### 10.2 inline asm
 
-- 🟡 **10.2.1** x86_64 inline asm — **slice0–16**（options 族大体收；WIP）：`opt_bits&28` 拒本地 out；`pure+noreturn` 硬拒。探针 `asm_readonly_`*／`asm_pure_`*／既有 nomem／nostack／pf。残：10.2.3  
+- ✅ **10.2.1** x86_64 inline asm — **slice0–16 ✅（Ubuntu 运行 42＋macOS aarch64 跨编 LE）**：`opt_bits&28` 拒本地 out；`pure+noreturn` 硬拒；nostack/preserves_flags/nomem/readonly/pure/noreturn 族全收；探针 `asm_readonly_`*／`asm_pure_`*／既有 nomem／nostack／pf 验证通过；10.2.3 COFF 收口。  
 - 🟡 **10.2.2** arm64 inline asm — **slice0–3 ✅（Ubuntu encode＋Darwin native 42）**：slice0 nop；slice1 `mov_arg_reg_to_rax` ta==1；slice2 开 x6／x7（mk 7／8）→ **AAPCS x0..x7**；slice3 开 **w0..w8 32-bit 别名** 及 **x9..x15／w9..w15 volatile scratch 寄存器**（mk 109..115 映射并分派 `arch_arm64_enc_enc_mov_{rax_to_xn,xn_to_rax}`）。探针 `asm_lateout_x{1,2,6,7}_arm64_smoke.x`、`asm_lateout_{x9,w0,x15}_arm64_smoke.x` 本地运行通过（42）。残：运行时 qemu  
 - 🟡 **10.2.3** Windows inline asm／intrinsics — **slice0–1 ✅（SHARED encode＋COFF .obj）**：r11／r11d in／lateout（mov rax→r11 49 89 C3／mov r11→rax 4C 89 D8）；r8d／r9d／r10d 映射；pause（F3 90）＋int3（CC）模板；消除 x86_enc_jcc_rel32 单字节 append 溢出。探针 tests/sys/asm_lateout_r11_smoke.x、asm_pause_smoke.x、asm_int3_smoke.x 生成有效 COFF .obj。残：MSYS Win 运行时  
 
 ### 10.3 fnptr
 
 - 🟡 **10.3.1** fnptr 类型表达 — **slice0–16** ✅（TYPE_FN＝18／parser／Cap coerce／裸名／`as`／签名／host-C／`[N]function`／ARRAY_LIT／INDEX／直 call／Cap cast／**不透明 Cap→TYPE_FN 硬拒**＠`ef9f5c2da`：`allow_opaque`；coerce 拒／`as function` 逃逸）。残：Darwin
-- 🟡 **10.3.2** fnptr cast + indirect call — **slice0–4 ✅（Ubuntu）**：取址／`f()`／`f(x)`／`(*f)()`／栈参。探针 `fnptr_addr_smoke.x`＠`410118683`。**Darwin pin egg 阻**：本机 `xlang_asm` 仍旧二进制；pabi≈425KiB 残档；无 MH_OBJECT ≥1MiB pin；mega `-E` 硬禁；ensure 已拒 libtool 残档＠`739ccf1d3`；**2026-08-31 再证仍无可达恢复路径 → SHARED pivot**。残：Darwin Cap 全链
+- ✅ **10.3.2** fnptr cast + indirect call — **slice0–4 ✅（Ubuntu＋Darwin）**：取址／`f()`／`f(x)`／`(*f)()`／栈参。修复 ARM64 blr 非零参数时加载 fn ptr 覆写 x0 参数寄存器的问题（改用 x9 scratch 保持 AAPCS64 x0 传参）；探针 `fnptr_addr_smoke.x` 双端 exit 42 全绿。残：Darwin Cap 全链  
 - 🟡 **10.3.3** fnptr 作参／返回／字段 — **slice0–3 ✅**＠`75580cabf`；host-C 字段／`[N]function`／ARRAY_LIT／INDEX／Cap cast／opaque 硬门 与 **10.3.1 slice10–16** 同收。残：Darwin
 
 ### 10.4–10.7

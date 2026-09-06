@@ -24,6 +24,10 @@ function main(): i32 {
   let v: i32 = 0;
   unsafe {
     sym = dlsym(0 as *u8, &name[0]);
+    if (sym == 0 as *u8) {
+      /* Darwin / macOS RTLD_DEFAULT is ((void*)-2) */
+      sym = dlsym((0 - 2) as *u8, &name[0]);
+    }
   }
   if (sym == 0 as *u8) {
     return 2;
