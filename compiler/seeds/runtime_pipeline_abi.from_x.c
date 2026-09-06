@@ -13768,7 +13768,9 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * emit_assign / emit_array_lit. Do not leftover rest U SAT local t
    * copy_large (glue_copy_large dest-in-rbx sz<8 rejects [2]u8). leftover
    * rest unique rec ASSIGN TYPE_ARRAY STRING_LIT (`*p = "hi"`) is leftover
-   * rest unique store iko==59. leftover unique leftover_emit_match_arm_result
+   * rest unique store iko==59. leftover rest unique rec ASSIGN TYPE_SLICE
+   * STRING_LIT (`*p = "hi"` dest_tk==11) is leftover rest unique rec ASSIGN
+   * (park dest + fat store). leftover unique leftover_emit_match_arm_result
    * remaining ADDR_OF (rko==51) skip unless proven (pointer dest). leftover
    * unique leftover_emit_match_arm_result remaining BINARY skip unless proven.
    * PLATFORM: WINDOWS leftover-PE. */
@@ -29267,6 +29269,7 @@ extern void pipeline_asm_emit_set_call_sret_reg_shift_c(int32_t shift);
 extern void pipeline_asm_set_call_expected_ret_ty_c(int32_t type_ref);
 extern int32_t pipeline_expr_resolved_type_ref(void *arena, int32_t expr_ref);
 extern int32_t glue_asm_emit_string_lit_ptr_rax_elf_c(void *arena, void *elf_ctx, int32_t str_expr_ref, int32_t ta);
+extern int32_t glue_asm_string_lit_len(void *arena, int32_t expr_ref);
 /* Stage10 10.2.1: EXPR_ASM (60) template emit (call_dispatch authority). */
 extern int32_t pipeline_asm_try_emit_inline_asm_expr_elf_c(void *arena, void *elf_ctx, int32_t expr_ref, void *ctx, int32_t ta);
 extern int32_t pipeline_asm_emit_cmp_elf(void *arena, void *elf_ctx, int32_t cmp_expr_ref, void *ctx, int32_t ta);
@@ -30129,7 +30132,10 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * (`*p = "hi"` of *[N]u8) is leftover rest unique store iko==59
      * (let_init(-3)); do not leftover rest unique rec ASSIGN second
      * intercept. leftover rest unique rec ASSIGN TYPE_SLICE STRING_LIT
-     * is leftover rest unique sibling.
+     * (`*p = "hi"` dest_tk==11) parks dest CPU stack then leftover
+     * unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax
+     * then store fat data@0+slen@8 (same leftover unique leftover_emit_match_arm_result
+     * dest_tk==11 / leftover rest unique rec ASSIGN TYPE_SLICE ARRAY_LIT).
      *
      * TYPE_ARRAY VAR dest MATCH `d = match 1 { 1 => [3, 4]; _ => [0, 0] }`
      * (arr_asg_match) is a sibling dest (VAR frame slot, not dest-in-rbx).
@@ -30518,6 +30524,49 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
           out_rc = -1;
         else
           out_rc = 0;
+      } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 11 && asg_rko == 59) {
+        /* TYPE_SLICE dest-in-rbx STRING_LIT `*p = "hi"` dest_tk==11.
+         * SAT emit_assign DEREF dest SAT local t struct_let_init -2 then
+         * leftover rest rec ko==59 leftover unique rec leftover rest SAT T
+         * glue_asm_emit_string_lit_ptr_rax puts data ptr in rax then 4B
+         * store through clobbered rbx (dest fat pair stays 0 / data-only
+         * without length). typeck adopts STRING_LIT as TYPE_SLICE; payload
+         * is a fat pair data@0+slen@8, not a pointer. G.7 complete leftover
+         * rest unique rec ASSIGN TYPE_SLICE STRING_LIT: park dest CPU stack
+         * (same leftover rest unique rec ASSIGN TYPE_SLICE ARRAY_LIT), leftover
+         * unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax then
+         * store data@0+slen@8 (same leftover unique leftover_emit_match_arm_result
+         * dest_tk==11). Do not leftover unique leftover_emit_string twin. Do
+         * not leftover rest remaining-wave. Do not leftover rest T SAT
+         * emit_assign / emit_array_lit. leftover rest unique rec ASSIGN VAR
+         * dest TYPE_SLICE STRING_LIT (`d = "hi"`) skip unless proven (SAT
+         * emit_assign). leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY
+         * STRING_LIT (`d = "hi"`) stays SAT emit_assign. ADDR_OF (rko==51) /
+         * BINARY skip unless proven. PLATFORM: WINDOWS leftover-PE. */
+        int32_t asg_slen;
+        if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_push_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else if (glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, asg_right, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else {
+          asg_slen = glue_asm_string_lit_len(arena, asg_right);
+          if (asg_slen < 0)
+            asg_slen = 0;
+          if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, 0, 8, ta) != 0)
+            out_rc = -1;
+          else if (backend_enc_mov_imm64_to_rax_arch(elf_ctx, asg_slen, 0, ta) != 0)
+            out_rc = -1;
+          else if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, 8, 8, ta) != 0)
+            out_rc = -1;
+          else
+            out_rc = 0;
+        }
       } else if ((asg_lko == 52 || asg_lko == 3) && asg_dtr > 0 && asg_dtk == 11 &&
                  asg_rko == 43) {
         /* TYPE_SLICE dest-in-rbx MATCH AND VAR dest MATCH
@@ -32406,7 +32455,7 @@ int32_t glue_try_index_rvalue_slice_once_elf_c(void *arena, void *elf_ctx, int32
  * emit_array_lit. Do not leftover rest U SAT local t copy_large
  * (glue_copy_large dest-in-rbx sz<8 rejects [2]u8). leftover rest
  * unique rec ASSIGN TYPE_SLICE STRING_LIT (`*p = "hi"` dest_tk==11)
- * is leftover rest unique sibling. leftover rest unique rec ASSIGN
+ * is leftover rest unique rec ASSIGN (park dest + fat store). leftover rest unique rec ASSIGN
  * VAR dest TYPE_ARRAY STRING_LIT (`d = "hi"`) stays SAT emit_assign
  * (do not intercept VAR dest TYPE_ARRAY non-MATCH rhs).
  * PLATFORM: WINDOWS leftover-PE hybrid / POSIX -E unchanged.
@@ -32708,8 +32757,8 @@ int32_t glue_struct_lit_store_fixed_array_field_elf_c(void *arena, void *elf_ctx
      * SAT emit_assign / emit_array_lit. Do not leftover rest U SAT local
      * t copy_large (glue_copy_large dest-in-rbx sz<8 rejects [2]u8).
      * leftover rest unique rec ASSIGN TYPE_SLICE STRING_LIT
-     * (`*p = "hi"` dest_tk==11) is leftover rest unique sibling.
-     * leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY STRING_LIT
+     * (`*p = "hi"` dest_tk==11) is leftover rest unique rec ASSIGN
+     * (park dest + fat store). leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY STRING_LIT
      * (`d = "hi"`) stays SAT emit_assign. PLATFORM: WINDOWS leftover-PE. */
     int32_t nbytes;
     int32_t slen;
