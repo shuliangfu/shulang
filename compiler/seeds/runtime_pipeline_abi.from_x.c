@@ -13509,7 +13509,10 @@ static int32_t leftover_emit_match_arm_result_elf_c(void *arena, void *elf_ctx, 
    * leftover_emit_if twin of leftover unique emit_if / .x thin emit_if.
    * leftover rest unique rec ASSIGN TYPE_SLICE dest-in-rbx IF AND VAR dest IF
    * parks dest then leftover unique leftover_emit_match_arm_result of IF dest-parked
-   * dest_tk==11. leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF AND VAR dest IF
+   * dest_tk==11. leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY IF/BLOCK
+   * parks dest then leftover unique leftover_emit_match_arm_result dest-parked
+   * dest_tk==10 (POSIX FROM_X leftover rest rec ASSIGN first-wins; dest-in-rbx
+   * TYPE_ARRAY IF/BLOCK stays leftover rest unique store iko==25/27/26). leftover rest unique rec ASSIGN TYPE_NAMED dest-in-rbx IF AND VAR dest IF
    * parks dest then leftover unique leftover_emit_match_arm_result of IF
    * dest-parked dest_tk==0. leftover rest unique store iko==25/27 IF wrapping
    * STRING_LIT/ARRAY_LIT parks dest then leftover unique leftover_emit_match_arm_result
@@ -30229,8 +30232,11 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
      * DEREF dest only (asg_lko==52); VAR dest fell through SAT emit_assign
      * SAT global T, MATCH dest not parked (arr_asg_match RUN=0 / CG002).
      * TYPE_NAMED/TYPE_SLICE MATCH already intercept VAR dest (asg_lko==3).
-     * Do not intercept VAR dest TYPE_ARRAY non-MATCH rhs (arr_asg_var /
-     * arr_asg_lit already GREEN via SAT emit_assign).
+     * VAR dest TYPE_ARRAY ARRAY_LIT/CALL/FIELD/INDEX/DEREF/CAST stay SAT
+     * emit_assign (arr_asg_lit / arr_asg_call / arr_asg_field /
+     * arr_asg_idx / arr_asg_deref / arr_asg_cast_lit POSIX GREEN).
+     * VAR dest TYPE_ARRAY IF/BLOCK is leftover rest unique rec ASSIGN
+     * sibling (arr_asg_if / arr_asg_block POSIX RED RUN=1).
      *
      * TYPE_NAMED dest-in-rbx VAR `*p = a` stays SAT emit_assign
      * (named_star_asg GREEN via SAT local t memcpy). TYPE_NAMED dest-in-rbx
@@ -30399,7 +30405,9 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
          * Do not leftover rest T SAT emit_assign / emit_array_lit.
          * Do not leftover rest remaining-wave. Do not leftover rest U
          * SAT local t copy_large. Do not intercept VAR dest TYPE_ARRAY
-         * non-MATCH rhs. PLATFORM: WINDOWS leftover-PE. */
+         * ARRAY_LIT/CALL/FIELD/INDEX/DEREF/CAST (POSIX GREEN). VAR dest
+         * TYPE_ARRAY IF/BLOCK is leftover rest unique rec ASSIGN sibling.
+         * PLATFORM: WINDOWS leftover-PE / POSIX FROM_X leftover rest. */
         asg_n_arr = pipeline_type_array_size_at(arena, asg_dtr);
         asg_elem = pipeline_type_elem_ref_at(arena, asg_dtr);
         asg_esz = glue_array_lit_force_esz_from_elem_type_c(arena, asg_elem);
@@ -30442,6 +30450,95 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
             out_rc = -1;
           else
             out_rc = pipeline_asm_emit_assign_elf_c(arena, elf_ctx, expr_ref, ctx, ta);
+        }
+      } else if (asg_lko == 3 && asg_dtr > 0 && asg_dtk == 10 &&
+                 (asg_rko == 25 || asg_rko == 27 || asg_rko == 26)) {
+        int32_t asg_nbytes;
+        int32_t asg_n_arr;
+        int32_t asg_esz;
+        int32_t asg_elem;
+        /* VAR dest TYPE_ARRAY IF `d = if true { [3, 4] } else { [0, 0] }`
+         * AND BLOCK `d = { [3, 4] }` / dest-region `d = { unsafe { [3, 4] } }`
+         * (arr_asg_if / arr_asg_block). leftover rest unique rec ASSIGN
+         * TYPE_ARRAY MATCH intercepts VAR dest (asg_lko==3 rko==43) via
+         * let_init(-3). IF/BLOCK fell through SAT emit_assign (SAT global T):
+         * leftover unique emit_if remaining-wave `#ifndef FROM_X` ABSENT /
+         * .x thin emit_if SAT if_arm of then/else SAT implicit dest then
+         * 4B store into d (arr_asg_if POSIX RUN=1 expect 4). BLOCK wrapping
+         * ARRAY_LIT recs SAT emit_array_lit implicit dest (arr_asg_block
+         * POSIX RUN=1). leftover unique leftover_emit_match_arm_result
+         * rko==25/27 already dest-parks then/else ARRAY_LIT dest_tk==10;
+         * rko==26 dest-parks dest-region peel/IF/with_arena last dest_tk==10.
+         * leftover rest unique rec ASSIGN TYPE_NAMED/TYPE_SLICE IF/BLOCK
+         * already intercept VAR dest. leftover rest unique rec ASSIGN
+         * TYPE_ARRAY dest-in-rbx IF/BLOCK stays leftover rest unique store
+         * iko==25/27/26 via catch-all let_init(-3) (do not leftover rest
+         * unique rec ASSIGN second intercept of dest-in-rbx). leftover rest
+         * unique store is WIN_LEFTOVER only — POSIX FROM_X leftover rest
+         * rec ASSIGN first-wins must dest-park here (not let_init(-3)
+         * fallthrough SAT emit_assign). G.7 complete leftover rest unique
+         * rec ASSIGN VAR dest TYPE_ARRAY IF/BLOCK: park dest CPU stack
+         * (lvalue of VAR; same leftover rest unique rec ASSIGN TYPE_ARRAY
+         * MATCH bump), leftover unique leftover_emit_match_arm_result of
+         * IF/BLOCK dest-parked dest_tk==10 (same leftover rest unique rec
+         * ASSIGN TYPE_SLICE IF dest_tk==11 / TYPE_NAMED IF dest_tk==0).
+         * Bump next_offset past d (TYPE_NAMED MATCH 8B lesson). Do not
+         * leftover unique leftover_emit_if / leftover_emit_block twin.
+         * Do not leftover rest remaining-wave. Do not leftover rest T SAT
+         * emit_if / emit_block_body_sync / emit_assign / emit_array_lit.
+         * Do not intercept VAR dest TYPE_ARRAY ARRAY_LIT/CALL/FIELD/
+         * INDEX/DEREF/CAST (POSIX GREEN). VAR dest TYPE_ARRAY STRING_LIT
+         * (`d = "hi"`) POSIX typeck *u8 vs [N]u8 (leftover-PE typeck unique).
+         * ADDR_OF (rko==51) / BINARY skip unless proven.
+         * PLATFORM: WINDOWS leftover-PE / POSIX FROM_X leftover rest. */
+        asg_n_arr = pipeline_type_array_size_at(arena, asg_dtr);
+        asg_elem = pipeline_type_elem_ref_at(arena, asg_dtr);
+        asg_esz = glue_array_lit_force_esz_from_elem_type_c(arena, asg_elem);
+        if (asg_esz <= 0)
+          asg_esz = glue_index_elem_byte_sz_from_type_ref_c(arena, asg_dtr);
+        if (asg_esz <= 0)
+          asg_esz = 4;
+        asg_nbytes = asg_n_arr * asg_esz;
+        if (asg_nbytes <= 0)
+          asg_nbytes = 8;
+        {
+          int32_t asg_p_off = glue_var_expr_stack_off_elf_c(arena, ctx, asg_left);
+          int32_t *asg_ly_next = (int32_t *)((uint8_t *)ctx + 4);
+          int32_t asg_next;
+          int32_t asg_past;
+          int32_t asg_span;
+          if (asg_p_off >= 0 && asg_ly_next) {
+            asg_next = *asg_ly_next;
+            asg_span = 8;
+            if (asg_nbytes > 8)
+              asg_span = 8 + ((asg_nbytes + 7) & ~7);
+            asg_past = asg_p_off + asg_span;
+            if (asg_next < asg_past)
+              *asg_ly_next = asg_past;
+            glue_align_next_offset(ctx);
+          }
+        }
+        if (asg_nbytes > 4096)
+          out_rc = -1;
+        else if (pipeline_asm_emit_lvalue_eff_addr_elf_c(arena, elf_ctx, asg_left, ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else if (backend_enc_push_rbx_arch(elf_ctx, ta) != 0)
+          out_rc = -1;
+        else {
+          g_leftover_match_dest_parked = 1;
+          g_leftover_match_dest_nbytes = asg_nbytes;
+          g_leftover_match_dest_tk = 10;
+          if (leftover_emit_match_arm_result_elf_c(arena, elf_ctx, asg_right, ctx, ta) != 0)
+            out_rc = -1;
+          else
+            out_rc = 0;
+          g_leftover_match_dest_parked = 0;
+          g_leftover_match_dest_nbytes = 0;
+          g_leftover_match_dest_tk = 0;
+          if (backend_enc_pop_rbx_arch(elf_ctx, ta) != 0)
+            out_rc = -1;
         }
       } else if (asg_lko == 52 && asg_dtr > 0 && asg_dtk == 8 && asg_rko == 45) {
         /* TYPE_NAMED dest-in-rbx STRUCT_LIT. SAT emit_struct_lit SAT

@@ -44162,6 +44162,15 @@ export function glue_emit_fixed_array_type_let_init_elf_c(arena: *u8, elf_ctx: *
   let ai: i32 = 0;
   let src_off: i32 = 0;
   let rc: i32 = 0;
+  let dest_spill: i32 = 0;
+  let if_cond: i32 = 0;
+  let if_then: i32 = 0;
+  let if_else: i32 = 0;
+  let else_lbl: u8[128] = [];
+  let done_lbl: u8[128] = [];
+  let else_len: i32 = 0;
+  let done_len: i32 = 0;
+  let arm_rc: i32 = 0;
   if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || ctx == (0 as *u8) || init_ref <= 0 || type_ref <= 0) {
     return 0 - 2;
   }
@@ -44356,7 +44365,191 @@ export function glue_emit_fixed_array_type_let_init_elf_c(arena: *u8, elf_ctx: *
       }
       return 0;
     }
+    /* dest-in-rbx IF `*p = if true { [3, 4] } else { [0, 0] }` AND
+     * VAR dest `d = if true { [3, 4] } else { [0, 0] }` (frame dest
+     * parks then recurse dest-in-rbx). leftover rest unique store
+     * iko==25/27 is WIN_LEFTOVER only. POSIX product .x let-init
+     * previously returned -2 then SAT emit_assign 4B-store
+     * (arr_asg_if RUN=1). G.7 complete: same dest-in-rbx IF as
+     * glue_emit_struct_type_let_init (park dest_spill, cond, jz,
+     * glue_emit_if_arm_dest_in_rbx TYPE_ARRAY then/else). ARRAY_LIT
+     * arms reuse dest-in-rbx ARRAY_LIT (`*p = [w]`). Do not
+     * leftover unique leftover_emit_if twin. Do not emit_if_arm (8B).
+     * PLATFORM: SHARED dest-in-rbx TYPE_ARRAY IF · MACOS|ARM64 dest-shadow. */
+    if ((iko == 25 || iko == 27) && (ta == 0 || ta == 1)) {
+      unsafe {
+        if_cond = pipeline_expr_if_cond_ref_at(arena, src);
+        if_then = pipeline_expr_if_then_ref_at(arena, src);
+        if_else = pipeline_expr_if_else_ref_at(arena, src);
+      }
+      if (if_cond <= 0 || if_then <= 0) {
+        return 0 - 1;
+      }
+      glue_align_next_offset(ctx);
+      dest_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+      if (ta == 1) {
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill + 8);
+      } else {
+        dest_spill = dest_spill + 8;
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill);
+      }
+      if (ta == 1) {
+        rc = glue_arm64_mov_x19_to_x0_elf_c(elf_ctx);
+      } else {
+        unsafe {
+          rc = backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+        }
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = pipeline_asm_emit_expr_elf_c(arena, elf_ctx, if_cond, ctx, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        else_len = pipeline_asm_emit_next_label_c(ctx, &else_lbl[0], 64);
+        done_len = pipeline_asm_emit_next_label_c(ctx, &done_lbl[0], 64);
+      }
+      if (else_len <= 0 || done_len <= 0) {
+        return 0 - 1;
+      }
+      if (if_else != 0) {
+        unsafe {
+          rc = glue_enc_jz_after_bool_in_eax(elf_ctx, &else_lbl[0], else_len, ta);
+        }
+      } else {
+        unsafe {
+          rc = glue_enc_jz_after_bool_in_eax(elf_ctx, &done_lbl[0], done_len, ta);
+        }
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      arm_rc = glue_emit_if_arm_dest_in_rbx_elf_c(arena, elf_ctx, if_then, ctx, ta, type_ref, dest_spill);
+      if (arm_rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_jmp_arch(elf_ctx, &done_lbl[0], done_len, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_label_arch(elf_ctx, &else_lbl[0], else_len, 0, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      if (if_else != 0) {
+        unsafe {
+          rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, dest_spill, ta);
+        }
+        if (rc != 0) {
+          return 0 - 1;
+        }
+        unsafe {
+          rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+        }
+        if (rc != 0) {
+          return 0 - 1;
+        }
+        arm_rc = glue_emit_if_arm_dest_in_rbx_elf_c(arena, elf_ctx, if_else, ctx, ta, type_ref, dest_spill);
+        if (arm_rc != 0) {
+          return 0 - 1;
+        }
+      }
+      unsafe {
+        rc = backend_enc_label_arch(elf_ctx, &done_lbl[0], done_len, 0, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      return 0;
+    }
+    /* dest-in-rbx BLOCK `*p = { [3, 4] }` AND VAR dest `d = { [3, 4] }`.
+     * glue_emit_if_arm_dest_in_rbx peels BLOCK wrappers then dest-in-rbx
+     * ARRAY_LIT. Park dest_spill first (cond-less). PLATFORM: SHARED. */
+    if (iko == 26 && (ta == 0 || ta == 1)) {
+      glue_align_next_offset(ctx);
+      dest_spill = pipe_load_i32_le(ctx, pipe_asm_ctx_off_next_offset());
+      if (ta == 1) {
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill + 8);
+      } else {
+        dest_spill = dest_spill + 8;
+        pipe_store_i32_le(ctx, pipe_asm_ctx_off_next_offset(), dest_spill);
+      }
+      if (ta == 1) {
+        rc = glue_arm64_mov_x19_to_x0_elf_c(elf_ctx);
+      } else {
+        unsafe {
+          rc = backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta);
+        }
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, dest_spill, ta);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      arm_rc = glue_emit_if_arm_dest_in_rbx_elf_c(arena, elf_ctx, src, ctx, ta, type_ref, dest_spill);
+      if (arm_rc != 0) {
+        return 0 - 1;
+      }
+      return 0;
+    }
     return 0 - 2;
+  }
+  /* Frame dest TYPE_ARRAY IF/BLOCK: park dest in rbx then dest-in-rbx.
+   * G.7 complete leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY
+   * IF/BLOCK sibling on POSIX product .x (leftover rest unique store
+   * WIN_LEFTOVER only). ARRAY_LIT/CALL/FIELD stay store_fixed_array_field.
+   * PLATFORM: SHARED. */
+  src = glue_peel_as_array_slice_ascription_c(arena, init_ref);
+  if (src <= 0) {
+    src = init_ref;
+  }
+  unsafe {
+    iko = pipeline_expr_kind_ord_at(arena, src);
+  }
+  if ((iko == 25 || iko == 27 || iko == 26) && (ta == 0 || ta == 1) && stack_slot_off >= 0) {
+    unsafe {
+      rc = backend_enc_lea_rbp_to_rax_arch(elf_ctx, stack_slot_off, ta);
+    }
+    if (rc != 0) {
+      return 0 - 1;
+    }
+    unsafe {
+      rc = backend_enc_mov_rax_to_rbx_arch(elf_ctx, ta);
+    }
+    if (rc != 0) {
+      return 0 - 1;
+    }
+    return glue_emit_fixed_array_type_let_init_elf_c(arena, elf_ctx, src, ctx, ta, type_ref, 0 - 3);
   }
   return glue_struct_lit_store_fixed_array_field_elf_c(arena, elf_ctx, init_ref, ctx, ta, 0, stack_slot_off, 0, type_ref);
 }
