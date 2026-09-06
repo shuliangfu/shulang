@@ -12,9 +12,10 @@
  * Slice4: reader-writer lock (rdlock/wrlock/unlock) + sync_os wire.
  * Later: Windows (10.6.2).
  *
- * Windows / Darwin: not provided — callers keep OS mutex/cond/rwlock APIs.
+ * Darwin: Cap residual 10.6.3 POSIX pthread sync primitives.
+ * Windows: not provided — callers keep OS mutex/cond/rwlock APIs.
  *
- * PLATFORM: LINUX primary (x86_64 + aarch64).
+ * PLATFORM: LINUX primary (x86_64 + aarch64) · DARWIN Cap sync.
  */
 
 #ifndef XLANG_SYNC_CAP_H
@@ -440,6 +441,260 @@ static inline int xlang_cap_rwlock_wrunlock(struct xlang_cap_rwlock *rw) {
   return 0;
 }
 
-#endif /* LINUX x86_64|aarch64 */
+#elif defined(__APPLE__)
+
+/*
+ * Cap residual 10.6.3 — Darwin POSIX pthread sync primitives.
+ * Provides xlang_cap_mutex, xlang_cap_cond, xlang_cap_sem, xlang_cap_rwlock
+ * matching Linux Cap signatures, eliminating duplication across platforms.
+ * PLATFORM: DARWIN / MACOS
+ */
+
+#include <errno.h>
+#include <pthread.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <xlang_thread_cap.h>
+
+/**
+ * Cap Darwin mutex — pthread_mutex_t wrapper.
+ * PLATFORM: DARWIN
+ */
+struct xlang_cap_mutex {
+  pthread_mutex_t mu;
+};
+
+static inline int xlang_cap_mutex_init(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_mutex_init(&m->mu, NULL) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_mutex_destroy(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_mutex_destroy(&m->mu) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_mutex_lock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_mutex_lock(&m->mu) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_mutex_trylock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  int ret = pthread_mutex_trylock(&m->mu);
+  if (ret != 0) {
+    errno = ret;
+    return -1;
+  }
+  return 0;
+}
+
+static inline int xlang_cap_mutex_unlock(struct xlang_cap_mutex *m) {
+  if (m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_mutex_unlock(&m->mu) == 0) ? 0 : -1;
+}
+
+/**
+ * Cap Darwin condvar — pthread_cond_t wrapper.
+ * PLATFORM: DARWIN
+ */
+struct xlang_cap_cond {
+  pthread_cond_t cv;
+};
+
+static inline int xlang_cap_cond_init(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_cond_init(&cv->cv, NULL) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_cond_destroy(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_cond_destroy(&cv->cv) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_cond_wait(struct xlang_cap_cond *cv, struct xlang_cap_mutex *m) {
+  if (cv == 0 || m == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_cond_wait(&cv->cv, &m->mu) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_cond_signal(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_cond_signal(&cv->cv) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_cond_broadcast(struct xlang_cap_cond *cv) {
+  if (cv == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_cond_broadcast(&cv->cv) == 0) ? 0 : -1;
+}
+
+/**
+ * Cap Darwin counting semaphore using mutex + condvar.
+ * Note: Darwin deprecated POSIX sem_init, so mutex + condvar provides a reliable portable counting sem.
+ * PLATFORM: DARWIN
+ */
+struct xlang_cap_sem {
+  pthread_mutex_t mu;
+  pthread_cond_t cv;
+  uint32_t count;
+};
+
+static inline int xlang_cap_sem_init(struct xlang_cap_sem *sem, uint32_t value) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (pthread_mutex_init(&sem->mu, NULL) != 0) return -1;
+  if (pthread_cond_init(&sem->cv, NULL) != 0) {
+    pthread_mutex_destroy(&sem->mu);
+    return -1;
+  }
+  sem->count = value;
+  return 0;
+}
+
+static inline int xlang_cap_sem_destroy(struct xlang_cap_sem *sem) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  pthread_cond_destroy(&sem->cv);
+  pthread_mutex_destroy(&sem->mu);
+  sem->count = 0;
+  return 0;
+}
+
+static inline int xlang_cap_sem_wait(struct xlang_cap_sem *sem) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (pthread_mutex_lock(&sem->mu) != 0) return -1;
+  while (sem->count == 0) {
+    if (pthread_cond_wait(&sem->cv, &sem->mu) != 0) {
+      pthread_mutex_unlock(&sem->mu);
+      return -1;
+    }
+  }
+  sem->count--;
+  pthread_mutex_unlock(&sem->mu);
+  return 0;
+}
+
+static inline int xlang_cap_sem_trywait(struct xlang_cap_sem *sem) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (pthread_mutex_lock(&sem->mu) != 0) return -1;
+  if (sem->count == 0) {
+    pthread_mutex_unlock(&sem->mu);
+    errno = EAGAIN;
+    return -1;
+  }
+  sem->count--;
+  pthread_mutex_unlock(&sem->mu);
+  return 0;
+}
+
+static inline int xlang_cap_sem_post(struct xlang_cap_sem *sem) {
+  if (sem == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (pthread_mutex_lock(&sem->mu) != 0) return -1;
+  sem->count++;
+  pthread_cond_signal(&sem->cv);
+  pthread_mutex_unlock(&sem->mu);
+  return 0;
+}
+
+/**
+ * Cap Darwin rwlock — pthread_rwlock_t wrapper.
+ * PLATFORM: DARWIN
+ */
+struct xlang_cap_rwlock {
+  pthread_rwlock_t rw;
+};
+
+static inline int xlang_cap_rwlock_init(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_init(&rw->rw, NULL) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_rwlock_destroy(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_destroy(&rw->rw) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_rwlock_rdlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_rdlock(&rw->rw) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_rwlock_wrlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_wrlock(&rw->rw) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_rwlock_rdunlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_unlock(&rw->rw) == 0) ? 0 : -1;
+}
+
+static inline int xlang_cap_rwlock_wrunlock(struct xlang_cap_rwlock *rw) {
+  if (rw == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  return (pthread_rwlock_unlock(&rw->rw) == 0) ? 0 : -1;
+}
+
+#endif /* LINUX x86_64|aarch64 | DARWIN */
 
 #endif /* XLANG_SYNC_CAP_H */

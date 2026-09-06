@@ -342,9 +342,9 @@
 - ✅ **10.4.2** 内存屏障内建 — **Ubuntu＋Darwin ✅** x86 fence＠`d39f619ee`＋aarch64 `dmb ish/ishld/ishst`＠`f2cc0d8d6`＋`atomic_lang_fence_smoke.x` 双端 42 全绿。  
 - ✅ **10.5.1** x86 AVX／SSE + aarch64 NEON 内建 — **slice0–10 ✅** · **slice10 ✅（Ubuntu host-C）**＠`0609c4a05`：`builtin.x` 标量 fallthrough（无 panic）。cold seed 孪生 hsum／dot／fsub **本波补**（SSE lanes==4；ARM／AVX 仍在 `simd_enc.x`）。残：MSYS Win 实机 · 双端 L4 未重跑
 - 🟡 **10.5.2** ARM SVE 内建 — **slice0–2 ✅（Ubuntu）**＠`2e03ae24c`：f32x4／fma／hsum／dot／i32x8／f32x8 双半 VL4。残：真宽 VL／MSYS Win  
-- 🟡 **10.6.1** Linux futex／clone／mmap 栈 — **slice0–2 ✅（Ubuntu）**＠`e8777cb6b`：futex／mmap／clone trampoline＋**product `runtime_thread_glue` Linux Cap**（pool／create／join；nm 无 pthread；STD-043 run=2）。残：Darwin pthread · TLS  
+- ✅ **10.6.1** Linux futex／clone／mmap 栈＋Darwin POSIX Cap — **Ubuntu＋Darwin ✅**：futex／mmap／clone trampoline（Linux）＋Darwin pthread Cap residual（`xlang_thread_cap.h` spawn/join）；**product `runtime_thread_glue` Linux+Darwin 全 Cap 收敛**（pool／create／join 统一使用 `xlang_thread_spawn` / `xlang_thread_join`，消除双实现；STD-043 run=2；THREAD-SYNC-CAP-DARWIN run=1）。残：TLS  
 - 🟡 **10.6.2** Windows CreateThread／WaitForSingleObject — **slice0 ✅（源码＋gate；Ubuntu skip）**＠`0d906f7e8`：Cap spawn／join＋product glue join-handle ABI。残：MSYS／Win 实机 **run=1** · pool／affinity 金标  
-- 🟡 **10.6.3** 互斥锁／条件变量／信号量 — **slice0–4 ✅（Ubuntu）**＠`7959148f7`：futex mutex／cond／sem／**rwlock**＋**Linux sync_os 叶无 pthread**（Cap spawn smoke）。残：Darwin mutex／cond／rwlock 仍 pthread · Windows sync Cap
+- ✅ **10.6.3** 互斥锁／条件变量／信号量 — **Ubuntu＋Darwin ✅**：futex mutex／cond／sem／rwlock（Linux）＋Darwin pthread sync Cap（`xlang_sync_cap.h` mutex/cond/sem/rwlock）；**product `runtime_sync_os` Linux+Darwin 全 Cap 收口**（mutex／cond／rwlock 统一使用 `xlang_cap_*` 结构与操作；STD-045 run=2；THREAD-SYNC-CAP-DARWIN run=1）。残：Windows sync Cap
 - 🟡 **10.7.1** va_list + va_start／arg／end — **slice0–18 ✅（SHARED Cap＋语言＋arity＋host-cc＋rt_preamble＋unsafe 豁免＋产品 `-backend c -o` Cap `-I`＋默认 asm Cap i32/i64/ptr＋typed `va_arg<T>(ap)`＋aarch64 asm Cap＋f32／f64 XMM／NEON＋stack extras＋mixed overflow）**＠`d79894f86`：slice18 header(24) GP／FP／共享 OV 游标；OV[8] 只拷一次；va_arg 过 class_end 走共享 overflow（SysV mixed GP＋FP）。残：MSVC（须切 Windows）· host-C 多份 `va_arg<i32>` 同符号
 - 🟡 **10.7.2** .x／Cap 自实现 vsnprintf — **slice0–21 ✅（SHARED）**＠`b5b7d323d`：产品 seed／gen pin／Track L／build_tool cold **Cap 收口**（labi「snprintf」仅为注释假阳）。残：纯 .x fmt · MSVC
 

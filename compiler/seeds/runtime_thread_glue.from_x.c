@@ -81,14 +81,19 @@ void xlang_cpu_set(unsigned int cpu, cpu_set_t *set) {
 #define XLANG_THREAD_CAP_DEFAULT_STACK (256u * 1024u)
 /** thread_id is heap `struct xlang_thread_join *` (owned until join). */
 #define XLANG_THREAD_ID_INVALID ((int64_t)0)
+#elif defined(__APPLE__)
+#include <pthread.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/qos.h>
+#include <xlang_sync_cap.h> /* Cap residual 10.6.1 / 10.6.3: Darwin Cap spawn/join/pool */
+#define XLANG_THREAD_CAP_DEFAULT_STACK (256u * 1024u)
+#define XLANG_THREAD_ID_INVALID ((int64_t)0)
 #else
 #include <pthread.h>
 #include <stdlib.h>
 typedef pthread_t xlang_thread_t;
 #define XLANG_THREAD_ID_INVALID ((int64_t)0)
-#if defined(__APPLE__)
-#include <sys/qos.h>
-#endif
 #endif
 
 /* Forward declarations for thin-provided _c functions (R2 / FROM_X mode). */
@@ -133,23 +138,9 @@ int64_t thread_self_c(void) { return thread_self_impl(); }
 /* ========== _impl: thread_create ========== */
 int64_t thread_create_impl(void *entry, void *arg) {
     if (entry == NULL) return XLANG_THREAD_ID_INVALID;
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64) || defined(__linux__) || defined(__APPLE__)
     {
-        /* PLATFORM: WINDOWS — Cap CreateThread spawn; thread_id = heap join handle. */
-        struct xlang_thread_join *join =
-            (struct xlang_thread_join *)malloc(sizeof(struct xlang_thread_join));
-        if (join == NULL) return XLANG_THREAD_ID_INVALID;
-        memset(join, 0, sizeof(*join));
-        if (xlang_thread_spawn((xlang_thread_start_fn)entry, arg, join,
-                               XLANG_THREAD_CAP_DEFAULT_STACK) != 0) {
-            free(join);
-            return XLANG_THREAD_ID_INVALID;
-        }
-        return (int64_t)(uintptr_t)join;
-    }
-#elif defined(__linux__)
-    {
-        /* PLATFORM: LINUX — Cap spawn; thread_id = heap join handle. */
+        /* PLATFORM: SHARED Cap (Linux futex / Windows CreateThread / Darwin pthread) — spawn; thread_id = heap join handle. */
         struct xlang_thread_join *join =
             (struct xlang_thread_join *)malloc(sizeof(struct xlang_thread_join));
         if (join == NULL) return XLANG_THREAD_ID_INVALID;
@@ -177,8 +168,9 @@ int64_t thread_create_c(void *entry, void *arg) { return thread_create_impl(entr
 /* ========== _impl: thread_create_with_stack ========== */
 int64_t thread_create_with_stack_impl(void *entry, void *arg, size_t stack_size) {
     if (entry == NULL) return XLANG_THREAD_ID_INVALID;
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64) || defined(__linux__) || defined(__APPLE__)
     {
+        /* PLATFORM: SHARED Cap — spawn with explicit stack. */
         struct xlang_thread_join *join =
             (struct xlang_thread_join *)malloc(sizeof(struct xlang_thread_join));
         size_t slen = stack_size;
@@ -186,25 +178,11 @@ int64_t thread_create_with_stack_impl(void *entry, void *arg, size_t stack_size)
         if (slen == 0) {
             slen = XLANG_THREAD_CAP_DEFAULT_STACK;
         }
-        memset(join, 0, sizeof(*join));
-        if (xlang_thread_spawn((xlang_thread_start_fn)entry, arg, join, slen) != 0) {
-            free(join);
-            return XLANG_THREAD_ID_INVALID;
-        }
-        return (int64_t)(uintptr_t)join;
-    }
-#elif defined(__linux__)
-    {
-        /* PLATFORM: LINUX — Cap spawn with explicit stack (floor Cap 16KiB). */
-        struct xlang_thread_join *join =
-            (struct xlang_thread_join *)malloc(sizeof(struct xlang_thread_join));
-        size_t slen = stack_size;
-        if (join == NULL) return XLANG_THREAD_ID_INVALID;
-        if (slen == 0) {
-            slen = XLANG_THREAD_CAP_DEFAULT_STACK;
-        } else if (slen < 16384u) {
+#if defined(__linux__)
+        else if (slen < 16384u) {
             slen = 16384u;
         }
+#endif
         memset(join, 0, sizeof(*join));
         if (xlang_thread_spawn((xlang_thread_start_fn)entry, arg, join, slen) != 0) {
             free(join);
@@ -242,20 +220,9 @@ int64_t thread_create_with_stack_c(void *entry, void *arg, size_t stack_size) {
 /* ========== _impl: thread_join ========== */
 int32_t thread_join_impl(int64_t thread_id) {
     if (thread_id == XLANG_THREAD_ID_INVALID) return -1;
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64) || defined(__linux__) || defined(__APPLE__)
     {
-        /* PLATFORM: WINDOWS — Cap join then free heap handle. */
-        struct xlang_thread_join *join = (struct xlang_thread_join *)(uintptr_t)thread_id;
-        if (xlang_thread_join(join) != 0) {
-            free(join);
-            return -1;
-        }
-        free(join);
-        return 0;
-    }
-#elif defined(__linux__)
-    {
-        /* PLATFORM: LINUX — Cap join then free heap handle. */
+        /* PLATFORM: SHARED Cap — join then free heap handle. */
         struct xlang_thread_join *join = (struct xlang_thread_join *)(uintptr_t)thread_id;
         if (xlang_thread_join(join) != 0) {
             free(join);
@@ -449,8 +416,8 @@ typedef struct {
     void *arg;
 } xlang_pool_job_t;
 
-#if defined(__linux__)
-/* PLATFORM: LINUX — Cap futex mutex/cond + Cap spawn workers (no libpthread). */
+#if defined(__linux__) || defined(__APPLE__)
+/* PLATFORM: SHARED Cap (Linux futex / Darwin pthread sync_cap) — Cap mutex/cond + Cap spawn workers. */
 static struct xlang_cap_mutex g_pool_mu;
 static struct xlang_cap_cond g_pool_not_empty;
 static struct xlang_cap_cond g_pool_idle;
@@ -464,7 +431,7 @@ static int g_pool_stop_req;
 static int g_pool_in_flight;
 static struct xlang_thread_join g_pool_joins[XLANG_THREAD_POOL_MAX_WORKERS];
 
-/** Worker main loop: dequeue jobs; stop flag exits. PLATFORM: LINUX Cap. */
+/** Worker main loop: dequeue jobs; stop flag exits. PLATFORM: SHARED Cap. */
 static void *xlang_thread_pool_worker(void *arg) {
     (void)arg;
     for (;;) {
@@ -546,7 +513,7 @@ int32_t thread_pool_start_impl(int32_t workers) {
 #if defined(_WIN32) || defined(_WIN64)
     (void)workers;
     return -1;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     {
         int i;
         if (workers < 1 || workers > XLANG_THREAD_POOL_MAX_WORKERS) {
@@ -627,7 +594,7 @@ int32_t thread_pool_submit_impl(uintptr_t entry, uintptr_t arg) {
     (void)entry;
     (void)arg;
     return -1;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     {
         xlang_pool_job_t job;
         if (!g_pool_started || entry == 0) {
@@ -683,7 +650,7 @@ int32_t thread_pool_submit_c(uintptr_t entry, uintptr_t arg) {
 int32_t thread_pool_drain_impl(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return -1;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     if (!g_pool_started) {
         return -1;
     }
@@ -713,7 +680,7 @@ int32_t thread_pool_drain_c(void) { return thread_pool_drain_impl(); }
 int32_t thread_pool_stop_impl(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return -1;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     {
         int i;
         if (!g_pool_started) {
@@ -769,7 +736,7 @@ int32_t thread_pool_stop_c(void) { return thread_pool_stop_impl(); }
 int32_t thread_pool_pending_impl(void) {
 #if defined(_WIN32) || defined(_WIN64)
     return -1;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     {
         int32_t n;
         if (!g_pool_started) {

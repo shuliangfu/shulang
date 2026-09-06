@@ -10,7 +10,7 @@
 // seeds/runtime_thread_glue.from_x.c and linked via the product pipeline
 // (thin+rest ld -r pattern).
 //
-// PLATFORM: SHARED — LINUX Cap (xlang_thread_cap／sync_cap); Darwin pthread;
+// PLATFORM: SHARED — LINUX Cap (futex); Darwin Cap (pthread residual);
 //           WINDOWS Cap CreateThread spawn/join (10.6.2).
 //
 // Wave513 (2026-07-27): R2 migration of runtime_thread_glue.from_x.c business

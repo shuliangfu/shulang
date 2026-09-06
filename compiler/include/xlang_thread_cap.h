@@ -11,9 +11,9 @@
  * Slice2: product runtime_thread_glue Linux spawn/join/pool → Cap.
  * 10.6.2 slice0: Windows CreateThread / WaitForSingleObject Cap spawn/join.
  *
- * Darwin: not provided — callers keep pthread APIs.
+ * Darwin: Cap residual 10.6.1 POSIX pthread spawn/join.
  *
- * PLATFORM: LINUX primary (x86_64 + aarch64) · WINDOWS Cap spawn/join.
+ * PLATFORM: LINUX primary (x86_64 + aarch64) · WINDOWS Cap spawn/join · DARWIN Cap spawn/join.
  */
 
 #ifndef XLANG_THREAD_CAP_H
@@ -565,6 +565,95 @@ static inline int xlang_thread_join(struct xlang_thread_join *join) {
   return 0;
 }
 
-#endif /* LINUX | WINDOWS */
+#elif defined(__APPLE__)
+
+/*
+ * Cap residual 10.6.1 — Darwin POSIX pthread spawn/join.
+ * Provides xlang_thread_spawn and xlang_thread_join matching Linux/Windows Cap
+ * so runtime_thread_glue and client code have a single authority across platforms.
+ * PLATFORM: DARWIN / MACOS
+ */
+
+#include <errno.h>
+#include <pthread.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+typedef void *(*xlang_thread_start_fn)(void *arg);
+
+/**
+ * Join handle filled by xlang_thread_spawn; wait with xlang_thread_join.
+ * PLATFORM: DARWIN
+ */
+struct xlang_thread_join {
+  pthread_t handle;
+  void *stack;
+  size_t stack_len;
+};
+
+/**
+ * Spawn fn(arg) via pthread_create (Darwin Cap residual).
+ * join must be zero-initialized; owns handle until xlang_thread_join.
+ * @param stack_len requested stack bytes; 0 -> system default
+ * @return 0 parent ok; -1 with errno
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_thread_spawn(xlang_thread_start_fn fn, void *arg,
+                                     struct xlang_thread_join *join, size_t stack_len) {
+  if (fn == 0 || join == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  join->handle = (pthread_t)0;
+  join->stack = 0;
+  join->stack_len = stack_len;
+  if (stack_len == 0) {
+    int ret = pthread_create(&join->handle, NULL, (void *(*)(void *))fn, arg);
+    if (ret != 0) {
+      errno = ret;
+      return -1;
+    }
+    return 0;
+  }
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) {
+    errno = EAGAIN;
+    return -1;
+  }
+  if (pthread_attr_setstacksize(&attr, stack_len) != 0) {
+    pthread_attr_destroy(&attr);
+    errno = EINVAL;
+    return -1;
+  }
+  int ret = pthread_create(&join->handle, &attr, (void *(*)(void *))fn, arg);
+  pthread_attr_destroy(&attr);
+  if (ret != 0) {
+    errno = ret;
+    return -1;
+  }
+  return 0;
+}
+
+/**
+ * Wait for Cap-spawned Darwin thread and clean up.
+ * @return 0 ok; -1 with errno
+ * PLATFORM: DARWIN
+ */
+static inline int xlang_thread_join(struct xlang_thread_join *join) {
+  if (join == 0 || join->handle == (pthread_t)0) {
+    errno = EINVAL;
+    return -1;
+  }
+  int ret = pthread_join(join->handle, NULL);
+  join->handle = (pthread_t)0;
+  if (ret != 0) {
+    errno = ret;
+    return -1;
+  }
+  return 0;
+}
+
+#endif /* LINUX | WINDOWS | DARWIN */
 
 #endif /* XLANG_THREAD_CAP_H */
