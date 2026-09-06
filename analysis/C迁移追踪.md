@@ -185,6 +185,7 @@
   - ✅ MATCH arm STRING_LIT dest-parked TYPE_ARRAY leftover unique leftover_emit_match_arm_result rko==59 dest_tk==10 min(dest_nbytes,slen) 8／4／1 copy＠`09663a529`
   - ✅ TYPE_ARRAY dest-in-rbx STRING_LIT `*p = "hi"` of `*[N]u8` leftover rest unique store iko==59 leftover unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax＋copy_from_e_star min(n_arr*esz,slen)＠`43fa26f39`
   - ✅ TYPE_SLICE dest-in-rbx STRING_LIT `*p = "hi"` dest_tk==11 leftover rest unique rec ASSIGN park dest＋leftover unique rec leftover rest SAT T glue_asm_emit_string_lit_ptr_rax＋store fat data@0＋slen@8＠`b075d78d1`
+  - ✅ TYPE_SLICE dest-in-rbx CAST `*p = "hi" as []u8`／`*p = [3, 4] as []i32` dest_tk==11 leftover rest unique rec ASSIGN park dest＋leftover unique leftover_emit_match_arm_result dest-parked dest_tk=11＠`8a41c7898`
 - ✅ **L4＠1174c5bb3 bstrict** — Ubuntu shuffle 后 **select SIGILL**：`vpxor ymm3` 写 `C5 F5 77`（EMMS #UD）；`vpand`／`vpandn`／`vpor` VEX.vvvv 误用 ymm3。i32 ymm 编码器已补（Ubuntu L4＠`6c0fdeebf` shuffle-select **OK**）；f32 ymm select 编码器亦已补全（`vxorps` `C5 E4 57 DB`、`vcmpgtps` `C5 EC C2 D3 0E`、`vandps` `C5 FC 54 C2`、`vandnps` `C5 EC 55 D1`、`vorps` `C5 FC 56 C2`）
 
 ---
