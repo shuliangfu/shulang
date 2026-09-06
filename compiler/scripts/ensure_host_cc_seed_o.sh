@@ -3872,11 +3872,74 @@ pipeline_abi_inject_unused_hints_thin() {
   pipeline_abi_inject_thin_leaf "$1" "src/runtime_pipeline_abi_unused_hints_thin.x" "unusedhints-thin"
 }
 
-# Cap-fn-ptr (10.3.2 slice0): EXPR_AS same-module #[no_mangle] fn as *u8 → LEA.
+# Cap-fn-ptr (10.3.2 slice0): EXPR_AS same-module fn as *u8 → LEA.
 # G.7: thin body matches pipeline_asm_emit_as_elf_impl / _c in mega .x.
 # PLATFORM: SHARED shell · LINUX gold + MACOS.
 pipeline_abi_inject_fnptr_as_thin() {
-  pipeline_abi_inject_thin_leaf "$1" "src/runtime_pipeline_abi_fnptr_as_thin.x" "fnptr-as-thin"
+  local o="$1"
+  local thin_x="src/runtime_pipeline_abi_fnptr_as_thin.x"
+  local xlang_bin=""
+  local gen_c thin_o base_o oc
+  if [ ! -s "$o" ] || [ ! -f "$thin_x" ]; then
+    return 0
+  fi
+  if pipeline_abi_o_is_libtool_archive "$o"; then
+    log "pipeline_abi fnptr-as-thin inject skip: $o is libtool archive"
+    return 1
+  fi
+  # PLATFORM: WINDOWS — leftover PE cannot -E tip thins; keep existing hybrid.
+  if pipeline_abi_windows_leftover_pe_cannot_e; then
+    log "pipeline_abi fnptr-as-thin inject skip: Windows leftover PE cannot -E; keep $o"
+    return 0
+  fi
+  if [ -x ./xlang_asm ]; then
+    xlang_bin=./xlang_asm
+  elif [ -x ./xlang ]; then
+    xlang_bin=./xlang
+  elif [ -x ./xlang-c ]; then
+    xlang_bin=./xlang-c
+  else
+    log "pipeline_abi fnptr-as-thin inject skip: no xlang binary"
+    return 0
+  fi
+  gen_c="$(mktemp "${TMPDIR:-/tmp}/pabi_fnas.XXXXXX.c")"
+  thin_o="$(mktemp "${TMPDIR:-/tmp}/pabi_fnas.XXXXXX.o")"
+  base_o="$(mktemp "${TMPDIR:-/tmp}/pabi_fnas_base.XXXXXX.o")"
+  if ! "$xlang_bin" -E "$thin_x" >"$gen_c" 2>/dev/null || [ ! -s "$gen_c" ]; then
+    log "pipeline_abi fnptr-as-thin inject: -E failed"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 1
+  fi
+  # shellcheck disable=SC2086
+  if ! $CC $BASE_CFLAGS -I. -Iinclude -Isrc -c -o "$thin_o" "$gen_c" 2>/dev/null; then
+    log "pipeline_abi fnptr-as-thin inject: cc thin failed"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 1
+  fi
+  cp -f "$o" "$base_o"
+  oc=""
+  if [ -x /opt/homebrew/opt/llvm/bin/llvm-objcopy ]; then
+    oc=/opt/homebrew/opt/llvm/bin/llvm-objcopy
+  elif command -v llvm-objcopy >/dev/null 2>&1; then
+    oc=llvm-objcopy
+  elif command -v objcopy >/dev/null 2>&1; then
+    oc=objcopy
+  fi
+  if [ -n "$oc" ]; then
+    "$oc" --weaken-symbol=pipeline_asm_emit_as_elf_impl "$base_o" 2>/dev/null || true
+    "$oc" --weaken-symbol=_pipeline_asm_emit_as_elf_impl "$base_o" 2>/dev/null || true
+    "$oc" --weaken-symbol=pipeline_asm_emit_as_elf_c "$base_o" 2>/dev/null || true
+    "$oc" --weaken-symbol=_pipeline_asm_emit_as_elf_c "$base_o" 2>/dev/null || true
+  fi
+  if pure_ld_partial_merge "$o" "$thin_o" "$base_o" 2>/dev/null; then
+    log "pipeline_abi fnptr-as-thin inject OK (first-wins over weakened leftover)"
+    rm -f "$gen_c" "$thin_o" "$base_o"
+    return 0
+  fi
+  cp -f "$base_o" "$o"
+  log "pipeline_abi fnptr-as-thin inject: merge failed; restored base"
+  rm -f "$gen_c" "$thin_o" "$base_o"
+  return 1
 }
 
 # Stage10 10.2.1: EXPR_ASM emit_expr_elf_rec override (ko==60 → try_emit).

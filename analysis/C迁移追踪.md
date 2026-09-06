@@ -332,9 +332,9 @@
 
 ### 10.3 fnptr
 
-- 🟡 **10.3.1** fnptr 类型表达 — **slice0–16** ✅（TYPE_FN＝18／parser／Cap coerce／裸名／`as`／签名／host-C／`[N]function`／ARRAY_LIT／INDEX／直 call／Cap cast／**不透明 Cap→TYPE_FN 硬拒**＠`ef9f5c2da`：`allow_opaque`；coerce 拒／`as function` 逃逸）。残：Darwin
+- ✅ **10.3.1** fnptr 类型表达 — **slice0–16 ✅（Ubuntu＋Darwin）**（TYPE_FN＝18／parser／Cap coerce／裸名／`as`／签名／host-C／`[N]function`／ARRAY_LIT／INDEX／直 call／Cap cast／放开同模块普通函数 LEA 取址与 Mach-O `_` 前缀）。探针 `tests/sys/fnptr_suite.x` exit 42。
 - ✅ **10.3.2** fnptr cast + indirect call — **slice0–4 ✅（Ubuntu＋Darwin）**：取址／`f()`／`f(x)`／`(*f)()`／栈参。修复 ARM64 blr 非零参数时加载 fn ptr 覆写 x0 参数寄存器的问题（改用 x9 scratch 保持 AAPCS64 x0 传参）；探针 `fnptr_addr_smoke.x` 双端 exit 42 全绿。残：Darwin Cap 全链  
-- 🟡 **10.3.3** fnptr 作参／返回／字段 — **slice0–3 ✅**＠`75580cabf`；host-C 字段／`[N]function`／ARRAY_LIT／INDEX／Cap cast／opaque 硬门 与 **10.3.1 slice10–16** 同收。残：Darwin
+- ✅ **10.3.3** fnptr 作参／返回／字段 — **slice0–3 ✅（Ubuntu＋Darwin）**＠`75580cabf`；高阶函数作参、返回值、结构体字段 `(h.cb)(x)`、数组索引 `ops[0](x)` 全绿。探针 `tests/sys/fnptr_suite.x` exit 42。
 
 ### 10.4–10.7
 

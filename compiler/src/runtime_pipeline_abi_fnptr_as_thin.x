@@ -373,34 +373,32 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
               fnptr_fi = glue_module_func_index_by_name_c(fnptr_mod, &fnptr_vname[0], fnptr_vlen);
             }
             if (fnptr_fi >= 0) {
+              // Cap-fn-ptr: load effective address of any same-module function into rax/x0.
+              // Both #[no_mangle] and standard functions use source-level symbol names
+              // (prefixed with leading underscore on Mach-O).
               unsafe {
-                fnptr_nm = pipeline_module_func_is_no_mangle_at(fnptr_mod, fnptr_fi);
+                fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
               }
-              if (fnptr_nm != 0) {
-                unsafe {
-                  fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
+              if (fnptr_macho != 0) {
+                fnptr_sym[0] = 95 as u8;
+                fnptr_k = 0;
+                while (fnptr_k < fnptr_vlen) {
+                  fnptr_sym[fnptr_k + 1] = fnptr_vname[fnptr_k];
+                  fnptr_k = fnptr_k + 1;
                 }
-                if (fnptr_macho != 0) {
-                  fnptr_sym[0] = 95 as u8;
-                  fnptr_k = 0;
-                  while (fnptr_k < fnptr_vlen) {
-                    fnptr_sym[fnptr_k + 1] = fnptr_vname[fnptr_k];
-                    fnptr_k = fnptr_k + 1;
-                  }
-                  fnptr_sym_len = fnptr_vlen + 1;
-                } else {
-                  fnptr_k = 0;
-                  while (fnptr_k < fnptr_vlen) {
-                    fnptr_sym[fnptr_k] = fnptr_vname[fnptr_k];
-                    fnptr_k = fnptr_k + 1;
-                  }
-                  fnptr_sym_len = fnptr_vlen;
+                fnptr_sym_len = fnptr_vlen + 1;
+              } else {
+                fnptr_k = 0;
+                while (fnptr_k < fnptr_vlen) {
+                  fnptr_sym[fnptr_k] = fnptr_vname[fnptr_k];
+                  fnptr_k = fnptr_k + 1;
                 }
-                unsafe {
-                  rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &fnptr_sym[0], fnptr_sym_len, ta);
-                }
-                return rc;
+                fnptr_sym_len = fnptr_vlen;
               }
+              unsafe {
+                rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &fnptr_sym[0], fnptr_sym_len, ta);
+              }
+              return rc;
             }
           }
         }
