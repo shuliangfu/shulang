@@ -14,18 +14,23 @@
 #if !defined(_WIN32) && !defined(_WIN64)
 
 #include <errno.h>
-#include <sys/socket.h>
+#include <xlang_net_cap.h> /* Cap residual 9.2.1: socket send/recv via the 9.1.7 net Cap face */
 
 /* thin+rest：thin 函数在 rest 模式下由 .x 提供，前向声明供 xlang_mbedtls_ssl_bind_fd_c 取地址 */
 int xlang_mbedtls_bio_send(void *ctx, const unsigned char *buf, size_t len);
 int xlang_mbedtls_bio_recv(void *ctx, unsigned char *buf, size_t len);
 
-/** mbedTLS BIO send：非阻塞时映射 EAGAIN → WANT_WRITE。 */
+/**
+ * mbedTLS BIO send callback: raw fd write via xlang_net_sendto (flags 0,
+ * no address — identical byte semantics to send()). The Cap face maps a
+ * negative kernel result back to errno, so the EAGAIN/EWOULDBLOCK ->
+ * MBEDTLS_ERR_SSL_WANT_WRITE mapping is preserved unchanged.
+ */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-21 thin+rest：_impl 实现；thin（src/asm/runtime_tls_mbedtls_bio.x）提供 public wrapper */
 int xlang_mbedtls_bio_send_impl(void *ctx, const unsigned char *buf, size_t len) {
     int fd = *(int *)ctx;
-    ssize_t r = send(fd, buf, len, 0);
+    long r = xlang_net_sendto(fd, buf, len, 0, 0, 0);
     if (r < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return MBEDTLS_ERR_SSL_WANT_WRITE;
@@ -41,12 +46,17 @@ int xlang_mbedtls_bio_send(void *ctx, const unsigned char *buf, size_t len) {
 }
 #endif
 
-/** mbedTLS BIO recv：EOF / EAGAIN 映射 mbedTLS 错误码。 */
+/**
+ * mbedTLS BIO recv callback: raw fd read via xlang_net_recvfrom (flags 0,
+ * no address — identical byte semantics to recv()). EOF and EAGAIN map to
+ * the mbedTLS error codes exactly as before; the Cap face restores errno
+ * from the negative kernel result on the raw-syscall platforms.
+ */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-21 thin+rest：_impl 实现；thin（src/asm/runtime_tls_mbedtls_bio.x）提供 public wrapper */
 int xlang_mbedtls_bio_recv_impl(void *ctx, unsigned char *buf, size_t len) {
     int fd = *(int *)ctx;
-    ssize_t r = recv(fd, buf, len, 0);
+    long r = xlang_net_recvfrom(fd, buf, len, 0, 0, 0);
     if (r < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return MBEDTLS_ERR_SSL_WANT_READ;
