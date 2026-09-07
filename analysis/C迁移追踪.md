@@ -270,7 +270,7 @@
 - ✅ **9.2.1** mbedtls BIO send／recv — **Cap net 闭环 ✅（`2a9f3dcae`）**：`runtime_tls_mbedtls_bio.from_x.c` BIO 回调 libc `send`／`recv` → `xlang_net_sendto`／`xlang_net_recvfrom`（9.1.7 权威；flags 0／NULL 地址＝字节语义等价；Cap 面「负返回→errno」映射保留，EAGAIN→WANT_WRITE／WANT_READ 分支原样）；mbedtls 本体仍链系统库（第三方依赖有意保留，Cap 化的是胶层 libc 调用）。验收＝双端 try-heat 重建 rc=0＋nm U 面 send/recv 清零（仅余 errno 脸＋`mbedtls_ssl_set_bio`）＋socketpair 行为 probe 双端 3/3（正常 roundtrip r=5／空非阻塞 EAGAIN→WANT_READ=-26880／写满 EAGAIN→WANT_WRITE）＋双端 L2 5/5＠`2a9f3dcae`＋12 门全 ok
 - ⬜ **9.2.2** zlib deflateInit2_／inflateInit2_（勘正：`std/compress/zlib`＝extern 绑定系统 -lz，依赖有意保留；C 桥＝zlib.h 宏展开等价，属 9.3.2 域；无胶层 libc 残）
 - ✅ **9.2.3** ed25519 ref10（.inc 宏）— 勘正：即 9.3.1 域（宏重命名桥已落地），并条见 9.3.1 ✅
-- ⬜ **9.2.4** libm `math_*_impl`（32 桥）— 勘正：fdlibm 级算法移植（大域，独立立波）
+- 🟡 **9.2.4** libm `math_*_impl`（32 桥）— 勘正：fdlibm 级算法移植（大域，独立立波）；**探针链先行扫清 backend 面（2026-09-08，`c62dc219a`→`f27479a03`）**：Fix A arm64 负浮点常量 4 处十进制误抄／Fix B SHARED f64→f32 demote／**exact-7** floor·ceil·trunc·round·fabs·fmin·fmax 纯 `.x` 位级（freestanding 去 libm）／Fix C fp 比较无序（NaN）语义双端／Fix D 未盖章 f64 实参 movd 根修／Fix E `.x` SysV xmm 重载宽度（f64→movq；5 处 helper 点全条件化）／Fix F fk9 门表 29→60 面（sole-caller UNDEF 根治；`.x`+seed 同 commit）。验收＝**Ubuntu 金标 L4 真冷＠`f27479a03`** 12 探针 12/12＋bstrict 128/129（唯一红 run-slice＝既有卡）；mac 真冷揭出 **arm64 f64 非确定错既有卡**（另刀）。运维＝stale product `.o` 陷阱立卡＋L4 序列 xbuild 化＋Darwin phase1 io 桩（`f635c82dd`）
 - ⬜ **9.2.5** arrow SIMD kernels — 勘正：extern 系统库绑定＋独立大域
 - ⬜ **9.2.6** sqlite3 C API — 勘正：extern 系统库绑定＋独立大域
 
