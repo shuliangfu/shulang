@@ -12,6 +12,9 @@
 //
 // libm functions: floor/ceil/trunc/round/sin/cos/tan/asin/acos/atan/atan2/
 //   sqrt/cbrt/pow/exp/log/fabs/signum/fmin/fmax/erf/erfc/log1p/expm1
+// 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax): full .x bit-level
+//   implementations on the product path (no libm); the seed keeps
+//   same-semantics C cold twins guarded by #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -86,25 +89,190 @@ export function math_special_near(a: f64, b: f64, eps: f64): i32 {
 }
 
 // === libm public API wrappers (#[no_mangle]) ===
+//
+// exact-7 slice (9.2.4): floor/ceil/trunc/round/fabs/fmin/fmax are full .x
+// bit-level implementations (fdlibm semantics, no libm call on the product
+// path). Punning goes through pointer casts (let p: *u64 = &v as *u64), all
+// masks are computed with shifts from a u64 one — no large hex literals.
+// The remaining wrappers (sin/cos/tan/...) still forward to the C seed
+// _impl bridges. The seed keeps same-semantics cold twins of the exact-7
+// under `#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X` (G.4: same commit, same
+// semantics on both paths).
 
+/**
+ * Computes floor(x): the largest integral value <= x, returned as f64.
+ * @param x f64 - input value (any bit pattern: zeros, subnormals, inf, NaN)
+ * @return f64 - floor(x); preserves -0.0 for inputs in (-1, 0]; returns x
+ *               unchanged for integers, +-inf and NaN
+ * Bit-level algorithm: exponent field e = (bits >> 52) & 2047; |x| < 1
+ * collapses to -1.0 / +0.0 (with -0.0 preserved); e >= 1075 means the value
+ * already has no fractional mantissa bits (>= 2^52, inf, NaN); otherwise
+ * clear the low (1075 - e) mantissa bits (truncation toward zero via pure
+ * bit subtraction — no borrow), then step one more unit away from zero
+ * (f64 subtract/add of 1.0 is exact for every non-integral |x| < 2^52).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_floor_c(x: f64): f64 {
-  unsafe { return math_floor_impl(x); }
+  let v: f64 = x;
+  let one: u64 = 1;
+  let p: *u64 = &v as *u64;
+  let bits: u64 = 0;
+  unsafe { bits = *p; }
+  let sign_bit: u64 = one << 63;
+  let e: i32 = ((bits >> 52) & 2047) as i32;
+  // inf / NaN: exponent all ones — nothing to round.
+  if e == 2047 {
+    return v;
+  }
+  // |x| < 1: floor is -1.0 for negative non-zero, +0.0 for positive,
+  // and +-0.0 is returned unchanged (sign of zero preserved).
+  if e < 1023 {
+    if bits == 0 || bits == sign_bit {
+      return v;
+    }
+    if (bits & sign_bit) != 0 {
+      return 0.0 - 1.0;
+    }
+    return 0.0;
+  }
+  // e >= 1075: exponent >= 52 — value is an exact integer (or inf/NaN).
+  if e >= 1075 {
+    return v;
+  }
+  // Clear the fractional mantissa bits: truncation toward zero. The low
+  // (1075 - e) bits are below the integer boundary, so subtraction of the
+  // masked-off part never borrows across the exponent field.
+  let frac_bits: i32 = 1075 - e;
+  let frac_mask: u64 = (one << frac_bits) - 1;
+  if (bits & frac_mask) == 0 {
+    return v;
+  }
+  let t_bits: u64 = bits - (bits & frac_mask);
+  unsafe { *p = t_bits; }
+  // Negative non-integer: floor moves one unit toward -inf.
+  if (bits & sign_bit) != 0 {
+    return v - 1.0;
+  }
+  return v;
 }
 
+/**
+ * Computes ceil(x): the smallest integral value >= x, returned as f64.
+ * @param x f64 - input value (any bit pattern: zeros, subnormals, inf, NaN)
+ * @return f64 - ceil(x); preserves +-0.0 (ceil of (-1, 0) is -0.0); returns
+ *               x unchanged for integers, +-inf and NaN
+ * Bit-level mirror of math_floor_c: truncation by mantissa masking, then
+ * positive non-integers step one unit toward +inf (exact f64 add of 1.0).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_ceil_c(x: f64): f64 {
-  unsafe { return math_ceil_impl(x); }
+  let v: f64 = x;
+  let one: u64 = 1;
+  let p: *u64 = &v as *u64;
+  let bits: u64 = 0;
+  unsafe { bits = *p; }
+  let sign_bit: u64 = one << 63;
+  let e: i32 = ((bits >> 52) & 2047) as i32;
+  // inf / NaN: exponent all ones — nothing to round.
+  if e == 2047 {
+    return v;
+  }
+  // |x| < 1: ceil is +1.0 for positive non-zero, -0.0 for negative
+  // non-zero (sign of zero preserved per IEEE), +-0.0 unchanged.
+  if e < 1023 {
+    if bits == 0 || bits == sign_bit {
+      return v;
+    }
+    if (bits & sign_bit) != 0 {
+      unsafe { *p = bits & sign_bit; }
+      return v;
+    }
+    return 1.0;
+  }
+  // e >= 1075: exponent >= 52 — value is an exact integer (or inf/NaN).
+  if e >= 1075 {
+    return v;
+  }
+  let frac_bits: i32 = 1075 - e;
+  let frac_mask: u64 = (one << frac_bits) - 1;
+  if (bits & frac_mask) == 0 {
+    return v;
+  }
+  let t_bits: u64 = bits - (bits & frac_mask);
+  unsafe { *p = t_bits; }
+  // Positive non-integer: ceil moves one unit toward +inf.
+  if (bits & sign_bit) == 0 {
+    return v + 1.0;
+  }
+  return v;
 }
 
+/**
+ * Computes trunc(x): the integral part of x with the fraction discarded
+ * (round toward zero), returned as f64.
+ * @param x f64 - input value (any bit pattern: zeros, subnormals, inf, NaN)
+ * @return f64 - trunc(x); preserves the sign of zero (trunc(-0.5) = -0.0);
+ *               returns x unchanged for integers, +-inf and NaN
+ * Bit-level: |x| < 1 collapses to a signed zero (sign bit kept); exponent
+ * >= 1075 means no fractional mantissa bits; otherwise mask off the low
+ * (1075 - e) mantissa bits by pure u64 subtraction (no borrow).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_trunc_c(x: f64): f64 {
-  unsafe { return math_trunc_impl(x); }
+  let v: f64 = x;
+  let one: u64 = 1;
+  let p: *u64 = &v as *u64;
+  let bits: u64 = 0;
+  unsafe { bits = *p; }
+  let sign_bit: u64 = one << 63;
+  let e: i32 = ((bits >> 52) & 2047) as i32;
+  // inf / NaN: exponent all ones — nothing to round.
+  if e == 2047 {
+    return v;
+  }
+  // |x| < 1: trunc is a signed zero carrying the sign of x.
+  if e < 1023 {
+    unsafe { *p = bits & sign_bit; }
+    return v;
+  }
+  // e >= 1075: exponent >= 52 — value is an exact integer (or inf/NaN).
+  if e >= 1075 {
+    return v;
+  }
+  let frac_bits: i32 = 1075 - e;
+  let frac_mask: u64 = (one << frac_bits) - 1;
+  if (bits & frac_mask) == 0 {
+    return v;
+  }
+  unsafe { *p = bits - (bits & frac_mask); }
+  return v;
 }
 
+/**
+ * Computes round(x): round to the nearest integral value, with ties resolved
+ * away from zero (C round semantics), returned as f64.
+ * @param x f64 - input value (any bit pattern: zeros, subnormals, inf, NaN)
+ * @return f64 - round(x); returns x unchanged for integers, +-inf and NaN
+ * Algorithm: t = trunc(x) (bit-level via math_trunc_c), then the fraction
+ * f = x - t is exact for every non-integral representable value; f >= 0.5
+ * steps +1.0, f <= -0.5 steps -1.0 (both exact f64 adds on integral values
+ * < 2^52). For inf/NaN the NaN comparisons are false and x flows through.
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_round_c(x: f64): f64 {
-  unsafe { return math_round_impl(x); }
+  let t: f64 = math_trunc_c(x);
+  let frac: f64 = x - t;
+  if frac >= 0.5 {
+    return t + 1.0;
+  }
+  if frac <= 0.0 - 0.5 {
+    return t - 1.0;
+  }
+  return t;
 }
 
 #[no_mangle]
@@ -167,19 +335,79 @@ export function math_log_c(x: f64): f64 {
   unsafe { return math_log_impl(x); }
 }
 
+/**
+ * Computes fabs(x): the absolute value of x, returned as f64.
+ * @param x f64 - input value (any bit pattern: zeros, subnormals, inf, NaN)
+ * @return f64 - |x| with the sign bit cleared; fabs(-0.0) = +0.0; NaN keeps
+ *               its payload with the sign bit cleared
+ * Bit-level: mask off bit 63 via the computed mask (1 << 63) - 1.
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_fabs_c(x: f64): f64 {
-  unsafe { return math_fabs_impl(x); }
+  let v: f64 = x;
+  let one: u64 = 1;
+  let p: *u64 = &v as *u64;
+  unsafe { *p = *p & ((one << 63) - 1); }
+  return v;
 }
 
+/**
+ * Computes fmin(a, b): IEEE 754 minimumNum, returned as f64.
+ * @param a f64 - first operand
+ * @param b f64 - second operand
+ * @return f64 - the smaller of a and b; if either operand is NaN the other
+ *               operand is returned; for equal operands (including the
+ *               fmin(+0,-0) / fmin(-0,+0) pairs) the SECOND operand b is
+ *               returned, matching glibc's x86_64 convention — Ubuntu gold;
+ *               macOS libm instead returns -0 for both zero pairs (2019-style),
+ *               an IEEE-legal platform divergence, tolerated here
+ * NaN is detected with the self-inequality test (a != a), which needs no
+ * bit inspection. PLATFORM: SHARED freestanding (no libm); zero-pair
+ * convention pinned to glibc (LINUX|UBUNTU gold), see note above.
+ */
 #[no_mangle]
 export function math_fmin_c(a: f64, b: f64): f64 {
-  unsafe { return math_fmin_impl(a, b); }
+  // IEEE fmin: a NaN operand yields the other operand.
+  if a != a {
+    return b;
+  }
+  if b != b {
+    return a;
+  }
+  if a < b {
+    return a;
+  }
+  return b;
 }
 
+/**
+ * Computes fmax(a, b): IEEE 754 maximumNum, returned as f64.
+ * @param a f64 - first operand
+ * @param b f64 - second operand
+ * @return f64 - the larger of a and b; if either operand is NaN the other
+ *               operand is returned; for equal operands (including the
+ *               fmax(-0,+0) / fmax(+0,-0) pairs) the SECOND operand b is
+ *               returned, matching glibc's x86_64 convention — Ubuntu gold;
+ *               macOS libm instead returns +0 for both zero pairs (2019-style),
+ *               an IEEE-legal platform divergence, tolerated here
+ * NaN is detected with the self-inequality test (a != a), which needs no
+ * bit inspection. PLATFORM: SHARED freestanding (no libm); zero-pair
+ * convention pinned to glibc (LINUX|UBUNTU gold), see note above.
+ */
 #[no_mangle]
 export function math_fmax_c(a: f64, b: f64): f64 {
-  unsafe { return math_fmax_impl(a, b); }
+  // IEEE fmax: a NaN operand yields the other operand.
+  if a != a {
+    return b;
+  }
+  if b != b {
+    return a;
+  }
+  if a > b {
+    return a;
+  }
+  return b;
 }
 
 #[no_mangle]

@@ -72,13 +72,14 @@ double math_erfc_impl(double x) { return erfc(x); }
 double math_log1p_impl(double x) { return log1p(x); }
 double math_expm1_impl(double x) { return expm1(x); }
 
-/* === libm thin wrappers (only when NOT in R2 from_x mode) === */
+/* === libm thin wrappers (only when NOT in R2 from_x mode) ===
+ * 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax) removed from this
+ * forward block: thin (.x) provides full bit-level implementations on the
+ * product path, and same-semantics C cold twins live in the guarded block
+ * below (G.4: same commit, same semantics on both paths).
+ */
 
 #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
-double math_floor_c(double x) { return math_floor_impl(x); }
-double math_ceil_c(double x) { return math_ceil_impl(x); }
-double math_trunc_c(double x) { return math_trunc_impl(x); }
-double math_round_c(double x) { return math_round_impl(x); }
 double math_sin_c(double x) { return math_sin_impl(x); }
 double math_cos_c(double x) { return math_cos_impl(x); }
 double math_tan_c(double x) { return math_tan_impl(x); }
@@ -91,13 +92,109 @@ double math_cbrt_c(double x) { return math_cbrt_impl(x); }
 double math_pow_c(double base, double exp) { return math_pow_impl(base, exp); }
 double math_exp_c(double x) { return math_exp_impl(x); }
 double math_log_c(double x) { return math_log_impl(x); }
-double math_fabs_c(double x) { return math_fabs_impl(x); }
-double math_fmin_c(double a, double b) { return math_fmin_impl(a, b); }
-double math_fmax_c(double a, double b) { return math_fmax_impl(a, b); }
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
 double math_log1p_c(double x) { return math_log1p_impl(x); }
 double math_expm1_c(double x) { return math_expm1_impl(x); }
+#endif
+
+/* === exact-7 cold twins (9.2.4): same bit-level algorithm as thin .x ===
+ * Thin (.x) provides these on the product path; this C twin keeps the cold
+ * (non from_x) path semantics-identical (G.4: same commit, same semantics).
+ * Punning via union (strict-aliasing safe); masks computed with shifts —
+ * no large hex literals, mirroring the .x source.
+ */
+
+#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
+double math_floor_c(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) {
+    if (v.u == 0 || v.u == sign_bit) return v.d;
+    if (v.u & sign_bit) return -1.0;
+    return 0.0;
+  }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  if ((v.u & frac_mask) == 0) return v.d;
+  v.u -= v.u & frac_mask;
+  if (x < 0.0) return v.d - 1.0;
+  return v.d;
+}
+
+double math_ceil_c(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) {
+    if (v.u == 0 || v.u == sign_bit) return v.d;
+    if (v.u & sign_bit) { v.u = sign_bit; return v.d; }
+    return 1.0;
+  }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  if ((v.u & frac_mask) == 0) return v.d;
+  v.u -= v.u & frac_mask;
+  if (x > 0.0) return v.d + 1.0;
+  return v.d;
+}
+
+double math_trunc_c(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) { v.u = v.u & sign_bit; return v.d; }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  v.u -= v.u & frac_mask;
+  return v.d;
+}
+
+double math_round_c(double x) {
+  double t = math_trunc_c(x);
+  double frac = x - t;
+  if (frac >= 0.5) return t + 1.0;
+  if (frac <= -0.5) return t - 1.0;
+  return t;
+}
+#endif
+
+#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
+double math_fabs_c(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  v.u &= (one << 63) - 1;
+  return v.d;
+}
+
+/* fmin/fmax zero-pair convention pinned to glibc x86_64 (Ubuntu gold):
+ * equal operands (incl. +-0 pairs) return the SECOND operand. macOS libm
+ * returns 2019-style min=-0/max=+0 for both zero pairs — IEEE-legal
+ * platform divergence, tolerated (PLATFORM: SHARED, glibc-pinned).
+ */
+double math_fmin_c(double a, double b) {
+  if (a != a) return b;
+  if (b != b) return a;
+  if (a < b) return a;
+  return b;
+}
+
+double math_fmax_c(double a, double b) {
+  if (a != a) return b;
+  if (b != b) return a;
+  if (a > b) return a;
+  return b;
+}
 #endif
 
 /* === signum: thin provides full .x impl; rest keeps C copy for cold path === */
