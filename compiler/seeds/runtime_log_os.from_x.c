@@ -14,12 +14,20 @@
  * PLATFORM: SHARED
  */
 #include <stdint.h>
-#include <stdio.h> /* FILE* for sink helpers; format via Cap xlang_snprintf */
 #include <stdlib.h>
 #include <string.h>
 #include <xlang_user_link_abi_getenv.h>
 #include <xlang_fmt_cap.h> /* Cap residual 10.7.2: log rotate path → xlang_snprintf */
 #include <xlang_io_cap.h>  /* Cap residual 9.1.8: log write fd → xlang_io_write */
+/* Cap residual 9.5.3 slice3a: smoke helpers verify log files via
+ * xlang_proc_open_ro/xlang_proc_read_file/xlang_proc_close_fd (9.1.12
+ * authorities) — no libc fopen/fread/fclose. */
+#include <xlang_proc_cap.h>
+
+/* rename is linked from the nostdlib stub provider (bootstrap_nostdlib_stubs
+ * defines it on top of the platform syscall face); its usual declarer
+ * <stdio.h> was dropped together with the FILE/fread residual above. */
+extern int rename(const char *oldpath, const char *newpath);
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <io.h>
@@ -378,8 +386,6 @@ int32_t log_multi_sink_smoke_c(const char *path) {
   const uint8_t msg_ok[] = "sink_ok";
   const uint8_t filtered[] = "filtered";
   char buf[512];
-  size_t total;
-  FILE *fp;
 
   if (!path) return 1;
 
@@ -392,11 +398,9 @@ int32_t log_multi_sink_smoke_c(const char *path) {
   }
   log_close_file_sink_c();
 
-  fp = fopen(path, "r");
-  if (!fp) return 5;
-  total = fread(buf, 1, sizeof(buf) - 1, fp);
-  buf[total] = 0;
-  fclose(fp);
+  /* Cap residual 9.5.3 slice3a: read-back verification via xlang_proc_read_file
+   * (whole-file read + NUL + close in one Cap call). */
+  if (xlang_proc_read_file(path, buf, sizeof(buf)) < 0) return 5;
   if (!strstr(buf, "[INFO] sink_ok")) return 6;
   if (!strstr(buf, "xlang: level=info component=std_log_smoke")) return 7;
 
@@ -410,11 +414,7 @@ int32_t log_multi_sink_smoke_c(const char *path) {
   if (log_write_c(2, msg_ok, 7) != 0) return 9;
   log_close_file_sink_c();
 
-  fp = fopen(path, "r");
-  if (!fp) return 10;
-  total = fread(buf, 1, sizeof(buf) - 1, fp);
-  buf[total] = 0;
-  fclose(fp);
+  if (xlang_proc_read_file(path, buf, sizeof(buf)) < 0) return 10;
 #if !defined(_WIN32) && !defined(_WIN64)
   unlink(path);
 #endif
@@ -432,8 +432,6 @@ int32_t log_rotate_async_smoke_c(const char *path) {
   const uint8_t rotate_msg[] = "rotate_line_xx";
   char path1[520];
   char buf[512];
-  size_t total;
-  FILE *fp;
 
   if (!path) return 1;
 
@@ -452,21 +450,14 @@ int32_t log_rotate_async_smoke_c(const char *path) {
   if (log_set_async_enabled_c(1) != 0) return 3;
   if (log_write_c(1, async_msg, 6) != 0) return 4;
 
-  fp = fopen(path, "r");
-  if (fp) {
-    total = fread(buf, 1, sizeof(buf) - 1, fp);
-    buf[total] = 0;
-    fclose(fp);
+  /* Read is best-effort here: missing file just means "nothing flushed yet". */
+  if (xlang_proc_read_file(path, buf, sizeof(buf)) >= 0) {
     if (strstr(buf, "async1")) return 5;
   }
 
   if (log_async_flush_c() != 0) return 6;
 
-  fp = fopen(path, "r");
-  if (!fp) return 7;
-  total = fread(buf, 1, sizeof(buf) - 1, fp);
-  buf[total] = 0;
-  fclose(fp);
+  if (xlang_proc_read_file(path, buf, sizeof(buf)) < 0) return 7;
   if (!strstr(buf, "[INFO] async1")) return 8;
 
   log_set_async_enabled_c(0);
@@ -480,11 +471,7 @@ int32_t log_rotate_async_smoke_c(const char *path) {
   }
   log_close_file_sink_c();
 
-  fp = fopen(path1, "r");
-  if (!fp) return 11;
-  total = fread(buf, 1, sizeof(buf) - 1, fp);
-  buf[total] = 0;
-  fclose(fp);
+  if (xlang_proc_read_file(path1, buf, sizeof(buf)) < 0) return 11;
   if (!strstr(buf, "rotate_line_xx")) return 12;
 
 #if !defined(_WIN32) && !defined(_WIN64)
