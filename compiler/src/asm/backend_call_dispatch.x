@@ -1168,6 +1168,12 @@ export function glue_emit_call_args_elf_sysv_f32_xmm_c(arena: *u8, elf: *u8, er:
     let gp_units_f: i32[96] = [];
     let spill_off_f: i32[96] = [];
     let is_sse_f: i32[96] = [];
+    // 1 = reload this xmm arg with the 64-bit GP-bits move (movq / fmov d);
+    // 0 = 32-bit move (movd / fmov s). f64 values spilled as 8 GP bytes must
+    // come back whole — a blind 32-bit reload truncated the high half
+    // (NaN 0x7ff8000000000000 arrived as 0.0). PLATFORM: LINUX|UBUNTU+MACOS
+    // x86_64 SysV only (this face is ta==0).
+    let is_f64_f: i32[96] = [];
     let gp_cur_f: i32 = 0;
     let xmm_cur_f: i32 = 0;
     i = 0;
@@ -1175,6 +1181,9 @@ export function glue_emit_call_args_elf_sysv_f32_xmm_c(arena: *u8, elf: *u8, er:
       let ar_f: i32 = pipeline_expr_call_arg_ref(arena, er, i);
       let pty_f: i32 = glue_call_param_type_ref_at(arena, er, i);
       is_sse_f[i] = glue_call_param_is_f32_c(arena, pty_f);
+      // Width twin of seed spill_is_f64: formal f64 wins, then the expr
+      // classifier (FLOAT_LIT default / stamp / structural fallback).
+      is_f64_f[i] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_f, pty_f);
       spill_off_f[i] = 0 - 1;
       if (is_sse_f[i] != 0) {
         if (xmm_cur_f < 8) {
@@ -1234,7 +1243,14 @@ export function glue_emit_call_args_elf_sysv_f32_xmm_c(arena: *u8, elf: *u8, er:
             pipeline_asm_emit_set_call_f32_xmm(0);
             return 0 - 1;
           }
-          if (backend_enc_mov_eax_to_xmm_arg_reg_arch(elf, gp_start_f[i], ta) != 0) {
+          // Reload width must match the value width: f64 travels as 64 GP
+          // bits (movq), f32 as 32 (movd). Same split as the seed _impl.
+          if (is_f64_f[i] != 0) {
+            if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf, gp_start_f[i], ta) != 0) {
+              pipeline_asm_emit_set_call_f32_xmm(0);
+              return 0 - 1;
+            }
+          } else if (backend_enc_mov_eax_to_xmm_arg_reg_arch(elf, gp_start_f[i], ta) != 0) {
             pipeline_asm_emit_set_call_f32_xmm(0);
             return 0 - 1;
           }
@@ -2460,6 +2476,9 @@ export function pipeline_asm_emit_call_args_elf_c(
       let gp_units: i32[96] = [];
       let spill_off: i32[96] = [];
       let is_sse: i32[96] = [];
+      // 1 = reload this xmm arg with the 64-bit GP-bits move (movq), 0 = 32-bit
+      // (movd); see the reload split below. PLATFORM: x86_64 SysV branch only.
+      let is_f64: i32[96] = [];
       let gp_cur: i32 = sret_sh;
       let xmm_cur: i32 = 0;
       let i: i32 = 0;
@@ -2467,6 +2486,9 @@ export function pipeline_asm_emit_call_args_elf_c(
         let ar_i: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, i);
         let pty_i: i32 = glue_call_param_type_ref_at(arena, expr_ref, i);
         is_sse[i] = glue_call_param_is_f32_c(arena, pty_i);
+        // Width twin of seed spill_is_f64: formal f64 wins, then the expr
+        // classifier (FLOAT_LIT default / stamp / structural fallback).
+        is_f64[i] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i);
         spill_off[i] = 0 - 1;
         if (is_sse[i] != 0) {
           if (xmm_cur < 8) {
@@ -2521,7 +2543,15 @@ export function pipeline_asm_emit_call_args_elf_c(
         if (spill_off[i] >= 0) {
           if (is_sse[i] != 0) {
             if (backend_enc_load_rbp_to_rax_arch(elf_ctx, spill_off[i], ta) != 0) { return 0 - 1; }
-            if (backend_enc_mov_eax_to_xmm_arg_reg_arch(elf_ctx, gp_start[i], ta) != 0) {
+            // Reload width must match the value width: f64 travels as 64 GP
+            // bits (movq), f32 as 32 (movd) — a blind movd truncated the
+            // high half of f64 args (NaN → 0.0). Twin of the seed _impl
+            // spill_is_f64 split. PLATFORM: x86_64 SysV branch only.
+            if (is_f64[i] != 0) {
+              if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx, gp_start[i], ta) != 0) {
+                return 0 - 1;
+              }
+            } else if (backend_enc_mov_eax_to_xmm_arg_reg_arch(elf_ctx, gp_start[i], ta) != 0) {
               return 0 - 1;
             }
           } else {
