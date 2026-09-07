@@ -106,7 +106,8 @@
  *   + wave39 Cap residual pure：driver_stdio_stdout + driver_asm_fwrite +
  *     driver_x_emit_fwrite_stdout 在 thin.x
  *     （g05 stdout_ptr + fwrite_opaque；Cap OS residual xlang_driver_fwrite_stdout_n
- *       藏 fwrite+fflush 与字节数返回 ABI）；FROM_X 无 pure-dup；
+ *       藏 xlang_io_write(1,…) Cap io 写与字节数返回 ABI；9.7.1 起无 libc FILE star）；
+ *     FROM_X 无 pure-dup；
  *   + wave40 Cap residual pure：driver_stdio_stderr + driver_asm_fflush_stdout +
  *     driver_asm_fopen_wb + driver_asm_write_metric_o 在 thin.x
  *     （g05 stderr_ptr / fflush_stdout / fopen_wb_opaque；write_metric pure orch
@@ -123,7 +124,8 @@
  *       Cap residual xlang_driver_sibling_argv0_get + access_spawn）；
  *   + wave44 Cap residual pure：driver_print_usage_write 在 thin.x
  *     （color policy pure：NO_COLOR / FORCE / isatty；Cap residual
- *       xlang_driver_usage_write_stdout 持巨型 plain/color lit + fwrite+fflush）；
+ *       xlang_driver_usage_write_stdout 持巨型 plain/color lit，
+ *       经 xlang_io_write(1,…) Cap io 写，无 libc FILE star）；
  *     wave29：pure io_net N=224 + WEAK_IO skip 178..181；表数据仍 seed；
  * FROM_X 剔 pure-dup _impl（H↓）。
  */
@@ -1850,13 +1852,15 @@ char **driver_entry_fmt_argv_slot(void) {
  * wave44 pure：hybrid thin owns driver_print_usage_write orch
  *   （NO_COLOR nonnull / CLICOLOR_FORCE|XLANG_FORCE_COLOR truthy / isatty）；
  * cold twin under #ifndef FROM_X；FROM_X 无 pure-dup。
- * always-seed：xlang_driver_usage_write_stdout（巨型 plain/color lit + fwrite+fflush）。
+ * always-seed：xlang_driver_usage_write_stdout（巨型 plain/color lit，
+ *   经 xlang_io_write(1,…) Cap io 写；9.7.1 起无 libc FILE star）。
  * PLATFORM: SHARED orch；lit 表权威唯一在 residual（G.7，禁 .x 长 \\n 串）。
  */
 
-/* Permanent Cap residual: giant usage tables + fwrite(stdout) + fflush.
+/* Permanent Cap residual: giant usage tables, written to fd 1 via
+ * xlang_io_write (Cap io face, 9.7.1 fd-handle convergence).
  * Pure wave44 owns color policy only; .x -E cannot host multi-line \\n lits.
- * Always linked under FROM_X. PLATFORM: SHARED — stdout FILE* write. */
+ * Always linked under FROM_X. PLATFORM: SHARED — Cap io write, raw fd 1. */
 void xlang_driver_usage_write_stdout(int32_t use_color) {
     /* Deno-style help layout: yellow section headers, blue subcommand names,
      * yellow flags, two-column alignment with description column. */

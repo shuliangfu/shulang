@@ -120,7 +120,7 @@
 //   + wave44 Cap residual pure：driver_print_usage_write
 //     (color policy pure: NO_COLOR nonnull / FORCE truthy / isatty;
 //      Cap residual xlang_driver_usage_write_stdout holds giant plain/color lit +
-//      fwrite+fflush; .x cannot host multi-line \\n usage tables).
+//      via xlang_io_write(1, ...) Cap io face; .x cannot host multi-line \\n lits).
 //
 
 /* wave228 G.7: env lookup via public pure thin link_abi_getenv (wave222 → _impl host getenv);
@@ -5423,7 +5423,8 @@ export function driver_parse_into_buf_rc(
 // ---- Wave39 Cap residual pure: stdio stdout + asm fwrite + x_emit fwrite_stdout ----
 // G.7: reuse wave26 g05 harness (xlang_driver_stdout_ptr / xlang_driver_fwrite_opaque).
 // driver_x_emit_fwrite_stdout returns written byte count (not 0/1); residual
-//   xlang_driver_fwrite_stdout_n hides fwrite+fflush and the count ABI.
+//   xlang_driver_fwrite_stdout_n hides the xlang_io_write(1, ...) Cap io write
+//   and the count ABI (name historical; no libc fwrite since 9.7.1).
 // wave40 owns stderr / fflush_stdout / fopen_wb / write_metric_o (see below).
 // wave41 owns mkstemp_fdopen. Still seed OS residual: sibling / usage / exec.
 // PLATFORM: SHARED — Cap residual pure under PREFER hybrid.
@@ -5883,15 +5884,17 @@ export function driver_dispatch_sibling_try_spawn(argc: i32, argv_opaque: *u8): 
 //   CLICOLOR_FORCE / XLANG_FORCE_COLOR truthy → force color even when piped
 //   otherwise → isatty(1)
 // Cap residual always-seed: xlang_driver_usage_write_stdout(use_color)
-//   holds giant plain + ANSI color multi-line tables + fwrite + fflush.
+//   holds giant plain + ANSI color multi-line tables, written to fd 1 via
+//   xlang_io_write (Cap io face; no libc FILE star since 9.7.1).
 // Root cause for residual: .x -E drops / mis-encodes long \\n string lits — not a
 // single-line workaround; table authority stays one seed residual (G.7).
-// PLATFORM: SHARED orch; isatty / fwrite OS surfaces.
+// PLATFORM: SHARED orch; isatty OS surface; lit tables via Cap io write.
 
 /**
- * Cap residual: write usage plain or color table to stdout and fflush.
+ * Cap residual: write usage plain or color table to stdout (fd 1) via
+ * xlang_io_write (Cap io; no libc FILE star / stdout).
  * @param use_color i32 — non-zero selects ANSI color table; zero selects plain
- * PLATFORM: SHARED — giant lit tables + fwrite/fflush. Always-seed (no pure-dup).
+ * PLATFORM: SHARED — giant lit tables + Cap io write. Always-seed (no pure-dup).
  */
 export extern "C" function xlang_driver_usage_write_stdout(use_color: i32): void;
 
@@ -5900,7 +5903,7 @@ export extern "C" function xlang_driver_usage_write_stdout(use_color: i32): void
  * Wave44 pure: color policy orch reuses G.7 driver_env_nonnull / driver_env_flag_truthy
  * (same truthiness as cold getenv checks); isatty(1) for TTY default; Cap residual
  * holds multi-line usage tables + write. Cold twin under #ifndef FROM_X.
- * PLATFORM: SHARED orch; residual owns giant lit + fwrite.
+ * PLATFORM: SHARED orch; residual owns giant lit + Cap io write.
  */
 #[no_mangle]
 export function driver_print_usage_write(): void {
@@ -5918,7 +5921,7 @@ export function driver_print_usage_write(): void {
       use_color = isatty(1);
     }
   }
-  // Cap residual: plain/color tables + fwrite(stdout) + fflush (giant lit authority).
+  // Cap residual: plain/color tables via xlang_io_write(1, ...) (giant lit authority).
   unsafe {
     xlang_driver_usage_write_stdout(use_color);
   }

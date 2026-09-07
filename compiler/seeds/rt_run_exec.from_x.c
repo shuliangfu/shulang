@@ -42,7 +42,9 @@ extern void diag_report_with_code(const char *file, int line, int col, const cha
  * (encoded fd 1), no libc FILE star / stdout. */
 extern void xlang_target_cpu_print(uint8_t *out, uint32_t features);
 extern uint8_t *driver_stdio_stdout(void);
-extern int xlang_waitpid_retry(pid_t pid, int *status_out);
+/* 9.7.5 G.7: single OS-spawn authority lives in driver_abi (wave42 body +
+ * xlang_driver_exec_spawn_wait); this TU only delegates. */
+extern int driver_exec_compiled_body(int argc, uint8_t *argv_opaque);
 extern const char *xlang_repo_root_from_argv0(const char *argv0);
 /* wave226 G.7: bash test shell via public pure thin link_abi_system (wave224 → _impl host system). */
 extern int link_abi_system(const char *cmd);
@@ -148,53 +150,19 @@ int driver_exec_path_is_non_exe(const char *exe) {
 }
 
 /**
- * cmd_run：编译成功后 exec 产物。spawn/fork 为 🔒 OS 路径，留在本 seed（冷启动）。
+ * cmd_run entry: exec the product binary after a successful compile.
+ * 9.7.5 G.7: thin delegation only — null/argc guards (isomorphic with
+ * src/runtime/rt_run_exec.x driver_exec_compiled) then wave42
+ * driver_exec_compiled_body (driver_abi thin: scan + non-exe gate +
+ * xlang_driver_exec_spawn_wait OS residual). The former inline
+ * fork/execv/_spawnvp body here was a second OS-spawn authority and is
+ * removed; runtime_diag_errno_path stays for the test path above.
+ * PLATFORM: SHARED orch; OS boundary lives only in the driver_abi residual.
  */
 int driver_exec_compiled(int argc, uint8_t *argv_opaque) {
-  char **argv = (char **)argv_opaque;
-  const char *exe;
-
-  if (!argv || argc < 1)
+  if (!argv_opaque || argc < 1)
     return 1;
-  exe = driver_exec_scan_out_path(argc, argv);
-  if (driver_exec_path_is_non_exe(exe))
-    return 0;
-  {
-#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
-    char *av[2];
-    intptr_t rc;
-    av[0] = (char *)exe;
-    av[1] = NULL;
-    rc = _spawnvp(_P_WAIT, exe, (const char *const *)av);
-    if (rc == -1) {
-      runtime_diag_errno_path(NULL, "process error", "spawnvp (driver_exec_compiled)", exe);
-      return 1;
-    }
-    return (int)rc;
-#else
-    pid_t pid = fork();
-    if (pid < 0) {
-      runtime_diag_errno_path(NULL, "process error", "fork (driver_exec_compiled)", exe);
-      return 1;
-    }
-    if (pid == 0) {
-      char *av[2];
-      av[0] = (char *)exe;
-      av[1] = NULL;
-      execv(exe, av);
-      runtime_diag_errno_path(NULL, "process error", "execv (driver_exec_compiled)", exe);
-      _exit(127);
-    }
-    {
-      int st = 0;
-      if (xlang_waitpid_retry(pid, &st) != 0)
-        return 1;
-      if (WIFEXITED(st))
-        return WEXITSTATUS(st);
-      return 1;
-    }
-#endif
-  }
+  return driver_exec_compiled_body(argc, argv_opaque);
 }
 
 /**

@@ -107,11 +107,12 @@ char **driver_entry_fmt_argv_slot(void);
  * Cap residual：rt_run_exec R2 usage 写 stdout。
  * wave44 pure under PREFER: color policy orch（NO_COLOR / CLICOLOR_FORCE /
  *   XLANG_FORCE_COLOR / isatty）；cold twin under #ifndef XLANG_L2_RDABI_THIN_FROM_X。
- * Always-seed residual: xlang_driver_usage_write_stdout（巨型 plain/color lit +
- *   fwrite+fflush）。.x 禁含 \\n 长字串字面量（-E 编码/丢体）→ 表留 residual。
+ * Always-seed residual: xlang_driver_usage_write_stdout（巨型 plain/color lit，
+ *   经 xlang_io_write(1,…) Cap io 写）。.x 禁含 \\n 长字串字面量（-E 编码/丢体）
+ *   → 表留 residual。
  */
 void driver_print_usage_write(void);
-/** Permanent Cap residual: giant usage tables + fwrite(stdout) + fflush. Always-seed. */
+/** Permanent Cap residual: giant usage tables via xlang_io_write(1, …) Cap io. Always-seed. */
 void xlang_driver_usage_write_stdout(int32_t use_color);
 
 /**
@@ -201,7 +202,8 @@ uint8_t *driver_x_emit_lib_root_at(int32_t i);
 void driver_x_emit_stdout_set_unbuffered(void);
 /**
  * wave39 pure: hybrid thin owns null/len guards; Cap OS residual
- * xlang_driver_fwrite_stdout_n returns written count after fwrite+fflush.
+ * xlang_driver_fwrite_stdout_n returns written count via xlang_io_write(1, …)
+ * (Cap io face; name is historical, body has no libc fwrite since 9.7.1).
  * cold twin under #ifndef FROM_X.
  */
 int32_t driver_x_emit_fwrite_stdout(uint8_t *data, int32_t len);
