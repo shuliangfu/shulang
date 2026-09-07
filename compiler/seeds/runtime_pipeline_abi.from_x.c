@@ -34758,6 +34758,69 @@ int32_t glue_expr_tree_has_call_index_c(void *arena, int32_t expr_ref) {
     }
     return 0;
   }
+  return 0;
+}
+
+/* 9.6.0: true when expr tree reads a VAR that does not resolve to a block
+ * local (module global / extern). EXPR_VAR = 3; resolution through the
+ * wave188 authority glue_asm_local_var_stack_off_scoped (param homes and
+ * enclosing-scope locals count as local). Callers must only consult this
+ * when glue_expr_tree_has_call_index_c already returned 0 (INDEX/CALL/
+ * METHOD_CALL nodes are claimed there first). A let whose init reads a
+ * global must stay in pass 1 source order — pass 0 would read the global
+ * before prior statements mutate it (probe pd: non-main
+ * `g=g+1; g=g+1; let c=g; return c` returned the pre-statement value).
+ * Previously this only worked in the hoist target because hoisting turned
+ * globals into block locals. G.7 twin of runtime_pipeline_abi.x walker.
+ * PLATFORM: SHARED freestanding emit. */
+int32_t glue_expr_tree_has_nonlocal_var_c(void *arena, void *ctx, int32_t expr_ref) {
+  int32_t ko, i, n, left_ref, right_ref, op_ref;
+  if (!arena || expr_ref <= 0)
+    return 0;
+  ko = pipeline_expr_kind_ord_at(arena, expr_ref);
+  if (ko == 3) {
+    if (glue_asm_local_var_stack_off_scoped(arena, ctx, expr_ref) < 0)
+      return 1;
+    return 0;
+  }
+  if (ko >= 4 && ko <= 21) {
+    left_ref = pipeline_expr_binop_left_ref_at(arena, expr_ref);
+    right_ref = pipeline_expr_binop_right_ref_at(arena, expr_ref);
+    if (glue_expr_tree_has_nonlocal_var_c(arena, ctx, left_ref) != 0)
+      return 1;
+    return glue_expr_tree_has_nonlocal_var_c(arena, ctx, right_ref);
+  }
+  if (ko == 22 || ko == 23 || ko == 24 || ko == 41) {
+    op_ref = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
+    return glue_expr_tree_has_nonlocal_var_c(arena, ctx, op_ref);
+  }
+  op_ref = pipeline_expr_as_operand_ref_at(arena, expr_ref);
+  if (op_ref > 0)
+    return glue_expr_tree_has_nonlocal_var_c(arena, ctx, op_ref);
+  if (ko == 44) {
+    left_ref = pipeline_expr_field_access_base_ref(arena, expr_ref);
+    return glue_expr_tree_has_nonlocal_var_c(arena, ctx, left_ref);
+  }
+  if (ko == 46) {
+    n = pipeline_expr_array_lit_num_elems_at(arena, expr_ref);
+    for (i = 0; i < n; i++) {
+      left_ref = pipeline_expr_array_lit_elem_ref(arena, expr_ref, i);
+      if (glue_expr_tree_has_nonlocal_var_c(arena, ctx, left_ref) != 0)
+        return 1;
+    }
+    return 0;
+  }
+  if (ko == 45) {
+    n = pipeline_expr_struct_lit_num_fields(arena, expr_ref);
+    for (i = 0; i < n; i++) {
+      left_ref = pipeline_expr_struct_lit_init_ref(arena, expr_ref, i);
+      if (glue_expr_tree_has_nonlocal_var_c(arena, ctx, left_ref) != 0)
+        return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
   if (ko == 45) {
     n = pipeline_expr_struct_lit_num_fields(arena, expr_ref);
     for (i = 0; i < n; i++) {
@@ -34782,6 +34845,13 @@ void glue_block_compute_pass1_deferred_lets(void *arena, void *ctx, int32_t bloc
     ko = init_ref > 0 ? pipeline_expr_kind_ord_at(arena, init_ref) : 0;
     has_call = init_ref > 0 ? glue_expr_tree_has_call_index_c(arena, init_ref) : 0;
     deferred[li] = (uint8_t)(has_call != 0 || ko == 47 || ko == 48 || ko == 49 ? 1 : 0);
+    /* 9.6.0: init reading a non-local VAR (module global) must stay in
+     * pass 1 source order — pass 0 would read the global before prior
+     * statements mutate it. Over-deferral is harmless; under-deferral is
+     * the pd miscompile. G.7 twin of runtime_pipeline_abi.x guard. */
+    if (!deferred[li] && init_ref > 0 &&
+        glue_expr_tree_has_nonlocal_var_c(arena, ctx, init_ref) != 0)
+      deferred[li] = 1;
   }
   glue_block_defer_lets_transitive(arena, ctx, block_ref, slot_base, nconst, nlet, deferred);
   nso = ast_ast_block_num_stmt_order(arena, block_ref);
@@ -46365,7 +46435,11 @@ int32_t pipeline_module_top_level_name_is_const(void *module, uint8_t *vname, in
  * Cold twin of pure pipeline_module_hoist_top_level_lets_into_main.
  * Stage 12.0.5: skip *all* TYPE_ARRAY (10) module lets — they are COMMON
  * via modlet prepare (const + mutable). dest-SLICE ARRAY_LIT const still
- * hoists (prepare requires TYPE_ARRAY). prepend count = actually appended.
+ * hoists (prepare requires TYPE_ARRAY). 9.6.0: mutable scalar LIT/BOOL
+ * lets also stay un-hoisted — prepare registers them as 8-byte COMMON
+ * (init_kind 0/2, is_const==0) and hoisting stacked a stale main frame
+ * slot beside the COMMON home (slot-first consumers read the slot, RMW
+ * reads COMMON). prepend count = actually appended.
  * Product pure owns full path when strong; cold must match so WEAK hybrid /
  * freestanding stay aligned.
  * PLATFORM: SHARED freestanding top_level hoist.
@@ -46431,6 +46505,17 @@ void pipeline_module_hoist_top_level_lets_into_main(void *module, void *arena) {
         if (pipeline_module_top_level_let_is_const(module, tl) == 0)
           continue;
       }
+      /* 9.6.0: mutable scalar LIT/BOOL init is modlet COMMON-owned (prepare
+       * registers init_kind 0/2 with is_const==0). Hoisting stacked a stale
+       * main frame slot beside the COMMON home and slot-first consumers
+       * (compare fast path) read the slot while RMW reads COMMON. ik is only
+       * sampled when init_ref is in range, so re-check validity: an
+       * un-initialized let has no COMMON cell and must still hoist. Const
+       * scalars keep hoisting (prepare skips those). Twin of the
+       * runtime_pipeline_abi.x hoist guard. PLATFORM: SHARED. */
+      if ((ik == 0 || ik == 2) && init_ref > 0 && init_ref <= nexprs &&
+          pipeline_module_top_level_let_is_const(module, tl) == 0)
+        continue;
     }
     for (k = 0; k < name_len; k++)
       name_buf[k] = pipeline_module_top_level_let_name_byte_at(module, tl, k);
