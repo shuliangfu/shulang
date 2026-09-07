@@ -667,6 +667,12 @@ export extern "C" function ast_pipeline_block_let_init_ref(arena: *u8, block_ref
 export extern "C" function pipeline_asm_abi_f32_xmm_enabled_c(): i32;
 export extern "C" function backend_enc_mov_arg_reg_to_rax_arch(elf_ctx: *u8, k: i32, ta: i32): i32;
 export extern "C" function backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx: *u8, k: i32, ta: i32): i32;
+/* AAPCS64 f64 return face: fmov dK, x0 — moves the internal rax-bits value
+ * into the FP return register at callee exit (and mirrors at the x0 harvest
+ * site as fmov x0, d0 with k=0). Defined in the backend_enc_dispatch object.
+ * PLATFORM: MACOS|ARM64 AAPCS64 (ta==1); declared for the return tail in
+ * pipeline_asm_emit_return_elf_impl. */
+export extern "C" function backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx: *u8, k: i32, ta: i32): i32;
 export extern "C" function backend_enc_mov_xmm_arg_reg_to_eax_arch(elf_ctx: *u8, k: i32, ta: i32): i32;
 export extern "C" function backend_enc_load_rbp_pos_to_rax_arch(elf_ctx: *u8, off_pos: i32, ta: i32): i32;
 export extern "C" function backend_enc_store_x_reg_to_rbp_arch(elf_ctx: *u8, reg: i32, offset: i32, ta: i32): i32;
