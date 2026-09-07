@@ -28218,13 +28218,13 @@ export function pipeline_asm_emit_neg_elf_c(arena: *u8, elf_ctx: *u8, expr_ref: 
       if (ta == 1) {
         // movz w1,#0x8000,lsl#16 ; eor w0,w0,w1
         unsafe {
-          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 1388314625); // 0x52b00001
+          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 1387266049); // 0x52b00001
         }
         if (rc != 0) {
           return 0 - 1;
         }
         unsafe {
-          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 1241587712); // 0x4a010000
+          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 1241579520); // 0x4a010000
         }
         return rc;
       }
@@ -28245,13 +28245,13 @@ export function pipeline_asm_emit_neg_elf_c(arena: *u8, elf_ctx: *u8, expr_ref: 
       if (ta == 1) {
         // movz x1,#0x8000,lsl#48 ; eor x0,x0,x1
         unsafe {
-          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 0 - 755023871); // 0xd2f00001 as i32
+          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 0 - 756023295); // 0xd2f00001 as i32
         }
         if (rc != 0) {
           return 0 - 1;
         }
         unsafe {
-          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 0 - 905969664); // 0xca010000 as i32
+          rc = arch_arm64_enc_enc_u32_le(elf_ctx, 0 - 905904128); // 0xca010000 as i32
         }
         return rc;
       }
