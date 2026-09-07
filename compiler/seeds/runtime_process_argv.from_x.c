@@ -12,9 +12,9 @@
 #include <xlang_weak.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xlang_proc_cap.h> /* Cap residual 9.5.5: /proc read face (bounded, seek-free) */
 #if defined(__APPLE__)
 #include <crt_externs.h>
 #endif
@@ -28,8 +28,8 @@ char **xlang_process_argv = NULL;
 void xlang_process_argv_bind_from_crt(void);
 
 /**
- * 从 CRT 绑定 argc/argv（asm 用户 main 无参、gcc -pie 链入时）。
- * 若已由 codegen 写入则 no-op。
+ * Bind argc/argv from the C runtime (asm user main without parameters, or
+ * gcc -pie linked images). No-op when codegen already wrote both globals.
  */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 void xlang_process_argv_bind_from_crt_impl(void) {
@@ -40,43 +40,26 @@ void xlang_process_argv_bind_from_crt_impl(void) {
   xlang_process_argv = *_NSGetArgv();
 #elif defined(__linux__)
   {
-    /* /proc/self/cmdline 常不支持 SEEK_END/ftell（得 0）→ 旧逻辑 silent no-op → argc 永 0
-     * （bstrict31 run-process args）。分块读入，不依赖 seek。 */
-    FILE *f;
-    char *cmdline = NULL;
-    size_t cap = 0;
-    size_t n = 0;
+    /* /proc/self/cmdline does not support SEEK_END/ftell (reports 0), so the
+     * former fopen/fread loop had to read in chunks; the old silent no-op on
+     * ftell==0 left argc permanently 0 (bstrict31 run-process args).
+     * Cap residual 9.5.5: the chunked read now comes from the 9.1.12 Cap
+     * authority xlang_proc_read_file_bounded (seek-free, 1 MiB bound); -2
+     * (cmdline larger than the bound) aborts loudly-ish exactly like the old
+     * hand-rolled over-1MiB bailout — argc/argv stay unbound. */
+    char *cmdline;
+    long n;
     int argc;
     char **argv;
     char *p;
-    char chunk[4096];
-    size_t nr;
-    f = fopen("/proc/self/cmdline", "rb");
-    if (!f)
+    cmdline = (char *)malloc(1024 * 1024);
+    if (!cmdline)
       return;
-    while ((nr = fread(chunk, 1, sizeof chunk, f)) > 0) {
-      char *grown;
-      if (n + nr + 1 > 1024 * 1024) {
-        free(cmdline);
-        fclose(f);
-        return;
-      }
-      grown = (char *)realloc(cmdline, n + nr + 1);
-      if (!grown) {
-        free(cmdline);
-        fclose(f);
-        return;
-      }
-      cmdline = grown;
-      memcpy(cmdline + n, chunk, nr);
-      n += nr;
-    }
-    fclose(f);
-    if (!cmdline || n == 0) {
+    n = xlang_proc_read_file_bounded("/proc/self/cmdline", cmdline, 1024 * 1024);
+    if (n <= 0) {
       free(cmdline);
       return;
     }
-    cmdline[n] = '\0';
     argc = 0;
     for (p = cmdline; p < cmdline + n; p++) {
       if (*p != '\0')
@@ -105,8 +88,7 @@ void xlang_process_argv_bind_from_crt_impl(void) {
       }
       xlang_process_argc = argc;
       xlang_process_argv = argv;
-      /* cmdline 缓冲由 argv[] 指向，勿 free */
-      (void)cap;
+      /* cmdline buffer is kept alive: argv[] points into it, never freed. */
     }
   }
 #endif

@@ -18,6 +18,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <xlang_fmt_cap.h> /* Cap residual 10.7.2: build_runtime cmd format → Cap snprintf */
+#include <xlang_io_cap.h>  /* Cap residual 9.5.5: write-back face (open_write/io_write) */
+#include <xlang_proc_cap.h> /* Cap residual 9.5.5: bounded whole-file read face */
 /* G.7: Cap after stdio for product cold-start build_runtime TU. */
 #undef snprintf
 #define snprintf xlang_snprintf
@@ -66,19 +68,23 @@ void build_runtime_warn_impl(const char *msg) {
  */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 int build_patch_pipeline_gen_c_impl(void) {
-  FILE *f = fopen("pipeline_gen.c", "rb");
-  if (!f) return -1;
-  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
-  long sz = ftell(f);
-  if (sz <= 0 || sz >= (long)PIPELINE_GEN_PATCH_BUF_SIZE) { fclose(f); return -1; }
-  rewind(f);
-  size_t cap = (size_t)sz + 4096;
-  if (cap > PIPELINE_GEN_PATCH_BUF_SIZE) cap = PIPELINE_GEN_PATCH_BUF_SIZE;
-  char *buf = (char *)malloc(cap);
-  if (!buf) { fclose(f); return -1; }
-  if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) { free(buf); fclose(f); return -1; }
+  /* Cap residual 9.5.5: former fopen/fseek/ftell/fread read + fopen("wb")/
+   * fwrite write-back replaced by the Cap authorities — bounded whole-file
+   * read (xlang_proc_read_file_bounded, 9.1.12 face) and
+   * xlang_io_open_write/xlang_io_write (9.5.3/9.1.8 faces). Contracts kept:
+   * unreadable (<=0) and over-sized (-2, file >= PIPELINE_GEN_PATCH_BUF_SIZE)
+   * both fail loudly exactly like the old fseek/ftell gate; a file of exactly
+   * cap-1 bytes still succeeds via the EOF probe. */
+  char *buf = (char *)malloc(PIPELINE_GEN_PATCH_BUF_SIZE);
+  long sz;
+  size_t cap;
+  size_t out_len;
+  int fd;
+  if (!buf) return -1;
+  cap = PIPELINE_GEN_PATCH_BUF_SIZE;
+  sz = xlang_proc_read_file_bounded("pipeline_gen.c", buf, PIPELINE_GEN_PATCH_BUF_SIZE);
+  if (sz <= 0) { free(buf); return -1; }
   buf[sz] = '\0';
-  fclose(f);
 
   /* 去重 struct xlang_slice_uint8_t：只保留第一个出现，删除后续重复 */
   {
@@ -133,10 +139,11 @@ int build_patch_pipeline_gen_c_impl(void) {
   }
 
   /* 瘦 pipeline_gen.c：外部符号由 parser_x.o / typeck_x.o / codegen_x.o 链接提供 */
-  f = fopen("pipeline_gen.c", "wb");
-  if (!f) { free(buf); return -1; }
-  if (fwrite(buf, 1, strlen(buf), f) != strlen(buf)) { fclose(f); free(buf); return -1; }
-  fclose(f);
+  fd = xlang_io_open_write("pipeline_gen.c");
+  if (fd < 0) { free(buf); return -1; }
+  out_len = strlen(buf);
+  if (xlang_io_write(fd, buf, out_len) != (long)out_len) { (void)xlang_proc_close_fd(fd); free(buf); return -1; }
+  (void)xlang_proc_close_fd(fd);
   free(buf);
   return 0;
 }
@@ -230,22 +237,22 @@ int build_exec_cmd(char *cmd_buf) {
  */
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 int build_patch_driver_gen_c_impl(void) {
-  FILE *f = fopen("driver_gen.c", "rb");
-  if (!f) return -1;
-  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
-  long sz = ftell(f);
-  if (sz <= 0 || sz >= (long)PIPELINE_GEN_PATCH_BUF_SIZE) { fclose(f); return -1; }
-  rewind(f);
-  char *buf = (char *)malloc((size_t)sz + 1);
-  if (!buf) { fclose(f); return -1; }
-  if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) { free(buf); fclose(f); return -1; }
+  /* Cap residual 9.5.5: same bounded-read + Cap write-back contract as
+   * build_patch_pipeline_gen_c_impl (see there for the loud-failure gates). */
+  char *buf = (char *)malloc(PIPELINE_GEN_PATCH_BUF_SIZE);
+  long sz;
+  size_t out_len;
+  int fd;
+  if (!buf) return -1;
+  sz = xlang_proc_read_file_bounded("driver_gen.c", buf, PIPELINE_GEN_PATCH_BUF_SIZE);
+  if (sz <= 0) { free(buf); return -1; }
   buf[sz] = '\0';
-  fclose(f);
   /* slice . -> ->、preprocess_x_buf 签名、run_compiler_c 包装均已从源头产出（codegen 数组形参为 *，runtime.c 在 XLANG_USE_X_DRIVER 下已定义 run_compiler_c），不再补丁 */
-  f = fopen("driver_gen.c", "wb");
-  if (!f) { free(buf); return -1; }
-  if (fwrite(buf, 1, strlen(buf), f) != strlen(buf)) { fclose(f); free(buf); return -1; }
-  fclose(f);
+  fd = xlang_io_open_write("driver_gen.c");
+  if (fd < 0) { free(buf); return -1; }
+  out_len = strlen(buf);
+  if (xlang_io_write(fd, buf, out_len) != (long)out_len) { (void)xlang_proc_close_fd(fd); free(buf); return -1; }
+  (void)xlang_proc_close_fd(fd);
   free(buf);
   return 0;
 }

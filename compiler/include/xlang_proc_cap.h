@@ -215,6 +215,54 @@ static inline long xlang_proc_read_file(const char *path, char *buf, size_t cap)
 }
 
 /**
+ * Bounded whole-file read with loud truncation signal.
+ * Like xlang_proc_read_file (chunked, seek-free, NUL-terminated) but a file
+ * larger than cap-1 bytes is rejected instead of silently truncated: after
+ * the buffer fills to cap-1, one probe byte is read — if it succeeds the
+ * file does not fit and -2 is returned so callers fail loudly (generated-code
+ * patchers, argv scanners) rather than consume partial content.
+ * @param path File path
+ * @param buf Output buffer
+ * @param cap Capacity of buf in bytes
+ * @return bytes read (excluding NUL), -1 on open/read error, -2 if truncated
+ * PLATFORM: SHARED
+ */
+static inline long xlang_proc_read_file_bounded(const char *path, char *buf, size_t cap) {
+  int fd;
+  long n;
+  long off;
+  char probe;
+  if (!path || !buf || cap < 2)
+    return -1;
+  fd = xlang_proc_open_ro(path);
+  if (fd < 0)
+    return -1;
+  off = 0;
+  while ((size_t)off + 1 < cap) {
+    n = xlang_io_read(fd, buf + off, cap - 1 - (size_t)off);
+    if (n < 0) {
+      (void)xlang_proc_close_fd(fd);
+      return -1;
+    }
+    if (n == 0)
+      break;
+    off += n;
+  }
+  /* Truncation probe: buffer filled to cap-1 — one more readable byte means
+   * the file exceeds the bound; report -2 and do not hand out partial data. */
+  if ((size_t)off + 1 >= cap) {
+    n = xlang_io_read(fd, &probe, 1);
+    if (n > 0) {
+      (void)xlang_proc_close_fd(fd);
+      return -2;
+    }
+  }
+  (void)xlang_proc_close_fd(fd);
+  buf[off] = '\0';
+  return off;
+}
+
+/**
  * Split in-place buffer at first '\n'; returns next line or NULL.
  * @param line Pointer to start of current line
  * @return Pointer to next line or NULL if end of string
