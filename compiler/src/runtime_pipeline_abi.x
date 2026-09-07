@@ -33230,7 +33230,7 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       unsafe {
         et2 = pipeline_type_elem_ref_at(a, type_ref2);
         rc = pipe_modlet_bake_array_lit_elems_to_data(
-          a, elf_ctx, init_ref2, et2, data_off, 0);
+          a, elf_ctx, init_ref2, et2, data_off, 0, csz2);
         pipeline_elf_ctx_set_shndx_override(elf_ctx, 0);
       }
       if (rc != 0) {
@@ -33255,22 +33255,29 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
 }
 
 /**
- * Bake ARRAY_LIT LIT elems into an already-reserved .data cell.
+ * Bake ARRAY_LIT constant elems into an already-reserved .data cell.
  * Twin of pipe_modlet_seed_array_lit_elems_to_rbx but writes object-file
  * bytes (library TUs never enter hoist-target seed). One nested ARRAY_LIT
  * level for `[K][N]T` rows; deeper nest is a later leaf. Empty lit is a
- * no-op (zeros already reserved).
- * @param arena *u8 — ASTArena
- * @param elf_ctx *u8 — ElfCodegenCtx
- * @param init_ref i32 — ARRAY_LIT expr
- * @param elem_ty i32 — dest elem type_ref (scalar or TYPE_ARRAY row)
- * @param data_base i32 — absolute offset of the cell in g_pipe_elf_data_buf
- * @param base_off i32 — byte offset within the cell
- * @return i32 — 0 ok; -1 poke fail
+ * no-op (zeros already reserved). Elem contract: EXPR_LIT and
+ * EXPR_NEG-over-LIT fold via pipe_modlet_array_lit_elem_const_val;
+ * anything else (FLOAT_LIT, binop, VAR, ...) loud-fails — the historic
+ * silent drop baked zeros for `[-1, 2]`. STRING_LIT here means prepare's
+ * has-string predicate missed the cell (pointers are not bytes): loud-fail.
+ * @param arena *u8 - ASTArena
+ * @param elf_ctx *u8 - ElfCodegenCtx
+ * @param init_ref i32 - ARRAY_LIT expr
+ * @param elem_ty i32 - dest elem type_ref (scalar or TYPE_ARRAY row)
+ * @param data_base i32 - absolute offset of the cell in g_pipe_elf_data_buf
+ * @param base_off i32 - byte offset within the cell
+ * @param span_bytes i32 - bytes this literal may occupy (cell size at top
+ *     call, row size for nested rows); literal exceeding span = loud fail
+ * @return i32 - 0 ok; -1 poke fail / non-constant elem / span overflow
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64 · ELF .data.
  */
 function pipe_modlet_bake_array_lit_elems_to_data(
-  arena: *u8, elf_ctx: *u8, init_ref: i32, elem_ty: i32, data_base: i32, base_off: i32
+  arena: *u8, elf_ctx: *u8, init_ref: i32, elem_ty: i32, data_base: i32, base_off: i32,
+  span_bytes: i32
 ): i32 {
   let ne: i32 = 0;
   let ei: i32 = 0;
@@ -33300,8 +33307,14 @@ function pipe_modlet_bake_array_lit_elems_to_data(
     if (row_sz <= 0) {
       row_sz = glue_array_lit_force_esz_from_elem_type_c(arena, elem_ty);
     }
-    if (ne <= 0 || ne > 1024) {
+    // ne<=0: empty row lit is a no-op (zeros already reserved). Span guard:
+    // row count must fit this literal's row span — a mismatch (typeck gap
+    // or absurd literal) loud-fails instead of silently leaving rows zero.
+    if (ne <= 0) {
       return 0;
+    }
+    if (row_sz > 0 && ne > span_bytes / row_sz) {
+      return 0 - 1;
     }
     ei = 0;
     while (ei < ne) {
@@ -33314,7 +33327,7 @@ function pipe_modlet_bake_array_lit_elems_to_data(
         }
         if (ek == 46) {
           rc = pipe_modlet_bake_array_lit_elems_to_data(
-            arena, elf_ctx, eref, inner_et, data_base, base_off + ei * row_sz);
+            arena, elf_ctx, eref, inner_et, data_base, base_off + ei * row_sz, row_sz);
           if (rc != 0) {
             return rc;
           }
@@ -33331,8 +33344,13 @@ function pipe_modlet_bake_array_lit_elems_to_data(
   unsafe {
     ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
   }
-  if (ne <= 0 || ne > 1024) {
+  // ne<=0: empty lit is a no-op (zeros already reserved). Span guard:
+  // elem count must fit this literal's elem span (no silent truncation).
+  if (ne <= 0) {
     return 0;
+  }
+  if (esz > 0 && ne > span_bytes / esz) {
+    return 0 - 1;
   }
   ei = 0;
   while (ei < ne) {
@@ -33343,26 +33361,29 @@ function pipe_modlet_bake_array_lit_elems_to_data(
       unsafe {
         ek = pipeline_expr_kind_ord_at(arena, eref);
       }
-      if (ek == 0) {
-        let cur: i32 = 0;
+      // A STRING_LIT elem here means prepare's has-string predicate missed
+      // this cell: .data bytes cannot express a pointer. Loud-fail.
+      if (ek == 59) {
+        return 0 - 1;
+      }
+      // LIT / EXPR_NEG-over-LIT: fold, then peel two's-complement bytes
+      // little-endian via u32 (unsigned division). The historic signed
+      // `cur / 256` peel corrupted bytes 1..3 of negative elems.
+      if (pipe_modlet_array_lit_elem_const_val(arena, eref, &ev) == 0) {
+        return 0 - 1;
+      }
+      let uw: u32 = ev as u32;
+      bi = 0;
+      while (bi < esz) {
         unsafe {
-          ev = pipeline_expr_int_val_at(arena, eref);
+          rc = pipeline_elf_ctx_data_poke_u8(
+            elf_ctx, data_base + base_off + ei * esz + bi, (uw & 255) as i32);
         }
-        cur = ev;
-        bi = 0;
-        while (bi < esz) {
-          unsafe {
-            rc = pipeline_elf_ctx_data_poke_u8(
-              elf_ctx, data_base + base_off + ei * esz + bi, cur & 255);
-          }
-          if (rc != 0) {
-            return 0 - 1;
-          }
-          // Logical byte peel (needles / small positive LITs); signed
-          // negatives use the same little-endian low-byte stream as mov_imm.
-          cur = cur / 256;
-          bi = bi + 1;
+        if (rc != 0) {
+          return 0 - 1;
         }
+        uw = uw / 256;
+        bi = bi + 1;
       }
     }
     ei = ei + 1;
@@ -33418,6 +33439,65 @@ function pipe_modlet_array_lit_has_string_elem(
 }
 
 /**
+ * Fold one ARRAY_LIT element to its constant i32 value.
+ * Accepts EXPR_LIT (ek 0) and EXPR_NEG over EXPR_LIT (ek 22) — the parser's
+ * compound-reparse normal form for negative literals, e.g. `[-600, 2]`
+ * produces EXPR_NEG(EXPR_LIT), not a bare negative LIT. Anything else
+ * (FLOAT_LIT, binop, VAR, ...) is not a compile-time constant elem; callers
+ * must loud-fail (return -1) instead of silently dropping the element —
+ * the historic silent drop baked/seeded zeros for `let g: i32[2] = [-1, 2]`.
+ * @param arena *u8 - ASTArena
+ * @param eref i32 - element expr ref
+ * @param out_val *i32 - folded two's-complement i32 value
+ * @return i32 - 1 = folded constant; 0 = not a supported constant elem
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
+ */
+function pipe_modlet_array_lit_elem_const_val(
+  arena: *u8, eref: i32, out_val: *i32
+): i32 {
+  let ek: i32 = 0;
+  let op: i32 = 0;
+  let v: i32 = 0;
+  if (arena == (0 as *u8) || eref <= 0 || out_val == (0 as *i32)) {
+    return 0;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+  }
+  if (ek == 0) {
+    unsafe {
+      v = pipeline_expr_int_val_at(arena, eref);
+    }
+    unsafe {
+      out_val[0] = v;
+    }
+    return 1;
+  }
+  if (ek == 22) {
+    unsafe {
+      op = pipeline_expr_unary_operand_ref_at(arena, eref);
+    }
+    if (op <= 0) {
+      return 0;
+    }
+    unsafe {
+      ek = pipeline_expr_kind_ord_at(arena, op);
+    }
+    if (ek != 0) {
+      return 0;
+    }
+    unsafe {
+      v = pipeline_expr_int_val_at(arena, op);
+    }
+    unsafe {
+      out_val[0] = 0 - v;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+/**
  * Store ARRAY_LIT LIT elems into COMMON already LEA'd in rbx.
  * One nested ARRAY_LIT level is enough for `[K][N]T` rows; deeper
  * nest is a later leaf. Empty lit is a no-op (BSS stays zero).
@@ -33443,6 +33523,7 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
   let inner_et: i32 = 0;
   let row_sz: i32 = 0;
   let rc: i32 = 0;
+  let hi: i32 = 0;
   if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || init_ref <= 0) {
     return 0;
   }
@@ -33460,8 +33541,13 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
     if (row_sz <= 0) {
       row_sz = glue_array_lit_force_esz_from_elem_type_c(arena, elem_ty);
     }
-    if (ne <= 0 || ne > 1024) {
+    // ne<=0: empty row lit is a no-op (BSS zero). ne>1024: entry-seed code
+    // bound — loud-fail instead of the historic silent zero fill.
+    if (ne <= 0) {
       return 0;
+    }
+    if (ne > 1024) {
+      return 0 - 1;
     }
     ei = 0;
     while (ei < ne) {
@@ -33491,8 +33577,13 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
   unsafe {
     ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
   }
-  if (ne <= 0 || ne > 1024) {
+  // ne<=0: empty lit is a no-op (BSS zero). ne>1024: entry-seed code-size
+  // bound (~16B emitted per elem) — loud-fail instead of silent zero fill.
+  if (ne <= 0) {
     return 0;
+  }
+  if (ne > 1024) {
+    return 0 - 1;
   }
   ei = 0;
   while (ei < ne) {
@@ -33503,10 +33594,38 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
       unsafe {
         ek = pipeline_expr_kind_ord_at(arena, eref);
       }
-      if (ek == 0) {
+      // STRING_LIT elem: emit the string bytes inline in .text and LEA
+      // their address (rax/x0), then store esz bytes at rbx+off. The
+      // cells reach here only because prepare keeps string-bearing
+      // arrays COMMON (has-string predicate); loud-fails on len > 126.
+      if (ek == 59) {
         unsafe {
-          ev = pipeline_expr_int_val_at(arena, eref);
-          rc = backend_enc_mov_imm64_to_rax_arch(elf_ctx, ev, 0, ta);
+          rc = glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, eref, ta);
+        }
+        if (rc != 0) {
+          return rc;
+        }
+        unsafe {
+          rc = backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta);
+        }
+        if (rc != 0) {
+          return 0 - 1;
+        }
+      } else {
+        // LIT / EXPR_NEG-over-LIT elem: fold to the constant value. A
+        // negative imm passes hi=-1 so the (hi:lo) imm64 halves rebuild
+        // the two's-complement value in rax before the esz store. Any
+        // other elem kind is not a compile-time constant: loud-fail
+        // (was: silently skipped, leaving the elem zero at runtime).
+        if (pipe_modlet_array_lit_elem_const_val(arena, eref, &ev) == 0) {
+          return 0 - 1;
+        }
+        hi = 0;
+        if (ev < 0) {
+          hi = 0 - 1;
+        }
+        unsafe {
+          rc = backend_enc_mov_imm64_to_rax_arch(elf_ctx, ev, hi, ta);
         }
         if (rc != 0) {
           return 0 - 1;
@@ -33516,25 +33635,6 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
         }
         if (rc != 0) {
           return 0 - 1;
-        }
-      } else {
-        // STRING_LIT elem: emit the string bytes inline in .text and LEA
-        // their address (rax/x0), then store esz bytes at rbx+off. The
-        // cells reach here only because prepare keeps string-bearing
-        // arrays COMMON (has-string predicate); loud-fails on len > 126.
-        if (ek == 59) {
-          unsafe {
-            rc = glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, eref, ta);
-          }
-          if (rc != 0) {
-            return rc;
-          }
-          unsafe {
-            rc = backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta);
-          }
-          if (rc != 0) {
-            return 0 - 1;
-          }
         }
       }
     }
