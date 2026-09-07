@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <xlang_fmt_cap.h> /* also Cap va via xlang_va_cap (10.7.1) */ /* Cap residual 10.7.2: freestanding vsnprintf authority */
+#include <xlang_fdprint_cap.h> /* Cap residual 9.5.4: format-to-fd write authority */
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -737,32 +738,12 @@ int snprintf(char *buf, size_t size, const char *fmt, ...) {
 }
 
 /** 向 fd 格式化输出；返回写入字节数。 */
-/* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
+/* Cap residual 9.5.4: "vsnprintf + write" combo — thin wrap over xlang_vfdprintf
+ * (G.7: body in xlang_fdprint_cap.h). Bounded 512-byte face (no heap): the
+ * nostdlib chain prints short diagnostic lines (spinner, per-line check
+ * summary, usage), so the old malloc heap-grow path is retired. */
 int bootstrap_vfprintf_fd_impl(int fd, const char *fmt, xlang_va_list ap) {
-    char stack_buf[512];
-    char *heap_buf = NULL;
-    char *use_buf = stack_buf;
-    size_t cap = sizeof(stack_buf);
-    xlang_va_list ap2;
-    int need;
-    int wrote = 0;
-    if (!fmt)
-        return 0;
-    xlang_va_copy(ap2, ap);
-    need = vsnprintf(stack_buf, cap, fmt, ap2);
-    xlang_va_end(ap2);
-    if (need >= (int)cap) {
-        cap = (size_t)need + 1u;
-        heap_buf = (char *)malloc(cap);
-        if (!heap_buf)
-            return -1;
-        use_buf = heap_buf;
-        need = vsnprintf(use_buf, cap, fmt, ap);
-    }
-    if (need > 0)
-        wrote = (int)write(fd, use_buf, (unsigned long)need);
-    free(heap_buf);
-    return wrote;
+    return xlang_vfdprintf(fd, fmt, ap);
 }
 
 #ifndef XLANG_BOOTSTRAP_NOSTDLIB_STUBS_FROM_X

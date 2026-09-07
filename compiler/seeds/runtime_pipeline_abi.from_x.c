@@ -230,19 +230,18 @@
 #undef snprintf
 #define snprintf xlang_snprintf
 #include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face; xlang_io_write */
+#include <xlang_fdprint_cap.h> /* Cap residual 9.5.4: format-to-fd write authority */
 
-/* Cap residual 9.7.1: cold-seed stderr trace writer. Every former
- * fprintf(stderr, ...) debug/trace print routes here: one bounded Cap
- * snprintf into a stack buffer + one raw fd-2 write (unbuffered, no
- * flush). Format spec is the Cap fmt authority (xlang_fmt_cap.h).
- * PLATFORM: SHARED. */
+/* Cap residual 9.5.4: cold-seed stderr trace writer. Every former
+ * fprintf(stderr, ...) debug/trace print routes here — thin wrap over the
+ * Cap "vsnprintf + write" authority xlang_vfdprintf (xlang_fdprint_cap.h):
+ * one bounded format into a stack buffer + one raw fd-2 write (unbuffered,
+ * no flush; truncated at 511 bytes). PLATFORM: SHARED. */
 static void pabi_trace(const char *fmt, ...) {
-    char b[512];
     xlang_va_list ap;
     xlang_va_start(ap, fmt);
-    xlang_vsnprintf(b, sizeof(b), fmt, ap);
+    (void)xlang_vfdprintf(2, fmt, ap);
     xlang_va_end(ap);
-    (void)xlang_io_write(2, b, strlen(b));
 }
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
