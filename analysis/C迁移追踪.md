@@ -27,7 +27,7 @@
 | Mega 去 pin M4（阶段 7） | 🟡 | 冷链关 pin 5/5；**7.4.6–7.4.9** pin 孪生已落盘；双端 L4＠`b5be5ed97` bstrict **129**；parser seed 物理删／CI 漂移闸 ⬜ |
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
-| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–3／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`）；余 9.2–3／9.5.4 ⬜ |
+| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–4／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`）；余 9.2–3 ⬜ |
 | 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
@@ -296,7 +296,7 @@
 - ✅ **9.5.1** driver_preamble_fputs — **.x thin 已接管 ✅**：Wave22 pure（`runtime_driver_abi_thin.x`）＋g05 `xlang_driver_fputs_opaque`，PREFER hybrid 模式下权威在 .x。  
 - ✅ **9.5.2** xlang_target_cpu_print（FILE／fprintf）— **全平台 Cap 闭环 ✅**：基于 `xlang_io_write` 统管 Linux/Darwin raw syscall 与 Windows `_write`，手工 hex 输出；`HAVE_XLANG_IO_PRINT_CAP` 全平台开启；`target_cpu.o` 双端强校验零 libc `fprintf`／`fwrite` 未定义符号；`--print-target-cpu` 门禁 `tests/run-simd-s1-gate.sh` 双端全通。  
 - ✅ **9.5.3** reportf／va_list — **slice0–3b ✅ ＋ slice3 残余由 9.7.1 统一收口 ✅（`75e074199`）**：slice0–1＠`26357d82a` diag＋lsp typeck reportf → Cap；slice2＠`b0d1c8068` 崩证／panic／JSON debug／parser_asm_thin trace／9 gen pin 模板；slice3a＠`a5ba1d2f3` runtime_log_os；slice3b＠`0a650a095` link_abi wrap/env/trace＋parse_expr_link 12 处＋**fmt 权威补 `%z`**（原 default 吞变参真 bug）。原「残 slice3 互联 opaque FILE\* 脸」（diag 微 ABI／strict_glue_stubs／rt_preamble／runtime_pipeline_abi 消费 TU）已随 **9.7.1** 整体换 fd 句柄面闭环；**残**：link_abi popen nm 扫描器（9.2 域）· 语言 va_list 面（10.7 域）
-- 🟡 **9.5.4** vsnprintf + write — 部分吸收于 **10.7.2** Cap（nostdlib＋diag＋**lsp_diag 全 fmt**＠`1fd734bb6`）；残：write 路径／其它 seed
+- ✅ **9.5.4** vsnprintf + write — **fd 格式化写组合面 Cap 闭环 ✅（`af4c479c1`）**：fmt 面已随 **10.7.2** 吸收（nostdlib＋diag＋**lsp_diag 全 fmt**＠`1fd734bb6`）；本波新权威 `include/xlang_fdprint_cap.h`＝`xlang_vfdprintf`／`xlang_fdprintf`（Cap `xlang_vsnprintf`＋`xlang_io_write` 单写；有界 512B 截断契约＝pabi_trace 9.7.1 先例；独立新头防 io_cap 平台头放大 fmt_cap ~20 消费面）。落点二改薄转发（G.7 同 commit 同语义）：`bootstrap_nostdlib_stubs.from_x.c` `bootstrap_vfprintf_fd_impl`（stack 512＋malloc 堆增长手写体）→ 委托 `xlang_vfdprintf`；`runtime_pipeline_abi.from_x.c` `pabi_trace` 手写体 → 委托 `xlang_vfdprintf`。验收＝Ubuntu 金标 stubs TU 重编 rc=0＋提供面 **15/15 T** 符号不缩（write/fwrite/fputs/fputc/puts/printf/fprintf/vfprintf/fflush/fileno/fread/fgets/fopen/fclose/fdopen）＋pipeline_abi FORCE 重建＋g05 OK＋双端 L2 5/5＠`af4c479c1`＋12 Cap/simd 门双端全 ok。残（read 路径／其它域，非本条 write 面）：`runtime_process_argv` /proc/self/cmdline 读、`build_runtime` pipeline_gen 读、async FILE\* emit 冷体（.x 脸已 Cap）；link_abi popen nm 扫描（**9.2 域**）；C 后端 cf_lib fprintf（**PC 域**）
 
 ### 9.6 全局／static／巨型数据（P1）
 
