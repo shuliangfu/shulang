@@ -9557,6 +9557,32 @@ int32_t asm_module_top_level_const_lit_i32(void *m, void *a, uint8_t *name, int3
   return 0;
 }
 
+/* 9.6.3: seed twin of runtime_pipeline_abi.x asm_module_top_level_let_name_exists —
+ * registration-side duplicate guard for the top-level-let parse authority
+ * (P012 kind=2). Must stay in step with the .x authority. PLATFORM: SHARED. */
+int32_t asm_module_top_level_let_name_exists(void *m, uint8_t *name, int32_t name_len) {
+  int32_t tl;
+  int32_t nl;
+  int32_t k;
+  int32_t ntl;
+  if (!m || !name || name_len <= 0)
+    return 0;
+  /* LP64: Module.num_top_level_lets @ offset 12 (≡ pure pipe_mod_get_num_top_level_lets). */
+  ntl = *(int32_t *)((char *)m + 12);
+  for (tl = 0; tl < ntl; tl++) {
+    nl = pipeline_module_top_level_let_name_len(m, tl);
+    if (nl != name_len || nl <= 0)
+      continue;
+    for (k = 0; k < name_len; k++) {
+      if (pipeline_module_top_level_let_name_byte_at(m, tl, k) != name[k])
+        break;
+    }
+    if (k == name_len)
+      return 1;
+  }
+  return 0;
+}
+
 int32_t asm_skip_typeck_entry_whitelist(void *m, int32_t func_index) {
   int32_t large_entry;
   if (!m || func_index < 0)

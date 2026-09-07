@@ -1100,6 +1100,64 @@ void parser_asm_parse_one_function_buf_into_c(struct parser_asm_onefunc_result *
   r = lexer_next_buf(lex, data, len);
   while (r.tok.kind != (int32_t)TOKEN_RETURN && r.tok.kind != (int32_t)TOKEN_RBRACE &&
          r.tok.kind != (int32_t)TOKEN_EOF) {
+    /*
+     * 9.6.3: function-local `static let` / `static const` — C twin of the
+     * parser.x / parser_gen pin onefunc hook (buf retry face). `static` is NOT
+     * a keyword: TOKEN_IDENT spelling "static" (115,116,97,116,105,99) followed
+     * by let/const desugars through parser_parse_one_top_level_let_into_glue
+     * into the module installed by parser_cur_module_set_c (pin parse_into /
+     * parse_into_buf windows). Other uses of an identifier named "static" see
+     * a non-let/const next token and fall through untouched. Any desugar
+     * failure is loud (set_onefunc_fail); the P012 duplicate-binding sticky
+     * raised inside the top-level-let authority is converted to the module
+     * loop's hard abort by the caller's wave676 check.
+     * PLATFORM: SHARED parse — parser.x + pin + C twin same commit.
+     */
+    if (r.tok.kind == (int32_t)TOKEN_IDENT && r.tok.ident_len == 6) {
+      extern void *parser_cur_module_get_c(void);
+      extern void parser_parse_one_top_level_let_into_glue(void *arena, void *module,
+          struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t is_const,
+          struct parser_asm_top_level_let_result *out);
+      uint8_t st_b0 = 0;
+      uint8_t st_b1 = 0;
+      uint8_t st_b2 = 0;
+      uint8_t st_b3 = 0;
+      uint8_t st_b4 = 0;
+      uint8_t st_b5 = 0;
+      if (r.token_start < (size_t)len)
+        st_b0 = data[r.token_start];
+      if (r.token_start + 1 < (size_t)len)
+        st_b1 = data[r.token_start + 1];
+      if (r.token_start + 2 < (size_t)len)
+        st_b2 = data[r.token_start + 2];
+      if (r.token_start + 3 < (size_t)len)
+        st_b3 = data[r.token_start + 3];
+      if (r.token_start + 4 < (size_t)len)
+        st_b4 = data[r.token_start + 4];
+      if (r.token_start + 5 < (size_t)len)
+        st_b5 = data[r.token_start + 5];
+      if (st_b0 == 115 && st_b1 == 116 && st_b2 == 97 && st_b3 == 116 && st_b4 == 105 && st_b5 == 99) {
+        struct parser_asm_lexer lex_st = parser_asm_lex_at_token_from_result_c(r);
+        struct parser_asm_lexer_result st_r2 = lexer_next_buf(lex_st, data, len);
+        if (st_r2.tok.kind == (int32_t)TOKEN_LET || st_r2.tok.kind == (int32_t)TOKEN_CONST) {
+          struct parser_asm_top_level_let_result tl_res;
+          memset(&tl_res, 0, sizeof(tl_res));
+          parser_parse_one_top_level_let_into_glue(arena, parser_cur_module_get_c(), lex_st,
+                                                   &source, st_r2.tok.kind == (int32_t)TOKEN_CONST ? 1 : 0,
+                                                   &tl_res);
+          if (!tl_res.ok) {
+            /* Loud: duplicate P012 sticky or real parse failure — never
+             * silently drop the declaration (wave679 no-soft-skip). */
+            parser_asm_set_onefunc_fail_c(out, lex);
+            return;
+          }
+          /* Whole `static let/const ...;` consumed; emit nothing into the frame. */
+          lex = tl_res.next_lex;
+          r = lexer_next_buf(lex, data, len);
+          continue;
+        }
+      }
+    }
     if (r.tok.kind == (int32_t)TOKEN_IF) {
       struct parser_asm_lexer if_start;
       int32_t if_cref = 0;

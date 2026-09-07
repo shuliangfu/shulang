@@ -28,6 +28,9 @@ extern void ast_arena_type_set(void *arena, int32_t ref, struct ast_Type t);
 extern int32_t pipeline_module_top_level_let_alloc(void *module);
 extern void pipeline_module_top_level_let_set(void *module, int32_t idx, uint8_t *name, int32_t name_len,
                                               int32_t type_ref, int32_t init_ref, int32_t is_const);
+/* 9.6.3: pure module top-level-let name scan (thin .x authority in
+ * runtime_pipeline_abi.x, seed twin in runtime_pipeline_abi.from_x.c). */
+extern int32_t asm_module_top_level_let_name_exists(void *module, uint8_t *name, int32_t name_len);
 extern int32_t parser_asm_stretch_top_level_let_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                         int32_t is_const);
 extern int32_t parser_asm_stretch_function_name_audit_c(const uint8_t *name, int32_t name_len);
@@ -57,6 +60,8 @@ void parser_asm_parse_one_top_level_let_into_slice_c(void *arena, void *module, 
   /* wave581 Cap residual: top-level let/const name content cap 127. */
   uint8_t name_buf[128];
   int32_t name_len;
+  int32_t name_line;
+  int32_t name_col;
   int32_t type_ref;
   int32_t tl_ix;
   int32_t ic;
@@ -88,6 +93,9 @@ void parser_asm_parse_one_top_level_let_into_slice_c(void *arena, void *module, 
     return;
   }
   name_len = r.tok.ident_len;
+  /* 9.6.3: binding-name token position, kept for the P012 dup diagnostic. */
+  name_line = (int32_t)r.tok.line;
+  name_col = (int32_t)r.tok.col;
   /* wave581 Cap residual: content cap 127 (was 63). PLATFORM: SHARED parse. */
   if (name_len <= 0 || name_len > 127)
     return;
@@ -126,6 +134,19 @@ void parser_asm_parse_one_top_level_let_into_slice_c(void *arena, void *module, 
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_SEMICOLON)
     return;
+  /*
+   * 9.6.3: P012 duplicate top-level binding — two module-level lets with one
+   * name used to compile silently, the second registration winning (q6 probe).
+   * Root fix at this registration authority: reject BEFORE alloc so no phantom
+   * entry lands. Sticky g_parser_sig_type_hard makes parse_into_buf abort
+   * (ok=-2). kind=2 = module top-level let/const (0 = param, 1 = struct field).
+   * PLATFORM: SHARED parse.
+   */
+  if (asm_module_top_level_let_name_exists(module, name_buf, name_len) != 0) {
+    extern void parser_report_duplicate_name_p012_c(int32_t line, int32_t col, int32_t kind);
+    parser_report_duplicate_name_p012_c(name_line, name_col, 2);
+    return;
+  }
   tl_ix = pipeline_module_top_level_let_alloc(module);
   if (tl_ix < 0)
     return;

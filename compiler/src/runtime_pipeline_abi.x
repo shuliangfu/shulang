@@ -19782,6 +19782,46 @@ export function asm_module_top_level_const_lit_i32(m: *u8, a: *u8, name: *u8, na
 }
 
 /**
+ * 9.6.3 pure: does this module already declare a top-level let/const with the
+ * exact given name? Registration-side duplicate guard for the top-level-let
+ * parse authority (P012 kind=2): two module-level bindings with one name used
+ * to compile silently with the second registration winning.
+ * @param m *u8 — Module*; null → 0
+ * @param name *u8 — binding-name bytes (not NUL-terminated)
+ * @param name_len i32 — name length; <= 0 → 0
+ * @return i32 — 1 = name already declared, 0 = no
+ * PLATFORM: SHARED — sole provider after top_level leave; seed twin in
+ * runtime_pipeline_abi.from_x.c must stay in step.
+ */
+#[no_mangle]
+export function asm_module_top_level_let_name_exists(m: *u8, name: *u8, name_len: i32): i32 {
+  unsafe {
+    if (m == 0 as *u8 || name == 0 as *u8 || name_len <= 0) {
+      return 0;
+    }
+    let ntl: i32 = pipe_mod_get_num_top_level_lets(m);
+    let tl: i32 = 0;
+    while (tl < ntl) {
+      let nl: i32 = pipeline_module_top_level_let_name_len(m, tl);
+      if (nl == name_len && nl > 0) {
+        let k: i32 = 0;
+        while (k < name_len) {
+          if (pipeline_module_top_level_let_name_byte_at(m, tl, k) != (name[k] as i32)) {
+            break;
+          }
+          k = k + 1;
+        }
+        if (k == name_len) {
+          return 1;
+        }
+      }
+      tl = tl + 1;
+    }
+    return 0;
+  }
+}
+
+/**
  * wave119 pure: SKIP_TYPECK entry whitelist (1 = do not stub via skip_heavy).
  * @param m *u8 — Module*
  * @param func_index i32 — function index

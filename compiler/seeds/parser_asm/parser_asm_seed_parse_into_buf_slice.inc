@@ -2901,6 +2901,12 @@ static int32_t parser_asm_seed_parse_impl_and_add_c(void *arena, void *module, s
       continue;
     }
     res = parser_asm_seed_onefunc_wired_c(fn_start);
+    /* 9.6.3: module window for the static-desugar hooks (impl slice + buf
+     * retry), mirroring the pin parse_into_buf window. PLATFORM: SHARED. */
+    {
+      extern void parser_cur_module_set_c(void *m);
+      parser_cur_module_set_c(module);
+    }
     {
       struct parser_asm_lexer fn_lex = fn_start;
       parser_lex_from_next_into_glue(&fn_lex, r); /* after FUNCTION */
@@ -2908,6 +2914,10 @@ static int32_t parser_asm_seed_parse_impl_and_add_c(void *arena, void *module, s
     }
     if (!res.ok)
       parser_asm_parse_one_function_buf_into_c(&res, arena, fn_start, data, len);
+    {
+      extern void parser_cur_module_set_c(void *m);
+      parser_cur_module_set_c(0);
+    }
     if (!res.ok) {
       /* wave676: P011 sticky → hard abort (same as main parse_into_buf loop). */
       {
@@ -4071,6 +4081,16 @@ struct parser_asm_seed_parse_into_result parser_asm_seed_parse_into_buf_c(void *
         lex = tl_res.next_lex;
         continue;
       }
+      /* 9.6.3: P012 duplicate top-level binding must not soft-skip (mirror of
+       * the parser.x parse_into_buf let branch; wave679 sticky pattern). */
+      {
+        extern int32_t parser_sig_type_hard_pending_c(void);
+        if (parser_sig_type_hard_pending_c() != 0) {
+          out.ok = -2;
+          out.main_idx = -1;
+          return out;
+        }
+      }
     }
     if (r.tok.kind != (int32_t)TOKEN_FUNCTION) {
       struct parser_asm_try_skip_allow_result try_res;
@@ -4113,12 +4133,23 @@ struct parser_asm_seed_parse_into_result parser_asm_seed_parse_into_buf_c(void *
         continue;
       }
       res = parser_asm_seed_onefunc_wired_c(lex);
+      /* 9.6.3: install the module while this function body parses so the
+       * static-desugar hooks (impl slice + buf retry) can reach it; window
+       * covers both faces, cleared right after the retry. PLATFORM: SHARED. */
+      {
+        extern void parser_cur_module_set_c(void *m);
+        parser_cur_module_set_c(module);
+      }
       parser_parse_one_function_impl(&res, arena, lex, &slice);
       if (!res.ok) {
         /* wave676: skip buf retry when P011 already sticky (avoid double diag). */
         extern int32_t parser_sig_type_hard_pending_c(void);
         if (parser_sig_type_hard_pending_c() == 0)
           parser_asm_parse_one_function_buf_into_c(&res, arena, lex_at_function, data, len);
+      }
+      {
+        extern void parser_cur_module_set_c(void *m);
+        parser_cur_module_set_c(0);
       }
       if (!res.ok) {
         /*

@@ -69,6 +69,20 @@ void parser_allow_bare_self_set_c(int32_t on) { g_parser_allow_bare_self = on ? 
 
 int32_t parser_allow_bare_self_pending_c(void) { return g_parser_allow_bare_self; }
 
+/*
+ * 9.6.3: module pointer installed by parser_cur_module_set_c around each
+ * function-body parse (parse_into / parse_into_buf), read by parse_block_into
+ * to desugar a function-local `static let/const` into a module top-level let.
+ * C-side static because the parser.x pin carries no module-scope pointer
+ * global; same pattern as g_parser_sig_type_hard above.
+ * PLATFORM: SHARED parse.
+ */
+static void *g_parser_cur_module = 0;
+
+void parser_cur_module_set_c(void *m) { g_parser_cur_module = m; }
+
+void *parser_cur_module_get_c(void) { return g_parser_cur_module; }
+
 void parser_report_untyped_formal_p011_c(int32_t line, int32_t col, int32_t kind) {
   extern void diag_report_with_code(const char *file, int32_t line, int32_t col, const char *kind_s,
                                     const char *code, const char *msg, const char *detail);
@@ -91,7 +105,7 @@ void parser_report_untyped_formal_p011_c(int32_t line, int32_t col, int32_t kind
  * Sticky: reuses g_parser_sig_type_hard so parse_into_buf aborts (ok=-2), same as P011.
  * @param line 1-based source line of the duplicate name token
  * @param col  1-based column
- * @param kind 0 = function param; 1 = struct field
+ * @param kind 0 = function param; 1 = struct field; 2 = module top-level let/const
  * PLATFORM: SHARED parse.
  */
 void parser_report_duplicate_name_p012_c(int32_t line, int32_t col, int32_t kind) {
@@ -101,6 +115,13 @@ void parser_report_duplicate_name_p012_c(int32_t line, int32_t col, int32_t kind
   if (kind == 0) {
     diag_report_with_code(NULL, line, col, "parse error", "P012",
                           "duplicate parameter name in function signature",
+                          NULL);
+  } else if (kind == 2) {
+    /* 9.6.3: two module-level let/const with one name used to compile silently
+     * (second registration won). Root-fixed at the top-level-let registration
+     * authority; sticky abort via g_parser_sig_type_hard. PLATFORM: SHARED parse. */
+    diag_report_with_code(NULL, line, col, "parse error", "P012",
+                          "duplicate top-level binding name (module already declares this let/const; rename one)",
                           NULL);
   } else {
     diag_report_with_code(NULL, line, col, "parse error", "P012",

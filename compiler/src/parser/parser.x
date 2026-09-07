@@ -2358,6 +2358,75 @@ function parse_block_into_with_scratch(arena: *ASTArena, lex_after_lbrace: Lexer
       lex_cur = parser_rewind_lex_for_lparen_control_stmt(lex_cur, r, source);
       lexer.lexer_next_into(&r, lex_cur, source);
     }
+    /*
+     * 9.6.3: function-local `static let` / `static const` — desugar to a module
+     * top-level let. `static` is NOT a keyword: it is detected as a TOKEN_IDENT
+     * whose span spells "static" followed by let/const. Every other use of an
+     * identifier named "static" (`static(x)` call, `static = e` assignment) sees
+     * a non-let/const next token and falls through to the ordinary statement
+     * path untouched. The desugar reuses parse_one_top_level_let_into (the sole
+     * module-let registration authority), so storage / seeder / entry-seed /
+     * bake semantics are exactly the 9.6.0-9.6.2 module-let machinery: init
+     * accepts what module-level lets accept today, init runs at program start
+     * (not first call — documented C divergence), and the cell persists across
+     * calls. The static name never enters frame slots, so inner-block `let`
+     * shadowing keeps its natural meaning. If no module is installed (body
+     * parsed outside a module loop) the desugar is impossible: fail loudly,
+     * never silently drop the declaration. Dup detection runs inside the
+     * top-level-let authority (P012 kind=2, sticky hard abort).
+     * PLATFORM: SHARED — seed parser_gen pin + parser_asm C twin stay in step.
+     */
+    if ((r.tok.kind as i32) == (token.TokenKind.TOKEN_IDENT as i32) && r.tok.ident_len == 6) {
+      let st_b0: u8 = 0;
+      let st_b1: u8 = 0;
+      let st_b2: u8 = 0;
+      let st_b3: u8 = 0;
+      let st_b4: u8 = 0;
+      let st_b5: u8 = 0;
+      if (r.token_start < source.length) {
+        st_b0 = source[r.token_start];
+      }
+      if (r.token_start + (1 as usize) < source.length) {
+        st_b1 = source[r.token_start + (1 as usize)];
+      }
+      if (r.token_start + (2 as usize) < source.length) {
+        st_b2 = source[r.token_start + (2 as usize)];
+      }
+      if (r.token_start + (3 as usize) < source.length) {
+        st_b3 = source[r.token_start + (3 as usize)];
+      }
+      if (r.token_start + (4 as usize) < source.length) {
+        st_b4 = source[r.token_start + (4 as usize)];
+      }
+      if (r.token_start + (5 as usize) < source.length) {
+        st_b5 = source[r.token_start + (5 as usize)];
+      }
+      // ASCII "static" = 115,116,97,116,105,99
+      if (st_b0 == 115 && st_b1 == 116 && st_b2 == 97 && st_b3 == 116 && st_b4 == 105 && st_b5 == 99) {
+        let lex_st: Lexer = { pos: 0 as usize, line: 0, col: 0 };
+        lex_from_result_ptr_into(&lex_st, &r);
+        let st_r2: LexerResult = { next_lex: lex_st, tok: { kind: token.TokenKind.TOKEN_EOF, line: 0, col: 0, int_val: (0 as i64), float_val: 0.0, ident: (0 as *u8), ident_len: 0 }, token_start: (0 as usize) };
+        lexer.lexer_next_into(&st_r2, lex_st, source);
+        if (st_r2.tok.kind == token.TokenKind.TOKEN_LET || st_r2.tok.kind == token.TokenKind.TOKEN_CONST) {
+          let st_mod: *Module = parser_cur_module_get_c();
+          if (st_mod == (0 as *Module)) {
+            out.ok = false;
+            return;
+          }
+          let st_res: TopLevelLetResult = { ok: false, next_lex: lex_st };
+          parse_one_top_level_let_into(arena, st_mod, st_r2.next_lex, source, st_r2.tok.kind == token.TokenKind.TOKEN_CONST, &st_res);
+          if (!st_res.ok) {
+            out.ok = false;
+            return;
+          }
+          /* The whole `static let/const ...;` form was consumed by the
+           * top-level-let authority; emit nothing into this block. */
+          lex_cur = st_res.next_lex;
+          stmt_tok_ready = false;
+          continue;
+        }
+      }
+    }
     /* See implementation. */
     if (r.tok.kind == token.TokenKind.TOKEN_LET || r.tok.kind == token.TokenKind.TOKEN_CONST) {
       /**
@@ -3948,6 +4017,27 @@ export extern function parser_sig_type_hard_reset_c(): void;
  * PLATFORM: SHARED parse.
  */
 export extern function parser_sig_type_hard_pending_c(): i32;
+
+/**
+ * 9.6.3: install the module whose function bodies are currently being parsed.
+ * parse_into / parse_into_buf set it right before parse_one_function_impl and
+ * clear it right after, so parse_block_into can desugar a function-local
+ * `static let` / `static const` into a module top-level let (shared storage,
+ * program-start init, module-wide visibility — documented 9.6.3 semantics).
+ * Definition: g_parser_cur_module in parser_asm_body_tl_slice.inc, same
+ * C-side static + accessor pattern as g_parser_sig_type_hard.
+ * @param m *Module — current module; null clears the slot
+ * PLATFORM: SHARED parse.
+ */
+export extern function parser_cur_module_set_c(m: *Module): void;
+
+/**
+ * 9.6.3: read the module pointer installed by parser_cur_module_set_c.
+ * @return *Module — current module; null when a body is parsed outside a
+ * module loop (then the static desugar must fail loudly, never silently)
+ * PLATFORM: SHARED parse.
+ */
+export extern function parser_cur_module_get_c(): *Module;
 
 /**
  * Allow bare `self` (no `: Type`) only while hoisting a trait default body.
@@ -6154,6 +6244,71 @@ export function parse_one_function_impl(out: *OneFuncResult, arena: *ASTArena, l
        */
       if (r.tok.kind == token.TokenKind.TOKEN_RBRACE || r.tok.kind == token.TokenKind.TOKEN_EOF) {
         break;
+      }
+      /*
+       * 9.6.3: function-local `static let` / `static const` — onefunc top-block
+       * statement loop face. The function body top block is parsed HERE, not by
+       * parse_block_into_with_scratch (that loop only sees nested blocks), so the
+       * IDENT-"static"-then-let/const desugar hook must exist in this loop too.
+       * Same contract as the parse_block hook: `static` is NOT a keyword; it is
+       * detected as a TOKEN_IDENT whose span spells "static" followed by
+       * let/const; the whole form is consumed by parse_one_top_level_let_into
+       * (the sole module-let registration authority) and nothing is emitted into
+       * the frame. `return static_var` references and `static(x)` calls see a
+       * non-let/const next token (or a non-statement position) and fall through
+       * untouched. No module installed → fail loudly, never silently drop.
+       * PLATFORM: SHARED — seed parser_gen pin + parser_asm C twin stay in step.
+       */
+      if ((r.tok.kind as i32) == (token.TokenKind.TOKEN_IDENT as i32) && r.tok.ident_len == 6) {
+        let st_b0: u8 = 0;
+        let st_b1: u8 = 0;
+        let st_b2: u8 = 0;
+        let st_b3: u8 = 0;
+        let st_b4: u8 = 0;
+        let st_b5: u8 = 0;
+        if (r.token_start < source.length) {
+          st_b0 = source[r.token_start];
+        }
+        if (r.token_start + (1 as usize) < source.length) {
+          st_b1 = source[r.token_start + (1 as usize)];
+        }
+        if (r.token_start + (2 as usize) < source.length) {
+          st_b2 = source[r.token_start + (2 as usize)];
+        }
+        if (r.token_start + (3 as usize) < source.length) {
+          st_b3 = source[r.token_start + (3 as usize)];
+        }
+        if (r.token_start + (4 as usize) < source.length) {
+          st_b4 = source[r.token_start + (4 as usize)];
+        }
+        if (r.token_start + (5 as usize) < source.length) {
+          st_b5 = source[r.token_start + (5 as usize)];
+        }
+        // ASCII "static" = 115,116,97,116,105,99
+        if (st_b0 == 115 && st_b1 == 116 && st_b2 == 97 && st_b3 == 116 && st_b4 == 105 && st_b5 == 99) {
+          let lex_st: Lexer = { pos: 0 as usize, line: 0, col: 0 };
+          lex_from_result_ptr_into(&lex_st, &r);
+          let st_r2: LexerResult = { next_lex: lex_st, tok: { kind: token.TokenKind.TOKEN_EOF, line: 0, col: 0, int_val: (0 as i64), float_val: 0.0, ident: (0 as *u8), ident_len: 0 }, token_start: (0 as usize) };
+          lexer.lexer_next_into(&st_r2, lex_st, source);
+          if (st_r2.tok.kind == token.TokenKind.TOKEN_LET || st_r2.tok.kind == token.TokenKind.TOKEN_CONST) {
+            let st_mod: *Module = parser_cur_module_get_c();
+            if (st_mod == (0 as *Module)) {
+              set_onefunc_fail(out, lex);
+              return;
+            }
+            let st_res: TopLevelLetResult = { ok: false, next_lex: lex_st };
+            parse_one_top_level_let_into(arena, st_mod, st_r2.next_lex, source, st_r2.tok.kind == token.TokenKind.TOKEN_CONST, &st_res);
+            if (!st_res.ok) {
+              set_onefunc_fail(out, lex);
+              return;
+            }
+            /* The whole `static let/const ...;` form was consumed by the
+             * top-level-let authority; emit nothing into the frame. */
+            lex = st_res.next_lex;
+            stmt_tok_ready = false;
+            continue;
+          }
+        }
       }
       /**
        * wave379: mid-body `return` only when a label follows (`return 1; L: …`).
@@ -9352,7 +9507,11 @@ export function parse_into(arena: *ASTArena, module: *Module, source: u8[]): Par
       }
       continue;
     }
+    /* 9.6.3: install the module while this function body parses so the
+     * parse_block_into static-desugar hook can reach it; clear right after. */
+    parser_cur_module_set_c(module);
     parse_one_function_impl(&res, arena, lex, source);
+    parser_cur_module_set_c(0 as *Module);
     if (!res.ok) {
       return { ok: -2, main_idx: -1 };
     }
@@ -11483,6 +11642,16 @@ export function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len
         lex = toplevel_res.next_lex;
         continue;
       }
+      /*
+       * 9.6.3: P012 duplicate top-level binding (two module-level lets with one
+       * name silently compiled, second registration won) must not soft-skip —
+       * the dup was already reported sticky inside the top-level-let authority.
+       * Same wave679 pattern as the struct branch below.
+       * PLATFORM: SHARED parse.
+       */
+      if (parser_sig_type_hard_pending_c() != 0) {
+        return { ok: -2, main_idx: -1 };
+      }
     }
     /* Impl closer: skip_one_impl parked the lexer at the first method; after
      * those functions the leftover `}` closes the nest (wave390 UFCS).
@@ -11578,6 +11747,10 @@ export function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len
       lex_from_library_into(&lex, lib_buf_first);
       continue;
     }
+    /* 9.6.3: install the module while this function body parses so the
+     * parse_block_into static-desugar hook can reach it; the window covers the
+     * slice parse and the buf retry (both parse the same body). */
+    parser_cur_module_set_c(module);
     parse_one_function_impl(&res, arena, lex, slice_for_impl);
     if (!res.ok) {
       /* wave676: skip buf retry when P011 already sticky (avoid double diag). */
@@ -11585,6 +11758,7 @@ export function parse_into_buf(arena: *ASTArena, module: *Module, data: *u8, len
         parse_one_function_buf_into(&res, arena, lex_at_function_buf, data, len);
       }
     }
+    parser_cur_module_set_c(0 as *Module);
     if (!res.ok) {
       /*
        * wave676 Cap residual: P011 untyped formal / missing return type must not

@@ -1279,6 +1279,10 @@ extern void parser_parse_into_try_skip_allow_into(struct parser_TrySkipAllowResu
 extern void parser_parse_into_try_skip_allow_into_buf(struct parser_TrySkipAllowResult * out, struct lexer_Lexer lex, struct lexer_LexerResult r, uint8_t * data, int32_t len);
 extern struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * arena, struct ast_Module * module, struct xlang_slice_uint8_t * source);
 extern void parser_parse_one_top_level_let_into(struct ast_ASTArena * arena, struct ast_Module * module, struct lexer_Lexer lex, struct xlang_slice_uint8_t * source, int is_const, struct parser_TopLevelLetResult * out);
+/* 9.6.3: current-module slot for the function-local `static let/const` desugar
+ * (definitions in parser_asm_body_tl_slice.inc; ≡ parser.x externs). */
+extern void parser_cur_module_set_c(struct ast_Module * m);
+extern struct ast_Module * parser_cur_module_get_c(void);
 extern void parser_parse_one_type_alias_into(struct ast_ASTArena * arena, struct ast_Module * module, struct lexer_Lexer lex, struct xlang_slice_uint8_t * source, struct parser_TypeAliasResult * out);
 extern void parser_parse_primary_into_buf(struct ast_ASTArena * arena, struct lexer_Lexer lex, uint8_t * data, int32_t len, struct parser_ParseExprResult * out);
 extern void parser_parse_unary_into_buf(struct ast_ASTArena * arena, struct lexer_Lexer lex, uint8_t * data, int32_t len, struct parser_ParseExprResult * out);
@@ -2359,6 +2363,65 @@ static void parser_parse_block_into_with_scratch(struct ast_ASTArena * arena, st
       if ((((r.tok).kind) ==82)) {
         (void)((lex_cur = parser_rewind_lex_for_lparen_control_stmt(lex_cur, r, source)));
         (void)(lexer_next_into(&(r), lex_cur, source));
+      }
+      /*
+       * 9.6.3: function-local `static let` / `static const` — desugar to a module
+       * top-level let (≡ parser.x parse_block_into hook). `static` is NOT a
+       * keyword: TOKEN_IDENT spelling "static" (115,116,97,116,105,99) followed by
+       * let(2)/const(3). Other uses of an identifier named "static" fall through
+       * untouched. Reuses parser_parse_one_top_level_let_into (sole registration
+       * authority; P012 kind=2 dup guard inside). No module installed → loud fail.
+       * PLATFORM: SHARED parse.
+       */
+      if (((((r.tok).kind) ==59) && (((r.tok).ident_len) ==6))) {
+        uint8_t st_b0 = 0;
+        uint8_t st_b1 = 0;
+        uint8_t st_b2 = 0;
+        uint8_t st_b3 = 0;
+        uint8_t st_b4 = 0;
+        uint8_t st_b5 = 0;
+        if (((r.token_start) < (source->length))) {
+          (void)((st_b0 = source->data[r.token_start]));
+        }
+        if (((r.token_start) + (1) < (source->length))) {
+          (void)((st_b1 = source->data[r.token_start + (1)]));
+        }
+        if (((r.token_start) + (2) < (source->length))) {
+          (void)((st_b2 = source->data[r.token_start + (2)]));
+        }
+        if (((r.token_start) + (3) < (source->length))) {
+          (void)((st_b3 = source->data[r.token_start + (3)]));
+        }
+        if (((r.token_start) + (4) < (source->length))) {
+          (void)((st_b4 = source->data[r.token_start + (4)]));
+        }
+        if (((r.token_start) + (5) < (source->length))) {
+          (void)((st_b5 = source->data[r.token_start + (5)]));
+        }
+        if (((st_b0 ==115) && (st_b1 ==116) && (st_b2 ==97) && (st_b3 ==116) && (st_b4 ==105) && (st_b5 ==99))) {
+          struct lexer_Lexer lex_st = (struct lexer_Lexer){ .pos = ((size_t)(0)), .line = 0, .col = 0 };
+          (void)(parser_lex_from_result_ptr_into(&(lex_st), &(r)));
+          struct lexer_LexerResult st_r2 = (struct lexer_LexerResult){ .next_lex = lex_st, .tok = (struct token_Token){ .kind = 0, .line = 0, .col = 0, .int_val = 0, .float_val = 0.0, .ident = 0, .ident_len = 0 }, .token_start = 0 };
+          (void)(lexer_next_into(&(st_r2), lex_st, source));
+          if (((((st_r2.tok).kind) ==2) || (((st_r2.tok).kind) ==3))) {
+            struct ast_Module * st_mod = parser_cur_module_get_c();
+            if (((st_mod == 0))) {
+              (void)(((out->ok) = 0));
+              return;
+            }
+            struct parser_TopLevelLetResult st_res = (struct parser_TopLevelLetResult){ .ok = 0, .next_lex = lex_st };
+            (void)(parser_parse_one_top_level_let_into(arena, st_mod, (st_r2.next_lex), source, ((((st_r2.tok).kind) ==3)), &(st_res)));
+            if (!((st_res.ok))) {
+              (void)(((out->ok) = 0));
+              return;
+            }
+            /* Whole `static let/const ...;` consumed by the top-level-let
+             * authority; emit nothing into this block. */
+            (void)((lex_cur = (st_res.next_lex)));
+            (void)((stmt_tok_ready = 0));
+            continue;
+          }
+        }
       }
       if (((((r.tok).kind) ==2) || (((r.tok).kind) ==3))) {
         /* Mid-body let/const: copy both pools; record kind=0 then kind=1 (prefix face). */
@@ -5180,6 +5243,67 @@ void parser_parse_one_function_impl(struct parser_OneFuncResult * out, struct as
         if ((((((r.tok).kind) ==85) || (((r.tok).kind) ==0)))) {
           break;
         }
+        /*
+         * 9.6.3: function-local `static let` / `static const` — onefunc top-block
+         * statement loop face (≡ parser.x parse_one_function_impl hook). The
+         * function body top block is parsed HERE, not by the parse_block loop, so
+         * the IDENT-"static"-then-let/const desugar hook must exist in this loop
+         * too. `static` is NOT a keyword: TOKEN_IDENT spelling "static"
+         * (115,116,97,116,105,99) followed by let(2)/const(3). Other uses fall
+         * through untouched. Reuses parser_parse_one_top_level_let_into (sole
+         * registration authority; P012 kind=2 dup guard inside). No module →
+         * loud fail. PLATFORM: SHARED parse — parser.x + pin same commit.
+         */
+        if (((((r.tok).kind) ==59) && (((r.tok).ident_len) ==6))) {
+          uint8_t st_b0 = 0;
+          uint8_t st_b1 = 0;
+          uint8_t st_b2 = 0;
+          uint8_t st_b3 = 0;
+          uint8_t st_b4 = 0;
+          uint8_t st_b5 = 0;
+          if (((r.token_start) < (source->length))) {
+            (void)((st_b0 = source->data[r.token_start]));
+          }
+          if (((r.token_start) + (1) < (source->length))) {
+            (void)((st_b1 = source->data[r.token_start + (1)]));
+          }
+          if (((r.token_start) + (2) < (source->length))) {
+            (void)((st_b2 = source->data[r.token_start + (2)]));
+          }
+          if (((r.token_start) + (3) < (source->length))) {
+            (void)((st_b3 = source->data[r.token_start + (3)]));
+          }
+          if (((r.token_start) + (4) < (source->length))) {
+            (void)((st_b4 = source->data[r.token_start + (4)]));
+          }
+          if (((r.token_start) + (5) < (source->length))) {
+            (void)((st_b5 = source->data[r.token_start + (5)]));
+          }
+          if (((st_b0 ==115) && (st_b1 ==116) && (st_b2 ==97) && (st_b3 ==116) && (st_b4 ==105) && (st_b5 ==99))) {
+            struct lexer_Lexer lex_st = (struct lexer_Lexer){ .pos = ((size_t)(0)), .line = 0, .col = 0 };
+            (void)(parser_lex_from_result_ptr_into(&(lex_st), &(r)));
+            struct lexer_LexerResult st_r2 = (struct lexer_LexerResult){ .next_lex = lex_st, .tok = (struct token_Token){ .kind = 0, .line = 0, .col = 0, .int_val = 0, .float_val = 0.0, .ident = 0, .ident_len = 0 }, .token_start = 0 };
+            (void)(lexer_next_into(&(st_r2), lex_st, source));
+            if (((((st_r2.tok).kind) ==2) || (((st_r2.tok).kind) ==3))) {
+              struct ast_Module * st_mod = parser_cur_module_get_c();
+              if (((st_mod == 0))) {
+                (void)(parser_set_onefunc_fail(out, lex));
+                return;
+              }
+              struct parser_TopLevelLetResult st_res = (struct parser_TopLevelLetResult){ .ok = 0, .next_lex = lex_st };
+              (void)(parser_parse_one_top_level_let_into(arena, st_mod, (st_r2.next_lex), source, ((((st_r2.tok).kind) ==3)), &(st_res)));
+              if (!((st_res.ok))) {
+                (void)(parser_set_onefunc_fail(out, lex));
+                return;
+              }
+              /* Whole `static let/const ...;` consumed by the top-level-let
+               * authority; emit nothing into the frame. */
+              (void)((lex = (st_res.next_lex)));
+              (void)((stmt_tok_ready = 0));
+              continue;
+            }
+          }
+        }
         if ((((r.tok).kind) ==11)) {
           /* wave656: onefunc bare return ASI + Cap-T001 (mirror parser.x wave655/656).
            * G.7: advance_past_stmt_semicolon_into after operand; Cap-T001 skip filler.
@@ -7506,7 +7630,11 @@ struct parser_ParseIntoResult parser_parse_into(struct ast_ASTArena * arena, str
         }
         continue;
       }
+      /* 9.6.3: install the module while this function body parses so the
+       * parse_block_into static-desugar hook can reach it; clear right after. */
+      (void)(parser_cur_module_set_c(module));
       (void)(parser_parse_one_function_impl(&(res), arena, lex, source));
+      (void)(parser_cur_module_set_c(0));
       if (!((res.ok))) {
         return (struct parser_ParseIntoResult){ .ok = -(2), .main_idx = -(1) };
       }
@@ -9033,6 +9161,14 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * arena,
           (void)((lex = (toplevel_res.next_lex)));
           continue;
         }
+        /* 9.6.3: P012 duplicate top-level binding must not soft-skip (≡ parser.x
+         * parse_into_buf let branch; wave679 sticky pattern). PLATFORM: SHARED. */
+        {
+          extern int32_t parser_sig_type_hard_pending_c(void);
+          if (parser_sig_type_hard_pending_c() != 0) {
+            return (struct parser_ParseIntoResult){ .ok = -(2), .main_idx = -(1) };
+          }
+        }
       }
       /* Impl closer after skip_one_impl parked at first method (wave390 UFCS).
        * Without this, parse_strict treats the leftover `}` as unexpected → P001.
@@ -9097,6 +9233,10 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * arena,
         (void)(parser_lex_from_library_into(&(lex), lib_buf_first));
         continue;
       }
+      /* 9.6.3: install the module while this function body parses so the
+       * parse_block_into static-desugar hook can reach it; the window covers
+       * the slice parse and the buf retry (both parse the same body). */
+      (void)(parser_cur_module_set_c(module));
       (void)(parser_parse_one_function_impl(&(res), arena, lex, &(slice_for_impl)));
       if (!((res.ok))) {
         /* wave676: if P011 already sticky, skip buf retry (avoids double P011 diag). */
@@ -9105,6 +9245,7 @@ struct parser_ParseIntoResult parser_parse_into_buf(struct ast_ASTArena * arena,
           (void)(parser_parse_one_function_buf_into(&(res), arena, lex_at_function_buf, data, len));
         }
       }
+      (void)(parser_cur_module_set_c(0));
       if (!((res.ok))) {
         /* wave676: P011 sticky → hard abort (no soft-skip false green). PLATFORM: SHARED. */
         {

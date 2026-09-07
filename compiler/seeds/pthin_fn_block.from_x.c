@@ -113,6 +113,17 @@ struct parser_asm_parse_expr_result {
   struct parser_asm_lexer next_lex;
 };
 
+/* 9.6.3 wave-fix: parser_asm_top_level_let_result used by the static-desugar hook in
+ * parser_asm_one_function_buf_slice.inc (function-local `static let/const` → module
+ * top-level let). Defined in sibling pthin TUs (glue/seed_parse/thin_c) but missing
+ * here → incomplete-type error. Single authority layout matches pthin_glue.from_x.c.
+ * PLATFORM: SHARED. */
+struct parser_asm_top_level_let_result {
+  int32_t ok;
+  uint8_t _pad[4];
+  struct parser_asm_lexer next_lex;
+};
+
 struct ast_Type {
   int32_t kind;
   uint8_t name[128];
