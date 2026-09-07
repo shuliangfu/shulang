@@ -2060,19 +2060,60 @@ uint8_t *xlang_driver_exec_scan_out_path_opaque(int32_t argc, uint8_t *argv_opaq
 
 /* Permanent OS residual: wait for product exe (spawn/fork/exec).
  * Pure wave42 owns null/non_exe orch; this is process boundary only.
+ * 9.4.3 C ABI argv: child argv = [exe] + user positionals after the .x source
+ * path. Driver flags stay driver-owned (not forwarded); "-o" also consumes its
+ * value (the run path appends the injected temp pair at argv tail; an explicit
+ * -o product path is likewise a driver artifact). argv[0] is the exe path per
+ * C convention. Falls back to [exe] only when the source path / argv is absent.
  * PLATFORM: WINDOWS _spawnvp; POSIX fork+execv+xlang_waitpid_retry. */
-int32_t xlang_driver_exec_spawn_wait(uint8_t *exe) {
+int32_t xlang_driver_exec_spawn_wait(uint8_t *exe, int32_t argc, uint8_t *argv_opaque) {
     const char *path;
+    /* Single-thread driver process, one exec per call — static matches the
+     * adj[512] convention in runtime_link_abi (ensure_run_o / drop_subcommand). */
+    static char *cav[520];
+    int k = 0;
     if (exe == NULL)
         return 1;
     path = (const char *)(void *)exe;
+    cav[k++] = (char *)path;
+    if (argv_opaque != NULL && argc >= 1 && argc <= 512) {
+        char **argv = (char **)(void *)argv_opaque;
+        int src = -1;
+        int i;
+        /* Locate the .x source path: first argv entry with a ".x" suffix. */
+        for (i = 1; i < argc; i++) {
+            const char *s = argv[i];
+            int n;
+            if (s == NULL)
+                continue;
+            n = (int)strlen(s);
+            if (n >= 2 && s[n - 2] == '.' && s[n - 1] == 'x') {
+                src = i;
+                break;
+            }
+        }
+        if (src >= 0) {
+            for (i = src + 1; i < argc; i++) {
+                const char *s = argv[i];
+                if (s == NULL)
+                    continue;
+                if (s[0] == '-' && s[1] == 'o' && s[2] == '\0') {
+                    /* Skip "-o" and its value (injected temp or explicit path). */
+                    i++;
+                    continue;
+                }
+                if (s[0] == '-')
+                    continue; /* driver flag: consumed at compile, not forwarded */
+                if (k < 512)
+                    cav[k++] = (char *)s;
+            }
+        }
+    }
+    cav[k] = NULL;
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
     {
-        char *av[2];
         intptr_t rc;
-        av[0] = (char *)path;
-        av[1] = NULL;
-        rc = _spawnvp(_P_WAIT, path, (const char *const *)av);
+        rc = _spawnvp(_P_WAIT, path, (const char *const *)cav);
         if (rc == -1) {
             runtime_diag_errno_path(NULL, "process error", "spawnvp (driver_exec_compiled)", path);
             return 1;
@@ -2087,10 +2128,7 @@ int32_t xlang_driver_exec_spawn_wait(uint8_t *exe) {
             return 1;
         }
         if (pid == 0) {
-            char *av[2];
-            av[0] = (char *)path;
-            av[1] = NULL;
-            execv(path, av);
+            execv(path, cav);
             runtime_diag_errno_path(NULL, "process error", "execv (driver_exec_compiled)", path);
             _exit(127);
         }
@@ -2116,7 +2154,8 @@ int driver_exec_compiled_body(int argc, uint8_t *argv_opaque) {
     exe = driver_exec_scan_out_path(argc, argv);
     if (driver_exec_path_is_non_exe(exe))
         return 0;
-    return (int)xlang_driver_exec_spawn_wait((uint8_t *)(void *)exe);
+    /* 9.4.3: forward user positionals after the .x source path to the child. */
+    return (int)xlang_driver_exec_spawn_wait((uint8_t *)(void *)exe, argc, argv_opaque);
 }
 #endif
 

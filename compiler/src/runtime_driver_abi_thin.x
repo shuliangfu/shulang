@@ -5691,11 +5691,16 @@ export function driver_asm_mkstemp_fdopen(path_out64: *u8): *u8 {
 export extern "C" function xlang_driver_exec_scan_out_path_opaque(argc: i32, argv_opaque: *u8): *u8;
 /**
  * Cap residual: run product exe and wait for exit status (spawn/fork/exec).
+ * 9.4.3 C ABI argv: the child receives [exe] + user positionals after the .x
+ * source path in run_argv; driver flags (and the "-o" pair, injected temp or
+ * explicit) stay driver-owned and are not forwarded. argv[0] = exe path.
  * @param exe *u8 — NUL-terminated path; null → 1
+ * @param argc i32 — run_argv length; out of [1,512] or null argv → exe-only child
+ * @param argv_opaque *u8 — opaque char** run_argv from cmd_run; null allowed
  * @return i32 — process exit code, or 1 on spawn/wait failure
  * PLATFORM: WINDOWS _spawnvp; POSIX fork+execv+xlang_waitpid_retry. Always-seed.
  */
-export extern "C" function xlang_driver_exec_spawn_wait(exe: *u8): i32;
+export extern "C" function xlang_driver_exec_spawn_wait(exe: *u8, argc: i32, argv_opaque: *u8): i32;
 /**
  * G.7: pure non-exe gate already in rt_run_exec.x (suffix .o/.obj/.s).
  * @param exe *u8 — product path; null treated as non-exe
@@ -5731,7 +5736,9 @@ export function driver_exec_compiled_body(argc: i32, argv_opaque: *u8): i32 {
       return 0;
     }
     // Cap residual: fork/exec or Windows spawnvp + wait (process OS boundary).
-    return xlang_driver_exec_spawn_wait(exe);
+    // 9.4.3: run_argv rides along so user positionals after the .x source path
+    // become the child's argv (C ABI argc/argv for the compiled program).
+    return xlang_driver_exec_spawn_wait(exe, argc, argv_opaque);
   }
   return 1;
 }
