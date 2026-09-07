@@ -1621,36 +1621,74 @@ int32_t backend_enc_ucomiss_rbx_rax_arch(struct platform_elf_ElfCodegenCtx *elf_
 }
 
 /**
- * PLATFORM: LINUX+MACOS x86_64 — setcc after ucomisd/comisd (CF/ZF based).
+ * PLATFORM: LINUX+MACOS x86_64 — setcc after ucomisd/comisd (CF/ZF/PF based).
  * cc: 0=eq 1=ne 2=lt(b) 3=le(be) 4=gt(a) 5=ge(ae); then movzbl %al,%eax.
  * Integer setl/setle/setg/setge read SF/OF and are wrong after ucomisd.
+ * IEEE unordered (NaN): ucomis* sets ZF=PF=CF=1, so plain sete/setne/setb/
+ * setbe answer C-wrong for NaN operands (a!=a was false, a<b was true).
+ * cc 0/2/3 are ordered-only (AND with !PF via setnp), cc 1 is unordered-or
+ * (OR with PF via setp); cc 4/5 (seta/setae) already exclude unordered.
+ * %cl is scratch here: the compare glue pins operands in rbx/rax and only
+ * eax carries the result out.
  */
 int32_t backend_enc_fp_cmp_setcc_movzbl_arch(struct platform_elf_ElfCodegenCtx *elf_ctx, int32_t cc, int32_t ta) {
-  uint8_t op = 0x94; /* sete */
   static const uint8_t movzbl_al_eax[3] = {0x0f, 0xb6, 0xc0};
+  static const uint8_t setnp_cl[3] = {0x0f, 0x9b, 0xc1}; /* setnp %cl (PF=0, ordered) */
+  static const uint8_t setp_cl[3] = {0x0f, 0x9a, 0xc1};  /* setp %cl (PF=1, unordered) */
+  static const uint8_t and_cl_al[2] = {0x20, 0xc8};      /* and %cl,%al — al &= cl */
+  static const uint8_t or_cl_al[2] = {0x00, 0xc8};       /* or %cl,%al  — al |= cl */
+  uint8_t op = 0x94; /* sete */
   uint8_t s[3];
-  /* wave616: after arm64 fcmp (ucomisd twin), NZCV matches integer cset eq/ne/lt/le/gt/ge. */
-  if (ta == 1)
-    return arch_arm64_enc_enc_cmp_setcc_movzbl(elf_ctx, cc);
+  /* PLATFORM: MACOS|ARM64 — CSET W0,<inv_cond> directly (do NOT reuse the
+   * integer table pipeline_asm_arm64_cset_cond_enc_from_cc: wave616's
+   * "NZCV matches integer cset" claim only holds for cc 0/1/4/5). fcmp
+   * unordered sets Z=0,C=1,V=1, so integer LT/LE (N!=V based) answer true
+   * on NaN where C FP semantics demand false. FP relations map to
+   * {EQ,NE,MI,LS,GT,GE}; stored inverted for CSINC: {1,0,5,8,13,11}
+   * (ordered lt = N==1 -> invert PL; ordered le = Z==1||C==0 -> invert HI). */
+  if (ta == 1) {
+    static const int32_t fp_inv_cond[6] = {1, 0, 5, 8, 13, 11};
+    if (cc < 0 || cc > 5)
+      return -1;
+    return arch_arm64_enc_enc_u32_le(elf_ctx, (int32_t)(0x1a9f07e0u | ((uint32_t)fp_inv_cond[cc] << 12)));
+  }
   if (ta != 0 || !elf_ctx)
     return -1;
-  if (cc == 1)
+  if (cc == 1) {
+    /* NE = ordered-ne OR unordered: setp %cl first, OR it in below. */
+    if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)setp_cl, 3) != 0)
+      return -1;
     op = 0x95; /* setne */
-  else if (cc == 2)
-    op = 0x92; /* setb  = CF (below / less) */
-  else if (cc == 3)
-    op = 0x96; /* setbe = CF|ZF */
-  else if (cc == 4)
-    op = 0x97; /* seta  = !CF & !ZF */
+  } else if (cc == 2 || cc == 3) {
+    /* LT/LE are ordered-only: setnp %cl first, AND it in below. */
+    if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)setnp_cl, 3) != 0)
+      return -1;
+    if (cc == 2)
+      op = 0x92; /* setb  = CF (below / less) */
+    else
+      op = 0x96; /* setbe = CF|ZF */
+  } else if (cc == 0) {
+    /* EQ is ordered-only too: plain sete is true on unordered. */
+    if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)setnp_cl, 3) != 0)
+      return -1;
+  } else if (cc == 4)
+    op = 0x97; /* seta  = !CF & !ZF — unordered-false already */
   else if (cc == 5)
-    op = 0x93; /* setae = !CF */
-  else if (cc != 0)
+    op = 0x93; /* setae = !CF — unordered-false already */
+  else
     return -1;
   s[0] = 0x0f;
   s[1] = op;
   s[2] = 0xc0;
   if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, s, 3) != 0)
     return -1;
+  if (cc == 1) {
+    if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)or_cl_al, 2) != 0)
+      return -1;
+  } else if (cc == 0 || cc == 2 || cc == 3) {
+    if (pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)and_cl_al, 2) != 0)
+      return -1;
+  }
   return pipeline_elf_ctx_append_bytes((uint8_t *)elf_ctx, (uint8_t *)movzbl_al_eax, 3);
 }
 
