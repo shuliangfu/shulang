@@ -403,6 +403,22 @@ for script in "${BSTRICT_SCRIPTS[@]}"; do
     _w3_stat_skip=$((_w3_stat_skip + 1))
     continue
   fi
+  # check 闸门 2026-08-05 起暂停（AGENTS.md 验证节奏）：opt-in 跳过该族脚本。
+  # 默认仍跑（保留既有语义）。XLANG_BSTRICT_SKIP_SUSPENDED_CHECK 取值：
+  #   1                        → 跳 run-check.sh（暂停闸门；fmt FMT001 收集债同域红）
+  #   冒号分隔脚本名列表        → 精确跳这些脚本（如已立卡的 run-fmt-cmd.sh 债）
+  # 用途：暂停/立卡既有红不得在产品 fail-fast 白名单里拦截整段；其余脚本仍硬门。
+  if [ -n "${XLANG_BSTRICT_SKIP_SUSPENDED_CHECK:-}" ]; then
+    _bstrict_skip_list="${XLANG_BSTRICT_SKIP_SUSPENDED_CHECK}"
+    [ "${_bstrict_skip_list}" = "1" ] && _bstrict_skip_list="run-check.sh"
+    case ":${_bstrict_skip_list}:" in
+      *":${script}:"*)
+        echo "run-all-bstrict: skip $script (opt-in XLANG_BSTRICT_SKIP_SUSPENDED_CHECK list)"
+        _w3_stat_skip=$((_w3_stat_skip + 1))
+        continue
+        ;;
+    esac
+  fi
   chmod +x "tests/$script"
   echo "run-all-bstrict: $script ..."
   # Darwin：连续 xlang_asm check 曾 OOM(Killed:9)。Heavy -o linkers
