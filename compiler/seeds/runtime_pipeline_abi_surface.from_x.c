@@ -2990,6 +2990,30 @@ int32_t preprocess_eval_condition_c(uint8_t * cond, int32_t cond_len) {
     }
     return 0;
   }
+  /* 9.3.3: bare decimal literal — nonzero true, "0" false (mirror of .x
+   * authority; digit tokens never exist in the -D table). */
+  k = 0;
+  int32_t all_digits = 1;
+  int32_t lit_true = 0;
+  while ((k < n)) {
+    uint8_t d = 0;
+    (void)((d = (base)[k]));
+    if ((d < 48)) {
+      (void)((all_digits = 0));
+      break;
+    }
+    if ((d > 57)) {
+      (void)((all_digits = 0));
+      break;
+    }
+    if ((d != 48)) {
+      (void)((lit_true = 1));
+    }
+    (void)((k = (k + 1)));
+  }
+  if ((all_digits != 0)) {
+    return lit_true;
+  }
   return preprocess_define_has(base, n);
 }
 void preprocess_if_stack_reset(void) {

@@ -5974,7 +5974,13 @@ export function preprocess_define_has(sym: *u8, sym_len: i32): i32 {
  *   1) trim leading/trailing space/tab;
  *   2) if empty after trim -> 0;
  *   3) if any complex op char (space/tab/=/!/(/)) -> Cap residual cfg_eval_expr_c;
- *   4) else same-TU pure preprocess_define_has (wave85 -D table).
+ *   4) else bare decimal literal -> nonzero digits = true, "0" = false (9.3.3:
+ *      "1"/"0" must not fall into the -D name table, where a digit token is
+ *      never defined and would always read false);
+ *   5) else same-TU pure preprocess_define_has (wave85 -D table).
+ *   Non-decimal literals (hex/octal suffix/`defined()` chains) remain
+ *   unsupported: complex op chars route to cfg_eval (X dialect), digit-led
+ *   identifiers keep identifier lookup. PLATFORM: SHARED.
  * PLATFORM: SHARED - glue keeps XLANG_WEAK cold fallback when pure not linked.
  */
 #[no_mangle]
@@ -6063,6 +6069,36 @@ export function preprocess_eval_condition_c(cond: *u8, cond_len: i32): i32 {
       return 1;
     }
     return 0;
+  }
+  // Bare decimal literal: C semantics — nonzero value true, "0" false
+  // (9.3.3 root fix at the evaluator authority; digit tokens never exist in
+  // the -D table, so falling through would always read false).
+  k = 0;
+  let all_digits: i32 = 1;
+  let lit_true: i32 = 0;
+  while (k < n) {
+    let d: u8 = 0;
+    unsafe {
+      d = base[k];
+    }
+    if (d < 48) {
+      // Below '0' — not a decimal digit.
+      all_digits = 0;
+      break;
+    }
+    if (d > 57) {
+      // Above '9' — not a decimal digit.
+      all_digits = 0;
+      break;
+    }
+    if (d != 48) {
+      // Any nonzero digit makes the literal true.
+      lit_true = 1;
+    }
+    k = k + 1;
+  }
+  if (all_digits != 0) {
+    return lit_true;
   }
   // Simple identifier: true iff present in pure -D table (same-TU pure).
   return preprocess_define_has(base, n);

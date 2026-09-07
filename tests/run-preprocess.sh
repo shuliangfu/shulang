@@ -129,6 +129,10 @@ run_exit no_d tests/preprocess/main.x 22
 run_exit d_foo tests/preprocess/main.x 11 -D FOO
 run_exit dfoo tests/preprocess/main.x 11 -DFOO
 
+# 9.3.3: bare decimal #if literals (nonzero true / "0" false)
+run_exit if_lit1 tests/preprocess/if_numeric1.x 11
+run_exit if_lit0 tests/preprocess/if_numeric0.x 22
+
 # #elseif arms
 run_exit elseif_none tests/preprocess/elseif.x 3
 run_exit elseif_foo tests/preprocess/elseif.x 1 -D FOO

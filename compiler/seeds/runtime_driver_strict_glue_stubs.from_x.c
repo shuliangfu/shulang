@@ -940,6 +940,24 @@ XLANG_WEAK int32_t preprocess_eval_condition_c(const uint8_t *cond, int32_t cond
     if (c == ' ' || c == '\t' || c == '=' || c == '!' || c == '(' || c == ')')
       return cfg_eval_expr_c((const char *)cond, cond_len) ? 1 : 0;
   }
+  /* Bare decimal literal: nonzero value true, "0" false (9.3.3; digit tokens
+   * never exist in the -D table, so identifier lookup would always be false).
+   * Same semantics as pure runtime_pipeline_abi authority. PLATFORM: SHARED. */
+  {
+    int all_digits = cond_len > 0;
+    int lit_true = 0;
+    for (k = 0; k < cond_len; k++) {
+      char d = (char)cond[k];
+      if (d < '0' || d > '9') {
+        all_digits = 0;
+        break;
+      }
+      if (d != '0')
+        lit_true = 1;
+    }
+    if (all_digits)
+      return lit_true;
+  }
   return preprocess_define_has(cond, cond_len) ? 1 : 0;
 }
 
