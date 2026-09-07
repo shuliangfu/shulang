@@ -1712,12 +1712,18 @@ void xlang_driver_run_thread_on_large_stack_pthread(void *(*fn)(void *), void *a
 }
 
 /**
- * 在大栈 pthread 上执行 fn(arg)；早退 pure 后进永久 OS pthread 面。
- * macOS 主线程 RLIMIT_STACK 硬顶约 8MiB，深递归 pipeline/typeck 须与大 pipeline 同路径。
- * G-02f-246/414 / wave12：public PREFER 时 thin pure orch；冷启动 twin 调同一 OS surface。
+ * Run fn(arg) on the 256MiB-stack pthread; pure early exits then the permanent
+ * OS pthread surface (verbatim mirror of the thin wave12 orch body).
+ * macOS main-thread RLIMIT_STACK caps around 8MiB; deep pipeline/typeck
+ * recursion must share the large pipeline path.
+ * G-02f-246/414 / wave12: public PREFER runs the thin pure orch; this cold twin
+ * keeps the same early-exit order and the same OS surface.
+ * 9.7.7 G.7: the former driver_run_thread_on_large_stack_impl middleman is
+ * collapsed — this public twin now holds the orch body directly.
+ * PLATFORM: SHARED orch; OS boundary only in xlang_driver_run_thread_on_large_stack_pthread.
  */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
-void driver_run_thread_on_large_stack_impl(void *(*fn)(void *), void *arg) {
+void driver_run_thread_on_large_stack(void *(*fn)(void *), void *arg) {
     if (fn == NULL)
         return;
     if (driver_is_large_stack_thread()) {
@@ -1726,8 +1732,10 @@ void driver_run_thread_on_large_stack_impl(void *(*fn)(void *), void *arg) {
     }
     driver_bump_stack_limit();
     /*
-     * NL-07 nostdlib：bootstrap pthread 桩同步跑在当前栈上，256MiB posix_memalign 栈不会生效；
-     * 依赖 driver_bump_stack_limit 在当前线程跑 pipeline，避免栈溢出 SIGSEGV。
+     * NL-07 nostdlib: the bootstrap pthread stub runs synchronously on the
+     * current stack, so a 256MiB posix_memalign stack would not take effect;
+     * rely on driver_bump_stack_limit and run the pipeline on the current
+     * thread to avoid a stack-overflow SIGSEGV.
      */
     if (bootstrap_nostdlib_pthread_is_stub()) {
         driver_run_fn_on_current_large_stack(fn, arg);
@@ -1740,24 +1748,19 @@ void driver_run_thread_on_large_stack_impl(void *(*fn)(void *), void *arg) {
     xlang_driver_run_thread_on_large_stack_pthread(fn, arg);
 }
 #endif
-#ifndef XLANG_L2_RDABI_THIN_FROM_X
-void driver_run_thread_on_large_stack(void *(*fn)(void *), void *arg) {
-    driver_run_thread_on_large_stack_impl(fn, arg);
-}
-#endif
 
-
-
-/** 对外别名：LSP 主循环等在 256MiB 栈 pthread 上执行 fn(arg)。 */
-/* G-02f-414：实现体始终 seed；public PREFER 时 thin pure forward */
-#ifndef XLANG_L2_RDABI_THIN_FROM_X
-void driver_run_on_large_stack_pthread_impl(void *(*fn)(void *), void *arg) {
-    driver_run_thread_on_large_stack_impl(fn, arg);
-}
-#endif
+/**
+ * Public alias: run fn(arg) on the large-stack pthread (LSP main loop etc.).
+ * G-02f-414: body always seed; public PREFER uses the thin pure forward.
+ * 9.7.7: mirrors the thin alias shape — null guard then direct call; the
+ * former driver_run_on_large_stack_pthread_impl middleman is removed.
+ * PLATFORM: SHARED orch.
+ */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 void driver_run_on_large_stack_pthread(void *(*fn)(void *), void *arg) {
-    driver_run_on_large_stack_pthread_impl(fn, arg);
+    if (fn == NULL)
+        return;
+    driver_run_thread_on_large_stack(fn, arg);
 }
 #endif
 
