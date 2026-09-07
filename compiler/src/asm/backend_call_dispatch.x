@@ -279,6 +279,8 @@ export extern function backend_enc_call_stack_reserve_arch(elf: *u8, nbytes: i32
 export extern function backend_enc_push_rax_arch(elf: *u8, ta: i32): i32;
 export extern function backend_enc_mov_eax_to_xmm_arg_reg_arch(elf: *u8, k: i32, ta: i32): i32;
 export extern function backend_enc_mov_rax_to_xmm_arg_reg_arch(elf: *u8, k: i32, ta: i32): i32;
+/** wave149 authority — structural scalar-f64 expression classifier (VAR/BINOP/CALL-aware); runtime_pipeline_abi TU. */
+export extern "C" function glue_binop_operand_is_scalar_f64_elf_c(arena: *u8, ctx: *u8, expr_ref: i32): i32;
 /** wave195 pure authority — call-arg value byte size (VAR/layout preferred). */
 export extern function pipeline_asm_call_arg_value_byte_size_c(arena: *u8, ctx: *u8, arg_ref: i32, pty: i32): i32;
 /**
@@ -3164,7 +3166,7 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
          * PLATFORM: MACOS|ARM64 — local impl homes GP (do not copy import METHOD). */
         if (ta == 0) {
           is_sse_e[ei] = glue_arg_ref_is_sse_float_c(arena, arg_ex, 0);
-          is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, arg_ex, 0);
+          is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
         }
         if (is_sse_e[ei] != 0) {
           if (xmm_cur < 8) {
@@ -3457,7 +3459,7 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
                         // stay GP on arm64 — local xlang callee homes x0).
                         if (ta == 0 || ta == 1) {
                           is_sse_m[i_m] = glue_arg_ref_is_sse_float_c(arena, ar_m, pty_m);
-                          is_f64_m[i_m] = glue_arg_ref_is_f64_width_c(arena, ar_m, pty_m);
+                          is_f64_m[i_m] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_m, pty_m);
                         }
                         if (is_sse_m[i_m] != 0) {
                           if (xmm_cur_m >= 8) { return 0 - 1; }
@@ -3836,7 +3838,7 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
         // Same-layer twin of import METHOD SSE classify (G.7 有则补全).
         if (ta == 0) {
           is_sse_u[i_u] = glue_arg_ref_is_sse_float_c(arena, ar_u, pty_u);
-          is_f64_u[i_u] = glue_arg_ref_is_f64_width_c(arena, ar_u, pty_u);
+          is_f64_u[i_u] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_u, pty_u);
         }
         if (is_sse_u[i_u] != 0) {
           if (xmm_cur_u >= 8) { return 0 - 1; }
@@ -6688,13 +6690,19 @@ function glue_arg_ref_is_sse_float_c(arena: *u8, arg_ref: i32, pty: i32): i32 {
  * f64 width for movq vs movd when placing into xmm.
  * Twin of seed `glue_arg_ref_is_f64_width_c`. Formal TYPE_F64=15 wins;
  * unstamped FLOAT_LIT defaults to f64 (typeck stamp to f32 clears this).
+ * Stamped non-f64 exprs fall through to the kind check; unstamped
+ * non-literal exprs (BINOP / CALL results carry no resolved stamp) fall
+ * back to the structural classifier glue_binop_operand_is_scalar_f64_elf_c
+ * (VAR decl / BINOP operands / callee return kind) — assuming 32-bit there
+ * loaded f64 exprs with movd and truncated the high half (NaN → 0.0).
  * @param arena *u8 — AST arena
+ * @param ctx *u8 — AsmFuncCtx (var-scope lookup for the structural fallback)
  * @param arg_ref i32 — extra / place expr
  * @param pty i32 — formal type_ref
  * @return i32 — 1 = 64-bit xmm move, 0 = 32-bit
  * PLATFORM: SHARED kind / LINUX+MACOS x86_64 SysV.
  */
-function glue_arg_ref_is_f64_width_c(arena: *u8, arg_ref: i32, pty: i32): i32 {
+function glue_arg_ref_is_f64_width_c(arena: *u8, ctx: *u8, arg_ref: i32, pty: i32): i32 {
   if (arena != 0 as *u8) {
     if (pty > 0) {
       unsafe {
@@ -6723,7 +6731,13 @@ function glue_arg_ref_is_f64_width_c(arena: *u8, arg_ref: i32, pty: i32): i32 {
       return 1;
     }
     atr = pipeline_expr_resolved_type_ref(arena, arg_ref);
-    if (atr <= 0) { return 0; }
+    if (atr <= 0) {
+      // Unstamped BINOP/CALL-result: structural fallback (single authority
+      // with the binop promote/demote paths), not a blind 32-bit assumption.
+      unsafe {
+        return glue_binop_operand_is_scalar_f64_elf_c(arena, ctx, arg_ref);
+      }
+    }
     ak = pipeline_type_kind_ord_at(arena, atr);
     if (ak == 15) { return 1; }
   }

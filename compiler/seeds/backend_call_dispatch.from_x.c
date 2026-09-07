@@ -636,8 +636,12 @@ static int32_t glue_call_arg_is_sse_float_c(struct ast_ASTArena *arena, int32_t 
   return glue_arg_ref_is_sse_float_c(arena, arg_ref, pty);
 }
 
+/* Structural scalar-f64 classifier (runtime_pipeline_abi TU; VAR decl /
+ * BINOP operands / callee return kind) — fallback for unstamped exprs. */
+extern int32_t glue_binop_operand_is_scalar_f64_elf_c(void *arena, void *ctx, int32_t expr_ref);
+
 /** f64 width for movq vs movd when placing into xmm. */
-static int32_t glue_arg_ref_is_f64_width_c(struct ast_ASTArena *arena, int32_t arg_ref, int32_t pty) {
+static int32_t glue_arg_ref_is_f64_width_c(struct ast_ASTArena *arena, void *ctx, int32_t arg_ref, int32_t pty) {
   int32_t atr;
   int32_t ak;
   if (pty > 0 && arena) {
@@ -664,19 +668,24 @@ static int32_t glue_arg_ref_is_f64_width_c(struct ast_ASTArena *arena, int32_t a
     return 1;
   }
   atr = pipeline_expr_resolved_type_ref(arena, arg_ref);
-  if (atr <= 0)
-    return 0;
+  if (atr <= 0) {
+    /* Unstamped BINOP/CALL-result exprs carry no resolved stamp: fall back
+     * to the structural classifier instead of assuming 32-bit — the blind
+     * 0 loaded f64 exprs with movd and truncated the high half (NaN → 0.0).
+     * Same root as the f32 store demote fix (stampless exprs). */
+    return glue_binop_operand_is_scalar_f64_elf_c(arena, ctx, arg_ref);
+  }
   ak = pipeline_type_kind_ord_at(arena, atr);
   return ak == 15 ? 1 : 0;
 }
 
-static int32_t glue_call_arg_is_f64_width_c(struct ast_ASTArena *arena, int32_t call_expr_ref, int32_t arg_index,
-                                            int32_t pty) {
+static int32_t glue_call_arg_is_f64_width_c(struct ast_ASTArena *arena, void *ctx, int32_t call_expr_ref,
+                                            int32_t arg_index, int32_t pty) {
   int32_t arg_ref;
   if (!arena || call_expr_ref <= 0)
-    return glue_arg_ref_is_f64_width_c(arena, 0, pty);
+    return glue_arg_ref_is_f64_width_c(arena, ctx, 0, pty);
   arg_ref = pipeline_expr_call_arg_ref(arena, call_expr_ref, arg_index);
-  return glue_arg_ref_is_f64_width_c(arena, arg_ref, pty);
+  return glue_arg_ref_is_f64_width_c(arena, ctx, arg_ref, pty);
 }
 
 /**
@@ -1156,7 +1165,7 @@ int32_t glue_emit_call_args_elf_sysv_f32_xmm_c_impl(struct ast_ASTArena *arena,
       spill_kind[i] = use_xmm ? 1 : 0;
       spill_reg[i] = reg_k;
       spill_units[i] = units;
-      spill_is_f64[i] = glue_call_arg_is_f64_width_c(arena, expr_ref, i, pty) || arg_ko == 1 ||
+      spill_is_f64[i] = glue_call_arg_is_f64_width_c(arena, ctx, expr_ref, i, pty) || arg_ko == 1 ||
                        (pty > 0 && pipeline_type_kind_ord_at(arena, pty) == 15);
     }
     for (i = 0; i < nargs; i++) {
@@ -3088,7 +3097,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
         ar_i = pipeline_expr_call_arg_ref(arena, expr_ref, i);
         pty_i = glue_call_param_type_ref_at(arena, expr_ref, i);
         is_sse[i] = glue_call_arg_is_sse_float_c(arena, expr_ref, i, pty_i);
-        is_f64[i] = glue_call_arg_is_f64_width_c(arena, expr_ref, i, pty_i);
+        is_f64[i] = glue_call_arg_is_f64_width_c(arena, ctx, expr_ref, i, pty_i);
         if (is_sse[i]) {
           gp_start[i] = xmm_cur < 8 ? xmm_cur : -1;
           gp_units[i] = 1;
@@ -6278,7 +6287,7 @@ int32_t pipeline_asm_emit_method_call_elf_c_impl(struct ast_ASTArena *arena, str
               return -1;
             if (ta == 0) {
               is_sse_e[ei] = glue_arg_ref_is_sse_float_c(arena, arg_ex, 0);
-              is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, arg_ex, 0);
+              is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
             }
             if (is_sse_e[ei] != 0) {
               if (xmm_cur < 8) {
@@ -6524,7 +6533,7 @@ int32_t pipeline_asm_emit_method_call_elf_c_impl(struct ast_ASTArena *arena, str
                * G.7: same gate as prefer backend_call_dispatch.x import METHOD (ta==0||ta==1).
                * UFCS places[] below stays ta==0 only (local X callee homes x0). */
               is_sse[i] = (ta == 0 || ta == 1) ? glue_arg_ref_is_sse_float_c(arena, arg_ref, pty_i) : 0;
-              is_f64[i] = glue_arg_ref_is_f64_width_c(arena, arg_ref, pty_i);
+              is_f64[i] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ref, pty_i);
               if (is_sse[i]) {
                 if (xmm_cur >= 8)
                   return -1;
@@ -6907,7 +6916,7 @@ int32_t pipeline_asm_emit_method_call_elf_c_impl(struct ast_ASTArena *arena, str
         sz = glue_sysv_arg_byte_size_c(arena, ctx, pty_i, arg_ref);
       arg_sz[i] = sz;
       is_sse[i] = (ta == 0) ? glue_arg_ref_is_sse_float_c(arena, arg_ref, pty_i) : 0;
-      is_f64[i] = glue_arg_ref_is_f64_width_c(arena, arg_ref, pty_i);
+      is_f64[i] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ref, pty_i);
       if (is_sse[i]) {
         if (xmm_cur >= 8)
           return -1;
