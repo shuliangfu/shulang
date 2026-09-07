@@ -7,7 +7,8 @@
  *
  * Uses xlang_va_cap.h (10.7.1) — no <stdarg.h>. No <string.h> (local strlen).
  *
- * Specs: %% %c %s %d %u %ld %lu %x %p %f/%F/%g/%G/%e/%E plus width / .* precision.
+ * Specs: %% %c %s %d %u %ld %lu %zu %x %lx %zx %p %f/%F/%g/%G/%e/%E plus width /
+ * .* precision.
  *
  * PLATFORM: SHARED (GCC/Clang builtins via Cap va).
  */
@@ -131,6 +132,7 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       int pad_zero = 0;
       int prec = -1;
       int longmod = 0;
+      int sizeflag = 0;
       if (*fmt == '0') {
         pad_zero = 1;
         fmt++;
@@ -159,6 +161,14 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       }
       if (*fmt == 'l') {
         longmod = 1;
+        fmt++;
+      }
+      /* Cap residual 9.5.3 slice3b: %z length modifier (previously fell into
+       * default → literal 'z' AND skipped the va_arg pop, desyncing later
+       * arguments). size_t is fetched as size_t — correct on LP64 unix and
+       * Windows x64/arm64 LLP64 alike (unsigned long is 32-bit there). */
+      if (*fmt == 'z') {
+        sizeflag = 1;
         fmt++;
       }
       (void)width;
@@ -215,8 +225,13 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
         break;
       }
       case 'u': {
-        unsigned long v =
-            longmod ? xlang_va_arg(ap, unsigned long) : xlang_va_arg(ap, unsigned int);
+        unsigned long v;
+        if (sizeflag)
+          v = (unsigned long)xlang_va_arg(ap, size_t);
+        else if (longmod)
+          v = xlang_va_arg(ap, unsigned long);
+        else
+          v = xlang_va_arg(ap, unsigned int);
         char ib[32];
         int in = 0;
         if (v == 0) {
@@ -237,8 +252,13 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
         break;
       }
       case 'x': {
-        unsigned long v =
-            longmod ? xlang_va_arg(ap, unsigned long) : xlang_va_arg(ap, unsigned int);
+        unsigned long v;
+        if (sizeflag)
+          v = (unsigned long)xlang_va_arg(ap, size_t);
+        else if (longmod)
+          v = xlang_va_arg(ap, unsigned long);
+        else
+          v = xlang_va_arg(ap, unsigned int);
         char ib[32];
         int in = 0;
         if (v == 0) {

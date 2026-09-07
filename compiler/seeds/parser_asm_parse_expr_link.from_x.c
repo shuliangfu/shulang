@@ -18,8 +18,25 @@
 #include <xlang_weak.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+/* Cap residual 9.5.3 slice3b: stderr diagnostics go through xlang_snprintf (10.7.2
+ * fmt authority, %zu supported) + xlang_io_write on raw fd 2 — libc <stdio.h>
+ * dropped (fflush becomes a no-op concept: raw fd writes are unbuffered). */
+#include <xlang_fmt_cap.h>
+#include <xlang_io_cap.h>
+#undef snprintf
+#define snprintf xlang_snprintf
+
+/* Cap stderr write helpers (fd 2). Single authority inside this TU for the
+ * parse_expr debug diagnostics. */
+static void cap_err_puts(const char *s) {
+  if (s)
+    (void)xlang_io_write(2, s, strlen(s));
+}
+static void cap_err_putc(char c) {
+  (void)xlang_io_write(2, &c, 1);
+}
 
 /** 与 parser_asm / lexer.x Lexer 布局一致。 */
 struct parser_asm_lexer {
@@ -98,7 +115,7 @@ void parser_asm_parse_expr_debug_snippet_c(struct parser_asm_slice_u8 *source, s
   size_t end;
   size_t i;
   if (!source || !source->data || source->length == 0) {
-    fprintf(stderr, " snippet=<no-source>\n");
+    cap_err_puts(" snippet=<no-source>\n");
     return;
   }
   start = pos;
@@ -111,21 +128,24 @@ void parser_asm_parse_expr_debug_snippet_c(struct parser_asm_slice_u8 *source, s
   end = pos + 24;
   if (end > source->length)
     end = source->length;
-  fprintf(stderr, " snippet=");
+  cap_err_puts(" snippet=");
   for (i = start; i < end; i++) {
     unsigned char ch = source->data[i];
     if (ch == (unsigned char)'\n')
-      fputs("\\n", stderr);
+      cap_err_puts("\\n");
     else if (ch == (unsigned char)'\r')
-      fputs("\\r", stderr);
+      cap_err_puts("\\r");
     else if (ch == (unsigned char)'\t')
-      fputs("\\t", stderr);
-    else if (ch < 32 || ch > 126)
-      fprintf(stderr, "\\x%02x", ch);
-    else
-      fputc((int)ch, stderr);
+      cap_err_puts("\\t");
+    else if (ch < 32 || ch > 126) {
+      char _xb[8];
+      int _xn = snprintf(_xb, sizeof _xb, "\\x%02x", ch);
+      if (_xn > 0)
+        (void)xlang_io_write(2, _xb, (size_t)_xn);
+    } else
+      cap_err_putc((char)ch);
   }
-  fputc('\n', stderr);
+  cap_err_putc('\n');
 }
 
 
@@ -157,11 +177,16 @@ void parse_expr_into(void *arena, struct parser_asm_lexer lex, struct parser_asm
   }
   if (debug_enabled && (parse_expr_debug_calls <= 64 || (parse_expr_debug_calls % 4096) == 0
       || same_in_pos_count == PARSER_ASM_PARSE_EXPR_SAME_POS_WARN)) {
-    fprintf(stderr, "parser_asm parse_expr enter call=%d in_pos=%zu line=%d col=%d len=%zu same=%d\n",
-            parse_expr_debug_calls, lex.pos, lex.line, lex.col, source->length, same_in_pos_count);
+    {
+      char _db[256];
+      int _dn = snprintf(_db, sizeof _db,
+                         "parser_asm parse_expr enter call=%d in_pos=%zu line=%d col=%d len=%zu same=%d\n",
+                         parse_expr_debug_calls, lex.pos, lex.line, lex.col, source->length, same_in_pos_count);
+      if (_dn > 0)
+        (void)xlang_io_write(2, _db, (size_t)_dn);
+    }
     if (parse_expr_debug_calls <= 16)
       parser_asm_parse_expr_debug_snippet_c(source, lex.pos);
-    fflush(stderr);
   }
   mega_lex.pos = lex.pos;
   mega_lex.line = lex.line;
@@ -171,10 +196,15 @@ void parse_expr_into(void *arena, struct parser_asm_lexer lex, struct parser_asm
   parser_parse_expr_into((struct ast_ASTArena *)arena, mega_lex, &mega_src, &mega_out);
   if (debug_enabled && (parse_expr_debug_calls <= 64 || (parse_expr_debug_calls % 4096) == 0 || mega_out.next_lex.pos < lex.pos
       || mega_out.next_lex.pos == lex.pos || same_in_pos_count >= PARSER_ASM_PARSE_EXPR_SAME_POS_WARN)) {
-    fprintf(stderr, "parser_asm parse_expr leave call=%d ok=%d in_pos=%zu out_pos=%zu expr=%d out_line=%d out_col=%d\n",
-            parse_expr_debug_calls, mega_out.ok, lex.pos, mega_out.next_lex.pos, mega_out.expr_ref, mega_out.next_lex.line,
-            mega_out.next_lex.col);
-    fflush(stderr);
+    {
+      char _db[256];
+      int _dn = snprintf(_db, sizeof _db,
+                         "parser_asm parse_expr leave call=%d ok=%d in_pos=%zu out_pos=%zu expr=%d out_line=%d out_col=%d\n",
+                         parse_expr_debug_calls, mega_out.ok, lex.pos, mega_out.next_lex.pos, mega_out.expr_ref, mega_out.next_lex.line,
+                         mega_out.next_lex.col);
+      if (_dn > 0)
+        (void)xlang_io_write(2, _db, (size_t)_dn);
+    }
   }
   out->ok = mega_out.ok;
   out->expr_ref = mega_out.expr_ref;
