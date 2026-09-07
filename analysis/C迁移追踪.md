@@ -295,7 +295,7 @@
 
 - ✅ **9.5.1** driver_preamble_fputs — **.x thin 已接管 ✅**：Wave22 pure（`runtime_driver_abi_thin.x`）＋g05 `xlang_driver_fputs_opaque`，PREFER hybrid 模式下权威在 .x。  
 - ✅ **9.5.2** xlang_target_cpu_print（FILE／fprintf）— **全平台 Cap 闭环 ✅**：基于 `xlang_io_write` 统管 Linux/Darwin raw syscall 与 Windows `_write`，手工 hex 输出；`HAVE_XLANG_IO_PRINT_CAP` 全平台开启；`target_cpu.o` 双端强校验零 libc `fprintf`／`fwrite` 未定义符号；`--print-target-cpu` 门禁 `tests/run-simd-s1-gate.sh` 双端全通。  
-- 🟡 **9.5.3** reportf／va_list — **slice0–2 ✅**：slice0–1＠`26357d82a` diag＋lsp typeck reportf → Cap；slice2＠`b0d1c8068` 崩证 note/bundle／panic 消息／JSON debug 打印簇／parser_asm_thin trace／9 gen seed pin 模板全走 `xlang_io_open_write`＋`xlang_io_write`＋`xlang_snprintf`（新增 `xlang_io_open_write` 四平台权威；双端 13 对象 nm 验 stdio=0）；**slice3a ✅**＠`a5ba1d2f3` runtime_log_os smoke 读回 → `xlang_proc_read_file`（生产 sink 本已 fd Cap）；**slice3b ✅**＠`0a650a095` runtime_link_abi .inc wrap 写手＋debug-env 读手＋link_only trace → Cap（**fmt 权威补 `%z` 修饰符**——原 default 吞变参真 bug）；parser_asm_parse_expr_link 12 处诊断全 Cap；**残 slice3**：`src/diag.o`（seed 84 处）· `src/runtime_driver_abi.o`（seed 75 处，**跨 TU FILE\* 簇**：strict_glue_stubs fputs／rt_preamble fputs／runtime_driver_no_c 同流）· `src/runtime_pipeline_abi.o`（seed 122 处）· `src/lsp/lsp_diag.o`（lsp_diag.x）· `src/async/async_cps_codegen.o`＋`async_liveness.o`（driver_preamble_fputs）· link_abi popen/pclose/fgets nm 扫描器（9.2 进程管道域）· 语言 va_list 面
+- 🟡 **9.5.3** reportf／va_list — **slice0–3b ✅**：slice0–1＠`26357d82a` diag＋lsp typeck reportf → Cap；slice2＠`b0d1c8068` 崩证／panic／JSON debug／parser_asm_thin trace／9 gen pin 模板；slice3a＠`a5ba1d2f3` runtime_log_os；slice3b＠`0a650a095` link_abi wrap/env/trace＋parse_expr_link 12 处＋**fmt 权威补 `%z`**（原 default 吞变参真 bug）。**残 slice3 ＝ 一张互联 opaque FILE\* 脸（＝9.7.1 域，须整体换 fd 句柄面，禁逐点半残）**：`driver_abi` 8 个 `xlang_driver_{fputs,stdout,fclose,fwrite,fopen_w,fopen_wb,stderr,fflush}_opaque`（rt_entry R2 .x diag_print\_\* 消费）· `diag` 微 ABI（`diag_stderr`／`diag_io_fputc/fputs/fputs_u04x/fflush`，被 diag_surface／diag_thin_surface／runtime_pipeline_abi 消费）· 消费 TU：strict_glue_stubs fputs／rt_preamble fputs／runtime_driver_no_c／async_cps_codegen＋async_liveness（driver_preamble_fputs）· link_abi popen nm 扫描器（9.2 域）· 语言 va_list 面
 - 🟡 **9.5.4** vsnprintf + write — 部分吸收于 **10.7.2** Cap（nostdlib＋diag＋**lsp_diag 全 fmt**＠`1fd734bb6`）；残：write 路径／其它 seed
 
 ### 9.6 全局／static／巨型数据（P1）
@@ -306,7 +306,7 @@
 
 ### 9.7 driver_abi 平台层（P3）
 
-- ⬜ **9.7.1** FILE／pctx／host／defines／work 槽  
+- 🟡 **9.7.1** FILE／pctx／host／defines／work 槽 — **＝9.5.3 slice3 残余的统一主刀**（2026-09-07 上帝视角结论）：opaque `FILE*` 脸横跨 driver_abi（8 个 `xlang_driver_*_opaque`，rt_entry R2 .x 消费）＋diag 微 ABI（`diag_stderr`／`diag_io_*`，被 diag_surface／diag_thin_surface／runtime_pipeline_abi 消费）＋外围 TU（strict_glue_stubs／rt_preamble／runtime_driver_no_c／async_*）；换 **fd 句柄面**（`int` fd ＋ 9.1.8/9.5.3 `xlang_io_write`/`xlang_io_open_write`/`xlang_proc_close_fd` 权威）后 9.5.3 剩余 TU 机械落定；禁逐 TU 半残转换
 - ⬜ **9.7.2** lib_roots 槽 + Parsed 填表  
 - ⬜ **9.7.3** GAS 行表 + OutBuf append  
 - ⬜ **9.7.4** driver_stdio_* + driver_entry_*_slot  
