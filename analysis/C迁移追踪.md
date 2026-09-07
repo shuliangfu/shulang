@@ -27,7 +27,7 @@
 | Mega 去 pin M4（阶段 7） | 🟡 | 冷链关 pin 5/5；**7.4.6–7.4.9** pin 孪生已落盘；双端 L4＠`b5be5ed97` bstrict **129**；parser seed 物理删／CI 漂移闸 ⬜ |
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
-| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.4–6／9.5.1–3／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`）；余 9.2–3／9.4.2–3／9.5.4 ⬜ |
+| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2／9.4.4–6／9.5.1–3／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`）；余 9.2–3／9.4.3／9.5.4 ⬜ |
 | 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
@@ -285,7 +285,7 @@
 ### 9.4 C ABI／fnptr／线程（P1）
 
 - ✅ **9.4.1** uintptr_t→fnptr cast + indirect call — 吸收于 **10.3** Cap `*u8`／`as function`／Cap CALL（Ubuntu）；Darwin Cap 仍阻
-- ⬜ **9.4.2** `void*(*)(void*)` C ABI  
+- ✅ **9.4.2** `void*(*)(void*)` C ABI — **双端闭环 ✅（`fb4019d32`）**：载体 p2（xlang fn 地址 → `thread_create_c`(pthread_create) → pthread 回调 → join → 栈上副作用）双端全绿；同 commit 收口 9.4.2 邻域既有卡（fn-ptr 全局表／ADDR_OF 全局不 seed）：①`pipe_modlet_lea_fn_sym_to_rax`（#[no_mangle] 权威 fn 符号 LEA spell，Mach-O `'_'`／ELF 裸名；as-impl／var-fast fnptr 块委托之）；②`pipe_modlet_lea_named_binding_addr_to_rax`（modlet COMMON cell → 同模 fn 符号；ADDR_OF 与 lvalue VAR scoped-miss 统一全局回退，`&g`／非局部 VAR 双路径通）；③prepare 门新谓词 `pipe_modlet_array_lit_has_ptr_addr_elem`（裸 fn／`fn as *u8`／`&global` 地址元素，嵌套行递归；门传 **unwrap 后 elem type**，镜像 seeder caller 的 `et` 语义——首测门传整数组 type 致 q2/q3 仍 bake→CG002，已根修）→ 此类表留 COMMON（`.data` bake 无法表达重定位）；④entry seeder `pipe_modlet_seed_ptr_addr_elem_to_rbx`（地址元素 lea→store，esz==8 高声校验；非地址元素仍走 fold）。`.x` 权威＋冷学生 seed twin 同 commit 同语义。验收＝`tests/probes/wave942`（q2 裸 fn 表／q3 as 表／q4 q5 `&global` 翻绿；q1 q6 p2 base 回归保绿）双端全绿＋Ubuntu `product_l2_matrix` 5/5＠`8dbf6b4b0`（xlang＋xlang_asm 双新）。残：fnptr-as thin 保持历史内联 spell（dev box mega -E OOM，Ubuntu gold hybrid 已吃 `.x` 权威）；seed 第二 WIN-leftover addr_of 变体无回退（Windows 高声拒）；`function(i32):i32` 全局赋值 typeck mismatch 另立前端卡（p3 家族）。  
 - ⬜ **9.4.3** `main` 的 `char`** argv  
 - ✅ **9.4.4** pthread_mutex／cond／create — **全平台 Cap 闭环 ✅**：Linux futex＋Darwin pthread Cap＋Windows Win32 sync/thread Cap；`runtime_sync_os`、`runtime_thread_glue`、`runtime_channel_glue`、`runtime_queue_contention` 全部收敛至 `xlang_sync_cap.h` 与 `xlang_thread_cap.h`，消灭全部裸 pthread 锁／条件变量与线程创建。  
 - ✅ **9.4.5** CRITICAL_SECTION／SRWLOCK／CONDITION_VARIABLE／CreateThread／`_beginthreadex` — **全平台 Cap 闭环 ✅**：吸收并闭环于 `xlang_sync_cap.h` 与 `xlang_thread_cap.h`；Windows 侧 `CRITICAL_SECTION`、`CONDITION_VARIABLE`、`_beginthreadex` 在 channel、queue、sync、thread 中全部统一为 Cap 结构与操作，消灭全部平台分支冗余。  
