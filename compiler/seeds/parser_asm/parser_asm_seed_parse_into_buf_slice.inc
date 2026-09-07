@@ -4166,9 +4166,11 @@ struct parser_asm_seed_parse_into_result parser_asm_seed_parse_into_buf_c(void *
         continue;
       }
       if (getenv("XLANG_DBG_FUNC")) {
-        fprintf(stderr, "[DBG_FUNC] ok name=%.*s pos_before=%zu pos_after=%zu\n",
-                (int)(res.name_len > 0 ? res.name_len : 0), res.name,
-                (size_t)lex_at_function.pos, (size_t)lex.pos);
+        /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+        { char _db[384]; int _dn = snprintf(_db, sizeof _db, "[DBG_FUNC] ok name=%.*s pos_before=%zu pos_after=%zu\n",
+            (int)(res.name_len > 0 ? res.name_len : 0), res.name,
+            (size_t)lex_at_function.pos, (size_t)lex.pos);
+          if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
       }
     }
   }

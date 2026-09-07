@@ -7,6 +7,8 @@
 /* G.7: Cap after stdio for compiler-only gen seed pin crash evidence. */
 #undef snprintf
 #define snprintf xlang_snprintf
+#include <xlang_io_cap.h>   /* Cap residual 9.5.3: xlang_io_write / xlang_io_open_write */
+#include <xlang_proc_cap.h> /* Cap residual 9.5.3: xlang_proc_close_fd (single close authority) */
 #include <string.h>
 #include <math.h>
 /* wave245 G.7: env via public pure thin link_abi_getenv (wave222 → _impl host getenv);
@@ -18,17 +20,26 @@ extern char *link_abi_getenv(const char *name);
 extern int getpid(void);
 static inline void xlang_crash_evidence_collect_inline(int has_msg, int msg_val) {
   const char *_ev = link_abi_getenv("XLANG_CRASH_EVIDENCE");
+  char _note[192];
   if (!_ev || _ev[0] != '1') return;
   int _pid = (int)getpid();
-  fprintf(stderr, "xlang: [XLANG_CRASH_EVIDENCE] panic=%d msg=%d frames=0 pid=%d\n", has_msg, msg_val, _pid);
-  const char *_dir = link_abi_getenv("XLANG_CRASH_EVIDENCE_DIR");
-  if (_dir && _dir[0]) { char _p[1024]; snprintf(_p, sizeof _p, "%s/xlang-crash-%d.txt", _dir, _pid);
-    FILE *_f = fopen(_p, "w"); if (_f) { fprintf(_f, "panic_has_msg=%d\npanic_msg=%d\nframes=0\npid=%d\n", has_msg, msg_val, _pid); fclose(_f);
-      fprintf(stderr, "xlang: [XLANG_CRASH_EVIDENCE] bundle=%s\n", _p); } } }
+  { int _n = snprintf(_note, sizeof _note, "xlang: [XLANG_CRASH_EVIDENCE] panic=%d msg=%d frames=0 pid=%d\n", has_msg, msg_val, _pid);
+    if (_n > 0) (void)xlang_io_write(2, _note, (size_t)_n); }
+  { const char *_dir = link_abi_getenv("XLANG_CRASH_EVIDENCE_DIR");
+    if (_dir && _dir[0]) { char _p[1024]; snprintf(_p, sizeof _p, "%s/xlang-crash-%d.txt", _dir, _pid);
+      { int _fd = xlang_io_open_write(_p);
+        if (_fd >= 0) { char _body[160];
+          int _bl = snprintf(_body, sizeof _body, "panic_has_msg=%d\npanic_msg=%d\nframes=0\npid=%d\n", has_msg, msg_val, _pid);
+          if (_bl > 0) (void)xlang_io_write(_fd, _body, (size_t)_bl);
+          (void)xlang_proc_close_fd(_fd);
+          { int _bn = snprintf(_note, sizeof _note, "xlang: [XLANG_CRASH_EVIDENCE] bundle=%s\n", _p);
+            if (_bn > 0) (void)xlang_io_write(2, _note, (size_t)_bn); } } } } }
+}
 static inline void xlang_panic_(int has_msg, int msg_val) __attribute__((noreturn, cold));
 static inline void xlang_panic_(int has_msg, int msg_val) {
   xlang_crash_evidence_collect_inline(has_msg, msg_val);
-  if (has_msg) (void)fprintf(stderr, "%d\n", msg_val);
+  if (has_msg) { char _mb[32]; int _mn = snprintf(_mb, sizeof _mb, "%d\n", msg_val);
+    if (_mn > 0) (void)xlang_io_write(2, _mb, (size_t)_mn); }
   abort();
 }
 struct std_io_sync_Iovec { uint8_t * base; size_t length; };

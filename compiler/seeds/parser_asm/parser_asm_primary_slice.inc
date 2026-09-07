@@ -781,9 +781,10 @@ static void parser_asm_primary_ident_suffix_loop_c(void *arena, struct parser_as
   debug_enabled = parser_asm_suffix_debug_enabled();
   parser_asm_suffix_debug_calls++;
   if (debug_enabled && (parser_asm_suffix_debug_calls <= 64 || (parser_asm_suffix_debug_calls % 1024) == 0)) {
-    fprintf(stderr, "parser_asm suffix call=%d pos=%d tok=%d line=%d col=%d first=%d expr=%d\n",
-            parser_asm_suffix_debug_calls, lex->pos, r->tok.kind, lex->line, lex->col, first_suffix, out->expr_ref);
-    fflush(stderr);
+    /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+    { char _db[256]; int _dn = snprintf(_db, sizeof _db, "parser_asm suffix call=%d pos=%d tok=%d line=%d col=%d first=%d expr=%d\n",
+        parser_asm_suffix_debug_calls, lex->pos, r->tok.kind, lex->line, lex->col, first_suffix, out->expr_ref);
+      if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
   }
   for (;;) {
     const char *branch_tag;
@@ -802,9 +803,10 @@ static void parser_asm_primary_ident_suffix_loop_c(void *arena, struct parser_as
       branch_tag = "stop";
     parser_asm_suffix_debug_iters++;
     if (debug_enabled && (parser_asm_suffix_debug_iters % 16384) == 0) {
-      fprintf(stderr, "parser_asm suffix iter=%d pos=%d tok=%d branch=%s line=%d col=%d expr=%d\n",
-              parser_asm_suffix_debug_iters, lex->pos, r->tok.kind, branch_tag, lex->line, lex->col, out->expr_ref);
-      fflush(stderr);
+      /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+      { char _db[256]; int _dn = snprintf(_db, sizeof _db, "parser_asm suffix iter=%d pos=%d tok=%d branch=%s line=%d col=%d expr=%d\n",
+          parser_asm_suffix_debug_iters, lex->pos, r->tok.kind, branch_tag, lex->line, lex->col, out->expr_ref);
+        if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
     }
     if (lex->pos == prev_pos && r->tok.kind == prev_tok_kind) {
       stall_count++;

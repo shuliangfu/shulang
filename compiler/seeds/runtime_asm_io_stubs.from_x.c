@@ -26,6 +26,76 @@
 #include <xlang_io_cap.h>
 #include <xlang_proc_cap.h>
 
+#include <xlang_fmt_cap.h> /* Cap residual 9.5.3: JSON debug print via Cap snprintf */
+#include <string.h>
+/* G.7: Cap after stdio — debug print cluster must not reach libc printf/putchar/fputs. */
+#undef snprintf
+#define snprintf xlang_snprintf
+
+/*
+ * Cap residual 9.5.3: debug print via Cap IO face — libc printf/putchar/fputs
+ * replaced by xlang_io_write on fd 1 (stdout) + xlang_snprintf
+ * (G.7 single authorities: xlang_io_cap.h / xlang_fmt_cap.h).
+ * PLATFORM: SHARED.
+ */
+static void io_cap_putc(int c) {
+  char ch = (char)c;
+  (void)xlang_io_write(1, &ch, 1);
+}
+static void io_cap_puts(const char *s) {
+  if (s)
+    (void)xlang_io_write(1, s, strlen(s));
+}
+static void io_cap_print_i32(int32_t v) {
+  char b[16];
+  int n = snprintf(b, sizeof b, "%d", (int)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_println_i32(int32_t v) {
+  char b[16];
+  int n = snprintf(b, sizeof b, "%d\n", (int)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_print_u32(uint32_t v) {
+  char b[16];
+  int n = snprintf(b, sizeof b, "%u", (unsigned)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_println_u32(uint32_t v) {
+  char b[16];
+  int n = snprintf(b, sizeof b, "%u\n", (unsigned)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_print_i64(int64_t v) {
+  char b[24];
+  int n = snprintf(b, sizeof b, "%lld", (long long)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_println_i64(int64_t v) {
+  char b[24];
+  int n = snprintf(b, sizeof b, "%lld\n", (long long)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_print_u64(uint64_t v) {
+  char b[24];
+  int n = snprintf(b, sizeof b, "%llu", (unsigned long long)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+static void io_cap_println_u64(uint64_t v) {
+  char b[24];
+  int n = snprintf(b, sizeof b, "%llu\n", (unsigned long long)v);
+  if (n > 0)
+    (void)xlang_io_write(1, b, (size_t)n);
+}
+
+
 /**
  * Cap residual 9.1.8: seed_io_syscall_* → xlang_io_cap.h (G.7 single authority).
  * F-03 无 std/io/io.o 时供 nostdlib / gcc 链；timeout 在 seed 桩 v1 忽略。
@@ -487,17 +557,17 @@ int32_t seed_io_write_fd1(uint8_t *ptr, size_t len, uint32_t timeout_ms) {
 
 
 int32_t std_io_print_i32(int32_t x) {
-  (void)printf("%d\n", (int)x);
+  io_cap_println_i32(x);
   return 0;
 }
 
 int32_t std_io_print_u32(uint32_t x) {
-  (void)printf("%u\n", (unsigned)x);
+  io_cap_println_u32(x);
   return 0;
 }
 
 int32_t std_io_print_i64(int64_t x) {
-  (void)printf("%lld\n", (long long)x);
+  io_cap_println_i64(x);
   return 0;
 }
 
@@ -582,42 +652,42 @@ typedef struct XlangSliceU8 {
  * Return 0 on success (printf write path); align std_io_print_i32.
  */
 int32_t std_fmt_print_i32(int32_t x) {
-  (void)printf("%d", (int)x);
+  io_cap_print_i32(x);
   return 0;
 }
 
 int32_t std_fmt_println_i32(int32_t x) {
-  (void)printf("%d\n", (int)x);
+  io_cap_println_i32(x);
   return 0;
 }
 
 int32_t std_fmt_print_u32(uint32_t x) {
-  (void)printf("%u", (unsigned)x);
+  io_cap_print_u32(x);
   return 0;
 }
 
 int32_t std_fmt_println_u32(uint32_t x) {
-  (void)printf("%u\n", (unsigned)x);
+  io_cap_println_u32(x);
   return 0;
 }
 
 int32_t std_fmt_print_i64(int64_t x) {
-  (void)printf("%lld", (long long)x);
+  io_cap_print_i64(x);
   return 0;
 }
 
 int32_t std_fmt_println_i64(int64_t x) {
-  (void)printf("%lld\n", (long long)x);
+  io_cap_println_i64(x);
   return 0;
 }
 
 int32_t std_fmt_print_u64(uint64_t x) {
-  (void)printf("%llu", (unsigned long long)x);
+  io_cap_print_u64(x);
   return 0;
 }
 
 int32_t std_fmt_println_u64(uint64_t x) {
-  (void)printf("%llu\n", (unsigned long long)x);
+  io_cap_println_u64(x);
   return 0;
 }
 
@@ -659,18 +729,19 @@ int32_t std_fmt_println_u8_slc(const XlangSliceU8 *s) {
 
 static void fmt_json_escape_byte(unsigned char c) {
   if (c == '\\' || c == '"') {
-    putchar('\\');
-    putchar((int)c);
+    io_cap_putc('\\');
+    io_cap_putc((int)c);
   } else if (c == '\n') {
-    fputs("\\n", stdout);
+    io_cap_puts("\\n");
   } else if (c == '\r') {
-    fputs("\\r", stdout);
+    io_cap_puts("\\r");
   } else if (c == '\t') {
-    fputs("\\t", stdout);
+    io_cap_puts("\\t");
   } else if (c < 32) {
-    printf("\\x%02x", (unsigned)c);
+{ char _b[8]; int _n = snprintf(_b, sizeof _b, "\\x%02x", (unsigned)c);
+      if (_n > 0) (void)xlang_io_write(1, _b, (size_t)_n); }
   } else {
-    putchar((int)c);
+    io_cap_putc((int)c);
   }
 }
 
@@ -702,17 +773,17 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
   if (*sch == 'i' && sch[1] == '@') {
     sch = fmt_json_parse_dec(sch + 2, &off);
     if (base)
-      printf("%d", (int)(*(const int32_t *)(base + off)));
+      io_cap_print_i32((int)(*(const int32_t *)(base + off)));
     else
-      fputs("0", stdout);
+      io_cap_puts("0");
     return sch;
   }
   if (*sch == 'b' && sch[1] == '@') {
     sch = fmt_json_parse_dec(sch + 2, &off);
     if (base && base[off])
-      fputs("true", stdout);
+      io_cap_puts("true");
     else
-      fputs("false", stdout);
+      io_cap_puts("false");
     return sch;
   }
   if (*sch == 'u' && sch[1] == '@') {
@@ -720,12 +791,12 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
     if (*sch == ',')
       sch++;
     sch = fmt_json_parse_dec(sch, &len);
-    putchar('"');
+    io_cap_putc('"');
     if (base && len > 0) {
       for (i = 0; i < len; i++)
         fmt_json_escape_byte(base[off + i]);
     }
-    putchar('"');
+    io_cap_putc('"');
     return sch;
   }
   if (*sch == 'a' && sch[1] == '@') {
@@ -733,16 +804,16 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
     if (*sch == ',')
       sch++;
     sch = fmt_json_parse_dec(sch, &len);
-    putchar('[');
+    io_cap_putc('[');
     if (base && len > 0) {
       const int32_t *arr = (const int32_t *)(base + off);
       for (i = 0; i < len; i++) {
         if (i)
-          putchar(',');
-        printf("%d", (int)arr[i]);
+          io_cap_putc(',');
+        io_cap_print_i32((int)arr[i]);
       }
     }
-    putchar(']');
+    io_cap_putc(']');
     return sch;
   }
   /* A@OFF — TYPE_SLICE of i32: fat {data,len} at base+OFF (PLATFORM: SHARED ABI). */
@@ -751,7 +822,7 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
     const int32_t *arr;
     uint64_t n64;
     sch = fmt_json_parse_dec(sch + 2, &off);
-    putchar('[');
+    io_cap_putc('[');
     if (base) {
       fat = base + off;
       arr = *(const int32_t *const *)fat;
@@ -760,12 +831,12 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
         len = (int32_t)n64;
         for (i = 0; i < len; i++) {
           if (i)
-            putchar(',');
-          printf("%d", (int)arr[i]);
+            io_cap_putc(',');
+          io_cap_print_i32((int)arr[i]);
         }
       }
     }
-    putchar(']');
+    io_cap_putc(']');
     return sch;
   }
   if (*sch == '?') {
@@ -773,7 +844,7 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
     if (*sch == ':')
       sch++;
     if (base == NULL || base[off] == 0) {
-      fputs("null", stdout);
+      io_cap_puts("null");
       /* Skip VAL without emitting: walk nested braces / atoms. */
       if (*sch == '{') {
         int depth = 0;
@@ -817,7 +888,7 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
   }
   if (*sch == '{') {
     sch++;
-    putchar('{');
+    io_cap_putc('{');
     int first = 1;
     while (*sch && *sch != '}') {
       if (*sch == ',') {
@@ -834,17 +905,17 @@ static const char *fmt_json_emit_val(const uint8_t *base, const char *sch) {
       if (*sch == ':')
         sch++;
       if (!first)
-        putchar(',');
+        io_cap_putc(',');
       first = 0;
-      putchar('"');
-      fputs(key, stdout);
-      putchar('"');
-      putchar(':');
+      io_cap_putc('"');
+      io_cap_puts(key);
+      io_cap_putc('"');
+      io_cap_putc(':');
       sch = fmt_json_emit_val(base, sch);
     }
     if (*sch == '}')
       sch++;
-    putchar('}');
+    io_cap_putc('}');
     return sch;
   }
   return sch;
@@ -860,7 +931,7 @@ int32_t std_fmt_json_println_schema(const uint8_t *base, const char *schema) {
   if (schema == NULL)
     schema = "null";
   (void)fmt_json_emit_val(base, schema);
-  putchar('\n');
+  io_cap_putc('\n');
   return 0;
 }
 

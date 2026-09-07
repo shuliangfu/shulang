@@ -38,11 +38,13 @@ static void parser_asm_arena_expr_set_c(void *arena, int32_t ref, struct parser_
       trace_hit = 1;
   }
   if (trace_hit) {
-    fprintf(stderr,
-            "note: parser expr watch: expr=%d kind=%d block=%d ty=%d left=%d right=%d name_len=%d name=%.*s\n",
-            (int)ref, (int)e.kind, (int)e.block_ref, (int)e.resolved_type_ref,
-            (int)e.binop_left_ref, (int)e.binop_right_ref, (int)e.var_name_len,
-            (int)e.var_name_len, (const char *)e.var_name);
+    /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+    { char _db[384]; int _dn = snprintf(_db, sizeof _db,
+        "note: parser expr watch: expr=%d kind=%d block=%d ty=%d left=%d right=%d name_len=%d name=%.*s\n",
+        (int)ref, (int)e.kind, (int)e.block_ref, (int)e.resolved_type_ref,
+        (int)e.binop_left_ref, (int)e.binop_right_ref, (int)e.var_name_len,
+        (int)e.var_name_len, (const char *)e.var_name);
+      if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
   }
   ast_arena_expr_set(arena, ref, e);
 }

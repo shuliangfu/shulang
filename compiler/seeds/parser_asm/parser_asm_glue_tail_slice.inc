@@ -1055,9 +1055,11 @@ void parser_asm_skip_one_function_full_into_slice_c(struct parser_asm_lexer *out
   }
   if (r.tok.kind != (int32_t)TOKEN_LBRACE) {
     if (dbg_skip && dbg_skip[0] && dbg_skip[0] != '0') {
-      fprintf(stderr,
-              "note: skip function debug: no-body start_pos=%zu scan_pos=%zu tok=%d ident_len=%d\n",
-              lex.pos, lex_cur.pos, (int)r.tok.kind, (int)r.tok.ident_len);
+      /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+      { char _db[256]; int _dn = snprintf(_db, sizeof _db,
+          "note: skip function debug: no-body start_pos=%zu scan_pos=%zu tok=%d ident_len=%d\n",
+          lex.pos, lex_cur.pos, (int)r.tok.kind, (int)r.tok.ident_len);
+        if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
     }
     out->pos = lex_cur.pos;
     out->line = lex_cur.line;
@@ -1074,9 +1076,11 @@ void parser_asm_skip_one_function_full_into_slice_c(struct parser_asm_lexer *out
     struct parser_asm_lexer_result tail;
     memset(&tail, 0, sizeof(tail));
     lexer_next_into(&tail, *out, source);
-    fprintf(stderr,
-            "note: skip function debug: start_pos=%zu body_pos=%zu out_pos=%zu next_tok=%d next_ident_len=%d\n",
-            lex.pos, r.next_lex.pos, out->pos, (int)tail.tok.kind, (int)tail.tok.ident_len);
+    /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+    { char _db[256]; int _dn = snprintf(_db, sizeof _db,
+        "note: skip function debug: start_pos=%zu body_pos=%zu out_pos=%zu next_tok=%d next_ident_len=%d\n",
+        lex.pos, r.next_lex.pos, out->pos, (int)tail.tok.kind, (int)tail.tok.ident_len);
+      if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn); }
   }
 }
 

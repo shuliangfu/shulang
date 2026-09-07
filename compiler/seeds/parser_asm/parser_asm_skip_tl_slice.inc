@@ -2653,7 +2653,8 @@ static int32_t xlang_skip_commit_default_onefunc_c(void *arena, void *module,
   if (fi_mod < 0)
     return -1;
   pipeline_module_func_name_write(module, fi_mod, res->name, res->name_len);
-  { static int dbgac=0; if (dbgac<4000){dbgac++; fprintf(stderr,"DBG_ACOMMIT mod=%p idx=%d name=%.*s nfns=%d\n",(void*)module,(int)fi_mod,(int)(res->name_len>0?res->name_len:0),(char*)res->name,(int)pipeline_module_num_funcs(module));} }
+  /* Cap residual 9.5.3: Cap IO debug print (was libc fprintf; PLATFORM: SHARED). */
+  { static int dbgac=0; if (dbgac<4000){dbgac++; char _db[384]; int _dn = snprintf(_db, sizeof _db, "DBG_ACOMMIT mod=%p idx=%d name=%.*s nfns=%d\n",(void*)module,(int)fi_mod,(int)(res->name_len>0?res->name_len:0),(char*)res->name,(int)pipeline_module_num_funcs(module)); if (_dn > 0) (void)xlang_io_write(2, _db, (size_t)_dn);} }
   pipeline_module_func_set_num_params(module, fi_mod, res->num_params);
   pipeline_module_func_set_return_type(module, fi_mod, type_ref);
   pipeline_module_func_set_body_ref(module, fi_mod, block_ref);

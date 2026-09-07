@@ -1,12 +1,14 @@
 /*
  * xlang_io_cap.h — Cap residual 9.1.8: write/read/writev without libc.
+ * Cap residual 9.5.3: xlang_io_open_write (create/truncate for diagnostics
+ * output such as crash evidence bundles).
  *
  * Single authority for rt_preamble xlang_sys_write/read/writev inlines and
  * freestanding_io syscall face (asm twin keeps same numbers).
  *
- * Linux: raw syscalls (x86_64: 1 write, 0 read, 20 writev; aarch64: 64 write, 63 read, 66 writev).
- * Darwin: raw syscalls (SYS_write=4, SYS_read=3, SYS_writev=121).
- * Windows: CRT/Win32 IO Cap (_write, _read, writev loop emulation).
+ * Linux: raw syscalls (x86_64: 1 write, 0 read, 20 writev, 2 open; aarch64: 64 write, 63 read, 66 writev, 56 open).
+ * Darwin: raw syscalls (SYS_write=4, SYS_read=3, SYS_writev=121, SYS_open=5).
+ * Windows: CRT/Win32 IO Cap (_write, _read, writev loop emulation, _open).
  * Other POSIX: thin libc wrappers.
  *
  * PLATFORM: SHARED (LINUX raw syscall | DARWIN raw syscall | WINDOWS | POSIX fallback).
@@ -19,6 +21,8 @@
 
 #include <errno.h>
 #include <io.h>
+#include <fcntl.h>  /* 9.5.3: _O_WRONLY/_O_CREAT/_O_TRUNC for xlang_io_open_write */
+#include <sys/stat.h> /* 9.5.3: _S_IREAD/_S_IWRITE for xlang_io_open_write */
 #include <stddef.h>
 #include <stdint.h>
 
@@ -56,6 +60,19 @@ static inline long xlang_io_read(int fd, void *buf, size_t count) {
     return -1;
   int r = _read(fd, buf, (unsigned int)count);
   return (long)r;
+}
+
+/**
+ * Cap residual 9.5.3: open/create file for writing via CRT _open
+ * (_O_WRONLY|_O_CREAT|_O_TRUNC, mode _S_IREAD|_S_IWRITE ≡ 0644).
+ * @param path NUL-terminated file path
+ * @return new file descriptor, or -1 with errno
+ * PLATFORM: WINDOWS
+ */
+static inline int xlang_io_open_write(const char *path) {
+  if (!path)
+    return -1;
+  return _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC, _S_IREAD | _S_IWRITE);
 }
 
 /**
@@ -144,6 +161,32 @@ static inline long xlang_io_read(int fd, void *buf, size_t count) {
     return -1;
   }
   return r;
+}
+
+/**
+ * Cap residual 9.5.3: open/create file for writing (O_WRONLY|O_CREAT|O_TRUNC,
+ * mode 0644) via raw syscall (open = 2 on x86_64, 56 on aarch64). Linux flag
+ * values: O_WRONLY 0x1, O_CREAT 0x40, O_TRUNC 0x200.
+ * @param path NUL-terminated file path
+ * @return new file descriptor, or -1 with errno
+ * PLATFORM: LINUX
+ */
+static inline int xlang_io_open_write(const char *path) {
+  long r;
+  if (!path)
+    return -1;
+#if defined(__x86_64__)
+  /* open = 2 */
+  r = xlang_io_syscall3(2, (long)path, 0x241L /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
+#elif defined(__aarch64__)
+  /* open = 56 */
+  r = xlang_io_syscall3(56, (long)path, 0x241L /* O_WRONLY|O_CREAT|O_TRUNC */, 0644);
+#endif
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
 }
 
 /**
@@ -262,6 +305,52 @@ static inline long xlang_io_read(int fd, void *buf, size_t count) {
 }
 
 /**
+ * Cap residual 9.5.3: open/create file for writing via raw syscall
+ * (SYS_open = 5, 0x2000005 on x86_64). Darwin flag values differ from Linux:
+ * O_WRONLY 0x1, O_CREAT 0x200, O_TRUNC 0x400; mode 0644.
+ * @param path NUL-terminated file path
+ * @return new file descriptor, or -1 with errno
+ * PLATFORM: MACOS|DARWIN raw syscall
+ */
+static inline int xlang_io_open_write(const char *path) {
+  long r;
+  if (!path)
+    return -1;
+#if defined(__x86_64__)
+  {
+    /* open = 5 → 0x2000005 on macOS x86_64 */
+    register long r10 __asm__("r10") = 0644;
+    __asm__ __volatile__("syscall"
+                         : "=a"(r)
+                         : "a"(0x2000005L), "D"(path), "S"(0x601L /* O_WRONLY|O_CREAT|O_TRUNC */), "d"(r10)
+                         : "rcx", "r11", "memory");
+  }
+#elif defined(__aarch64__)
+  {
+    register long x16 __asm__("x16") = 5; /* SYS_open */
+    register long x0 __asm__("x0") = (long)path;
+    register long x1 __asm__("x1") = 0x601L; /* O_WRONLY|O_CREAT|O_TRUNC */
+    register long x2 __asm__("x2") = 0644;
+    register long failed __asm__("x9");
+    __asm__ __volatile__("svc #0x80\n\t"
+                         "cset %3, cs"
+                         : "+r"(x0), "+r"(x1), "+r"(x2), "=r"(failed)
+                         : "r"(x16)
+                         : "memory", "cc");
+    if (failed)
+      r = -x0;
+    else
+      r = x0;
+  }
+#endif
+  if (r < 0) {
+    errno = (int)(-r);
+    return -1;
+  }
+  return (int)r;
+}
+
+/**
  * Darwin raw writev via syscall (SYS_writev = 121).
  * PLATFORM: MACOS|DARWIN raw syscall
  */
@@ -309,6 +398,7 @@ static inline long xlang_io_writev(int fd, const void *iov, int iovcnt) {
 
 #include <sys/uio.h>
 #include <unistd.h>
+#include <fcntl.h> /* 9.5.3: O_WRONLY/O_CREAT/O_TRUNC for xlang_io_open_write */
 
 /** PLATFORM: POSIX fallback — libc write. */
 static inline long xlang_io_write(int fd, const void *buf, size_t count) {
@@ -317,6 +407,19 @@ static inline long xlang_io_write(int fd, const void *buf, size_t count) {
   if (!buf)
     return -1;
   return (long)write(fd, buf, count);
+}
+
+/**
+ * Cap residual 9.5.3: open/create file for writing via libc open
+ * (O_WRONLY|O_CREAT|O_TRUNC, mode 0644).
+ * @param path NUL-terminated file path
+ * @return new file descriptor, or -1 with errno
+ * PLATFORM: POSIX fallback
+ */
+static inline int xlang_io_open_write(const char *path) {
+  if (!path)
+    return -1;
+  return open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 }
 
 /** PLATFORM: POSIX fallback — libc read. */

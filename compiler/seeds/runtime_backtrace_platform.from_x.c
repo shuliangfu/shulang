@@ -25,6 +25,8 @@
 /* G.7: Cap after stdio for backtrace crash-evidence residual. */
 #undef snprintf
 #define snprintf xlang_snprintf
+#include <xlang_io_cap.h>   /* Cap residual 9.5.3: xlang_io_write / xlang_io_open_write */
+#include <xlang_proc_cap.h> /* Cap residual 9.5.3: xlang_proc_close_fd (single close authority) */
 #include "diag.h"
 #include <xlang_user_link_abi_getenv.h>
 #if defined(__unix__) || defined(__APPLE__)
@@ -399,8 +401,16 @@ int32_t backtrace_xplat_quality_impl(void) {
   }
   total = backtrace_capture_c(buf, 32);
   if (total > 0) resolved = backtrace_symbolicate_c(buf, total, buf, names, total);
-  fprintf(stderr, "xlang: [XLANG_BT_XPLAT] backtrace xplat: platform=%s gold=%d resolved=%d total=%d\n",
-          (const char *)plat, gold, resolved, total);
+  /* 9.5.3: diagnostic note via Cap IO (xlang_io_write); no libc fprintf. */
+  {
+    char note[256];
+    int note_len = snprintf(note, sizeof(note),
+                            "xlang: [XLANG_BT_XPLAT] backtrace xplat: platform=%s gold=%d "
+                            "resolved=%d total=%d\n",
+                            (const char *)plat, gold, resolved, total);
+    if (note_len > 0)
+      (void)xlang_io_write(2, note, (size_t)note_len);
+  }
   if (gold < 1 || resolved < 1 || total < 1) return 1;
   return 0;
 }
@@ -411,10 +421,13 @@ int32_t backtrace_xplat_quality_c(void) {
 }
 #endif
 
-/** Collect crash evidence when XLANG_CRASH_EVIDENCE=1. */
+/** Collect crash evidence when XLANG_CRASH_EVIDENCE=1.
+ * 9.5.3: stderr note + evidence bundle via Cap IO (xlang_io_write/open_write +
+ * xlang_proc_close_fd); no libc fprintf/fopen/fclose. */
 void xlang_crash_evidence_collect_impl(int has_msg, int msg_val) {
   const char *en = link_abi_getenv("XLANG_CRASH_EVIDENCE");
   uint8_t buf[512];
+  char note[256];
   int32_t n;
   int32_t pid = 0;
   if (!en || en[0] != '1') return;
@@ -424,23 +437,42 @@ void xlang_crash_evidence_collect_impl(int has_msg, int msg_val) {
 #elif defined(_WIN32) || defined(_WIN64)
   pid = (int32_t)GetCurrentProcessId();
 #endif
-  fprintf(stderr, "note: crash evidence: panic=%d msg=%d frames=%d pid=%d\n", has_msg, msg_val, n, pid);
+  {
+    int note_len = snprintf(note, sizeof(note),
+                            "note: crash evidence: panic=%d msg=%d frames=%d pid=%d\n",
+                            has_msg, msg_val, n, pid);
+    if (note_len > 0)
+      (void)xlang_io_write(2, note, (size_t)note_len);
+  }
   {
     const char *dir = link_abi_getenv("XLANG_CRASH_EVIDENCE_DIR");
     if (dir && dir[0]) {
       char path[1024];
-      FILE *f;
       int32_t i;
       (void)snprintf(path, sizeof(path), "%s/xlang-crash-%d.txt", dir, pid);
-      f = fopen(path, "w");
-      if (f) {
-        fprintf(f, "panic_has_msg=%d\npanic_msg=%d\nframes=%d\npid=%d\n", has_msg, msg_val, n, pid);
-        for (i = 0; i < n; i++) {
-          void *addr = backtrace_read_frame_addr_c(buf, i);
-          fprintf(f, "frame%d=0x%zx\n", (int)i, (size_t)(uintptr_t)addr);
+      {
+        int fd = xlang_io_open_write(path);
+        if (fd >= 0) {
+          char body[128];
+          int body_len = snprintf(body, sizeof(body),
+                                  "panic_has_msg=%d\npanic_msg=%d\nframes=%d\npid=%d\n",
+                                  has_msg, msg_val, n, pid);
+          if (body_len > 0)
+            (void)xlang_io_write(fd, body, (size_t)body_len);
+          for (i = 0; i < n; i++) {
+            void *addr = backtrace_read_frame_addr_c(buf, i);
+            int line_len = snprintf(body, sizeof(body), "frame%d=0x%zx\n", (int)i,
+                                    (size_t)(uintptr_t)addr);
+            if (line_len > 0)
+              (void)xlang_io_write(fd, body, (size_t)line_len);
+          }
+          (void)xlang_proc_close_fd(fd);
+          {
+            int note_len = snprintf(note, sizeof(note), "note: crash evidence: bundle=%s\n", path);
+            if (note_len > 0)
+              (void)xlang_io_write(2, note, (size_t)note_len);
+          }
         }
-        fclose(f);
-        fprintf(stderr, "note: crash evidence: bundle=%s\n", path);
       }
     }
   }

@@ -28,6 +28,9 @@
 /* G.7: Cap after stdio for user-link panic residual. */
 #undef snprintf
 #define snprintf xlang_snprintf
+#include <xlang_io_cap.h>   /* Cap residual 9.5.3: xlang_io_write / xlang_io_open_write */
+#include <xlang_proc_cap.h> /* Cap residual 9.5.3: xlang_proc_close_fd (single close authority) */
+#include <string.h>
 #include <xlang_environ_cap.h>
 #ifdef _WIN32
 #include <process.h> /* MinGW getpid() 声明在此；unistd.h 不提供 */
@@ -69,23 +72,42 @@ const char *link_abi_getenv(const char *name) {
 /* G-02f-165：逻辑源 .x（批折叠）；seed 保留同语义 C 供产品 cc */
 /* G-02f-22 thin+rest：_impl 实现；thin（src/asm/runtime_panic.x）提供 public wrapper */
 /* wave251 G.7: env via public face link_abi_getenv (not raw libc getenv). */
+/* 9.5.3: stderr note + evidence bundle via Cap IO (xlang_io_write/open_write +
+ * xlang_proc_close_fd); no libc fprintf/fopen/fclose. */
 void xlang_crash_evidence_minimal_impl(int has_msg, int msg_val) {
   const char *en = link_abi_getenv("XLANG_CRASH_EVIDENCE");
+  char note[160];
   if (!en || en[0] != '1') {
     return;
   }
-  int pid = (int)getpid();
-  fprintf(stderr, "note: crash evidence: panic=%d msg=%d frames=0 pid=%d\n", has_msg, msg_val,
-          pid);
-  const char *dir = link_abi_getenv("XLANG_CRASH_EVIDENCE_DIR");
-  if (dir && dir[0]) {
-    char path[1024];
-    (void)snprintf(path, sizeof(path), "%s/xlang-crash-%d.txt", dir, pid);
-    FILE *f = fopen(path, "w");
-    if (f) {
-      fprintf(f, "panic_has_msg=%d\npanic_msg=%d\nframes=0\npid=%d\n", has_msg, msg_val, pid);
-      fclose(f);
-      fprintf(stderr, "note: crash evidence: bundle=%s\n", path);
+  {
+    int pid = (int)getpid();
+    int note_len;
+    note_len = snprintf(note, sizeof(note), "note: crash evidence: panic=%d msg=%d frames=0 pid=%d\n",
+                        has_msg, msg_val, pid);
+    if (note_len > 0)
+      (void)xlang_io_write(2, note, (size_t)note_len);
+    {
+      const char *dir = link_abi_getenv("XLANG_CRASH_EVIDENCE_DIR");
+      if (dir && dir[0]) {
+        char path[1024];
+        char body[256];
+        (void)snprintf(path, sizeof(path), "%s/xlang-crash-%d.txt", dir, pid);
+        {
+          int fd = xlang_io_open_write(path);
+          if (fd >= 0) {
+            int body_len = snprintf(body, sizeof(body),
+                                    "panic_has_msg=%d\npanic_msg=%d\nframes=0\npid=%d\n",
+                                    has_msg, msg_val, pid);
+            if (body_len > 0)
+              (void)xlang_io_write(fd, body, (size_t)body_len);
+            (void)xlang_proc_close_fd(fd);
+            note_len = snprintf(note, sizeof(note), "note: crash evidence: bundle=%s\n", path);
+            if (note_len > 0)
+              (void)xlang_io_write(2, note, (size_t)note_len);
+          }
+        }
+      }
     }
   }
 }
@@ -122,6 +144,8 @@ XLANG_WEAK int io_register_buffers_buf_c(const void *bufs, int nr) {
 
 /**
  * Product panic entry (wave386): full-width payload; print cstr when has_msg==2.
+ * 9.5.3: message output via Cap IO (xlang_io_write to stderr); no libc
+ * fputs/fputc/fprintf.
  * @param has_msg 0=bare, 1=integer msg_val, 2=NUL cstr pointer in msg_val
  * @param msg_val integer evidence or cstr pointer (LP64 full width)
  * PLATFORM: SHARED — host-C / libc path; Linux freestanding uses .s twin.
@@ -130,14 +154,17 @@ void xlang_panic_(int has_msg, intptr_t msg_val) {
   if (has_msg == 2) {
     const char *s = (const char *)(uintptr_t)msg_val;
     if (s != NULL && s[0] != '\0') {
-      fputs("panic: ", stderr);
-      fputs(s, stderr);
-      fputc('\n', stderr);
+      (void)xlang_io_write(2, "panic: ", 7);
+      (void)xlang_io_write(2, s, strlen(s));
+      (void)xlang_io_write(2, "\n", 1);
     } else {
-      fputs("panic\n", stderr);
+      (void)xlang_io_write(2, "panic\n", 6);
     }
   } else if (has_msg == 1) {
-    fprintf(stderr, "panic: %ld\n", (long)msg_val);
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "panic: %ld\n", (long)msg_val);
+    if (n > 0)
+      (void)xlang_io_write(2, buf, (size_t)n);
   }
   /* Evidence path keeps historical int payload (truncated). */
   xlang_crash_evidence_collect_c(has_msg, (int)msg_val);
