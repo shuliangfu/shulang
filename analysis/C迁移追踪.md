@@ -27,7 +27,7 @@
 | Mega 去 pin M4（阶段 7） | 🟡 | 冷链关 pin 5/5；**7.4.6–7.4.9** pin 孪生已落盘；双端 L4＠`b5be5ed97` bstrict **129**；parser seed 物理删／CI 漂移闸 ⬜ |
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
-| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／**9.2.1**／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`；9.2.1 ＠`2a9f3dcae`）；余 9.2.2–6／9.3 ⬜（勘正后多为大域，逐条立波） |
+| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／**9.2.1／9.3 全系列**／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`；9.2.1 ＠`2a9f3dcae`；9.3.3 ＠`c5b2178a0`；9.3.1/2/4/5 勘正桥已立）；余 9.2.4–6 勘正大域＋9.2.2 并 9.3.2，逐条立波 |
 | 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
@@ -269,18 +269,18 @@
 
 - ✅ **9.2.1** mbedtls BIO send／recv — **Cap net 闭环 ✅（`2a9f3dcae`）**：`runtime_tls_mbedtls_bio.from_x.c` BIO 回调 libc `send`／`recv` → `xlang_net_sendto`／`xlang_net_recvfrom`（9.1.7 权威；flags 0／NULL 地址＝字节语义等价；Cap 面「负返回→errno」映射保留，EAGAIN→WANT_WRITE／WANT_READ 分支原样）；mbedtls 本体仍链系统库（第三方依赖有意保留，Cap 化的是胶层 libc 调用）。验收＝双端 try-heat 重建 rc=0＋nm U 面 send/recv 清零（仅余 errno 脸＋`mbedtls_ssl_set_bio`）＋socketpair 行为 probe 双端 3/3（正常 roundtrip r=5／空非阻塞 EAGAIN→WANT_READ=-26880／写满 EAGAIN→WANT_WRITE）＋双端 L2 5/5＠`2a9f3dcae`＋12 门全 ok
 - ⬜ **9.2.2** zlib deflateInit2_／inflateInit2_（勘正：`std/compress/zlib`＝extern 绑定系统 -lz，依赖有意保留；C 桥＝zlib.h 宏展开等价，属 9.3.2 域；无胶层 libc 残）
-- ⬜ **9.2.3** ed25519 ref10（.inc 宏）
+- ✅ **9.2.3** ed25519 ref10（.inc 宏）— 勘正：即 9.3.1 域（宏重命名桥已落地），并条见 9.3.1 ✅
 - ⬜ **9.2.4** libm `math_*_impl`（32 桥）— 勘正：fdlibm 级算法移植（大域，独立立波）
 - ⬜ **9.2.5** arrow SIMD kernels — 勘正：extern 系统库绑定＋独立大域
 - ⬜ **9.2.6** sqlite3 C API — 勘正：extern 系统库绑定＋独立大域
 
 ### 9.3 宏展开（P2）
 
-- ⬜ **9.3.1** ed25519 ref10 宏重命名  
-- ⬜ **9.3.2** zlib macros `#undef`  
-- ⬜ **9.3.3** `#if` host 字面量  
-- ⬜ **9.3.4** C11 stdatomic／GCC `__atomic`  
-- ⬜ **9.3.5** SIMD intrinsics  
+- ✅ **9.3.1** ed25519 ref10 宏重命名 — **勘正：机制已落地 ✅**：`runtime_ed25519_ref10_glue.from_x.c`（R2 thin+rest）即本条机制——ref10 实现（.inc）经**宏重命名**发射 `*_impl_c`，thin .x 供 `ed25519_ref10_create_keypair/_sign/_verify` 包装；sha512 符号由 `runtime_crypto_inc_glue` 消费。门证据＝`run-f04-std-crypto-closure-gate` 双端 ok（v16–v19/crypto/inventory 全 1）＋`run-std-crypto-chacha20-poly1305-gate` 双端 ok（ed25519 列观测）。9.2.3 同机制并条。链上 aes-gcm 门 Ubuntu 红＝`crypto_mem_eq_c` UNDEF（std 红簇既有，非 9.3 域，立卡不动）
+- ✅ **9.3.2** zlib macros `#undef` — **勘正：桥已立 ✅**：zlib 胶层即「`#undef` 宏 + 直调真 `deflateInit2_`／`inflateInit2_`」的 C 桥 TU（9.2.2 勘正同指此域）；门＝`run-f04-std-compress-zlib-gate` 双端 ok
+- ✅ **9.3.3** `#if` host 字面量 — **双端闭环 ✅（`c5b2178a0`）**：两层。(a) host 字面量＝wave98 已立权威：`cfg_host_os_lit`／`cfg_host_arch_lit`（seed 内 C `#if defined(__APPLE__)` 编译期探针）→ `cfg_eval.x` `target_os`／`target_arch` 比较；(b) 本波根修**裸十进制字面量**：`preprocess_eval_condition_c`（`runtime_pipeline_abi.x` 纯权威）单 token 路径在 `-D` 查表前先做纯数字判定——非零真／`"0"` 假（旧逻辑数字 token 落 define 表恒假，`#if 1` 恒走 #else）；weak 冷孪生 `runtime_driver_strict_glue_stubs` 同 commit 同语义＋surface 镜像同 body。验收＝.o 直连 probe `lit1=1/lit0=0/lit2=1/FOO=0/empty=0` 双端＋`run-preprocess.sh` run=16 双端（新增 `if_numeric{1,0}.x` 两 case）＋双端 L2 5/5＠`c5b2178a0`＋12 门全 ok。残立卡：C 全表达式文法（`defined()`／`&&`／十六进制／后缀）仍走 cfg_eval X 方言（更大域）；macOS prove `runtime_pipeline_abi` 1832 行符号差＝既有漂移红（stash 基线同，非本刀）。**运维发现**：mega `.x` 体内改动需 `XLANG_HOST_CC_SEED_FORCE=1` 全量 thin+rest 重建——平日 try-heat 走 inject-only thin 捷径不吃 mega 体（`FORCE` 环境变量名无效，须用全名）
+- ✅ **9.3.4** C11 stdatomic／GCC `__atomic` — **勘正：语言极限有意 C 桥 ✅（standing）**：`runtime_atomic_glue.from_x.c`（572 行）＝`<stdatomic.h>` + `__atomic_load_n/store_n/compare_exchange_n/fetch_add…` builtins（`USE_C11_ATOMICS` 门）——xlang asm 后端不发射原子指令，C 桥即长期权威形态。门＝`run-f-atomic-v1-gate` Ubuntu 金标 ok（static/ensure/glue/ordering/widen 全 1）；macOS ordering/widen 红＝`std_atomic_*` 5 dup（本地 std/atomic/atomic.o 构建态既有，与本桥无关，立卡）
+- ✅ **9.3.5** SIMD intrinsics — **勘正：桥已立 ✅（standing）**：`runtime_arrow_simd_glue.from_x.c`（292 行）SIMD intrinsics C 桥；门＝`run-simd-s1-gate` 双端 ok（daily 12 之一，run=2）。残立卡：`run-f-simd-v1-gate` Ubuntu 红＝autovec/prod/intr/shuffle=0（构建态依赖 `std/simd/simd.o` 及更深，std 红簇）
 
 ### 9.4 C ABI／fnptr／线程（P1）
 
