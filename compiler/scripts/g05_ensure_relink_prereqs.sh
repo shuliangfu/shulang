@@ -54,6 +54,19 @@ fi
 #      "cc: command not found" on Windows.
 CC="${G05_CC:-${CC:-cc}}"
 BASE_CFLAGS="-Wall -Wextra -I. -Iinclude -Isrc"
+# PLATFORM: MACOS — match macho.x LC_BUILD_VERSION minos 11.0.0 (same authority
+# as ensure_host_cc_seed_o.sh / cc_inc_tu.sh). Host-cc refreshes done here (e.g.
+# the runtime_asm_io_stubs.o seed-newer rule) otherwise stamp minos=<host SDK>
+# and ld warns "newer macOS version than being linked" on every product /
+# user-program link. Do not -w swallow; do not raise macho.x minos to 26.0.
+case "$(uname -s 2>/dev/null)" in
+  Darwin)
+    case " $BASE_CFLAGS " in
+      *" -mmacosx-version-min="*) ;;
+      *) BASE_CFLAGS="$BASE_CFLAGS -mmacosx-version-min=11.0" ;;
+    esac
+    ;;
+esac
 
 # Stage 12.2.1: XLANG_FORBID_HOST_CC gate (no-op when flag unset; zero impact
 # on normal builds). When XLANG_FORBID_HOST_CC=1, replaces $CC with a wrapper

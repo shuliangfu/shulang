@@ -127,6 +127,20 @@ build_xlang_asm_info "using XLANG=$XLANG (list from $BUILD_LIST_X)"
 # compile_x 的 stub 回退与后续链接均依赖宿主 cc；须在 asm 编译循环之前定义。
 CC="${CC:-cc}"
 CFLAGS="-Wall -Wextra -I. -Iinclude -Isrc"
+# PLATFORM: MACOS — match macho.x LC_BUILD_VERSION minos 11.0.0 (same authority
+# as ensure_host_cc_seed_o.sh / cc_inc_tu.sh). Always-linked host-cc companions
+# built here (runtime_panic.o / runtime_asm_io_stubs.o / user-link runtime objs)
+# otherwise stamp minos=<host SDK> and ld warns "newer macOS version than being
+# linked" on every user-program link. Do not -w swallow; do not raise macho.x
+# minos to 26.0.
+case "$(uname -s 2>/dev/null)" in
+  Darwin)
+    case " $CFLAGS " in
+      *" -mmacosx-version-min="*) ;;
+      *) CFLAGS="$CFLAGS -mmacosx-version-min=11.0" ;;
+    esac
+    ;;
+esac
 
 # Stage 12.2.1: XLANG_FORBID_HOST_CC gate (no-op when flag unset; zero impact
 # on normal builds). When XLANG_FORBID_HOST_CC=1, replaces $CC with a wrapper
