@@ -229,6 +229,21 @@
  * Later #include <stdio.h> must not undo this under -D_FORTIFY_SOURCE=0. */
 #undef snprintf
 #define snprintf xlang_snprintf
+#include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face; xlang_io_write */
+
+/* Cap residual 9.7.1: cold-seed stderr trace writer. Every former
+ * fprintf(stderr, ...) debug/trace print routes here: one bounded Cap
+ * snprintf into a stack buffer + one raw fd-2 write (unbuffered, no
+ * flush). Format spec is the Cap fmt authority (xlang_fmt_cap.h).
+ * PLATFORM: SHARED. */
+static void pabi_trace(const char *fmt, ...) {
+    char b[512];
+    xlang_va_list ap;
+    xlang_va_start(ap, fmt);
+    xlang_vsnprintf(b, sizeof(b), fmt, ap);
+    xlang_va_end(ap);
+    (void)xlang_io_write(2, b, strlen(b));
+}
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <dirent.h>
 #include <sys/stat.h>
@@ -457,8 +472,9 @@ void xlang_load_direct_fail_cleanup(char *dep_sources[], char *dep_paths[], int3
 /* wave78 pure soft residual — pure emit/fclose_asm_out / free_loaded_imports call under hybrid. */
 void xlang_lsp_ptr_slot_clear(void **arr, int32_t i);
 void xlang_fputs_stdout(const char *s);
-int driver_asm_fp_is_stdout(FILE *fp);
-void driver_asm_fclose_file(FILE *fp);
+/* Cap residual 9.7.1: opaque fd handles (twin of runtime_pipeline_abi.x *u8). */
+int driver_asm_fp_is_stdout(uint8_t *fp);
+void driver_asm_fclose_file(uint8_t *fp);
 /* wave79 pure OS residual — always-seed resolve_*_impl / pure resolve_file call under hybrid. */
 void xlang_path_try_realpath_inplace(char *path, size_t path_size);
 /* pipeline_diag_preprocess_directive_code already declared above */
@@ -1902,7 +1918,7 @@ int32_t driver_dep_slot_for_path_scan(const char *path);
 void driver_typeck_dep_sidecar_clear_impl(void);
 void driver_dep_seeded_clear_slots_impl(void);
 void xlang_get_entry_dir_impl(const char *input_path, char *entry_dir, size_t size);
-void driver_asm_fclose_asm_out_impl(FILE *fp);
+void driver_asm_fclose_asm_out_impl(uint8_t *fp);
 
 /* G-02f-51 helper protos (defs later near dep_prerun) */
 const char *xlang_dep_prerun_entry_dir_pick(const char *main_entry_dir, const char **lib_roots, int n_lib_roots);
@@ -2022,8 +2038,10 @@ int xlang_merge_deps_path_already_out_scan(const char *path, char *out_paths[], 
  * #ifndef FROM_X. PLATFORM: SHARED — same null-skip + fputs(stdout) semantics as pure. */
 #ifndef XLANG_RUNTIME_PIPELINE_ABI_FROM_X
 void xlang_fputs_stdout(const char *s) {
+    /* Cap residual 9.7.1: fputs(stdout) → raw fd-1 write (twin of runtime_driver_abi
+     * fputs_opaque semantics). PLATFORM: SHARED. */
     if (s)
-        fputs(s, stdout);
+        (void)xlang_io_write(1, s, strlen(s));
 }
 #endif /* XLANG_RUNTIME_PIPELINE_ABI_FROM_X */
 
@@ -2257,32 +2275,37 @@ const char *xlang_entry_lib_name_from_path(const char *input_path) {
  * convert the cluster together because POSIX .x thin owns all three. */
 #if !defined(XLANG_RUNTIME_PIPELINE_ABI_FROM_X) \
     || defined(XLANG_RUNTIME_PIPELINE_ABI_WIN_LEFTOVER_GROW_VEC)
-int driver_asm_fp_is_stdout(FILE *fp) {
-    return fp == stdout ? 1 : 0;
+int driver_asm_fp_is_stdout(uint8_t *fp) {
+    /* Cap residual 9.7.1: stdout identity = opaque handle with fd==1
+     * (NULL stays 0, same as NULL != stdout before). PLATFORM: SHARED. */
+    return (fp && xlang_driver_handle_to_fd(fp) == 1) ? 1 : 0;
 }
 #endif /* XLANG_RUNTIME_PIPELINE_ABI_FROM_X */
 
 /* 产品链与 runtime_driver_abi 同链；driver_abi 为权威定义。弱化避免 Darwin ld 双 T。 */
 XLANG_WEAK void driver_asm_fflush_stdout(void) {
-    fflush(stdout);
+    /* Cap residual 9.7.1: fd writes are unbuffered — nothing to flush. */
 }
 
 #if !defined(XLANG_RUNTIME_PIPELINE_ABI_FROM_X) \
     || defined(XLANG_RUNTIME_PIPELINE_ABI_WIN_LEFTOVER_GROW_VEC)
-void driver_asm_fclose_file(FILE *fp) {
+void driver_asm_fclose_file(uint8_t *fp) {
+    /* Cap residual 9.7.1: handle close (std fds 0/1/2 intentionally no-op). */
     if (fp)
-        fclose(fp);
+        (void)xlang_driver_handle_close(fp);
 }
 #endif /* XLANG_RUNTIME_PIPELINE_ABI_FROM_X */
 
 /* G-02f-234：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 #if !defined(XLANG_RUNTIME_PIPELINE_ABI_FROM_X) \
     || defined(XLANG_RUNTIME_PIPELINE_ABI_WIN_LEFTOVER_GROW_VEC)
-void driver_asm_fclose_asm_out(FILE *fp) {
-    if (!fp || fp == stdout)
-        fflush(stdout);
+void driver_asm_fclose_asm_out(uint8_t *fp) {
+    /* Cap residual 9.7.1: stdout handle (fd 1) is unbuffered — no flush;
+     * file handles close via Cap. PLATFORM: SHARED. */
+    if (!fp || xlang_driver_handle_to_fd(fp) == 1)
+        ;
     else
-        fclose(fp);
+        (void)xlang_driver_handle_close(fp);
 }
 #endif /* XLANG_RUNTIME_PIPELINE_ABI_FROM_X */
 
@@ -4923,24 +4946,21 @@ void asm_diag_trace_func_body(struct ast_ASTArena *arena, int32_t body_ref) {
   if (!trace || trace[0] == '\0' || trace[0] == '0')
     return;
   /* Cold twin lacks Block layout; pure product path prints full metrics. */
-  fprintf(stderr, "asm_body: ref=%d (cold)\n", (int)body_ref);
-  fflush(stderr);
+  pabi_trace( "asm_body: ref=%d (cold)\n", (int)body_ref);
 }
 
 void asm_diag_trace_body_ref(int32_t body_ref) {
   const char *trace = link_abi_getenv("XLANG_ASM_BODY_TRACE");
   if (!trace || trace[0] == '\0' || trace[0] == '0')
     return;
-  fprintf(stderr, "asm_body_ref=%d\n", (int)body_ref);
-  fflush(stderr);
+  pabi_trace( "asm_body_ref=%d\n", (int)body_ref);
 }
 
 void asm_diag_trace_emit_phase(int32_t phase) {
   const char *trace = link_abi_getenv("XLANG_ASM_BODY_TRACE");
   if (!trace || trace[0] == '\0' || trace[0] == '0')
     return;
-  fprintf(stderr, "asm_emit_phase=%d\n", (int)phase);
-  fflush(stderr);
+  pabi_trace( "asm_emit_phase=%d\n", (int)phase);
 }
 
 void asm_diag_trace_func_idx(int32_t func_idx, uint8_t *name, int32_t name_len) {
@@ -4952,13 +4972,10 @@ void asm_diag_trace_func_idx(int32_t func_idx, uint8_t *name, int32_t name_len) 
   if (!trace || trace[0] == '\0' || trace[0] == '0')
     return;
   if (func_idx >= 0)
-    fprintf(stderr, "asm_trace: #%d ", (int)func_idx);
+    pabi_trace("asm_trace: #%d %.*s\n", (int)func_idx,
+               name_len < 64 ? (int)name_len : 64, (const char *)name);
   else
-    fprintf(stderr, "asm_trace: ");
-  for (i = 0; i < name_len && i < 64; i++)
-    fputc(name[i], stderr);
-  fputc('\n', stderr);
-  fflush(stderr);
+    pabi_trace("asm_trace: %.*s\n", name_len < 64 ? (int)name_len : 64, (const char *)name);
 }
 
 void asm_diag_trace_func(uint8_t *name, int32_t name_len) {
@@ -9627,8 +9644,7 @@ void asm_parser_emit_heavy_dbg_real(void *m, int32_t fi, const char *why) {
     return;
   fl = pipeline_module_func_name_len_at(m, fi);
   pipeline_module_func_name_copy64(m, fi, fn);
-  fprintf(stderr, "xlang: parser REAL_EMIT fi=%d fn=%.*s why=%s\n", fi, (int)(fl > 127 ? 127 : fl), fn, why);
-  fflush(stderr);
+  pabi_trace( "xlang: parser REAL_EMIT fi=%d fn=%.*s why=%s\n", fi, (int)(fl > 127 ? 127 : fl), fn, why);
 }
 
 int32_t asm_parser_emit_heavy_bisect_max_index(void) {
@@ -10355,7 +10371,7 @@ int32_t pipeline_visibility_allow_func(void *m, int32_t fi, int32_t cross_module
       nlen = 0;
     if (nlen > 127)
       nlen = 127;
-    fprintf(stderr, "warning: '%.*s' is not exported (XLANG_VISIBILITY=warn); "
+    pabi_trace( "warning: '%.*s' is not exported (XLANG_VISIBILITY=warn); "
                     "add `export` or it will error under strict\n",
             (int)nlen, (const char *)name);
     return 1;
@@ -10769,7 +10785,8 @@ static void wpo_dump_mark_local_call_names_win(void *a, uint8_t *used_flags, int
 
 int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   const char *path;
-  FILE *fp = NULL;
+  /* Cap residual 9.7.1: opaque fd handle from the face fopen_write_opaque. */
+  uint8_t *fp = NULL;
   int use_stdout = 0;
   int32_t nfuncs, fi, root = -1, nlen, is_ext;
   uint8_t *reach = NULL;
@@ -10782,19 +10799,19 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   if (!path || !path[0]) return 0;
   if (path[0] == '-' && path[1] == '\0') use_stdout = 1;
   else {
-    fp = (FILE *)(void *)xlang_driver_fopen_write_opaque((uint8_t *)path);
+    fp = xlang_driver_fopen_write_opaque((uint8_t *)path);
     if (!fp) return 0;
   }
   nfuncs = pipeline_module_num_funcs(m);
   if (nfuncs <= 0) {
-    if (fp) xlang_driver_fclose_opaque((uint8_t *)(void *)fp);
+    if (fp) (void)xlang_driver_fclose_opaque(fp);
     return 0;
   }
   reach = (uint8_t *)calloc((size_t)nfuncs, 1);
   called = (uint8_t *)calloc((size_t)nfuncs, 1);
   if (!reach || !called) {
     free(reach); free(called);
-    if (fp) xlang_driver_fclose_opaque((uint8_t *)(void *)fp);
+    if (fp) (void)xlang_driver_fclose_opaque(fp);
     return 0;
   }
   wpo_dump_mark_local_call_names_win(a, called, nfuncs, m);
@@ -10818,8 +10835,9 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   }
   {
     char hdr[] = "{\n  \"version\": 2,\n  \"entry\": \"\",\n  \"modules\": [\n    {\"id\": 0, \"path\": \"\"}\n  ],\n  \"functions\": [\n";
+    /* Cap residual 9.7.1: fprintf/fputs to the file handle → raw fd write. */
     if (use_stdout) xlang_driver_fwrite_stdout_n((uint8_t *)hdr, (int32_t)(sizeof(hdr) - 1));
-    else fprintf(fp, "%s", hdr);
+    else (void)xlang_io_write(xlang_driver_handle_to_fd(fp), hdr, sizeof(hdr) - 1);
   }
   first = 1;
   for (fi = 0; fi < nfuncs; fi++) {
@@ -10831,7 +10849,7 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
     name[nlen] = 0;
     if (!first) {
       if (use_stdout) xlang_driver_fwrite_stdout_n((uint8_t *)",\n", 2);
-      else fputs(",\n", fp);
+      else (void)xlang_io_write(xlang_driver_handle_to_fd(fp), ",\n", 2);
     }
     first = 0;
     if (use_stdout) {
@@ -10841,8 +10859,11 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
         fi, (const char *)name, is_ext ? "true" : "false", reach[fi] ? "true" : "false");
       if (n > 0) xlang_driver_fwrite_stdout_n((uint8_t *)line, n);
     } else {
-      fprintf(fp, "    {\"id\": %d, \"module\": 0, \"name\": \"%s\", \"extern\": %s, \"reachable\": %s}",
+      char line[384];
+      int n = snprintf(line, sizeof(line),
+        "    {\"id\": %d, \"module\": 0, \"name\": \"%s\", \"extern\": %s, \"reachable\": %s}",
         fi, (const char *)name, is_ext ? "true" : "false", reach[fi] ? "true" : "false");
+      if (n > 0) (void)xlang_io_write(xlang_driver_handle_to_fd(fp), line, (size_t)n);
     }
   }
   {
@@ -10850,10 +10871,10 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
     int n = snprintf(tail, sizeof(tail),
       "\n  ],\n  \"edges\": [\n  ],\n  \"call_sites\": [],\n  \"root\": %d\n}\n", root);
     if (use_stdout) xlang_driver_fwrite_stdout_n((uint8_t *)tail, n);
-    else fputs(tail, fp);
+    else if (n > 0) (void)xlang_io_write(xlang_driver_handle_to_fd(fp), tail, (size_t)n);
   }
   free(reach); free(called);
-  if (fp) xlang_driver_fclose_opaque((uint8_t *)(void *)fp);
+  if (fp) (void)xlang_driver_fclose_opaque(fp);
   return 1;
 }
 #endif /* FROM_X && WIN_LEFTOVER_GROW_VEC — leftover-PE wpo_dump unique */
@@ -10861,8 +10882,9 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
 #ifndef XLANG_RUNTIME_PIPELINE_ABI_FROM_X /* reopen remaining wave101 FROM_X after leftover-PE unused_hints unique */
 
 /* WPO_DUMP_CALLGRAPH — cold seed twin of runtime_pipeline_abi_wpo_dump_thin.x.
- * Gated by XLANG_WPO_DUMP_CALLGRAPH. PLATFORM: SHARED. */
-extern void *xlang_driver_fopen_write_opaque(const char *path);
+ * Gated by XLANG_WPO_DUMP_CALLGRAPH. PLATFORM: SHARED.
+ * Cap residual 9.7.1: face open returns an opaque fd handle (uint8_t *). */
+extern uint8_t *xlang_driver_fopen_write_opaque(uint8_t *path);
 extern int32_t xlang_driver_fwrite_opaque(const void *data, int32_t len, void *stream);
 extern int32_t xlang_driver_fclose_opaque(void *stream);
 extern int32_t xlang_driver_fwrite_stdout_n(const void *data, int32_t len);
@@ -10894,11 +10916,12 @@ extern int32_t pipeline_asm_module_func_is_extern_at(void *m, int32_t fi);
 
 #ifndef XLANG_RUNTIME_PIPELINE_ABI_FROM_X
 /* Host-C cold path: thin inject owns product; this twin covers !FROM_X boots.
- * Deliberately minimal: getenv + fopen + fprintf empty-reachable-safe graph via
- * name-based mark (same shape as unused_private used[]). Full thin is authority. */
+ * Deliberately minimal: getenv + face open + bounded writes, empty-reachable-safe
+ * graph via name-based mark (same shape as unused_private used[]). Full thin is
+ * authority. Cap residual 9.7.1: fp is an opaque fd handle. */
 int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   const char *path;
-  FILE *fp = NULL;
+  uint8_t *fp = NULL;
   int use_stdout = 0;
   int32_t nfuncs, fi, root = -1, nlen, is_ext;
   uint8_t *reach = NULL;
@@ -10911,7 +10934,7 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   if (!path || !path[0]) return 0;
   if (path[0] == '-' && path[1] == '\0') use_stdout = 1;
   else {
-    fp = (FILE *)xlang_driver_fopen_write_opaque(path);
+    fp = xlang_driver_fopen_write_opaque((uint8_t *)path);
     if (!fp) return 0;
   }
   nfuncs = pipeline_module_num_funcs(m);
@@ -10948,8 +10971,9 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
   }
   {
     char hdr[] = "{\n  \"version\": 2,\n  \"entry\": \"\",\n  \"modules\": [\n    {\"id\": 0, \"path\": \"\"}\n  ],\n  \"functions\": [\n";
+    /* Cap residual 9.7.1: fprintf/fputs to the file handle → raw fd write. */
     if (use_stdout) xlang_driver_fwrite_stdout_n(hdr, (int32_t)(sizeof(hdr) - 1));
-    else fprintf(fp, "%s", hdr);
+    else (void)xlang_io_write(xlang_driver_handle_to_fd(fp), hdr, sizeof(hdr) - 1);
   }
   first = 1;
   for (fi = 0; fi < nfuncs; fi++) {
@@ -10961,7 +10985,7 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
     name[nlen] = 0;
     if (!first) {
       if (use_stdout) xlang_driver_fwrite_stdout_n(",\n", 2);
-      else fputs(",\n", fp);
+      else (void)xlang_io_write(xlang_driver_handle_to_fd(fp), ",\n", 2);
     }
     first = 0;
     if (use_stdout) {
@@ -10971,8 +10995,11 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
         fi, (const char *)name, is_ext ? "true" : "false", reach[fi] ? "true" : "false");
       if (n > 0) xlang_driver_fwrite_stdout_n(line, n);
     } else {
-      fprintf(fp, "    {\"id\": %d, \"module\": 0, \"name\": \"%s\", \"extern\": %s, \"reachable\": %s}",
+      char line[384];
+      int n = snprintf(line, sizeof(line),
+        "    {\"id\": %d, \"module\": 0, \"name\": \"%s\", \"extern\": %s, \"reachable\": %s}",
         fi, (const char *)name, is_ext ? "true" : "false", reach[fi] ? "true" : "false");
+      if (n > 0) (void)xlang_io_write(xlang_driver_handle_to_fd(fp), line, (size_t)n);
     }
   }
   {
@@ -10980,10 +11007,10 @@ int32_t pipeline_typeck_wpo_dump_callgraph(void *m, void *a, void *ctx) {
     int n = snprintf(tail, sizeof(tail),
       "\n  ],\n  \"edges\": [\n  ],\n  \"call_sites\": [],\n  \"root\": %d\n}\n", root);
     if (use_stdout) xlang_driver_fwrite_stdout_n(tail, n);
-    else fputs(tail, fp);
+    else if (n > 0) (void)xlang_io_write(xlang_driver_handle_to_fd(fp), tail, (size_t)n);
   }
   free(reach); free(called);
-  if (fp) xlang_driver_fclose_opaque(fp);
+  if (fp) (void)xlang_driver_fclose_opaque(fp);
   return 1;
 }
 #else
@@ -21485,7 +21512,7 @@ int32_t pipeline_asm_emit_block_inits_elf_c(struct ast_ASTArena *arena, struct p
       } else {
         /* -2 unsupported fixed-array init — do not store pointer into array slot. */
         if (link_abi_getenv("XLANG_ASM_DEBUG"))
-          fprintf(stderr, "xlang: fixed array let init unhandled block=%d i=%d init_ko=%d\n",
+          pabi_trace( "xlang: fixed array let init unhandled block=%d i=%d init_ko=%d\n",
                   (int)block_ref, (int)i, (int)pipeline_expr_kind_ord_at(arena, init_ref));
         return -1;
       }
@@ -24071,9 +24098,8 @@ extern int32_t pipeline_expr_index_base_ref(void *a, int32_t er);
 extern int32_t pipeline_expr_index_index_ref(void *a, int32_t er);
 extern int32_t backend_fold_func_return_operand_ref(void *a, void *m, int32_t fi);
 extern char *link_abi_getenv(const char *name);
-extern int fprintf(void *stream, const char *fmt, ...);
-/* stderr for TRACE soft paths */
-extern void *stderr;
+/* Cap residual 9.7.1: raw libc fprintf/stderr externs removed — trace prints
+ * route through pabi_trace (Cap snprintf + raw fd-2 write). */
 
 int32_t glue_block_let_is_simd_vector_type(void *arena, int32_t block_ref, int32_t let_idx) {
   int32_t tr;
@@ -24100,7 +24126,7 @@ int32_t glue_block_let_is_simd_vector_type(void *arena, int32_t block_ref, int32
       return 1;
   }
   if (link_abi_getenv("XLANG_ASM_EMIT_TRACE"))
-    fprintf(stderr, "xlang: let idx=%d type_ref=%d kind=%d slot_b=%d init=%d\n", (int)let_idx, (int)tr,
+    pabi_trace( "xlang: let idx=%d type_ref=%d kind=%d slot_b=%d init=%d\n", (int)let_idx, (int)tr,
             (int)pipeline_type_kind_ord_at(arena, tr), (int)asm_local_slot_bytes(arena, tr), (int)init_ref);
   return 0;
 }
@@ -28603,7 +28629,7 @@ int32_t pipeline_asm_emit_var_field_access_elf_c(void *arena,
     var_off = asm_ctx_local_find_offset((uint8_t *)ctx, vname, vlen);
   if (var_off < 0) {
     if (link_abi_getenv("XLANG_ASM_EMIT_TRACE"))
-      fprintf(stderr, "xlang: var_field_access miss var='%.*s'\n", (int)vlen, (char *)vname);
+      pabi_trace( "xlang: var_field_access miss var='%.*s'\n", (int)vlen, (char *)vname);
     return PIPELINE_ASM_ELF_EXPR_FAST_UNHANDLED;
   }
   /*
@@ -29392,14 +29418,11 @@ int32_t pipeline_expr_enum_namespace_field_tag(void *a, int32_t expr_ref) {
     return -1;
   pipeline_expr_field_access_name_into(a, expr_ref, field_buf);
   if (link_abi_getenv("XLANG_ASM_EMIT_TRACE")) {
-    fprintf(stderr, "xlang: enum_ns_tag base_len=%d field_len=%d mod=%p base='", (int)blen, (int)flen,
-            (void *)g_pipeline_asm_emit_module);
-    for (int32_t di = 0; di < blen && di < 31; di++)
-      fputc((char)base_buf[di], stderr);
-    fprintf(stderr, "' field='");
-    for (int32_t di = 0; di < flen && di < 63; di++)
-      fputc((char)field_buf[di], stderr);
-    fprintf(stderr, "'\n");
+    /* Cap residual 9.7.1: char-loop fprintf/fputc → single bounded %.*s trace. */
+    pabi_trace("xlang: enum_ns_tag base_len=%d field_len=%d mod=%p base='%.*s' field='%.*s'\n",
+               (int)blen, (int)flen, (void *)g_pipeline_asm_emit_module,
+               blen < 31 ? (int)blen : 31, (const char *)base_buf,
+               flen < 63 ? (int)flen : 63, (const char *)field_buf);
   }
   if (blen == 8 && memcmp(base_buf, "ExprKind", 8) == 0) {
     if (glue_enum_field_name_equal(field_buf, flen, "EXPR_LIT"))
@@ -29456,7 +29479,7 @@ int32_t pipeline_expr_enum_namespace_field_tag(void *a, int32_t expr_ref) {
   {
     int32_t mod_tag = pipeline_expr_enum_field_tag_via_module(base_buf, blen, field_buf, flen);
     if (link_abi_getenv("XLANG_ASM_EMIT_TRACE"))
-      fprintf(stderr, "xlang: enum_ns_tag mod_tag=%d\n", (int)mod_tag);
+      pabi_trace( "xlang: enum_ns_tag mod_tag=%d\n", (int)mod_tag);
     if (mod_tag >= 0)
       return mod_tag;
   }
@@ -30364,7 +30387,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
         dbg_max_depth = dbg_depth_now;
     }
     if (dbg_log_now) {
-      fprintf(stderr,
+      pabi_trace(
               "xlang: [XLANG_DEBUG_REGEX_EMIT] rec depth=%d expr_ref=%d ko=%d streak=%d ctx=%p ta=%d\\n",
               (int)dbg_depth_now, (int)expr_ref, (int)ko, (int)dbg_same_expr_streak, (void *)ctx, (int)ta);
     }
@@ -32012,7 +32035,7 @@ int32_t pipeline_asm_emit_expr_elf_rec(void *arena, void *elf_ctx, int32_t expr_
     out_rc = backend_emit_expr_elf_slow(arena, elf_ctx, expr_ref, ctx, ta);
 debug_done:
   if (dbg_on && dbg_log_now && out_rc == PIPELINE_ASM_ELF_EXPR_FAST_UNHANDLED) {
-    fprintf(stderr,
+    pabi_trace(
             "xlang: [XLANG_DEBUG_REGEX_EMIT] unhandled depth=%d expr_ref=%d ko=%d\\n",
             (int)dbg_depth_now, (int)expr_ref, (int)ko);
   }
@@ -32604,7 +32627,7 @@ int32_t pipeline_asm_emit_expr_elf_fast(void *arena, void *elf_ctx, int32_t expr
       int32_t mod_imm;
       void *mod = pipeline_asm_emit_module_ref_c();
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr,
+        pabi_trace(
                 "xlang: emit_expr_fast VAR miss vlen=%d name=%.*s off=%d ctx=%p\n",
                 (int)vlen, (int)vlen, (char *)vname, (int)off, (void *)ctx);
       if (mod && asm_module_top_level_const_lit_i32(mod, arena, vname, vlen, &mod_imm) != 0)
@@ -39131,7 +39154,7 @@ int32_t pipeline_asm_emit_expr_elf_for_call_args(void *arena, void *elf_ctx, int
       return glue_load_var_as_value_to_rax_rdx_elf_c(elf_ctx, arena, ctx, expr_ref, off, ta);
     }
     if (link_abi_getenv("XLANG_ASM_DEBUG"))
-      fprintf(stderr,
+      pabi_trace(
               "xlang: for_call_args VAR miss expr_ref=%d off=%d ctx=%p\n",
               (int)expr_ref, (int)off, (void *)ctx);
   }
@@ -52261,7 +52284,7 @@ int32_t pipeline_elf_ctx_append_patch(uint8_t *ctx_bytes, int32_t rel32_offset, 
     return -1;
   ctx = (PipelineElfCtxAccess *)ctx_bytes;
   if (ctx->num_patches >= PIPELINE_ELF_CTX_TABLE_CAP) {
-    fprintf(stderr, "xlang: elf num_patches limit %d reached\n", PIPELINE_ELF_CTX_TABLE_CAP);
+    pabi_trace( "xlang: elf num_patches limit %d reached\n", PIPELINE_ELF_CTX_TABLE_CAP);
     return -1;
   }
   bits = imm_bits;
@@ -52426,7 +52449,7 @@ int32_t pipeline_elf_ctx_resolve_patches(uint8_t *ctx_bytes) {
         target_shndx = PIPELINE_ELF_SHNX_TEXT_HOT;
       } else {
         if (link_abi_getenv("XLANG_ASM_DEBUG")) {
-          fprintf(stderr,
+          pabi_trace(
                   "xlang: elf patch shndx mismatch p=%d patch_sh=%d target_sh=%d rel=%d tgt=%d code_len=%d hot=%d\n",
                   (int)p, (int)patch_shndx, (int)target_shndx, (int)rel32_offset, (int)target_offset,
                   (int)ctx->code_len, (int)ctx->code_hot_len);
@@ -52494,7 +52517,7 @@ int32_t pipeline_elf_ctx_append_reloc(uint8_t *ctx_bytes, int32_t offset, uint8_
     return -1;
   ctx = (PipelineElfCtxAccess *)ctx_bytes;
   if (ctx->num_relocs >= PIPELINE_ELF_CTX_RELOC_TOTAL_CAP) {
-    fprintf(stderr, "xlang: elf num_relocs limit %d reached\n", PIPELINE_ELF_CTX_RELOC_TOTAL_CAP);
+    pabi_trace( "xlang: elf num_relocs limit %d reached\n", PIPELINE_ELF_CTX_RELOC_TOTAL_CAP);
     return -1;
   }
   ri = ctx->num_relocs;
@@ -56216,7 +56239,7 @@ int32_t pipeline_block_append_while(void *a, int32_t br, int32_t cond_ref, int32
   wl->cond_ref = cond_ref;
   wl->body_ref = body_ref;
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: append_while br=%d cond=%d body=%d wi=%d\n", (int)br, (int)cond_ref, (int)body_ref,
+    pabi_trace( "xlang: append_while br=%d cond=%d body=%d wi=%d\n", (int)br, (int)cond_ref, (int)body_ref,
             (int)(idx - b->loop_base));
   b->num_loops++;
   return idx - b->loop_base;
@@ -57104,7 +57127,7 @@ void pipeline_block_with_arena_fixup_stmt_order(void *a, int32_t br) {
   }
   if (wa_ri < 0 || inner <= 0 || inner == br) {
     if (link_abi_getenv("XLANG_ASM_DEBUG") && b->num_regions > 0)
-      fprintf(stderr, "xlang: wa_fixup skip br=%d wa_ri=%d inner=%d nso=%d\n", (int)br, (int)wa_ri, (int)inner,
+      pabi_trace( "xlang: wa_fixup skip br=%d wa_ri=%d inner=%d nso=%d\n", (int)br, (int)wa_ri, (int)inner,
               (int)b->num_stmt_order);
     return;
   }
@@ -57112,14 +57135,14 @@ void pipeline_block_with_arena_fixup_stmt_order(void *a, int32_t br) {
     if (pipeline_block_stmt_order_kind(a, br, i) == 6) {
       if (link_abi_getenv("XLANG_ASM_DEBUG")) {
         W277_Block *ib = inner > 0 ? w277_block_at(a, inner) : NULL;
-        fprintf(stderr, "xlang: wa_fixup ok br=%d inner=%d in_nso=%d in_nif=%d\n", (int)br, (int)inner,
+        pabi_trace( "xlang: wa_fixup ok br=%d inner=%d in_nso=%d in_nif=%d\n", (int)br, (int)inner,
                 ib ? (int)ib->num_stmt_order : -1, ib ? (int)ib->num_if_stmts : -1);
       }
       return;
     }
   }
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: wa_fixup apply br=%d wa_ri=%d inner=%d old_nso=%d\n", (int)br, (int)wa_ri, (int)inner,
+    pabi_trace( "xlang: wa_fixup apply br=%d wa_ri=%d inner=%d old_nso=%d\n", (int)br, (int)wa_ri, (int)inner,
             (int)b->num_stmt_order);
   abs = b->stmt_order_base;
   if (abs < 0)
@@ -57156,14 +57179,14 @@ void pipeline_block_stmt_order_rebuild_sparse_ifs(void *a, int32_t br) {
   int32_t emitted_ifs;
   int32_t abs;
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: rebuild_sparse_ifs ENTER br=%d\n", (int)br);
+    pabi_trace( "xlang: rebuild_sparse_ifs ENTER br=%d\n", (int)br);
   if (!a || br <= 0)
     return;
   b = w277_block_at(a, br);
   sc = arena_sidecar_get(a, 1);
   if (!b || !sc || b->num_if_stmts <= 0) {
     if (link_abi_getenv("XLANG_ASM_DEBUG"))
-      fprintf(stderr,
+      pabi_trace(
               "xlang: rebuild_sparse_ifs early br=%d b=%p sc=%p nif=%d\n",
               (int)br, (void *)b, (void *)sc, b ? (int)b->num_if_stmts : -1);
     return;
@@ -57178,11 +57201,11 @@ void pipeline_block_stmt_order_rebuild_sparse_ifs(void *a, int32_t br) {
     if (k0 == 5)
       if_in_order++;
     if (link_abi_getenv("XLANG_ASM_DEBUG"))
-      fprintf(stderr, "xlang: rebuild_sparse_ifs so[%d]=kind=%u idx=%d\n", (int)i, (unsigned)k0,
+      pabi_trace( "xlang: rebuild_sparse_ifs so[%d]=kind=%u idx=%d\n", (int)i, (unsigned)k0,
               (int)pipeline_block_stmt_order_idx(a, br, i));
   }
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr,
+    pabi_trace(
             "xlang: rebuild_sparse_ifs br=%d nso=%d nif=%d if_in_order=%d\n",
             (int)br, (int)nso, (int)nif, (int)if_in_order);
   if (if_in_order >= nif)
@@ -57261,7 +57284,7 @@ void pipeline_block_stmt_order_rebuild_sparse_ifs(void *a, int32_t br) {
       *so = neu[i];
   }
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: if_rebuild br=%d nif=%d old_if_in_order=%d new_nso=%d\n", (int)br, (int)nif, (int)if_in_order,
+    pabi_trace( "xlang: if_rebuild br=%d nif=%d old_if_in_order=%d new_nso=%d\n", (int)br, (int)nif, (int)if_in_order,
             (int)nn);
 }
 
@@ -57278,7 +57301,7 @@ void pipeline_module_fixup_with_arena_stmt_orders(void *m, void *a) {
       continue;
     b = w277_block_at(a, br);
     if (link_abi_getenv("XLANG_ASM_DEBUG") && b && b->num_regions > 0)
-      fprintf(stderr, "xlang: wa_fixup scan fi=%d br=%d nreg=%d nso=%d\n", (int)fi, (int)br, (int)b->num_regions,
+      pabi_trace( "xlang: wa_fixup scan fi=%d br=%d nreg=%d nso=%d\n", (int)fi, (int)br, (int)b->num_regions,
               (int)b->num_stmt_order);
     pipeline_block_with_arena_fixup_stmt_order(a, br);
     pipeline_block_stmt_order_rebuild_sparse_ifs(a, br);
@@ -58737,7 +58760,7 @@ void pipeline_expr_set_resolved_type_ref(void *a, int32_t expr_ref, int32_t type
   trace_ref = atoi(trace_expr);
   if (trace_ref != expr_ref)
     return;
-  fprintf(stderr, "note: expr set debug: expr=%d kind=%d block=%d old_ty=%d new_ty=%d\n", (int)expr_ref,
+  pabi_trace( "note: expr set debug: expr=%d kind=%d block=%d old_ty=%d new_ty=%d\n", (int)expr_ref,
           (int)ex->kind, (int)ex->block_ref, (int)old_ref, (int)type_ref);
 }
 
@@ -59717,7 +59740,7 @@ void ast_pool_drop_bodies_for_check(void *a, void *m) {
   }
 #endif
   if (link_abi_getenv("XLANG_DEBUG_CHECK_MEM")) {
-    fprintf(stderr,
+    pabi_trace(
             "xlang: [CHECK_MEM] drop_bodies arena=%p n_expr=%d n_block=%d n_type=%d "
             "n_func=%d freed_body_approx=%zuMB\n",
             a, (int)n_expr, (int)n_block, (int)n_type,
@@ -60234,9 +60257,8 @@ void pipeline_module_func_set_num_generic_params(void *m, int32_t fi, int32_t n)
   if (f && n >= 0)
     f->num_generic_params = n;
   if (f && link_abi_getenv("XLANG_DEBUG_FUNC_GENERIC_SLOT")) {
-    fprintf(stderr, "xlang: [XLANG_DEBUG_FUNC_GENERIC_SLOT] set fi=%d n=%d name=%.*s\n",
+    pabi_trace( "xlang: [XLANG_DEBUG_FUNC_GENERIC_SLOT] set fi=%d n=%d name=%.*s\n",
             (int)fi, (int)f->num_generic_params, (int)(f->name_len > 0 ? f->name_len : 0), (const char *)f->name);
-    fflush(stderr);
   }
 }
 
@@ -60256,10 +60278,9 @@ int32_t pipeline_module_func_num_generic_params_at(void *m, int32_t func_index) 
   if (!f)
     return 0;
   if (link_abi_getenv("XLANG_DEBUG_FUNC_GENERIC_SLOT")) {
-    fprintf(stderr, "xlang: [XLANG_DEBUG_FUNC_GENERIC_SLOT] get fi=%d n=%d name=%.*s\n",
+    pabi_trace( "xlang: [XLANG_DEBUG_FUNC_GENERIC_SLOT] get fi=%d n=%d name=%.*s\n",
             (int)func_index, (int)f->num_generic_params, (int)(f->name_len > 0 ? f->name_len : 0),
             (const char *)f->name);
-    fflush(stderr);
   }
   return (int32_t)f->num_generic_params;
 }
@@ -61682,7 +61703,7 @@ void pipeline_block_fill_whiles_from_onefunc(void *a, int32_t br, uint8_t *out, 
     int32_t cond_ref = pipeline_onefunc_while_cond_ref(out, i);
     int32_t body_ref = pipeline_onefunc_while_body_ref(out, i);
     if (link_abi_getenv("XLANG_ASM_DEBUG"))
-      fprintf(stderr, "xlang: fill_while_from_onefunc i=%d cond=%d body=%d\n", (int)i, (int)cond_ref, (int)body_ref);
+      pabi_trace( "xlang: fill_while_from_onefunc i=%d cond=%d body=%d\n", (int)i, (int)cond_ref, (int)body_ref);
     pipeline_block_append_while(a, br, cond_ref, body_ref);
   }
 }
@@ -61692,7 +61713,7 @@ void pipeline_block_fill_whiles_from_onefunc(void *a, int32_t br, uint8_t *out, 
 void pipeline_block_fill_fors_from_onefunc(void *a, int32_t br, uint8_t *out, int32_t count) {
   int32_t i;
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: fill_fors br=%d count=%d\n", (int)br, (int)count);
+    pabi_trace( "xlang: fill_fors br=%d count=%d\n", (int)br, (int)count);
   for (i = 0; i < count; i++) {
     pipeline_block_append_for(a, br, pipeline_onefunc_for_init_ref(out, i), pipeline_onefunc_for_cond_ref(out, i),
                               pipeline_onefunc_for_step_ref(out, i), pipeline_onefunc_for_body_ref(out, i));
@@ -63530,7 +63551,7 @@ int32_t pipeline_sync_dep_slots_from_driver_impl_c(struct ast_Module *module, st
   n_entry_imports = parser_get_module_num_imports(module);
   if (n_entry_imports >= 0 && n_entry_imports < dep_sync_nd) {
     if (link_abi_getenv("XLANG_DEBUG_PIPE"))
-      fprintf(stderr,
+      pabi_trace(
               "xlang: [XLANG_DEBUG_PIPE] skip entry-index dep sync (ndep=%d entry_imports=%d)\n",
               (int)dep_sync_nd, (int)n_entry_imports);
     return 0;
@@ -63687,7 +63708,7 @@ int32_t pipeline_typeck_after_parse_ok_impl_c(struct ast_ASTArena *arena, struct
   pipeline_module_set_main_func_index(module, r.main_idx);
   pipeline_typeck_set_active_ctx_c(module, ctx);
   if (link_abi_getenv("XLANG_DEBUG_PIPE") != NULL) {
-    fprintf(stderr, "xlang: [XLANG_DEBUG_PIPE] type_aliases=%d struct_layouts=%d\n",
+    pabi_trace( "xlang: [XLANG_DEBUG_PIPE] type_aliases=%d struct_layouts=%d\n",
             (int)pipeline_module_num_type_aliases_at(module),
             (int)pipeline_module_num_struct_layouts_at(module));
   }
@@ -63806,7 +63827,7 @@ void pipeline_debug_module_funcs(void *m) {
     len = (int)pipeline_module_func_name_len_at(m, i);
     memset(nm, 0, sizeof(nm));
     pipeline_module_func_name_copy64(m, i, nm);
-    fprintf(stderr, "[DEBUG] module func[%d] name_len=%d name=%.*s\n", i, len,
+    pabi_trace( "[DEBUG] module func[%d] name_len=%d name=%.*s\n", i, len,
             len > 0 && len <= 64 ? len : 0, (const char *)nm);
   }
 }
@@ -63836,14 +63857,11 @@ void driver_diagnostic_entry_module(struct ast_Module *mod, struct ast_ASTArena 
         nso = ast_ast_block_num_stmt_order(a, body_ref);
         nreg = ast_ast_block_num_regions(a, body_ref);
       }
-      fprintf(stderr, "asm_list: #%d extern=%d body_ref=%d nlet=%d nso=%d nreg=%d name=",
+      pabi_trace("asm_list: #%d extern=%d body_ref=%d nlet=%d nso=%d nreg=%d name=%.*s\n",
               (int)i, (int)pipeline_module_func_is_extern_at(mod, i),
-              (int)body_ref, (int)nlet, (int)nso, (int)nreg);
-      for (j = 0; j < nl && j < 64; j++)
-        fputc((char)nm[j], stderr);
-      fputc('\n', stderr);
+              (int)body_ref, (int)nlet, (int)nso, (int)nreg,
+              nl < 64 ? (int)nl : 64, (const char *)nm);
     }
-    fflush(stderr);
     return;
   }
   (void)mod;
@@ -64132,7 +64150,7 @@ XLANG_WEAK int32_t pipeline_typeck_dep_prerun_module_c(void *module, void *arena
   if (tc == 0)
     return 0;
   if (link_abi_getenv("XLANG_DEBUG_PIPE"))
-    fprintf(stderr, "xlang: [XLANG_DEBUG_PIPE] dep prerun full typeck rc=%d, light fallback\n", (int)tc);
+    pabi_trace( "xlang: [XLANG_DEBUG_PIPE] dep prerun full typeck rc=%d, light fallback\n", (int)tc);
   if (pipeline_typeck_validate_struct_layouts_zero_padding_c(module, arena) != 0)
     return -7;
   pipeline_typeck_patch_all_body_parent_links_c(module, arena);
@@ -64596,7 +64614,7 @@ int32_t pipeline_typeck_check_expr_c(void *module, void *arena, int32_t expr_ref
     return pipeline_typeck_check_expr_try_propagate_c(module, arena, expr_ref, return_type_ref, ctx);
   rc = pipeline_typeck_check_expr_impl_c(module, arena, expr_ref, return_type_ref, ctx);
   if (rc != 0 && link_abi_getenv("XLANG_DEBUG_PIPE"))
-    fprintf(stderr, "xlang: [XLANG_DEBUG_PIPE] check_expr fail func=%d expr=%d kind=%d block=%d\n",
+    pabi_trace( "xlang: [XLANG_DEBUG_PIPE] check_expr fail func=%d expr=%d kind=%d block=%d\n",
             -1, (int)expr_ref, (int)kind, -1);
   (void)ctx;
   return rc;
@@ -65383,11 +65401,11 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
   /* PLATFORM: SHARED x86_64 — text-embedded module mutable lit cells once before funcs. */
   if (pipeline_asm_modlet_prepare_and_emit_elf_c(m, a, elf_ctx, ta) != 0) {
     if (link_abi_getenv("XLANG_ASM_DEBUG"))
-      fprintf(stderr, "xlang: mega_body_c modlet prepare fail\n");
+      pabi_trace( "xlang: mega_body_c modlet prepare fail\n");
     return -1;
   }
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: mega_body_c start emit_n=%d start_skip=%d nf=%d\n", (int)emit_n, (int)start_skip,
+    pabi_trace( "xlang: mega_body_c start emit_n=%d start_skip=%d nf=%d\n", (int)emit_n, (int)start_skip,
             (int)pipeline_module_num_funcs(m));
   for (k = 0; k < emit_n; k++) {
     int32_t i = pipeline_asm_wpo_pgo_emit_order_at(m, k);
@@ -65435,7 +65453,7 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
         pipeline_asm_module_func_param_name_copy32(m, i, 0, p0);
         off0 = asm_ctx_local_find_offset((uint8_t *)bctx, p0, plen0);
       }
-      fprintf(stderr,
+      pabi_trace(
               "xlang: mega_body_c post_fill fi=%d np=%d plen0=%d nloc=%d off0=%d p0=%.*s\n",
               (int)i, (int)np_dbg, (int)plen0, (int)nloc, (int)off0,
               (int)(plen0 > 0 ? plen0 : 0), (char *)p0);
@@ -65467,7 +65485,7 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
       return -1;
     if (backend_enc_label_arch(elf_ctx, export_sym, export_sym_len, 1, ta) != 0) {
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr, "xlang: mega_body_c enc_label fail func=%.*s\n", (int)export_sym_len, (char *)export_sym);
+        pabi_trace( "xlang: mega_body_c enc_label fail func=%.*s\n", (int)export_sym_len, (char *)export_sym);
       return -1;
     }
     if (asm_skip_heavy_module_func_body(m, a, i) != 0) {
@@ -65502,13 +65520,13 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
     }
     if (pipeline_asm_emit_param_home_elf_c(elf_ctx, bctx, m, i, ta) != 0) {
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr, "xlang: mega_body_c param_home fail fi=%d\n", (int)i);
+        pabi_trace( "xlang: mega_body_c param_home fail fi=%d\n", (int)i);
       return -1;
     }
     /* Mutable module-level lit lets on non-hoist: seed stack slots after param home. */
     if (pipeline_asm_emit_module_top_level_mutable_lit_inits_elf_c(a, elf_ctx, bctx, m, i, ta) != 0) {
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr, "xlang: mega_body_c top_level lit inits fail func=%.*s fi=%d\n", (int)fname_len,
+        pabi_trace( "xlang: mega_body_c top_level lit inits fail func=%.*s fi=%d\n", (int)fname_len,
                 (char *)fname_buf, (int)i);
       return -1;
     }
@@ -65516,7 +65534,7 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
     if (i == pipeline_asm_hoist_target_func_index(m) &&
         pipeline_asm_modlet_seed_nonzero_inits_elf_c(elf_ctx, ta) != 0) {
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr, "xlang: mega_body_c modlet nonzero seed fail func=%.*s\n", (int)fname_len,
+        pabi_trace( "xlang: mega_body_c modlet nonzero seed fail func=%.*s\n", (int)fname_len,
                 (char *)fname_buf);
       return -1;
     }
@@ -65528,7 +65546,7 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
         pipeline_debug_trace_named_func_bodies("mega_pre_emit_block_body", m, a);
         if (backend_emit_block_body_sync_elf(a, elf_ctx, body_ref, bctx, ta) != 0) {
           if (link_abi_getenv("XLANG_ASM_DEBUG"))
-            fprintf(stderr, "xlang: mega_body_c emit_block_body fail func=%.*s fi=%d body_ref=%d\n",
+            pabi_trace( "xlang: mega_body_c emit_block_body fail func=%.*s fi=%d body_ref=%d\n",
                     (int)fname_len, (char *)fname_buf, (int)i, (int)body_ref);
           return -1;
         }
@@ -65658,14 +65676,14 @@ int32_t pipeline_backend_asm_codegen_ast_to_elf_mega_body_c(void *m, void *a, vo
     }
     if (backend_enc_epilogue_arch(elf_ctx, ta) != 0) {
       if (link_abi_getenv("XLANG_ASM_DEBUG"))
-        fprintf(stderr, "xlang: mega_body_c epilogue fail func=%.*s fi=%d\n", (int)fname_len, (char *)fname_buf,
+        pabi_trace( "xlang: mega_body_c epilogue fail func=%.*s fi=%d\n", (int)fname_len, (char *)fname_buf,
                 (int)i);
       return -1;
     }
     pipeline_asm_emit_async_cps_end_func_elf_c();
   }
   if (link_abi_getenv("XLANG_ASM_DEBUG"))
-    fprintf(stderr, "xlang: mega_body_c done emit_n=%d rc=0\n", (int)emit_n);
+    pabi_trace( "xlang: mega_body_c done emit_n=%d rc=0\n", (int)emit_n);
   return 0;
 }
 

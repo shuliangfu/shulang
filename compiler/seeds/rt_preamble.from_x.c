@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+/* Cap residual 9.7.1: inline ABI writers take the opaque fd-handle stream. */
+#include "xlang_driver_stream_cap.h"
 
 #ifndef CODEGEN_PREAMBLE_SKIP_STD_IO_CORE_MACROS
 #define CODEGEN_PREAMBLE_SKIP_STD_IO_CORE_MACROS    1u
@@ -641,9 +644,13 @@ const int32_t driver_preamble_fs_path_lines_n =
 
 #ifndef XLANG_RT_PREAMBLE_FROM_X
 
-/** 向生成 C 写入 std.io / std.net 内联 ABI。成功返回 0。 */
-int write_io_net_abi_inline(FILE *cf) {
+/** 向生成 C 写入 std.io / std.net 内联 ABI。成功返回 0。
+ * 9.7.1: cf is the opaque fd-handle stream (xlang_driver_stream_cap.h). */
+int write_io_net_abi_inline(uint8_t *cf) {
     const unsigned skip = codegen_get_preamble_skip_mask();
+    int fd = xlang_driver_handle_to_fd(cf);
+    if (fd < 0)
+        return 1;
     for (int32_t i = 0; i < driver_preamble_io_net_lines_n; i++) {
         int skip_line = 0;
         /* std_io_driver_handle_* 别名：codegen 已 emit handle_stdin 等时跳过。 */
@@ -669,24 +676,30 @@ int write_io_net_abi_inline(FILE *cf) {
          */
         if ((skip & CODEGEN_PREAMBLE_SKIP_WEAK_IO_BATCH) && i >= 178 && i <= 181)
             skip_line = 1;
-        if (!skip_line && fputs(driver_preamble_io_net_lines[i], cf) == EOF)
+        if (!skip_line && xlang_io_write(fd, driver_preamble_io_net_lines[i],
+                                         strlen(driver_preamble_io_net_lines[i])) < 0)
             return 1;
     }
     return 0;
 }
 
-/** 向生成 C 写入 std.fs / std.path / std.map / std.error 内联 ABI。成功返回 0。 */
-int write_fs_path_map_error_abi_inline(FILE *cf) {
+/** 向生成 C 写入 std.fs / std.path / std.map / std.error 内联 ABI。成功返回 0。
+ * 9.7.1: cf is the opaque fd-handle stream (xlang_driver_stream_cap.h). */
+int write_fs_path_map_error_abi_inline(uint8_t *cf) {
+    int fd = xlang_driver_handle_to_fd(cf);
+    if (fd < 0)
+        return 1;
     for (int32_t i = 0; i < driver_preamble_fs_path_lines_n; i++) {
-        if (fputs(driver_preamble_fs_path_lines[i], cf) == EOF)
+        if (xlang_io_write(fd, driver_preamble_fs_path_lines[i],
+                           strlen(driver_preamble_fs_path_lines[i])) < 0)
             return 1;
     }
     return 0;
 }
 
 #else
-int write_io_net_abi_inline(FILE *cf);
-int write_fs_path_map_error_abi_inline(FILE *cf);
+int write_io_net_abi_inline(uint8_t *cf);
+int write_fs_path_map_error_abi_inline(uint8_t *cf);
 #endif
 
 int labi_rt_preamble_slice_marker(void) {

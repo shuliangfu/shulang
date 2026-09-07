@@ -65,6 +65,10 @@ static inline long xlang_io_read(int fd, void *buf, size_t count) {
 /**
  * Cap residual 9.5.3: open/create file for writing via CRT _open
  * (_O_WRONLY|_O_CREAT|_O_TRUNC, mode _S_IREAD|_S_IWRITE ≡ 0644).
+ * 9.7.1: _O_BINARY is REQUIRED — this authority also serves the driver
+ * "wb" face (fopen_wb_opaque: metric .o / asm .o emission); CRT text mode
+ * would CRLF-corrupt binary outputs. Emitted C text with LF endings is
+ * accepted by every host toolchain, so binary mode is safe for all callers.
  * @param path NUL-terminated file path
  * @return new file descriptor, or -1 with errno
  * PLATFORM: WINDOWS
@@ -72,7 +76,8 @@ static inline long xlang_io_read(int fd, void *buf, size_t count) {
 static inline int xlang_io_open_write(const char *path) {
   if (!path)
     return -1;
-  return _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC, _S_IREAD | _S_IWRITE);
+  return _open(path, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY,
+               _S_IREAD | _S_IWRITE);
 }
 
 /**

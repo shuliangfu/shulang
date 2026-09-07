@@ -11,13 +11,13 @@
 struct codegen_CodegenOutBuf;
 
 /** 写入 lsp_io_gen.c 所需的 std.heap typeck 符号别名（C-04 v0：std_io extern 改由 codegen 自动生成）。 */
-void lsp_codegen_emit_heap_alias_block(FILE *out);
+void lsp_codegen_emit_heap_alias_block(uint8_t *out);
 
 /** @deprecated 使用 codegen import extern + lsp_codegen_emit_heap_alias_block */
-void lsp_codegen_emit_io_extern_block(FILE *out);
+void lsp_codegen_emit_io_extern_block(uint8_t *out);
 
 /** 写入 lsp_gen.c 所需的 lsp_io 符号 extern 与 static inline 包装（原 lsp_gen_extern.h 语义）。 */
-void lsp_codegen_emit_gen_extern_block(FILE *out);
+void lsp_codegen_emit_gen_extern_block(uint8_t *out);
 
 /** 写入 lsp_io_gen.c 所需的 std.heap typeck 链接别名（alloc/free 符号映射）。 */
 int lsp_codegen_emit_heap_alias_to_buf(struct codegen_CodegenOutBuf *out);

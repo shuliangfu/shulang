@@ -198,6 +198,8 @@ void driver_compile_phase_timing_clear(void);
 /* G.7: single Cap authority for this cold/rest TU (after stdio). */
 #undef snprintf
 #define snprintf xlang_snprintf
+/* Cap residual 9.7.1: opaque stream face → fd-handle (write/open/close authorities). */
+#include "xlang_driver_stream_cap.h"
 
 #ifndef _WIN32
 #include <sys/time.h>
@@ -230,69 +232,93 @@ void driver_compile_phase_timing_clear(void);
  * freestanding bag). Keep prologue static inline for -E inlining only; local `t`
  * does not multidef against these weak globals.
  *
- * PLATFORM: SHARED — FILE cast via stdio + realpath/unistd; Win32 realpath null;
- * thread_fn_ptr casts require product pipeline_run_x_thread_fn and
- * xlang_asm_codegen_elf_o_thread_fn T defs at final pure-ld (present on bag).
+ * Cap residual 9.7.1: the face no longer wraps libc FILE*. Every body encodes
+ * raw fds via xlang_driver_stream_cap.h and routes I/O through the Cap
+ * authorities (xlang_io_write / xlang_io_open_write / xlang_proc_close_fd), so
+ * this TU carries zero stdio UNDEFs. Signatures stay `uint8_t *` (opaque),
+ * which keeps every .x consumer source-compatible.
+ *
+ * PLATFORM: SHARED — fd-handle face (encoding in xlang_driver_stream_cap.h);
+ * Win32 realpath null; thread_fn_ptr casts require product pipeline_run_x_thread_fn
+ * and xlang_asm_codegen_elf_o_thread_fn T defs at final pure-ld (present on bag).
  */
 XLANG_WEAK int32_t xlang_driver_fputs_opaque(uint8_t *s, uint8_t *stream) {
+    long n;
+    int fd;
     if (!s || !stream) {
         return (int32_t)-1;
     }
-    return (int32_t)fputs((const char *)(void *)s, (FILE *)(void *)stream);
+    fd = xlang_driver_handle_to_fd(stream);
+    if (fd < 0) {
+        return (int32_t)-1;
+    }
+    /* Mirrors fputs contract used by callers (driver_preamble_fputs checks <0):
+     * return byte count written, or -1 on error. */
+    n = xlang_io_write(fd, s, strlen((const char *)(void *)s));
+    return (int32_t)n;
 }
 
 XLANG_WEAK uint8_t *xlang_driver_stdout_ptr(void) {
-    return (uint8_t *)(void *)stdout;
+    return xlang_driver_handle_from_fd(1);
 }
 
 XLANG_WEAK int32_t xlang_driver_fclose_opaque(uint8_t *stream) {
-    if (!stream) {
-        return 0;
-    }
-    return fclose((FILE *)(void *)stream) == 0 ? 0 : 1;
+    return (int32_t)xlang_driver_handle_close(stream);
 }
 
 XLANG_WEAK int32_t xlang_driver_fwrite_opaque(uint8_t *data, int32_t len, uint8_t *stream) {
-    size_t n;
+    long n;
+    int fd;
     if (!data || len < 0 || !stream) {
         return 1;
     }
     if (len == 0) {
         return 0;
     }
-    n = fwrite((const void *)(void *)data, 1, (size_t)len, (FILE *)(void *)stream);
+    fd = xlang_driver_handle_to_fd(stream);
+    if (fd < 0) {
+        return 1;
+    }
+    n = xlang_io_write(fd, data, (size_t)len);
     return n == (size_t)len ? 0 : 1;
 }
 
 XLANG_WEAK uint8_t *xlang_driver_fopen_write_opaque(uint8_t *path) {
+    int fd;
     if (!path) {
         return (uint8_t *)0;
     }
-    return (uint8_t *)(void *)fopen((const char *)(void *)path, "w");
+    /* fopen(path,"w") ≡ O_WRONLY|O_CREAT|O_TRUNC (0644) — the Cap authority. */
+    fd = xlang_io_open_write((const char *)(void *)path);
+    return fd < 0 ? (uint8_t *)0 : xlang_driver_handle_from_fd(fd);
 }
 
 XLANG_WEAK uint8_t *xlang_driver_stderr_ptr(void) {
-    return (uint8_t *)(void *)stderr;
+    return xlang_driver_handle_from_fd(2);
 }
 
 XLANG_WEAK void xlang_driver_fflush_stdout(void) {
-    (void)fflush(stdout);
+    /* Raw fd 1 writes are unbuffered — nothing to flush (9.7.1). */
 }
 
 XLANG_WEAK uint8_t *xlang_driver_fopen_wb_opaque(uint8_t *path) {
+    int fd;
     if (!path) {
         return (uint8_t *)0;
     }
-    return (uint8_t *)(void *)fopen((const char *)(void *)path, "wb");
+    /* Binary "wb" face: xlang_io_open_write is _O_BINARY on Windows (9.7.1),
+     * so metric .o / asm .o emission cannot be CRLF-corrupted. */
+    fd = xlang_io_open_write((const char *)(void *)path);
+    return fd < 0 ? (uint8_t *)0 : xlang_driver_handle_from_fd(fd);
 }
 
 XLANG_WEAK uint8_t *xlang_driver_fdopen_wb_opaque(int32_t fd) {
-    FILE *fp;
     if (fd < 0) {
         return (uint8_t *)0;
     }
-    fp = fdopen((int)fd, "wb");
-    return (uint8_t *)(void *)fp;
+    /* fdopen(fd,"wb") consumed the caller's fd (mkstemp); the handle now owns
+     * it — fclose_opaque/handle_close releases it, same contract as libc. */
+    return xlang_driver_handle_from_fd((int)fd);
 }
 
 #if defined(_POSIX_VERSION) || defined(__APPLE__)
@@ -1756,18 +1782,19 @@ void driver_run_stack_esc_gate_on_large_stack(void *arg) {
 
 /**
  * Cap residual：opaque FILE* 供 rt_entry R2 full .x 的 diag_print_*。
- * wave39 pure：hybrid thin owns driver_stdio_stdout via g05 xlang_driver_stdout_ptr；
- * wave40 pure：hybrid thin owns driver_stdio_stderr via g05 xlang_driver_stderr_ptr；
+ * wave39 pure：hybrid thin owns driver_stdio_stdout via fd-handle stdout_ptr；
+ * wave40 pure：hybrid thin owns driver_stdio_stderr via fd-handle stderr_ptr；
  * cold twins under #ifndef FROM_X；FROM_X 无 pure-dup。
- * PLATFORM: SHARED — FILE* cast stays C.
+ * PLATFORM: SHARED — fd-handle face (9.7.1): encoded std fds, .x consumers
+ * pass the value to the same opaque face, so identity/typing still holds.
  */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 void *driver_stdio_stdout(void) {
-    return (void *)stdout;
+    return (void *)xlang_driver_handle_from_fd(1);
 }
 
 void *driver_stdio_stderr(void) {
-    return (void *)stderr;
+    return (void *)xlang_driver_handle_from_fd(2);
 }
 #endif
 
@@ -1962,11 +1989,10 @@ static const char usage_color[] =
     "Release default: xlang_asm -backend asm -O2 (f32 xmm ABI on unless legacy).\n"
     "See \033[4;34mcompiler/docs/F32_XMM_ABI.md\033[0m for f32 ABI and deprecation timeline.\n";
     if (use_color) {
-        (void)fwrite(usage_color, 1, sizeof(usage_color) - 1u, stdout);
+        (void)xlang_io_write(1, usage_color, sizeof(usage_color) - 1u);
     } else {
-        (void)fwrite(usage_plain, 1, sizeof(usage_plain) - 1u, stdout);
+        (void)xlang_io_write(1, usage_plain, sizeof(usage_plain) - 1u);
     }
-    (void)fflush(stdout);
 }
 
 /* wave44 pure: hybrid thin owns print_usage color orch; cold twin under #ifndef FROM_X. */
@@ -2246,14 +2272,18 @@ int32_t driver_preamble_fs_path_line_count(void) {
 #endif /* !XLANG_L2_RDABI_THIN_FROM_X */
 
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
-/** Cap residual G.7 authority cold twin：opaque *u8 stream → FILE* fputs（EOF/null → 负值）。
+/** Cap residual G.7 authority cold twin：opaque *u8 stream → fd-handle write（error → 负值）。
  * Shared by rt_preamble + async_liveness/async_cps emit pure (.x). No module-local clones.
- * Wave22 pure owns this under PREFER hybrid (thin.x + g05 xlang_driver_fputs_opaque).
- * PLATFORM: SHARED — single FILE* fputs bridge for product cold seed. */
+ * Wave22 pure owns this under PREFER hybrid (thin.x + fd-handle fputs_opaque).
+ * PLATFORM: SHARED — single stream-write bridge for product cold seed (9.7.1). */
 int32_t driver_preamble_fputs(uint8_t *s, uint8_t *stream) {
+    int fd;
     if (s == NULL || stream == NULL)
         return -1;
-    return (int32_t)fputs((const char *)(void *)s, (FILE *)(void *)stream);
+    fd = xlang_driver_handle_to_fd(stream);
+    if (fd < 0)
+        return -1;
+    return (int32_t)xlang_io_write(fd, s, strlen((const char *)(void *)s));
 }
 #endif /* !XLANG_L2_RDABI_THIN_FROM_X */
 
@@ -2307,24 +2337,21 @@ uint8_t *driver_x_emit_lib_root_at(int32_t i) {
 }
 #endif /* !XLANG_L2_RDABI_THIN_FROM_X */
 
-/* Permanent OS residual: stdout FILE* setvbuf (always seed). */
+/* 9.7.1: stdout writes go through raw fd 1 (unbuffered by nature) — kept as a
+ * no-op for .x callers that used to disable libc FILE buffering. */
 void driver_x_emit_stdout_set_unbuffered(void) {
-    (void)setvbuf(stdout, NULL, _IONBF, 0);
 }
 
 /**
  * Cap OS residual for wave39 pure driver_x_emit_fwrite_stdout.
- * Pure owns null/len guards; this returns fwrite byte count after fflush.
+ * Pure owns null/len guards; this returns write byte count (fd 1 is unbuffered).
  * Always linked under FROM_X (no pure-dup of public symbol).
- * PLATFORM: SHARED — FILE* stdout cast stays seed rest.
+ * PLATFORM: SHARED — fd-handle face; raw write(1) via Cap authority (9.7.1).
  */
 int32_t xlang_driver_fwrite_stdout_n(uint8_t *data, int32_t len) {
-    size_t n;
     if (data == NULL || len <= 0)
         return 0;
-    n = fwrite(data, 1, (size_t)len, stdout);
-    (void)fflush(stdout);
-    return (int32_t)n;
+    return (int32_t)xlang_io_write(1, data, (size_t)len);
 }
 
 /* wave39 pure: hybrid thin owns fwrite_stdout; cold twin; FROM_X no pure-dup. */
@@ -3077,12 +3104,14 @@ void driver_asm_pctx_apply_host_defaults(void *ctx, uint8_t *target, int32_t emi
 }
 #endif /* !XLANG_L2_RDABI_THIN_FROM_X */
 
-/* wave40 pure: hybrid thin owns fopen_wb via g05 fopen_wb_opaque; cold twin. */
+/* wave40 pure: hybrid thin owns fopen_wb via fd-handle fopen_wb_opaque; cold twin. */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 uint8_t *driver_asm_fopen_wb(uint8_t *path) {
+    int fd;
     if (path == NULL)
         return NULL;
-    return (uint8_t *)(void *)fopen((const char *)(void *)path, "wb");
+    fd = xlang_io_open_write((const char *)(void *)path);
+    return fd < 0 ? NULL : xlang_driver_handle_from_fd(fd);
 }
 #endif
 
@@ -3108,38 +3137,33 @@ int32_t xlang_driver_asm_mkstemp_fdopen_enabled(void) {
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 uint8_t *driver_asm_mkstemp_fdopen(uint8_t *path_out64) {
     int fd;
-    FILE *fp;
     if (path_out64 == NULL)
         return NULL;
     snprintf((char *)(void *)path_out64, 64, "%sxlang_asm_XXXXXX", XLANG_TMP_PREFIX);
     fd = mkstemp((char *)(void *)path_out64);
     if (fd < 0)
         return NULL;
-    fp = fdopen(fd, "wb");
-    if (!fp) {
-        close(fd);
-        unlink((char *)(void *)path_out64);
-        path_out64[0] = 0;
-        return NULL;
-    }
-    return (uint8_t *)(void *)fp;
+    /* fdopen(fd,"wb") used to consume the fd; the handle owns it now (9.7.1). */
+    return xlang_driver_handle_from_fd(fd);
 }
 #endif
 
 void driver_asm_fclose(uint8_t *fp) {
-    driver_asm_fclose_asm_out((FILE *)(void *)fp);
+    driver_asm_fclose_asm_out(fp);
 }
 
-/* wave39 pure: hybrid thin owns asm_fwrite via g05 fwrite_opaque + stdout_ptr;
+/* wave39 pure: hybrid thin owns asm_fwrite via fd-handle fwrite_opaque + stdout_ptr;
  * cold twin under #ifndef FROM_X；FROM_X 无 pure-dup. */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 int32_t driver_asm_fwrite(uint8_t *fp, uint8_t *data, int32_t len) {
-    FILE *out;
-    size_t n;
+    int fd;
+    long n;
     if (data == NULL || len <= 0)
         return 0;
-    out = fp ? (FILE *)(void *)fp : stdout;
-    n = fwrite(data, 1, (size_t)len, out);
+    fd = fp ? xlang_driver_handle_to_fd(fp) : 1;
+    if (fd < 0)
+        return 1;
+    n = xlang_io_write(fd, data, (size_t)len);
     return (n == (size_t)len) ? 0 : 1;
 }
 #endif
@@ -3147,18 +3171,22 @@ int32_t driver_asm_fwrite(uint8_t *fp, uint8_t *data, int32_t len) {
 /* wave40 pure: hybrid thin owns fflush_stdout + write_metric_o; cold twins. */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 void driver_asm_fflush_stdout(void) {
-    (void)fflush(stdout);
+    /* Raw fd 1 writes are unbuffered — nothing to flush (9.7.1). */
 }
 
 int32_t driver_asm_write_metric_o(uint8_t *path) {
-    FILE *metric_o;
+    int fd;
+    static const char zero_byte[1] = { 0 };
+    long n;
     if (path == NULL)
         return 1;
-    metric_o = fopen((const char *)(void *)path, "wb");
-    if (!metric_o)
+    fd = xlang_io_open_write((const char *)(void *)path);
+    if (fd < 0)
         return 1;
-    (void)fputc('\0', metric_o);
-    if (fclose(metric_o) != 0)
+    n = xlang_io_write(fd, zero_byte, 1);
+    if (n != 1)
+        return 1;
+    if (xlang_proc_close_fd(fd) != 0)
         return 1;
     return 0;
 }
@@ -3386,7 +3414,7 @@ void driver_asm_work_cleanup(void) {
     if (g_asm_work_p[12])
         pipeline_dep_ctx_heap_destroy((struct ast_PipelineDepCtx *)(void *)g_asm_work_p[12]);
     if (g_asm_work_p[19])
-        driver_asm_fclose_asm_out((FILE *)(void *)g_asm_work_p[19]);
+        driver_asm_fclose_asm_out((uint8_t *)(void *)g_asm_work_p[19]);
     free(g_asm_work_p[20]); /* elf */
     free(g_asm_work_p[3]);  /* arena */
     free(g_asm_work_p[4]);  /* module */
@@ -3422,8 +3450,9 @@ typedef struct DriverCompileParsedAbi {
     int use_lto;
 } DriverCompileParsedAbi;
 
-extern int write_io_net_abi_inline(FILE *cf);
-extern int write_fs_path_map_error_abi_inline(FILE *cf);
+/* 9.7.1: inline ABI writers take the opaque fd-handle stream (rt_preamble seed). */
+extern int write_io_net_abi_inline(uint8_t *cf);
+extern int write_fs_path_map_error_abi_inline(uint8_t *cf);
 extern int xlang_write_path_bytes(const char *path, const void *data, size_t len);
 extern void diag_reportf(const char *file, int line, int col, const char *kind, const char *detail,
                          const char *fmt, ...);
@@ -3575,7 +3604,6 @@ const char *xlang_driver_tmp_prefix(void) {
 uint8_t *driver_parsed_open_out_file(uint8_t *out_path, uint8_t *tmp_c_out64, int32_t *emit_stdout) {
     char tmp[128];
     int fd;
-    FILE *cf;
     /* wave25: never touch BSS static by name — hybrid pure owns the buffer. */
     char *tbuf = (char *)(void *)driver_parsed_tmp_c_buf();
     if (emit_stdout)
@@ -3587,7 +3615,8 @@ uint8_t *driver_parsed_open_out_file(uint8_t *out_path, uint8_t *tmp_c_out64, in
     if (!out_path) {
         if (emit_stdout)
             *emit_stdout = 1;
-        return (uint8_t *)(void *)stdout;
+        /* Emit-to-stdout: encoded std handle; consumers guard fd 1 on close. */
+        return xlang_driver_handle_from_fd(1);
     }
     if (!tbuf)
         return NULL;
@@ -3601,7 +3630,7 @@ uint8_t *driver_parsed_open_out_file(uint8_t *out_path, uint8_t *tmp_c_out64, in
      * fdopen/fopen (POSIX allows it). Close the mkstemp fd BEFORE rename, then
      * reopen the renamed .c path. Without this, rename fails with
      * STATUS_SHARING_VIOLATION / "Permission denied" (BLD001). */
-    close(fd);
+    xlang_proc_close_fd(fd);
     /* Cap 256 matches pure/cold BSS; snprintf enforces NUL. */
     snprintf(tbuf, 256, "%s.c", tmp);
     if (rename(tmp, tbuf) != 0) {
@@ -3609,9 +3638,9 @@ uint8_t *driver_parsed_open_out_file(uint8_t *out_path, uint8_t *tmp_c_out64, in
         unlink(tmp);
         return NULL;
     }
-    cf = fopen(tbuf, "w");
-    if (!cf) {
-        runtime_diag_errno_path((const char *)(void *)out_path, "build error", "fopen", tbuf);
+    fd = xlang_io_open_write(tbuf);
+    if (fd < 0) {
+        runtime_diag_errno_path((const char *)(void *)out_path, "build error", "open", tbuf);
         unlink(tbuf);
         return NULL;
     }
@@ -3622,32 +3651,32 @@ uint8_t *driver_parsed_open_out_file(uint8_t *out_path, uint8_t *tmp_c_out64, in
         memcpy(tmp_c_out64, tbuf, n);
         tmp_c_out64[n] = 0;
     }
-    return (uint8_t *)(void *)cf;
+    return xlang_driver_handle_from_fd(fd);
 }
 #endif /* !XLANG_L2_RDABI_THIN_FROM_X */
 
 /* wave26 pure: hybrid thin owns fclose / fclose_rc / write_out; cold twins; FROM_X no pure-dup. */
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 void driver_parsed_fclose(uint8_t *fp) {
-    if (!fp || fp == (uint8_t *)(void *)stdout)
+    if (!fp || xlang_driver_handle_to_fd(fp) == 1)
         return;
-    fclose((FILE *)(void *)fp);
+    (void)xlang_driver_handle_close(fp);
 }
 
 int32_t driver_parsed_fclose_rc(uint8_t *fp) {
-    if (!fp || fp == (uint8_t *)(void *)stdout)
+    if (!fp || xlang_driver_handle_to_fd(fp) == 1)
         return 0;
-    return fclose((FILE *)(void *)fp) == 0 ? 0 : 1;
+    return xlang_driver_handle_close(fp);
 }
 
 int32_t driver_parsed_write_out(uint8_t *fp, uint8_t *data, int32_t len) {
-    FILE *cf = (FILE *)(void *)fp;
+    int fd = xlang_driver_handle_to_fd(fp);
     size_t first_line = 0;
     int need_preamble;
     static const char min_preamble[] =
         "/* generated */\n#include <stdint.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include "
         "<stdio.h>\n#include <string.h>\n";
-    if (!cf || !data || len < 0)
+    if (fd < 0 || !data || len < 0)
         return 1;
     while (first_line < (size_t)len && data[first_line] != '\n')
         first_line++;
@@ -3656,16 +3685,18 @@ int32_t driver_parsed_write_out(uint8_t *fp, uint8_t *data, int32_t len) {
     need_preamble =
         (len > 0 && data[0] != '#' && (len < 2 || data[0] != '/' || data[1] != '*'));
     if (need_preamble) {
-        if (fwrite(min_preamble, 1, sizeof(min_preamble) - 1, cf) != (size_t)(sizeof(min_preamble) - 1))
+        if (xlang_io_write(fd, min_preamble, sizeof(min_preamble) - 1) !=
+            (long)(sizeof(min_preamble) - 1))
             return 1;
     }
-    if (fwrite(data, 1, first_line, cf) != first_line)
+    if (xlang_io_write(fd, data, first_line) != (long)first_line)
         return 1;
-    if (write_io_net_abi_inline(cf) != 0)
+    if (write_io_net_abi_inline(fp) != 0)
         return 1;
-    if (write_fs_path_map_error_abi_inline(cf) != 0)
+    if (write_fs_path_map_error_abi_inline(fp) != 0)
         return 1;
-    if (fwrite(data + first_line, 1, (size_t)len - first_line, cf) != (size_t)len - first_line)
+    if (xlang_io_write(fd, data + first_line, (size_t)len - first_line) !=
+        (long)((size_t)len - first_line))
         return 1;
     return 0;
 }
@@ -3887,9 +3918,12 @@ void driver_parsed_work_cleanup(void) {
     void *da = g_parsed_work_p[9];
     void *dm = g_parsed_work_p[10];
     if (link_abi_getenv && link_abi_getenv("XLANG_DEBUG_SIDECAR")) {
-        fprintf(stderr,
-                "xlang: [SIDECAR] cleanup enter n_deps=%d arena=%p module=%p da=%p dm=%p\n", n,
-                g_parsed_work_p[3], g_parsed_work_p[4], da, dm);
+        /* Cap residual 9.7.1: debug trace via raw fd-2 write (no stdio). */
+        char sidecar_buf[160];
+        xlang_snprintf(sidecar_buf, sizeof(sidecar_buf),
+                       "xlang: [SIDECAR] cleanup enter n_deps=%d arena=%p module=%p da=%p dm=%p\n",
+                       n, g_parsed_work_p[3], g_parsed_work_p[4], da, dm);
+        (void)xlang_io_write(2, sidecar_buf, strlen(sidecar_buf));
     }
     for (i = 0; i < n; i++) {
         if (da) {

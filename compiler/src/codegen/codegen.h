@@ -120,7 +120,7 @@ void codegen_set_dep_slots_for_x_pipeline(struct ASTModule **mods, const char **
  * 节点=函数、边=静态 CALL/METHOD_CALL；call_sites 含全整型常量实参 profile（WPO-S2 特化前置）。
  * 由 runtime 在 typeck 通过后、XLANG_WPO_DUMP_CALLGRAPH 指向路径（或 "-"=stdout）时调用。
  */
-void codegen_dump_wpo_callgraph_json(FILE *out,
+void codegen_dump_wpo_callgraph_json(uint8_t *out,
     struct ASTModule *entry, const char *entry_path,
     struct ASTModule **all_mods, const char **all_paths, int n_all);
 

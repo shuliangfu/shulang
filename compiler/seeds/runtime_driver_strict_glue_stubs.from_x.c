@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <xlang_io_cap.h>
+/* Cap residual 9.7.1: stream params are opaque fd handles. */
+#include "xlang_driver_stream_cap.h"
 
 #include "token.h"
 #include "codegen/codegen.h"
@@ -249,11 +251,14 @@ XLANG_WEAK void codegen_compute_used_types(struct ASTModule *entry, struct ASTMo
   if (n_out) *n_out = 0;
 }
 
-XLANG_WEAK void codegen_dump_wpo_callgraph_json(FILE *out,
+XLANG_WEAK void codegen_dump_wpo_callgraph_json(uint8_t *out,
     struct ASTModule *entry, const char *entry_path,
     struct ASTModule **all_mods, const char **all_paths, int n_all) {
   (void)entry; (void)entry_path; (void)all_mods; (void)all_paths; (void)n_all;
-  if (out) fputs("{\"version\":2,\"nodes\":[]}\n", out);
+  if (out) {
+    static const char json[] = "{\"version\":2,\"nodes\":[]}\n";
+    (void)xlang_io_write(xlang_driver_handle_to_fd(out), json, sizeof(json) - 1);
+  }
 }
 
 /* ---- G-02e-10：原 _stubs_driver.c（pipeline_gen asm_driver_* → driver_*）---- */
@@ -367,19 +372,22 @@ int append_text_to_codegen_buf(struct codegen_CodegenOutBuf *out, const char *te
 
 
 
-void lsp_codegen_emit_heap_alias_block(FILE *out) {
+void lsp_codegen_emit_heap_alias_block(uint8_t *out) {
   if (out)
-    fputs(lsp_heap_alias_block, out);
+    (void)xlang_io_write(xlang_driver_handle_to_fd(out), lsp_heap_alias_block,
+                         strlen(lsp_heap_alias_block));
 }
 
-void lsp_codegen_emit_io_extern_block(FILE *out) {
+void lsp_codegen_emit_io_extern_block(uint8_t *out) {
   if (out)
-    fputs(lsp_io_extern_block, out);
+    (void)xlang_io_write(xlang_driver_handle_to_fd(out), lsp_io_extern_block,
+                         strlen(lsp_io_extern_block));
 }
 
-void lsp_codegen_emit_gen_extern_block(FILE *out) {
+void lsp_codegen_emit_gen_extern_block(uint8_t *out) {
   if (out)
-    fputs(lsp_gen_extern_block, out);
+    (void)xlang_io_write(xlang_driver_handle_to_fd(out), lsp_gen_extern_block,
+                         strlen(lsp_gen_extern_block));
 }
 
 int lsp_codegen_emit_heap_alias_to_buf(struct codegen_CodegenOutBuf *out) {

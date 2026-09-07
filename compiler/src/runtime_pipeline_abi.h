@@ -179,8 +179,9 @@ const char *xlang_entry_lib_name_from_path(const char *input_path);
 /** Historical -E surface; wave309 no-op (pipeline_glue.c shell retired). */
 void xlang_emit_pipeline_glue_include(void);
 
-/** asm 后端：stdout 仅 fflush，其它 fclose。 */
-void driver_asm_fclose_asm_out(FILE *fp);
+/** asm 后端：stdout 句柄（fd 1）无缓冲无需 flush，其它句柄经 Cap 关闭。
+ *  Cap residual 9.7.1: opaque fd handle（见 xlang_driver_stream_cap.h）。 */
+void driver_asm_fclose_asm_out(uint8_t *fp);
 
 /** 判断 codegen 输出缓冲是否已为 Mach-O/ELF 对象魔数。 */
 int xlang_asm_out_buf_is_object(const unsigned char *data, size_t len);

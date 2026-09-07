@@ -7,8 +7,11 @@
  *
  * Uses xlang_va_cap.h (10.7.1) — no <stdarg.h>. No <string.h> (local strlen).
  *
- * Specs: %% %c %s %d %u %ld %lu %zu %x %lx %zx %p %f/%F/%g/%G/%e/%E plus width /
- * .* precision.
+ * Specs: %% %c %s %d %u %ld %lu %zu %x %lx %zx %p %f/%F/%g/%G/%e/%E plus
+ * '-' left-align, '0' zero-pad, '*' / digit width, '*' / digit precision.
+ * (9.7.1: '-' was previously emitted literally while skipping the flag parse
+ * and %s discarded width entirely; %x had no zero-pad, so %04x/%02x emitted
+ * unpadded hex. All completed here — single Cap fmt authority.)
  *
  * PLATFORM: SHARED (GCC/Clang builtins via Cap va).
  */
@@ -130,9 +133,20 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       int tn = 0;
       int width = 0;
       int pad_zero = 0;
+      int leftalign = 0;
       int prec = -1;
       int longmod = 0;
       int sizeflag = 0;
+      /* %s streams directly (strings may exceed tmp); numerics build tmp. */
+      const char *sv = 0;
+      int sn = 0;
+      if (*fmt == '-') {
+        /* 9.7.1: '-' left-align flag. Previously fell into the conversion
+         * switch as literal text AND consumed no va_arg, desyncing later
+         * arguments and printing "-8s" style garbage. */
+        leftalign = 1;
+        fmt++;
+      }
       if (*fmt == '0') {
         pad_zero = 1;
         fmt++;
@@ -171,7 +185,6 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
         sizeflag = 1;
         fmt++;
       }
-      (void)width;
       switch (*fmt) {
       case 'c': {
         char c = (char)xlang_va_arg(ap, int);
@@ -180,19 +193,14 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       }
       case 's': {
         const char *s = xlang_va_arg(ap, const char *);
-        int si = 0;
         if (s == 0) {
           s = "(null)";
         }
-        while (s[si] && (prec < 0 || si < prec)) {
-          if (pos + 1 < size) {
-            buf[pos] = s[si];
-          }
-          pos++;
-          si++;
+        while (s[sn] && (prec < 0 || sn < prec)) {
+          sn++;
         }
-        fmt++;
-        continue;
+        sv = s;
+        break;
       }
       case 'd': {
         long v = longmod ? xlang_va_arg(ap, long) : xlang_va_arg(ap, int);
@@ -210,7 +218,7 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
           ib[in++] = (char)('0' + (v % 10));
           v /= 10;
         }
-        if (pad_zero) {
+        if (pad_zero && !leftalign) {
           int target = neg ? (width - 1) : width;
           while (in < target && in < (int)sizeof(ib) - 1) {
             ib[in++] = '0';
@@ -241,7 +249,7 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
           ib[in++] = (char)('0' + (v % 10));
           v /= 10;
         }
-        if (pad_zero) {
+        if (pad_zero && !leftalign) {
           while (in < width && in < (int)sizeof(ib) - 1) {
             ib[in++] = '0';
           }
@@ -267,6 +275,14 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
         while (v > 0) {
           ib[in++] = "0123456789abcdef"[v & 15];
           v >>= 4;
+        }
+        /* 9.7.1: zero-pad for %04x/%02x style specs (previously width was
+         * ignored here, emitting unpadded hex — byte-level output corruption
+         * for escapers using \xHH). */
+        if (pad_zero && !leftalign) {
+          while (in < width && in < (int)sizeof(ib) - 1) {
+            ib[in++] = '0';
+          }
         }
         while (in > 0 && tn < (int)sizeof(tmp) - 1) {
           tmp[tn++] = ib[--in];
@@ -318,12 +334,44 @@ static inline int xlang_vsnprintf(char *buf, size_t size, const char *fmt,
       }
       fmt++;
       {
-        int ti;
-        for (ti = 0; ti < tn; ti++) {
+        /* Shared width emission: left-align pads right, otherwise pad left.
+         * pad_zero for numerics was already baked into tmp above ('-' flag
+         * overrides '0', matching libc). */
+        int pad = 0;
+        int i;
+        int len;
+        const char *sp;
+        if (sv != 0) {
+          len = sn;
+          sp = sv;
+        } else {
+          len = tn;
+          sp = tmp;
+        }
+        if (width > len) {
+          pad = width - len;
+        }
+        if (!leftalign) {
+          for (i = 0; i < pad; i++) {
+            if (pos + 1 < size) {
+              buf[pos] = ' ';
+            }
+            pos++;
+          }
+        }
+        for (i = 0; i < len; i++) {
           if (pos + 1 < size) {
-            buf[pos] = tmp[ti];
+            buf[pos] = sp[i];
           }
           pos++;
+        }
+        if (leftalign) {
+          for (i = 0; i < pad; i++) {
+            if (pos + 1 < size) {
+              buf[pos] = ' ';
+            }
+            pos++;
+          }
         }
       }
     }

@@ -254,57 +254,54 @@ g05_try_x_to_o() {
     echo '  return (uint8_t *)(void *)n;'
     echo '}'
     echo '#endif'
-    # PLATFORM: SHARED — wave22 Cap residual: opaque *u8 → FILE* fputs cast.
-    # .x cannot name FILE*; direct fputs(*u8,*u8) trips -Werror=incompatible-pointer-types.
-    # Pure driver_preamble_fputs (runtime_driver_abi_thin.x) calls this harness helper.
-    # Outside _WIN32 guard: stdio fputs is available on Windows host-cc too.
+    # PLATFORM: SHARED — Cap residual 9.7.1: opaque *u8 stream face → fd-handle.
+    # Authority: include/xlang_driver_stream_cap.h (handle = fd+1, NULL invalid;
+    # std fds 0/1/2 never closed). Write/open/close route through the Cap
+    # authorities (xlang_io_write / xlang_io_open_write / xlang_proc_close_fd),
+    # so generated TUs carry zero stdio UNDEFs. Signatures stay `uint8_t *` —
+    # .x consumers are source-compatible.
+    echo '#include "xlang_driver_stream_cap.h"'
     echo 'static inline int32_t xlang_driver_fputs_opaque(uint8_t *s, uint8_t *stream) {'
-    echo '  return (int32_t)fputs((const char *)(void *)s, (FILE *)(void *)stream);'
+    echo '  int fd = xlang_driver_handle_to_fd(stream);'
+    echo '  if (!s || fd < 0) return -1;'
+    echo '  return (int32_t)xlang_io_write(fd, s, strlen((const char *)(void *)s));'
     echo '}'
-    # PLATFORM: SHARED — wave26 Cap residual: stdout identity + fclose/fwrite for pure
-    # driver_parsed_fclose / fclose_rc / write_out (runtime_driver_abi_thin.x).
-    # .x cannot name FILE* or compare to stdout without these harness casts.
     echo 'static inline uint8_t *xlang_driver_stdout_ptr(void) {'
-    echo '  return (uint8_t *)(void *)stdout;'
+    echo '  return xlang_driver_handle_from_fd(1);'
     echo '}'
     echo 'static inline int32_t xlang_driver_fclose_opaque(uint8_t *stream) {'
-    echo '  if (!stream) return 0;'
-    echo '  return fclose((FILE *)(void *)stream) == 0 ? 0 : 1;'
+    echo '  return (int32_t)xlang_driver_handle_close(stream);'
     echo '}'
     echo 'static inline int32_t xlang_driver_fwrite_opaque(uint8_t *data, int32_t len, uint8_t *stream) {'
-    echo '  size_t n;'
+    echo '  long n;'
+    echo '  int fd;'
     echo '  if (!data || len < 0 || !stream) return 1;'
     echo '  if (len == 0) return 0;'
-    echo '  n = fwrite((const void *)(void *)data, 1, (size_t)len, (FILE *)(void *)stream);'
+    echo '  fd = xlang_driver_handle_to_fd(stream);'
+    echo '  if (fd < 0) return 1;'
+    echo '  n = xlang_io_write(fd, data, (size_t)len);'
     echo '  return n == (size_t)len ? 0 : 1;'
     echo '}'
-    # PLATFORM: SHARED — wave27 Cap residual: fopen(path,"w") as opaque *u8 for pure
-    # driver_parsed_open_out_file (runtime_driver_abi_thin.x). .x cannot name FILE*.
     echo 'static inline uint8_t *xlang_driver_fopen_write_opaque(uint8_t *path) {'
+    echo '  int fd;'
     echo '  if (!path) return (uint8_t *)0;'
-    echo '  return (uint8_t *)(void *)fopen((const char *)(void *)path, "w");'
+    echo '  fd = xlang_io_open_write((const char *)(void *)path);'
+    echo '  return fd < 0 ? (uint8_t *)0 : xlang_driver_handle_from_fd(fd);'
     echo '}'
-    # PLATFORM: SHARED — wave40 Cap residual: stderr identity + fflush(stdout) + fopen "wb"
-    # for pure driver_stdio_stderr / driver_asm_fflush_stdout / driver_asm_fopen_wb
-    # (runtime_driver_abi_thin.x). "wb" is intentionally not "w" (binary metric/asm out;
-    # G.7: separate surface from fopen_write_opaque text "w").
     echo 'static inline uint8_t *xlang_driver_stderr_ptr(void) {'
-    echo '  return (uint8_t *)(void *)stderr;'
+    echo '  return xlang_driver_handle_from_fd(2);'
     echo '}'
     echo 'static inline void xlang_driver_fflush_stdout(void) {'
-    echo '  (void)fflush(stdout);'
     echo '}'
     echo 'static inline uint8_t *xlang_driver_fopen_wb_opaque(uint8_t *path) {'
+    echo '  int fd;'
     echo '  if (!path) return (uint8_t *)0;'
-    echo '  return (uint8_t *)(void *)fopen((const char *)(void *)path, "wb");'
+    echo '  fd = xlang_io_open_write((const char *)(void *)path);'
+    echo '  return fd < 0 ? (uint8_t *)0 : xlang_driver_handle_from_fd(fd);'
     echo '}'
-    # PLATFORM: SHARED — wave41 Cap residual: fdopen(fd,"wb") as opaque *u8 for pure
-    # driver_asm_mkstemp_fdopen (runtime_driver_abi_thin.x). .x cannot name FILE*.
     echo 'static inline uint8_t *xlang_driver_fdopen_wb_opaque(int32_t fd) {'
-    echo '  FILE *fp;'
     echo '  if (fd < 0) return (uint8_t *)0;'
-    echo '  fp = fdopen((int)fd, "wb");'
-    echo '  return (uint8_t *)(void *)fp;'
+    echo '  return xlang_driver_handle_from_fd(fd);'
     echo '}'
     # PLATFORM: SHARED — wave79 Cap residual: libc realpath as opaque *u8 for pure
     # xlang_path_try_realpath_inplace (runtime_pipeline_abi.x). .x must not name char*

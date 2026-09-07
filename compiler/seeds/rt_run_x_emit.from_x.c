@@ -21,6 +21,7 @@
 #include "runtime_diag_codes.h"
 #include "runtime_io_abi.h"
 #include "runtime_driver_abi.h"
+#include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face */
 #include "runtime_pipeline_abi.h"
 #include "token.h"
 
@@ -109,7 +110,8 @@ int driver_run_x_emit_c(void) {
     old_allow_legacy_extern = typeck_set_allow_legacy_extern_calls(1);
 #ifdef XLANG_USE_X_PIPELINE
     {
-        (void)setvbuf(stdout, NULL, _IONBF, 0);
+        /* Cap residual 9.7.1: emitted C goes out through raw fd writes
+         * (xlang_io_write), which are unbuffered — no stdio setvbuf needed. */
 #if defined(XLANG_USE_X_DRIVER) && defined(XLANG_USE_X_PIPELINE)
         {
             const int want_extern = driver_x_emit_c_want_extern;
@@ -430,8 +432,9 @@ int driver_run_x_emit_c(void) {
              * gate grep finds the marker on the -E path. Mirrors driver/emit.x:413
              * and rt_run_compiler_parsed.from_x.c:1055. PLATFORM: SHARED. */
             driver_print_x_smoke_summary(module, (size_t)out_buf->length);
-            fwrite(out_buf->data, 1, (size_t)out_buf->length, stdout);
-            fflush(stdout);
+            /* Cap residual 9.7.1: fwrite(stdout)+fflush → single raw fd-1 write
+             * (unbuffered; no flush needed). PLATFORM: SHARED. */
+            (void)xlang_io_write(1, out_buf->data, (size_t)out_buf->length);
             for (int j = n_deps - 1; j >= 0; j--) { ast_pool_arena_release(dep_arenas[j]); ast_pool_module_release(dep_modules[j]); free(dep_arenas[j]); free(dep_modules[j]); }
             while (n_deps > 0) {
                 n_deps--;

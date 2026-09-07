@@ -26,6 +26,7 @@
 #include "runtime_diag_codes.h"
 #include "runtime_io_abi.h"
 #include "runtime_driver_abi.h"
+#include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face */
 #include "runtime_pipeline_abi.h"
 #include "runtime_link_abi.h"
 /* wave238 G.7: env via public pure thin link_abi_getenv (wave222 → _impl host getenv);
@@ -138,9 +139,14 @@ extern void codegen_or_preamble_skip_mask(unsigned mask);
 #define CODEGEN_PREAMBLE_SKIP_STD_IO_DRIVER_HANDLE  2u
 #define CODEGEN_PREAMBLE_SKIP_STD_IO_UNDEF_REDEFINE 4u
 #define CODEGEN_PREAMBLE_SKIP_WEAK_IO_BATCH         8u
-extern int write_io_net_abi_inline(FILE *cf);
-extern int write_fs_path_map_error_abi_inline(FILE *cf);
-extern void codegen_emit_include_pipeline_glue_c(FILE *out, const char *argv0);
+/* Cap residual 9.7.1: ABI writers take an opaque fd handle (see
+ * xlang_driver_stream_cap.h); the emitted-C stream may be the stdout handle
+ * (fd 1) or a temp-file handle. Twin of the seed bodies in
+ * runtime/rt_preamble seed and src/runtime.x codegen_emit_include_pipeline_glue_c
+ * (authority signature *u8). PLATFORM: SHARED. */
+extern int write_io_net_abi_inline(uint8_t *cf);
+extern int write_fs_path_map_error_abi_inline(uint8_t *cf);
+extern void codegen_emit_include_pipeline_glue_c(uint8_t *out, const char *argv0);
 extern int content_has_generic_syntax(const char *content, size_t n);
 extern int content_has_compound_assign_syntax(const char *content, size_t n);
 extern const char *xlang_entry_lib_name_from_path(const char *path);
@@ -730,9 +736,11 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
     char tmp[128]; snprintf(tmp, sizeof(tmp), "%sxlang_x.XXXXXX", XLANG_TMP_PREFIX);
     char tmp_c[256];
     int fd = -1;
-    FILE *cf;
+    /* Cap residual 9.7.1: opaque fd handle (stdout handle or temp-file handle);
+     * NULL = not opened. PLATFORM: SHARED. */
+    uint8_t *cf;
     if (emit_to_stdout) {
-        cf = stdout;
+        cf = xlang_driver_handle_from_fd(1);
     } else {
         fd = mkstemp(tmp);
         if (fd < 0) {
@@ -752,7 +760,12 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             rt_cp_release_arena_module(arena, module); free(src);
             return 1;
         }
-        cf = fopen(tmp_c, "w");
+        /* Cap residual 9.7.1: fopen(tmp_c, "w") → Cap open_write (create/truncate)
+         * wrapped as an opaque fd handle. PLATFORM: SHARED. */
+        {
+            int cf_fd = xlang_io_open_write(tmp_c);
+            cf = cf_fd < 0 ? NULL : xlang_driver_handle_from_fd(cf_fd);
+        }
         if (!cf) {
             runtime_diag_errno_path(input_path, "build error", "fopen", tmp_c);
             unlink(tmp_c);
@@ -773,7 +786,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             diag_report_with_code(NULL, 0, 0, "pipeline error", XLANG_DIAG_CODE_X_PIPELINE_XP005,
                                   ".x path dependency allocation failed", NULL);
             while (j > 0) { j--; rt_cp_release_arena_module(dep_arenas[j], dep_modules[j]); }
-            if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
             while (n_deps--) { free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
             rt_cp_release_arena_module(arena, module); free(src);
             return 1;
@@ -787,7 +800,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
         diag_report_with_code(NULL, 0, 0, "pipeline error", XLANG_DIAG_CODE_X_PIPELINE_XP006,
                               ".x path output/context allocation failed", NULL);
         for (int jj = 0; jj < n_deps; jj++) { rt_cp_release_arena_module(dep_arenas[jj], dep_modules[jj]); }
-        if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+        if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
         while (n_deps--) { free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
         rt_cp_release_arena_module(arena, module); free(src);
         if (out_buf) free(out_buf);
@@ -841,7 +854,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             free(out_buf);
             pipeline_dep_ctx_heap_destroy(pctx);
             for (int k = 0; k < n_deps; k++) { rt_cp_release_arena_module(dep_arenas[k], dep_modules[k]); }
-            if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
             while (n_deps--) { free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
             rt_cp_release_arena_module(arena, module); free(src);
             return 1;
@@ -875,7 +888,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             free(out_buf);
             pipeline_dep_ctx_heap_destroy(pctx);
             for (int k = 0; k < n_deps; k++) { rt_cp_release_arena_module(dep_arenas[k], dep_modules[k]); }
-            if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
             while (n_deps--) { free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
             rt_cp_release_arena_module(arena, module); free(src);
             return 1;
@@ -942,7 +955,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             free(out_buf);
             pipeline_dep_ctx_heap_destroy(pctx);
             for (int k = 0; k < n_deps; k++) { rt_cp_release_arena_module(dep_arenas[k], dep_modules[k]); }
-            if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
             while (n_deps > 0) { n_deps--; free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
             rt_cp_release_arena_module(arena, module);
             free(src);
@@ -979,7 +992,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
                          "pipeline debug: out (first %zu bytes):\n%.*s", show, (int)show,
                          (const char *)out_buf->data);
         }
-        if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+        if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
         rt_cp_release_arena_module(arena, module);
         free(src);
         free(out_buf);
@@ -1002,7 +1015,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
             fail_ck = 1;
         if (fail_ck) {
             if (!emit_to_stdout) {
-                fclose(cf);
+                xlang_driver_handle_close(cf);
                 unlink(tmp_c);
             }
             rt_cp_release_arena_module(arena, module);
@@ -1013,7 +1026,7 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
         }
         driver_print_check_ok(input_path);
         if (!emit_to_stdout) {
-            fclose(cf);
+            xlang_driver_handle_close(cf);
             unlink(tmp_c);
         }
         rt_cp_release_arena_module(arena, module);
@@ -1036,25 +1049,27 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
         int need_preamble = (out_buf->length > 0 && out_buf->data[0] != '#' && (out_buf->length < 2 || out_buf->data[0] != '/' || out_buf->data[1] != '*'));
         if (need_preamble) {
             static const char min_preamble[] = "/* generated */\n#include <stdint.h>\n#include <stddef.h>\n#include <stdlib.h>\n#include <stdio.h>\n#include <string.h>\n";
-            if (fwrite(min_preamble, 1, sizeof(min_preamble) - 1, cf) != (size_t)(sizeof(min_preamble) - 1)) {
-                if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            if (xlang_io_write(xlang_driver_handle_to_fd(cf), min_preamble,
+                               sizeof(min_preamble) - 1) != (long)(sizeof(min_preamble) - 1)) {
+                if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
                 free(out_buf);
                 pipeline_dep_ctx_heap_destroy(pctx);
                 return 1;
             }
         }
-        if (fwrite(out_buf->data, 1, first_line, cf) != first_line
+        if (xlang_io_write(xlang_driver_handle_to_fd(cf), out_buf->data, first_line) != (long)first_line
             || write_io_net_abi_inline(cf) != 0
             || write_fs_path_map_error_abi_inline(cf) != 0
-            || fwrite(out_buf->data + first_line, 1, (size_t)out_buf->length - first_line, cf) != (size_t)out_buf->length - first_line) {
-            if (!emit_to_stdout) { fclose(cf); unlink(tmp_c); }
+            || xlang_io_write(xlang_driver_handle_to_fd(cf), out_buf->data + first_line,
+                              (size_t)out_buf->length - first_line) != (long)((size_t)out_buf->length - first_line)) {
+            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
             free(out_buf);
             pipeline_dep_ctx_heap_destroy(pctx);
             return 1;
         }
     }
-    if (!emit_to_stdout) {
-        if (fclose(cf) != 0) {
+        if (!emit_to_stdout) {
+            if (xlang_driver_handle_close(cf) != 0) {
             unlink(tmp_c);
             free(out_buf);
             pipeline_dep_ctx_heap_destroy(pctx);

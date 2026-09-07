@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <xlang_fmt_cap.h> /* also Cap va via xlang_va_cap (10.7.1) */ /* Cap residual 10.7.2: lsp reportf/snprintf → Cap fmt */
+#include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face; xlang_io_write */
 
 /* wave244 G.7: env via public pure thin link_abi_getenv (wave222 → _impl host getenv);
  * not raw libc getenv. Cap residual host getenv stays only link_abi_getenv_impl.
@@ -74,13 +75,21 @@ extern size_t lsp_diag_x_alloc_dep_ctx_size(void);
 
 /** 调试 LSP read_message 的 leftover 长度 n；LSP_READ_DEBUG 时打 stderr，便于确认 state 是否在两次调用间保留。 */
 void lsp_debug_u32(uint32_t n) {
-    if (link_abi_getenv("LSP_READ_DEBUG") != NULL)
-        (void)fprintf(stderr, "lsp_read_message leftover n=%u\n", (unsigned)n);
+    if (link_abi_getenv("LSP_READ_DEBUG") != NULL) {
+        /* Cap residual 9.7.1: fprintf(stderr) → Cap snprintf + raw fd-2 write. */
+        char dbg_buf[64];
+        xlang_snprintf(dbg_buf, sizeof(dbg_buf), "lsp_read_message leftover n=%u\n", (unsigned)n);
+        (void)xlang_io_write(2, dbg_buf, strlen(dbg_buf));
+    }
 }
 /** 调试：打 state 指针。 */
 void lsp_debug_ptr(uint8_t *p) {
-    if (link_abi_getenv("LSP_READ_DEBUG") != NULL)
-        (void)fprintf(stderr, "lsp_read_message state_buf=%p\n", (void *)p);
+    if (link_abi_getenv("LSP_READ_DEBUG") != NULL) {
+        /* Cap residual 9.7.1: fprintf(stderr) → Cap snprintf + raw fd-2 write. */
+        char dbg_buf[64];
+        xlang_snprintf(dbg_buf, sizeof(dbg_buf), "lsp_read_message state_buf=%p\n", (void *)p);
+        (void)xlang_io_write(2, dbg_buf, strlen(dbg_buf));
+    }
 }
 
 /* 前向声明：行索引、引用索引与定义/引用/悬停。 */

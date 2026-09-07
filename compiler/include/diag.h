@@ -2,8 +2,11 @@
 #define XLANG_DIAG_H
 
 #include <stddef.h>
-#include <stdio.h>
+#include <stdint.h>
 #include <xlang_va_cap.h> /* Cap residual 10.7.1: reportf face without <stdarg.h> */
+/* Cap residual 9.7.1: print/known-codes faces take the opaque fd-handle stream
+ * (xlang_driver_stream_cap.h); .x callers pass *u8 handles. */
+#include "xlang_driver_stream_cap.h"
 
 typedef struct DiagContextSnapshot {
     const char *file_path;
@@ -28,10 +31,10 @@ int diag_code_is_known(const char *code);
 const char *diag_code_kind(const char *code);
 const char *diag_code_summary(const char *code);
 const char *diag_code_details(const char *code);
-void diag_print_known_codes(FILE *out);
-void diag_print_code_explain(FILE *out, const char *code);
+void diag_print_known_codes(uint8_t *out);
+void diag_print_code_explain(uint8_t *out, const char *code);
 const char *diag_code_suggest(const char *code, char *out, size_t out_cap);
-void diag_print_code_table(FILE *out);
+void diag_print_code_table(uint8_t *out);
 void diag_set_json_mode(int enable);
 int diag_json_enabled(void);
 

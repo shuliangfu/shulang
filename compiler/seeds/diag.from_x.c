@@ -29,6 +29,59 @@ void diag_json_set_state(int v);
 #include <stdlib.h>
 #include <string.h>
 #include <xlang_fmt_cap.h> /* Cap residual 10.7.2／9.5.3: reportf → xlang_vsnprintf */
+/* Cap residual 9.7.1: diag micro-ABI streams are opaque fd handles. */
+#include "xlang_driver_stream_cap.h"
+
+/* ---- 9.7.1 local write helpers over the fd-handle face (PLATFORM: SHARED) ----
+ * All diag print sites go through these; formatting uses the Cap fmt authority.
+ * Byte-exact replacements for the former fputs/fputc/fprintf/fflush calls. */
+
+/** Decode handle → fd (static wrapper keeps call sites short). */
+static int diag_o_fd(uint8_t *o) {
+    return xlang_driver_handle_to_fd(o);
+}
+
+/** Write exactly n bytes; return 0 on success, -1 on error (fputs contract). */
+static int diag_o_write(uint8_t *o, const char *s, size_t n) {
+    int fd = diag_o_fd(o);
+    if (fd < 0 || (!s && n > 0))
+        return -1;
+    if (n == 0)
+        return 0;
+    return xlang_io_write(fd, s, n) == (long)n ? 0 : -1;
+}
+
+/** Write NUL-terminated string (fputs twin; NULL writes nothing). */
+static int diag_o_puts(uint8_t *o, const char *s) {
+    return diag_o_write(o, s, s ? strlen(s) : 0);
+}
+
+/** Write one char (fputc twin). */
+static int diag_o_putc(uint8_t *o, char c) {
+    return diag_o_write(o, &c, 1);
+}
+
+/** Formatted write via Cap fmt (fprintf twin; 512B cap — diag lines are short). */
+static int diag_o_printf(uint8_t *o, const char *fmt, ...) {
+    char buf[512];
+    xlang_va_list ap;
+    int n;
+    xlang_va_start(ap, fmt);
+    n = xlang_vsnprintf(buf, sizeof(buf), fmt, ap);
+    xlang_va_end(ap);
+    if (n < 0)
+        return -1;
+    return diag_o_write(o, buf, ((size_t)n < sizeof(buf)) ? (size_t)n : sizeof(buf) - 1);
+}
+
+/** Std stream handles for direct stderr/stdout sites. */
+static uint8_t *diag_h_stderr(void) {
+    return xlang_driver_handle_from_fd(2);
+}
+
+static uint8_t *diag_h_stdout(void) {
+    return xlang_driver_handle_from_fd(1);
+}
 
 /* wave233 G.7: env via public pure thin link_abi_getenv (wave222 → _impl host getenv);
  * not raw libc getenv. Cap residual host getenv stays only link_abi_getenv_impl.
@@ -221,7 +274,8 @@ int diag_should_color_impl(void)
     /* wave233 G.7: XLANG_NO_COLOR via link_abi_getenv (not raw getenv). */
     if (link_abi_getenv("XLANG_NO_COLOR"))
         return 0;
-    return isatty(fileno(stderr)) ? 1 : 0;
+    /* 9.7.1: fd 2 directly — no stderr FILE* needed for isatty. */
+    return isatty(2) ? 1 : 0;
 #endif
 }
 
@@ -357,102 +411,107 @@ static DiagPalette diag_palette_for_kind(const char *kind) {
     return pal;
 }
 
-/** 供 .x stdio 冷路径（G-02f-156）。 */
+/** 供 .x stdio 冷路径（G-02f-156）。9.7.1: stream params are opaque fd handles. */
 /* G-02f-421：实现体始终 seed；public PREFER 时 thin pure forward */
-FILE *diag_stderr_impl(void) { return stderr; }
+uint8_t *diag_stderr_impl(void) { return diag_h_stderr(); }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-FILE *diag_stderr(void) { return diag_stderr_impl(); }
+uint8_t *diag_stderr(void) { return diag_stderr_impl(); }
 #endif
 /* G-02f-415：实现体始终 seed（stdio/fmt）；public PREFER 时 thin pure forward */
-int diag_io_fputc_impl(FILE *o, int c) { return fputc(c, o); }
+int diag_io_fputc_impl(uint8_t *o, int c) { return diag_o_putc(o, (char)c); }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-int diag_io_fputc(FILE *o, int c) { return diag_io_fputc_impl(o, c); }
+int diag_io_fputc(uint8_t *o, int c) { return diag_io_fputc_impl(o, c); }
 #endif
-int diag_io_fputs_impl(const char *s, FILE *o) { return fputs(s ? s : "", o); }
+int diag_io_fputs_impl(const char *s, uint8_t *o) { return diag_o_puts(o, s ? s : ""); }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-int diag_io_fputs(const char *s, FILE *o) { return diag_io_fputs_impl(s, o); }
+int diag_io_fputs(const char *s, uint8_t *o) { return diag_io_fputs_impl(s, o); }
 #endif
-void diag_io_fputs_u04x_impl(FILE *o, unsigned c) { fprintf(o, "\\u%04x", c); }
+void diag_io_fputs_u04x_impl(uint8_t *o, unsigned c) { diag_o_printf(o, "\\u%04x", c); }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fputs_u04x(FILE *o, unsigned c) { diag_io_fputs_u04x_impl(o, c); }
+void diag_io_fputs_u04x(uint8_t *o, unsigned c) { diag_io_fputs_u04x_impl(o, c); }
 #endif
-void diag_io_fflush_impl(FILE *o) { fflush(o); }
+void diag_io_fflush_impl(uint8_t *o) { (void)o; /* raw fd writes are unbuffered */ }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fflush(FILE *o) { diag_io_fflush_impl(o); }
+void diag_io_fflush(uint8_t *o) { diag_io_fflush_impl(o); }
 #endif
-void diag_io_fprint_line_col_impl(FILE *o, int line, int col) {
-    fprintf(o, ",\"line\":%d,\"col\":%d,\"message\":", line, col);
+void diag_io_fprint_line_col_impl(uint8_t *o, int line, int col) {
+    diag_o_printf(o, ",\"line\":%d,\"col\":%d,\"message\":", line, col);
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_line_col(FILE *o, int line, int col) {
+void diag_io_fprint_line_col(uint8_t *o, int line, int col) {
     diag_io_fprint_line_col_impl(o, line, col);
 }
 #endif
 /** 供 .x report_human 位置/gutter 冷路径（G-02f-159）。 */
-void diag_io_fprint_loc_file_line_col_impl(FILE *o, const char *pc, const char *file, int line, int col, const char *rs) {
-    fprintf(o, "%s --> %s:%d:%d%s\n", pc ? pc : "", file ? file : "", line, col, rs ? rs : "");
+void diag_io_fprint_loc_file_line_col_impl(uint8_t *o, const char *pc, const char *file, int line, int col, const char *rs) {
+    diag_o_printf(o, "%s --> %s:%d:%d%s\n", pc ? pc : "", file ? file : "", line, col, rs ? rs : "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_loc_file_line_col(FILE *o, const char *pc, const char *file, int line, int col, const char *rs) {
+void diag_io_fprint_loc_file_line_col(uint8_t *o, const char *pc, const char *file, int line, int col, const char *rs) {
     diag_io_fprint_loc_file_line_col_impl(o, pc, file, line, col, rs);
 }
 #endif
-void diag_io_fprint_loc_file_line_impl(FILE *o, const char *pc, const char *file, int line, const char *rs) {
-    fprintf(o, "%s --> %s:%d%s\n", pc ? pc : "", file ? file : "", line, rs ? rs : "");
+void diag_io_fprint_loc_file_line_impl(uint8_t *o, const char *pc, const char *file, int line, const char *rs) {
+    diag_o_printf(o, "%s --> %s:%d%s\n", pc ? pc : "", file ? file : "", line, rs ? rs : "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_loc_file_line(FILE *o, const char *pc, const char *file, int line, const char *rs) {
+void diag_io_fprint_loc_file_line(uint8_t *o, const char *pc, const char *file, int line, const char *rs) {
     diag_io_fprint_loc_file_line_impl(o, pc, file, line, rs);
 }
 #endif
-void diag_io_fprint_loc_file_impl(FILE *o, const char *pc, const char *file, const char *rs) {
-    fprintf(o, "%s --> %s%s\n", pc ? pc : "", file ? file : "", rs ? rs : "");
+void diag_io_fprint_loc_file_impl(uint8_t *o, const char *pc, const char *file, const char *rs) {
+    diag_o_printf(o, "%s --> %s%s\n", pc ? pc : "", file ? file : "", rs ? rs : "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_loc_file(FILE *o, const char *pc, const char *file, const char *rs) {
+void diag_io_fprint_loc_file(uint8_t *o, const char *pc, const char *file, const char *rs) {
     diag_io_fprint_loc_file_impl(o, pc, file, rs);
 }
 #endif
-void diag_io_fprint_loc_line_col_impl(FILE *o, const char *pc, int line, int col, const char *rs) {
-    fprintf(o, "%s --> %d:%d%s\n", pc ? pc : "", line, col, rs ? rs : "");
+void diag_io_fprint_loc_line_col_impl(uint8_t *o, const char *pc, int line, int col, const char *rs) {
+    diag_o_printf(o, "%s --> %d:%d%s\n", pc ? pc : "", line, col, rs ? rs : "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_loc_line_col(FILE *o, const char *pc, int line, int col, const char *rs) {
+void diag_io_fprint_loc_line_col(uint8_t *o, const char *pc, int line, int col, const char *rs) {
     diag_io_fprint_loc_line_col_impl(o, pc, line, col, rs);
 }
 #endif
-void diag_io_fprint_gutter_blank_impl(FILE *o, int width) {
-    fprintf(o, "%*s |\n", width, "");
+void diag_io_fprint_gutter_blank_impl(uint8_t *o, int width) {
+    diag_o_printf(o, "%*s |\n", width, "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_gutter_blank(FILE *o, int width) {
+void diag_io_fprint_gutter_blank(uint8_t *o, int width) {
     diag_io_fprint_gutter_blank_impl(o, width);
 }
 #endif
-void diag_io_fprint_src_line_impl(FILE *o, int line, const char *start, int len) {
-    fprintf(o, "%d | %.*s\n", line, len, start ? start : "");
+void diag_io_fprint_src_line_impl(uint8_t *o, int line, const char *start, int len) {
+    /* Three-part write keeps arbitrary-length source lines intact (no 512 cap). */
+    if (diag_o_printf(o, "%d | ", line) != 0)
+        return;
+    if (start && len > 0 && diag_o_write(o, start, (size_t)len) != 0)
+        return;
+    diag_o_puts(o, "\n");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_src_line(FILE *o, int line, const char *start, int len) {
+void diag_io_fprint_src_line(uint8_t *o, int line, const char *start, int len) {
     diag_io_fprint_src_line_impl(o, line, start, len);
 }
 #endif
-void diag_io_fprint_gutter_bar_impl(FILE *o, int width) {
-    fprintf(o, "%*s | ", width, "");
+void diag_io_fprint_gutter_bar_impl(uint8_t *o, int width) {
+    diag_o_printf(o, "%*s | ", width, "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_gutter_bar(FILE *o, int width) {
+void diag_io_fprint_gutter_bar(uint8_t *o, int width) {
     diag_io_fprint_gutter_bar_impl(o, width);
 }
 #endif
-void diag_io_fprint_caret_mark_impl(FILE *o, const char *cc, const char *rs, const char *detail) {
-    fprintf(o, "%s^%s", cc ? cc : "", rs ? rs : "");
+void diag_io_fprint_caret_mark_impl(uint8_t *o, const char *cc, const char *rs, const char *detail) {
+    diag_o_printf(o, "%s^%s", cc ? cc : "", rs ? rs : "");
     if (detail && detail[0] != '\0')
-        fprintf(o, " %s", detail);
-    fputc('\n', o);
+        diag_o_printf(o, " %s", detail);
+    diag_o_putc(o, '\n');
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_caret_mark(FILE *o, const char *cc, const char *rs, const char *detail) {
+void diag_io_fprint_caret_mark(uint8_t *o, const char *cc, const char *rs, const char *detail) {
     diag_io_fprint_caret_mark_impl(o, cc, rs, detail);
 }
 #endif
@@ -476,13 +535,13 @@ void diag_print_header_impl(const char *kind, const char *code, const char *msg,
     if (!reset)
         reset = "";
     if (kind[0] == '\0') {
-        fprintf(stderr, "%s\n", msg);
+        diag_o_printf(diag_h_stderr(), "%s\n", msg);
         return;
     }
     if (code && code[0] != '\0')
-        fprintf(stderr, "%s%s[%s]%s: %s\n", kind_color, kind, code, reset, msg);
+        diag_o_printf(diag_h_stderr(), "%s%s[%s]%s: %s\n", kind_color, kind, code, reset, msg);
     else
-        fprintf(stderr, "%s%s%s: %s\n", kind_color, kind, reset, msg);
+        diag_o_printf(diag_h_stderr(), "%s%s%s: %s\n", kind_color, kind, reset, msg);
 }
 /* G-02f-116：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 /* G-02f-335：hybrid 时由 diag_thin.x 提供 */
@@ -694,33 +753,32 @@ void diag_report_human_impl(const char *file, int line, int col, const char *kin
      * expr line/col still show file:0:0 instead of bare file path.
      * This makes check output consistent and helps locate errors. */
     if (actual_file) {
-        fprintf(stderr, "%s --> %s:%d:%d%s\n", path_color, actual_file, line, col, reset);
+        diag_o_printf(diag_h_stderr(), "%s --> %s:%d:%d%s\n", path_color, actual_file, line, col, reset);
     } else if (line > 0 || col > 0) {
-        fprintf(stderr, "%s --> %d:%d%s\n", path_color, line, col, reset);
+        diag_o_printf(diag_h_stderr(), "%s --> %d:%d%s\n", path_color, line, col, reset);
     }
 
     if (!have_line || line <= 0 || col <= 0) {
-        fflush(stderr);
-        return;
+        return; /* raw fd 2 writes are unbuffered — no flush needed (9.7.1) */
     }
 
     width = diag_line_digits(line);
-    fprintf(stderr, "%*s |\n", width, "");
-    fprintf(stderr, "%d | %.*s\n", line, (int)line_len, line_start);
-    fprintf(stderr, "%*s | ", width, "");
+    diag_o_printf(diag_h_stderr(), "%*s |\n", width, "");
+    /* Single formatted write; %.*s keeps the slice bounded by line_len. */
+    diag_o_printf(diag_h_stderr(), "%d | %.*s\n", line, (int)line_len, line_start);
+    diag_o_printf(diag_h_stderr(), "%*s | ", width, "");
 
     caret_col = col > 1 ? col - 1 : 0;
     for (i = 0; i < caret_col; i++) {
         if ((size_t)i < line_len && line_start[i] == '\t')
-            fputc('\t', stderr);
+            diag_o_putc(diag_h_stderr(), '\t');
         else
-            fputc(' ', stderr);
+            diag_o_putc(diag_h_stderr(), ' ');
     }
-    fprintf(stderr, "%s^%s", caret_color, reset);
+    diag_o_printf(diag_h_stderr(), "%s^%s", caret_color, reset);
     if (detail && detail[0] != '\0')
-        fprintf(stderr, " %s", detail);
-    fputc('\n', stderr);
-    fflush(stderr);
+        diag_o_printf(diag_h_stderr(), " %s", detail);
+    diag_o_putc(diag_h_stderr(), '\n');
 }
 
 /* G-02f-158：逻辑源 .x（JSON 分流真迁）；seed 保留同语义 C 供产品 cc */
@@ -908,33 +966,33 @@ const char *diag_entry_details(const char *code) {
     return diag_entry_details_impl(code);
 }
 #endif
-FILE *diag_stdout_impl(void) { return stdout; }
+uint8_t *diag_stdout_impl(void) { return diag_h_stdout(); }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-FILE *diag_stdout(void) { return diag_stdout_impl(); }
+uint8_t *diag_stdout(void) { return diag_stdout_impl(); }
 #endif
-/* G-02f-415：code table io → seed impl + thin pure forward */
-void diag_io_fprint_unknown_code_impl(FILE *out, const char *code) {
-    fprintf(out, "Unknown diagnostic code: %s\n", code ? code : "(null)");
+/* G-02f-415：code table io → seed impl + thin pure forward (9.7.1 fd handles) */
+void diag_io_fprint_unknown_code_impl(uint8_t *out, const char *code) {
+    diag_o_printf(out, "Unknown diagnostic code: %s\n", code ? code : "(null)");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_unknown_code(FILE *out, const char *code) {
+void diag_io_fprint_unknown_code(uint8_t *out, const char *code) {
     diag_io_fprint_unknown_code_impl(out, code);
 }
 #endif
-void diag_io_fprint_code_table_hdr_impl(FILE *out) {
-    fprintf(out, "%-8s %-18s %s\n", "CODE", "KIND", "SUMMARY");
-    fprintf(out, "%-8s %-18s %s\n", "----", "----", "-------");
+void diag_io_fprint_code_table_hdr_impl(uint8_t *out) {
+    diag_o_printf(out, "%-8s %-18s %s\n", "CODE", "KIND", "SUMMARY");
+    diag_o_printf(out, "%-8s %-18s %s\n", "----", "----", "-------");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_code_table_hdr(FILE *out) {
+void diag_io_fprint_code_table_hdr(uint8_t *out) {
     diag_io_fprint_code_table_hdr_impl(out);
 }
 #endif
-void diag_io_fprint_code_table_row_impl(FILE *out, const char *code, const char *kind, const char *summary) {
-    fprintf(out, "%-8s %-18s %s\n", code ? code : "", kind ? kind : "", summary ? summary : "");
+void diag_io_fprint_code_table_row_impl(uint8_t *out, const char *code, const char *kind, const char *summary) {
+    diag_o_printf(out, "%-8s %-18s %s\n", code ? code : "", kind ? kind : "", summary ? summary : "");
 }
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_io_fprint_code_table_row(FILE *out, const char *code, const char *kind, const char *summary) {
+void diag_io_fprint_code_table_row(uint8_t *out, const char *code, const char *kind, const char *summary) {
     diag_io_fprint_code_table_row_impl(out, code, kind, summary);
 }
 #endif
@@ -965,34 +1023,34 @@ extern const char *diag_code_details(const char *code);
 /* G-02f-157：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 /* G-02f-338：hybrid 时 public 由 thin；本文件出 _impl */
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_print_known_codes(FILE *out)
+void diag_print_known_codes(uint8_t *out)
 #else
-void diag_print_known_codes_impl(FILE *out)
+void diag_print_known_codes_impl(uint8_t *out)
 #endif
 {
     size_t i;
     if (!out)
-        out = stdout;
+        out = diag_h_stdout();
     for (i = 0; i < g_diag_code_table_count; i++)
-        fprintf(out, "%s%s", i == 0 ? "" : ", ", g_diag_code_table[i].code);
-    fputc('\n', out);
+        diag_o_printf(out, "%s%s", i == 0 ? "" : ", ", g_diag_code_table[i].code);
+    diag_o_putc(out, '\n');
 }
 
 /* G-02f-157：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 /* G-02f-338：hybrid 时 public 由 thin；本文件出 _impl */
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_print_code_explain(FILE *out, const char *code)
+void diag_print_code_explain(uint8_t *out, const char *code)
 #else
-void diag_print_code_explain_impl(FILE *out, const char *code)
+void diag_print_code_explain_impl(uint8_t *out, const char *code)
 #endif
 {
     const DiagCodeExplain *entry;
     if (!out)
-        out = stdout;
+        out = diag_h_stdout();
     entry = diag_lookup_code_explain(code);
     if (!entry) {
-        fprintf(out, "Unknown diagnostic code: %s\n", code ? code : "(null)");
-        fprintf(out, "Known codes: ");
+        diag_o_printf(out, "Unknown diagnostic code: %s\n", code ? code : "(null)");
+        diag_o_puts(out, "Known codes: ");
 #ifdef XLANG_L2_DIAG_THIN_FROM_X
         diag_print_known_codes_impl(out);
 #else
@@ -1000,10 +1058,10 @@ void diag_print_code_explain_impl(FILE *out, const char *code)
 #endif
         return;
     }
-    fprintf(out, "%s\n", entry->code);
-    fprintf(out, "Kind: %s\n", entry->kind);
-    fprintf(out, "Summary: %s\n", entry->summary);
-    fprintf(out, "Details: %s\n", entry->details);
+    diag_o_printf(out, "%s\n", entry->code);
+    diag_o_printf(out, "Kind: %s\n", entry->kind);
+    diag_o_printf(out, "Summary: %s\n", entry->summary);
+    diag_o_printf(out, "Details: %s\n", entry->details);
 }
 
 
@@ -1119,19 +1177,19 @@ const char *diag_code_suggest(const char *code, char *out, size_t out_cap) {
 /* G-02f-157：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 /* G-02f-338：hybrid 时 public 由 thin；本文件出 _impl */
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_print_code_table(FILE *out)
+void diag_print_code_table(uint8_t *out)
 #else
-void diag_print_code_table_impl(FILE *out)
+void diag_print_code_table_impl(uint8_t *out)
 #endif
 {
     size_t i;
     if (!out)
-        out = stdout;
-    fprintf(out, "%-8s %-18s %s\n", "CODE", "KIND", "SUMMARY");
-    fprintf(out, "%-8s %-18s %s\n", "----", "----", "-------");
+        out = diag_h_stdout();
+    diag_o_printf(out, "%-8s %-18s %s\n", "CODE", "KIND", "SUMMARY");
+    diag_o_printf(out, "%-8s %-18s %s\n", "----", "----", "-------");
     for (i = 0; i < g_diag_code_table_count; i++) {
         const DiagCodeExplain *e = &g_diag_code_table[i];
-        fprintf(out, "%-8s %-18s %s\n", e->code, e->kind, e->summary);
+        diag_o_printf(out, "%-8s %-18s %s\n", e->code, e->kind, e->summary);
     }
 }
 
@@ -1199,31 +1257,31 @@ int diag_json_enabled_impl(void)
  */
 /* G-02f-156：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
 #ifndef XLANG_L2_DIAG_THIN_FROM_X
-void diag_json_write_str(FILE *out, const char *s)
+void diag_json_write_str(uint8_t *out, const char *s)
 #else
-void diag_json_write_str_impl(FILE *out, const char *s)
+void diag_json_write_str_impl(uint8_t *out, const char *s)
 #endif
 {
     const unsigned char *p = (const unsigned char *)(s ? s : "");
-    fputc('"', out);
+    diag_o_putc(out, '"');
     for (; *p; p++) {
         unsigned char c = *p;
         switch (c) {
-        case '"':  fputs("\\\"", out); break;
-        case '\\': fputs("\\\\", out); break;
-        case '\b': fputs("\\b", out); break;
-        case '\f': fputs("\\f", out); break;
-        case '\n': fputs("\\n", out); break;
-        case '\r': fputs("\\r", out); break;
-        case '\t': fputs("\\t", out); break;
+        case '"':  diag_o_puts(out, "\\\""); break;
+        case '\\': diag_o_puts(out, "\\\\"); break;
+        case '\b': diag_o_puts(out, "\\b"); break;
+        case '\f': diag_o_puts(out, "\\f"); break;
+        case '\n': diag_o_puts(out, "\\n"); break;
+        case '\r': diag_o_puts(out, "\\r"); break;
+        case '\t': diag_o_puts(out, "\\t"); break;
         default:
             if (c < 0x20)
-                fprintf(out, "\\u%04x", c);
+                diag_o_printf(out, "\\u%04x", c);
             else
-                fputc((int)c, out);
+                diag_o_putc(out, (char)c);
         }
     }
-    fputc('"', out);
+    diag_o_putc(out, '"');
 }
 
 
@@ -1269,22 +1327,23 @@ void diag_report_json_impl(const char *file, int line, int col,
 #endif
 {
     const char *sev = diag_json_severity(kind);
-    fputs("{\"severity\":", stderr);
-    diag_json_write_str(stderr, sev);
-    fputs(",\"code\":", stderr);
+    uint8_t *eo = diag_h_stderr();
+    diag_o_puts(eo, "{\"severity\":");
+    diag_json_write_str(eo, sev);
+    diag_o_puts(eo, ",\"code\":");
     if (code && code[0])
-        diag_json_write_str(stderr, code);
+        diag_json_write_str(eo, code);
     else
-        fputs("null", stderr);
-    fputs(",\"file\":", stderr);
+        diag_o_puts(eo, "null");
+    diag_o_puts(eo, ",\"file\":");
     if (file && file[0])
-        diag_json_write_str(stderr, file);
+        diag_json_write_str(eo, file);
     else
-        fputs("null", stderr);
-    fprintf(stderr, ",\"line\":%d,\"col\":%d,\"message\":", line, col);
-    diag_json_write_str(stderr, msg ? msg : "");
-    fputs("}\n", stderr);
-    fflush(stderr);
+        diag_o_puts(eo, "null");
+    diag_o_printf(eo, ",\"line\":%d,\"col\":%d,\"message\":", line, col);
+    diag_json_write_str(eo, msg ? msg : "");
+    diag_o_puts(eo, "}\n");
+    /* raw fd 2 writes are unbuffered — no flush (9.7.1) */
 }
 
 

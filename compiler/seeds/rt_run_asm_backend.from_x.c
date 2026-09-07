@@ -27,6 +27,7 @@
 #include "runtime_diag_codes.h"
 #include "runtime_io_abi.h"
 #include "runtime_driver_abi.h"
+#include "xlang_driver_stream_cap.h" /* Cap residual 9.7.1: opaque FILE* face → fd-handle face */
 #include "runtime_pipeline_abi.h"
 #include "runtime_link_abi.h"
 #include "runtime_proc_abi.h"
@@ -258,7 +259,10 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
         driver_diagnostic_after_entry_parse(driver_get_module_num_funcs(module));
         driver_diagnostic_after_entry_parse_module(module);
         {
-            FILE *metric_o = fopen(out_path, "wb");
+            /* Cap residual 9.7.1: metric placeholder .o via Cap open_write
+             * (binary-safe on Windows; single zero byte payload). */
+            int metric_fd = xlang_io_open_write(out_path);
+            uint8_t *metric_o = metric_fd < 0 ? NULL : xlang_driver_handle_from_fd(metric_fd);
             if (!metric_o) {
                 diag_reportf_with_code(out_path, 0, 0, "io error", XLANG_DIAG_CODE_IO_IO001, NULL,
                              "cannot open parse-metric output '%s'",
@@ -268,8 +272,11 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
                 free(src);
                 return 1;
             }
-            (void)fputc('\0', metric_o);
-            if (fclose(metric_o) != 0) {
+            {
+                const char metric_zero = '\0';
+                (void)xlang_io_write(xlang_driver_handle_to_fd(metric_o), &metric_zero, 1);
+            }
+            if (xlang_driver_handle_close(metric_o) != 0) {
                 diag_reportf_with_code(out_path, 0, 0, "io error", XLANG_DIAG_CODE_IO_IO001, NULL,
                              "failed to write parse-metric output '%s'",
                              out_path ? out_path : "?");
@@ -351,7 +358,8 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
      * 否则 pipeline 二次 strict parse 大模块仅 ~4 func（parser.x）；见 run-parser-parse-count-gate.sh。
      */
     typeck_ndep_store((int32_t)(0));
-    FILE *asm_out = NULL;
+    /* Cap residual 9.7.1: opaque fd handle (NULL = not opened). PLATFORM: SHARED. */
+    uint8_t *asm_out = NULL;
     int emit_elf_o = 0;
     void *elf_ctx_ptr = NULL;
     char asm_tmp_o_path[64];
@@ -378,7 +386,9 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
                 free(src);
                 return 1;
             }
-            asm_out = fdopen(fd, "wb");
+            /* Cap residual 9.7.1: keep the mkstemp fd — wrap it as an opaque
+             * handle instead of fdopen("wb"). PLATFORM: SHARED. */
+            asm_out = xlang_driver_handle_from_fd(fd);
             if (!asm_out) {
                 runtime_diag_errno_path(input_path, "build error", "fdopen (asm)", asm_tmp_o_path);
                 close(fd);
@@ -390,7 +400,10 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
             }
             emit_elf_o = 1;
         } else {
-            asm_out = fopen(out_path, "wb");
+            /* Cap residual 9.7.1: fopen(out_path, "wb") → Cap open_write
+             * (create/truncate, binary-safe on Windows). PLATFORM: SHARED. */
+            int aof = xlang_io_open_write(out_path);
+            asm_out = aof < 0 ? NULL : xlang_driver_handle_from_fd(aof);
             if (!asm_out) {
                 runtime_diag_errno_path(out_path, "io error", "fopen (-o asm)", out_path);
                 free(arena);
@@ -903,9 +916,10 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
                 }
             }
         }
-        fwrite(out_buf->data, 1, (size_t)out_buf->length, asm_out ? asm_out : stdout);
-        if (!asm_out)
-            fflush(stdout);
+        /* Cap residual 9.7.1: fwrite(stdout) → raw fd write (unbuffered; no
+         * flush needed). PLATFORM: SHARED. */
+        (void)xlang_io_write(asm_out ? xlang_driver_handle_to_fd(asm_out) : 1,
+                             out_buf->data, (size_t)out_buf->length);
         driver_asm_fclose_asm_out(asm_out);
         asm_out = NULL;
         if (elf_ctx_ptr) { free(elf_ctx_ptr); elf_ctx_ptr = NULL; }
