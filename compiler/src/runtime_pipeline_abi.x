@@ -35593,6 +35593,9 @@ export function pipeline_asm_emit_param_home_elf_c(elf_ctx: *u8, ctx: *u8, mod: 
   let f32en: i32 = 0;
   let arena: *u8 = 0 as *u8;
   let gp: i32 = 0;
+  let fp_cur: i32 = 0;
+  let is_f64_p: i32 = 0;
+  let pty_h: i32 = 0;
   let stack_pos: i32 = 16;
   let cur: i32 = 16;
   let k: i32 = 0;
@@ -35828,7 +35831,53 @@ export function pipeline_asm_emit_param_home_elf_c(elf_ctx: *u8, ctx: *u8, mod: 
       home_w = glue_func_param_home_width_c(arena, mod, func_index, i);
     }
     home = cur;
-    if (psz > 16) {
+    /* AAPCS64 FP class: f64 formals arrive in v0-v7 (dK), independent of the
+     * GP cursor (x0-x7). Home via fmov x0,dK then the plain 8-byte store —
+     * bits pass through unchanged and no narrow-canonicalization is needed
+     * (the full 64-bit value is significant). FP overflow falls to the
+     * incoming stack word. Callers (CALL packer / UFCS / import METHOD)
+     * classify f64 identically, so both faces agree on v-slots.
+     * PLATFORM: MACOS|ARM64 AAPCS64. */
+    is_f64_p = 0;
+    unsafe {
+      pty_h = pipeline_module_func_param_type_ref_at(mod, func_index, i);
+    }
+    if (pty_h > 0) {
+      unsafe {
+        if (pipeline_type_kind_ord_at(arena, pty_h) == 15) {
+          is_f64_p = 1;
+        }
+      }
+    }
+    if (is_f64_p != 0 && fp_cur < reg_max) {
+      unsafe {
+        rc = backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx, fp_cur, ta);
+      }
+      if (rc != 0) {
+        return -1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, home, ta);
+      }
+      if (rc != 0) {
+        return -1;
+      }
+      fp_cur = fp_cur + 1;
+    } else if (is_f64_p != 0) {
+      unsafe {
+        rc = backend_enc_load_x29_pos_to_rax_arch(elf_ctx, stack_pos, ta);
+      }
+      if (rc != 0) {
+        return -1;
+      }
+      unsafe {
+        rc = backend_enc_store_rax_to_rbp_arch(elf_ctx, home, ta);
+      }
+      if (rc != 0) {
+        return -1;
+      }
+      stack_pos = stack_pos + 8;
+    } else if (psz > 16) {
       nbytes = (psz + 7) & (~7);
       k = 0;
       while (k < nbytes) {
@@ -41226,6 +41275,29 @@ export function pipeline_asm_emit_return_elf_impl(arena: *u8, elf_ctx: *u8, expr
         sty = glue_float_promote_src_ty_ref_c(arena, ret_op);
         if (glue_maybe_promote_f32_to_f64_rax_elf_c(arena, elf_ctx, rty, sty, ta) != 0) {
           return 0 - 1;
+        }
+      }
+    }
+  }
+  /* AAPCS64 f64 boundary: the scalar return value leaves in d0 (call site
+   * harvests with fmov x0,d0). The internal representation stays rax-bits;
+   * this single exit-point convert covers every value path above. sret
+   * struct returns cannot be f64, so the kind check excludes them; bare
+   * `return;` has no value (ret_op == 0).
+   * PLATFORM: MACOS|ARM64 AAPCS64. */
+  if (ta == 1 && ret_op != 0 && mod != (0 as *u8) && fi >= 0) {
+    unsafe {
+      rty = pipeline_module_func_return_type_at(mod, fi);
+    }
+    if (rty > 0) {
+      unsafe {
+        if (pipeline_type_kind_ord_at(arena, rty) == 15) {
+          unsafe {
+            rc = backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx, 0, ta);
+          }
+          if (rc != 0) {
+            return 0 - 1;
+          }
         }
       }
     }

@@ -2859,6 +2859,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
        */
       int32_t nw = 0;
       int32_t gp_tmp = 0;
+      int32_t fp_tmp = 0; /* AAPCS64 f64 boundary wave: v0–v7 independent cursor */
       int32_t j;
       int32_t host_mem = g_emit_call_args_arm64_host_mem;
       for (j = 0; j < nargs; j++) {
@@ -2875,6 +2876,14 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
           } else {
             nw += w_j;
           }
+        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j)) {
+          /* AAPCS64 f64: first 8 take v-slots (no stack words); overflow
+           * spills one stack word. Twin of the .x authority pre-pass.
+           * PLATFORM: MACOS|ARM64 AAPCS64. */
+          if (fp_tmp < 8)
+            fp_tmp += 1;
+          else
+            nw += 1;
         } else if (u_j > 0 && gp_tmp + u_j <= reg_max)
           gp_tmp += u_j;
         else
@@ -2952,6 +2961,12 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
       int32_t arg_sz_a64[GLUE_ASM_MAX_CALL_ARGS];
       /* is_mem_a64: 0=reg/int, 1=stack MEMORY, 2=host-indirect lea (std_/core_ exports). */
       int32_t is_mem_a64[GLUE_ASM_MAX_CALL_ARGS];
+      /* AAPCS64 f64 boundary wave: f64 args take v0–v7 (independent FP
+       * cursor, fp_slot[i] = v-slot or -1); callee param home reads dK.
+       * f32 stays GP-bits this wave (param home is f64-only).
+       * PLATFORM: MACOS|ARM64 AAPCS64. */
+      int32_t fp_slot_a64[GLUE_ASM_MAX_CALL_ARGS];
+      int32_t fp_cur_a64 = 0;
       int32_t gp_cur_a64 = 0; /* AAPCS64 sret uses x8 — no GP shift */
       int32_t stk_slot = 0;
       int32_t host_mem = g_emit_call_args_arm64_host_mem;
@@ -2973,6 +2988,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
         arg_sz_a64[i] = sz_i;
         is_mem_a64[i] = 0;
         spill_off_a64[i] = -1;
+        fp_slot_a64[i] = -1;
         u = glue_sysv_arg_gp_units_from_size_c(sz_i);
         if (glue_sysv_arg_is_memory_by_value_c(sz_i)) {
           if (host_mem) {
@@ -2992,6 +3008,19 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
           }
           continue;
         }
+        if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i)) {
+          /* AAPCS64 f64: v-slot when the FP cursor has room; overflow falls
+           * to one stack word below. GP start stays -1 so the GP place /
+           * load stages skip it. Twin of the .x authority classifier.
+           * PLATFORM: MACOS|ARM64 AAPCS64. */
+          gp_start_a64[i] = -1;
+          gp_units_a64[i] = 1;
+          if (fp_cur_a64 < 8) {
+            fp_slot_a64[i] = fp_cur_a64;
+            fp_cur_a64 += 1;
+          }
+          continue;
+        }
         if (u < 1)
           u = 1;
         if (u > 2)
@@ -3005,7 +3034,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
       }
       for (i = 0; i < nargs; i++) {
         int32_t so;
-        if (gp_start_a64[i] < 0)
+        if (gp_start_a64[i] < 0 && fp_slot_a64[i] < 0)
           continue;
         arg_ref = pipeline_expr_call_arg_ref(arena, expr_ref, i);
         if (arg_ref == 0)
@@ -3018,6 +3047,8 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
         } else if (glue_emit_one_call_arg_elf_c(arena, elf_ctx, expr_ref, arg_ref, i, ctx, ta) != 0) {
           return -1;
         }
+        /* f64 v-slot args spill one word too: the reload stage reads the
+         * frame, matching the GP spill discipline (f64 != sret, 8B). */
         so = glue_sysv_spill_rax_rdx_to_frame_c(elf_ctx, ctx, ta, gp_units_a64[i]);
         if (so < 0)
           return -1;
@@ -3030,7 +3061,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
       for (i = 0; i < nargs; i++) {
         int32_t words;
         int32_t stored;
-        if (gp_start_a64[i] >= 0)
+        if (gp_start_a64[i] >= 0 || fp_slot_a64[i] >= 0)
           continue;
         arg_ref = pipeline_expr_call_arg_ref(arena, expr_ref, i);
         if (arg_ref == 0)
@@ -3060,6 +3091,20 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
         }
       }
       /*
+       * AAPCS64 f64 boundary wave: FP reload first (ascending v-slot).
+       * fmov dK, x0 uses x0 as a bits temp only and leaves every GP
+       * register intact, so FP reloads cannot disturb the GP reload below.
+       * PLATFORM: MACOS|ARM64 AAPCS64.
+       */
+      for (i = 0; i < nargs; i++) {
+        if (fp_slot_a64[i] < 0 || spill_off_a64[i] < 0)
+          continue;
+        if (backend_enc_load_rbp_to_rax_arch(elf_ctx, spill_off_a64[i], ta) != 0)
+          return -1;
+        if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx, fp_slot_a64[i], ta) != 0)
+          return -1;
+      }
+      /*
        * Load high→low by *arg index*: x0 is spill temp and may be arg0.
        * Loading lower GPs first would clobber them when materializing higher ones
        * through x0 (wave392 reent2). Dual-GP loads write gp and gp+1 atomically
@@ -3067,7 +3112,7 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
        * Must run *after* stack place so emit-to-x0 for stack does not wipe final GPs.
        */
       for (i = nargs - 1; i >= 0; i--) {
-        if (spill_off_a64[i] < 0)
+        if (spill_off_a64[i] < 0 || fp_slot_a64[i] >= 0)
           continue;
         if (glue_sysv_load_spill_to_arg_regs_elf_c(elf_ctx, ta, spill_off_a64[i], gp_start_a64[i],
                                                      gp_units_a64[i]) != 0)
@@ -4023,12 +4068,19 @@ int32_t glue_asm_harvest_call_ret_to_gpr_c(struct ast_ASTArena *arena,
   if (!arena || !elf_ctx || call_expr_ref <= 0)
     return 0;
   kind = pipeline_asm_call_return_type_kind_ord_c(arena, call_expr_ref);
-  /* SSE harvest remains x86-only (xmm). */
+  /* f64 harvest on both arches: x86_64 movq xmm0→rax; arm64 AAPCS64
+   * fmov x0,d0 (callee leaves the f64 return in d0 since the AAPCS64
+   * f64 boundary wave). The internal rax-bits representation is
+   * restored right after the call.
+   * PLATFORM: SHARED · LINUX+MACOS x86_64 SysV · MACOS|ARM64 AAPCS64. */
+  if (kind == 15)
+    return backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx, 0, ta);
+  /* f32 xmm harvest remains x86-only: arm64 keeps the GP-bits f32
+   * convention this wave (callee param home / return are f64-only).
+   * PLATFORM: LINUX+MACOS x86_64 SysV. */
   if (ta == 0) {
     if (kind == 14)
       return backend_enc_mov_xmm_arg_reg_to_eax_arch(elf_ctx, 0, ta);
-    if (kind == 15)
-      return backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx, 0, ta);
   }
   /* Integer GP ret: both x86_64 and arm64 (sxtw / cdqe / uxt). */
   if (kind == 0)
@@ -6285,9 +6337,16 @@ int32_t pipeline_asm_emit_method_call_elf_c_impl(struct ast_ASTArena *arena, str
             arg_ex = pipeline_expr_method_call_arg_ref(arena, expr_ref, ei);
             if (arg_ex == 0)
               return -1;
+            /* PLATFORM: LINUX|x86_64 SysV — f32/f64 extras go xmm0–7 then stack.
+             * PLATFORM: MACOS|ARM64 AAPCS64 — f64 extras take v-slots (callee
+             * param home reads dK since the AAPCS64 f64 boundary wave); f32
+             * stays GP-bits (param home is f64-only this wave). */
             if (ta == 0) {
               is_sse_e[ei] = glue_arg_ref_is_sse_float_c(arena, arg_ex, 0);
               is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
+            } else {
+              is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
+              is_sse_e[ei] = is_f64_e[ei];
             }
             if (is_sse_e[ei] != 0) {
               if (xmm_cur < 8) {

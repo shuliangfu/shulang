@@ -2300,9 +2300,14 @@ export function pipeline_asm_emit_call_args_elf_c(
     } else if (ta == 1) {
       /* wave603: AAPCS64 stack words include MEMORY multi-word (≡ x86 wave601),
        * not nargs-reg_max alone. Align 16 for arm64 SP.
+       * wave9xx AAPCS64 FP class: f64 scalars consume v0-v7 (d regs) which are
+       * independent of the GP cursor, so they take neither GP units nor stack
+       * words while a v-slot is free; only FP overflow spills to the stack.
+       * Must mirror the main classification pass below exactly.
        * PLATFORM: MACOS|ARM64 AAPCS64. */
       let nw_a: i32 = 0;
       let gp_tmp: i32 = 0;
+      let fp_tmp: i32 = 0;
       let j_a: i32 = 0;
       while (j_a < nargs) {
         let ar_j: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, j_a);
@@ -2312,6 +2317,12 @@ export function pipeline_asm_emit_call_args_elf_c(
         let w_j: i32 = glue_sysv_arg_stack_words_c(sz_j, u_j);
         if (glue_sysv_arg_is_memory_by_value_c(sz_j) != 0) {
           nw_a = nw_a + w_j;
+        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j) != 0) {
+          if (fp_tmp < 8) {
+            fp_tmp = fp_tmp + 1;
+          } else {
+            nw_a = nw_a + 1;
+          }
         } else if (u_j > 0 && gp_tmp + u_j <= reg_max) {
           gp_tmp = gp_tmp + u_j;
         } else {
@@ -2387,7 +2398,9 @@ export function pipeline_asm_emit_call_args_elf_c(
       let spill_off: i32[96] = [];
       let arg_sz_a: i32[96] = [];
       let is_mem_a: i32[96] = [];
+      let fp_slot: i32[96] = [];
       let gp_cur: i32 = 0;
+      let fp_cur: i32 = 0;
       let i: i32 = 0;
       while (i < nargs) {
         let ar_i: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, i);
@@ -2396,9 +2409,23 @@ export function pipeline_asm_emit_call_args_elf_c(
         spill_off[i] = 0 - 1;
         arg_sz_a[i] = sz_i;
         is_mem_a[i] = glue_sysv_arg_is_memory_by_value_c(sz_i);
+        fp_slot[i] = 0 - 1;
         if (is_mem_a[i] != 0) {
           gp_start[i] = 0 - 1;
           gp_units[i] = 0;
+        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i) != 0) {
+          /* AAPCS64 FP class: f64 scalars pass in v0-v7 (fmov dK of the rax
+           * bits at reload), independent of the GP cursor (x0-x7). They keep
+           * one spill word (gp_units=1) but consume no GP slot; overflow
+           * falls through to the stack-slot pass below as an 8-byte word.
+           * f32 stays GP-bits this wave (callee param home is f64-only).
+           * PLATFORM: MACOS|ARM64 AAPCS64. */
+          gp_units[i] = 1;
+          gp_start[i] = 0 - 1;
+          if (fp_cur < 8) {
+            fp_slot[i] = fp_cur;
+            fp_cur = fp_cur + 1;
+          }
         } else {
           let u: i32 = glue_sysv_arg_gp_units_from_size_c(sz_i);
           if (u < 1) { u = 1; }
@@ -2416,7 +2443,7 @@ export function pipeline_asm_emit_call_args_elf_c(
       // Emit + spill register-class args.
       i = 0;
       while (i < nargs) {
-        if (gp_start[i] >= 0) {
+        if (gp_start[i] >= 0 || fp_slot[i] >= 0) {
           let arg_ref: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, i);
           if (arg_ref != 0) {
             if (glue_emit_one_call_arg_elf_c(arena, elf_ctx, expr_ref, arg_ref, i, ctx, ta) != 0) {
@@ -2435,7 +2462,7 @@ export function pipeline_asm_emit_call_args_elf_c(
       let stk_slot: i32 = 0;
       i = 0;
       while (i < nargs) {
-        if (gp_start[i] < 0) {
+        if (gp_start[i] < 0 && fp_slot[i] < 0) {
           let arg_ref2: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, i);
           if (arg_ref2 != 0) {
             if (is_mem_a[i] != 0) {
@@ -2456,10 +2483,25 @@ export function pipeline_asm_emit_call_args_elf_c(
         }
         i = i + 1;
       }
+      // FP reload first (ascending v-slot): x0 is only a bits temp here and
+      // fmov dK,x0 leaves every GP register intact, so the GP pass below can
+      // still use x0 as its scratch. PLATFORM: MACOS|ARM64 AAPCS64.
+      i = 0;
+      while (i < nargs) {
+        if (fp_slot[i] >= 0 && spill_off[i] >= 0) {
+          if (backend_enc_load_rbp_to_rax_arch(elf_ctx, spill_off[i], ta) != 0) {
+            return 0 - 1;
+          }
+          if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx, fp_slot[i], ta) != 0) {
+            return 0 - 1;
+          }
+        }
+        i = i + 1;
+      }
       // Load spills high→low so x0 temp does not wipe lower final GPs.
       i = nargs - 1;
       while (i >= 0) {
-        if (spill_off[i] >= 0) {
+        if (spill_off[i] >= 0 && gp_start[i] >= 0) {
           if (glue_sysv_load_spill_to_arg_regs_elf_c(elf_ctx, ta, spill_off[i], gp_start[i], gp_units[i]) != 0) {
             return 0 - 1;
           }
@@ -2636,16 +2678,22 @@ export function glue_asm_harvest_call_ret_to_gpr_c(
   unsafe {
     kind = pipeline_asm_call_return_type_kind_ord_c(arena, call_expr_ref);
   }
-  // SSE harvest remains x86-only (xmm).
+  // f64 harvest on both arches: x86_64 movq xmm0→rax; arm64 AAPCS64
+  // fmov x0,d0 (callee leaves the f64 return in d0). The internal
+  // rax-bits representation is restored right after the call.
+  // PLATFORM: SHARED · LINUX+MACOS x86_64 SysV · MACOS|ARM64 AAPCS64.
+  if (kind == 15) {
+    unsafe {
+      return backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx, 0, ta);
+    }
+  }
+  // f32 xmm harvest remains x86-only: arm64 keeps the GP-bits f32
+  // convention this wave (callee param home / return are f64-only).
+  // PLATFORM: LINUX+MACOS x86_64 SysV.
   if (ta == 0) {
     if (kind == 14) {
       unsafe {
         return backend_enc_mov_xmm_arg_reg_to_eax_arch(elf_ctx, 0, ta);
-      }
-    }
-    if (kind == 15) {
-      unsafe {
-        return backend_enc_mov_xmm_arg_reg_to_rax_arch(elf_ctx, 0, ta);
       }
     }
   }
@@ -3193,10 +3241,15 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
         let arg_ex: i32 = pipeline_expr_method_call_arg_ref(arena, expr_ref, ei);
         if (arg_ex == 0) { return 0 - 1; }
         /* PLATFORM: LINUX|x86_64 SysV — f32/f64 extras go xmm0–7 then stack.
-         * PLATFORM: MACOS|ARM64 — local impl homes GP (do not copy import METHOD). */
+         * PLATFORM: MACOS|ARM64 AAPCS64 — f64 extras take v-slots (callee
+         * param home reads dK since the AAPCS64 f64 boundary wave); f32
+         * stays GP-bits (param home is f64-only this wave). */
         if (ta == 0) {
           is_sse_e[ei] = glue_arg_ref_is_sse_float_c(arena, arg_ex, 0);
           is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
+        } else {
+          is_f64_e[ei] = glue_arg_ref_is_f64_width_c(arena, ctx, arg_ex, 0);
+          is_sse_e[ei] = is_f64_e[ei];
         }
         if (is_sse_e[ei] != 0) {
           if (xmm_cur < 8) {
@@ -3485,8 +3538,11 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
                         // PLATFORM: LINUX+MACOS x86_64 SysV — f32/f64 extras go xmm0–7.
                         // PLATFORM: MACOS|ARM64 AAPCS64 — same extras go s0–s7 / d0–d7
                         // (host-C gcc reads FP regs). Encoder now has fmov sK,w0.
-                        // Do NOT open UFCS leave / CALL packer / param home (those
-                        // stay GP on arm64 — local xlang callee homes x0).
+                        // Since the AAPCS64 f64 boundary wave, xlang-compiled
+                        // callees home f64 formals from dK too (param home),
+                        // so import-METHOD, UFCS leave, the CALL packer and
+                        // param home all agree on v-slots for f64. f32 local
+                        // formals still home from GP (f64-only wave scope).
                         if (ta == 0 || ta == 1) {
                           is_sse_m[i_m] = glue_arg_ref_is_sse_float_c(arena, ar_m, pty_m);
                           is_f64_m[i_m] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_m, pty_m);
@@ -3866,9 +3922,14 @@ export function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_ctx: *u8, ex
         gp_start_u[i_u] = 0 - 1;
         gp_units_u[i_u] = 0;
         // Same-layer twin of import METHOD SSE classify (G.7 有则补全).
+        // PLATFORM: MACOS|ARM64 AAPCS64 — f64 extras take v-slots (callee
+        // param home reads dK); f32 stays GP-bits this wave.
         if (ta == 0) {
           is_sse_u[i_u] = glue_arg_ref_is_sse_float_c(arena, ar_u, pty_u);
           is_f64_u[i_u] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_u, pty_u);
+        } else {
+          is_f64_u[i_u] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_u, pty_u);
+          is_sse_u[i_u] = is_f64_u[i_u];
         }
         if (is_sse_u[i_u] != 0) {
           if (xmm_cur_u >= 8) { return 0 - 1; }

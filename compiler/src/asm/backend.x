@@ -289,6 +289,13 @@ export extern function pipeline_asm_module_func_num_params_at(mod: *Module, func
 export extern function pipeline_asm_module_func_param_name_len_at(mod: *Module, func_index: i32, param_index: i32): i32;
 export extern function pipeline_asm_module_func_param_name_copy32(mod: *Module, func_index: i32, param_index: i32, dst: *u8): void;
 export extern function pipeline_asm_get_return_expr_ref_at(arena: *ASTArena, module: *Module, func_index: i32): i32;
+/* Declared in backend_call_dispatch.x; used by the implicit-tail f64 return
+ * conversion (AAPCS64 boundary wave). Same authority, extern re-declaration. */
+export extern function pipeline_module_func_return_type_at(m: *u8, fi: i32): i32;
+/* fmov dK, x0 dispatcher; defined alongside the other backend_enc_*_arch
+ * dispatchers (backend_enc_dispatch seed object). Single authority — no new
+ * encoder body here. */
+export extern function backend_enc_mov_rax_to_xmm_arg_reg_arch(elf: *u8, k: i32, ta: i32): i32;
 /** Import-qualified symbol field-layer scratch (runtime_pipeline_abi; shared with typeck.x). Historical ast_pool.c left wave309. */
 export extern function asm_qual_sym_layer_reset(): void;
 export extern function asm_qual_sym_layer_push(bytes: *u8, len: i32): i32;
@@ -4079,6 +4086,23 @@ export function asm_codegen_ast_to_elf_seed_mega(module: *Module, arena: *ASTAre
       }
       if (result_ref != 0) {
         if (emit_expr_elf(arena, elf_ctx, result_ref, &ctx, ta) != 0) { return -1; }
+      }
+      /* AAPCS64 f64 boundary: implicit-tail exit (single-expression body or
+       * empty body with a return expr). The value leaves in d0 to match the
+       * explicit-return common tail in pipeline_asm_emit_return_elf_impl.
+       * f64 cannot be sret, so no sret guard; ta==0 needs no conversion.
+       * PLATFORM: MACOS|ARM64 AAPCS64. */
+      if (ta == 1 && result_ref != 0) {
+        let rty_tail: i32 = pipeline_module_func_return_type_at(module as *u8, i);
+        if (rty_tail > 0) {
+          unsafe {
+            if (pipeline_type_kind_ord_at(arena, rty_tail) == 15) {
+              unsafe {
+                if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx as *u8, 0, ta) != 0) { return -1; }
+              }
+            }
+          }
+        }
       }
       if (enc_epilogue_arch(elf_ctx, ta) != 0) { return -1; }
       pipeline_asm_emit_async_cps_end_func_elf_c();

@@ -20926,6 +20926,10 @@ int32_t glue_try_return_slice_escape_from_fixed_array_elf_c(
   return 1;
 }
 
+/* Forward decl: fmov d0, x0 return-face convert dispatcher (defined in the
+ * backend_enc_dispatch leaf; extern decl there sits later in this TU). */
+extern int32_t backend_enc_mov_rax_to_xmm_arg_reg_arch(void *elf_ctx, int32_t k, int32_t ta);
+
 int32_t pipeline_asm_emit_return_elf_impl(struct ast_ASTArena *arena,
                                                    struct platform_elf_ElfCodegenCtx *elf_ctx, int32_t expr_ref,
                                                    struct backend_AsmFuncCtx *ctx, int32_t ta) {
@@ -21059,6 +21063,22 @@ int32_t pipeline_asm_emit_return_elf_impl(struct ast_ASTArena *arena,
                                                         pipeline_asm_emit_func_index_c());
       int32_t sty = glue_float_promote_src_ty_ref_c(arena, ret_op);
       if (glue_maybe_promote_f32_to_f64_rax_elf_c(arena, elf_ctx, rty, sty, ta) != 0)
+        return -1;
+    }
+  }
+  /* AAPCS64 f64 boundary: the scalar return value leaves in d0 (call site
+   * harvests with fmov x0,d0). The internal representation stays rax-bits;
+   * this single exit-point convert covers every value path above. sret
+   * struct returns cannot be f64, so the kind check excludes them; bare
+   * `return;` has no value (ret_op == 0).
+   * Twin of the .x authority pipeline_asm_emit_return_elf_impl common tail.
+   * PLATFORM: MACOS|ARM64 AAPCS64. */
+  if (ta == 1 && ret_op != 0 && ((struct ast_Module *)pipeline_asm_emit_module_ref_c()) &&
+      pipeline_asm_emit_func_index_c() >= 0) {
+    int32_t rty_tail = pipeline_module_func_return_type_at(((struct ast_Module *)pipeline_asm_emit_module_ref_c()),
+                                                           pipeline_asm_emit_func_index_c());
+    if (rty_tail > 0 && pipeline_type_kind_ord_at(arena, rty_tail) == W144_TYPE_F64) {
+      if (backend_enc_mov_rax_to_xmm_arg_reg_arch(elf_ctx, 0, ta) != 0)
         return -1;
     }
   }
