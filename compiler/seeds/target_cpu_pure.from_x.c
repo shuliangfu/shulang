@@ -19,8 +19,8 @@
  *   + tcp_parse_named + xlang_target_cpu_resolve + tcp_eq5 + tcp_eq6
  *   + xlang_simd_is_vector_type_spelling + xlang_simd_vector_lanes_esz_from_spelling
  *   + append_feat_name + flags_has_token
- * Cap residual（mega rest 冷路径）：xlang_target_cpu_print（Linux/Darwin Cap io write；
- *   仅 Win/其它仍 FILE/fprintf）+ OS detect (sysctl/proc/#if platform) 在本文件 #endif 后始终编译。
+ * Cap residual（mega rest 冷路径）：xlang_target_cpu_print（全平台 Cap io write，
+ *   fd-handle 脸 9.7.2 与 .x 权威一致）+ OS detect (sysctl/proc/#if platform) 在本文件 #endif 后始终编译。
  * FROM_X 下本文件业务 H=0（仅 extern 声明 + slice marker）。
  * 冷启动/无 PREFER 时仍编译完整 C 体（可与 mega 并存）。
  *
@@ -32,7 +32,6 @@
  */
 #include <stdint.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <string.h>
 #include "target_cpu.h"
 
@@ -293,7 +292,7 @@ int target_cpu_pure_slice_marker(void) {
 
 /* --- Cap residual: language-limit funcs (always compiled) --- */
 
-/* --- G-02f-5：print（stdio / FILE* 语言限制，逻辑与原 target_cpu.inc 一致）--- */
+/* --- G-02f-5：print（Cap io write，fd-handle 脸 9.7.2；逻辑与原 target_cpu.inc 一致）--- */
 
 /* PLATFORM: SHARED (LINUX | DARWIN | WINDOWS | POSIX) Cap 9.1.12 / 9.5.2 */
 #include <xlang_io_cap.h>
@@ -333,7 +332,8 @@ static void tcp_fmt_u32_hex8(uint32_t v, char *dst) {
 
 /**
  * Append fixed prefix + '=' + 0x + 8-digit hex + newline; write to fd.
- * Must match fprintf path (target_cpu_features=0x…) for SIMD-S1 gate grep.
+ * Byte-identical output to the libc fprintf path this replaced (gate grep
+ * depends on the exact `target_cpu_features=0x…` lines).
  * PLATFORM: LINUX|DARWIN Cap residual 9.5.2
  */
 static void tcp_cap_print_hex_line(int fd, const char *prefix, uint32_t val) {
@@ -360,7 +360,16 @@ static void tcp_cap_print_hex_line(int fd, const char *prefix, uint32_t val) {
 
 #endif /* HAVE_XLANG_IO_PRINT_CAP */
 
-void xlang_target_cpu_print(FILE *out, uint32_t features) {
+/**
+ * Print the feature mask as stable key=value lines via Cap io (fd 1).
+ * @param out Opaque stdout handle (*u8, e.g. driver_stdio_stdout()); kept for
+ *            face parity with the .x authority — the Cap implementation always
+ *            writes through raw fd 1 and ignores the handle (NULL allowed).
+ * @param features Feature bitmask (XLANG_CPU_FEAT_*).
+ * Cap residual 9.7.2: face unified with .x authority — no libc FILE*, no fprintf.
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS) — Cap io write, fd 1.
+ */
+void xlang_target_cpu_print(uint8_t *out, uint32_t features) {
   char list[256];
   size_t pos = 0;
 
@@ -393,7 +402,8 @@ void xlang_target_cpu_print(FILE *out, uint32_t features) {
     size_t lpos;
     const char *feat_list;
     size_t flen;
-    /* stdout fd; out is opaque FILE* / *u8 handle — product always prints to stdout. */
+    /* stdout fd; out is the opaque *u8 handle from driver_stdio_stdout() —
+     * product always prints to raw fd 1 (face parity with .x authority). */
     const int fd = 1;
     (void)out;
     tcp_cap_print_hex_line(fd, "target_cpu_features", features);
@@ -410,10 +420,6 @@ void xlang_target_cpu_print(FILE *out, uint32_t features) {
     }
     tcp_cap_print_hex_line(fd, "target_cpu_host_features", xlang_target_cpu_detect_host());
   }
-#else
-  fprintf(out, "target_cpu_features=0x%08x\n", features);
-  fprintf(out, "target_cpu_features_list=%s\n", list[0] ? list : "(none)");
-  fprintf(out, "target_cpu_host_features=0x%08x\n", xlang_target_cpu_detect_host());
 #endif
 }
 

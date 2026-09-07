@@ -2,7 +2,7 @@
  * G-02f target_cpu_pure R2 full surface — isomorphic with src/driver/target_cpu_pure.x
  * Product PREFER_X_O: g05_try_x_to_o(target_cpu_pure.x) + mega rest under FROM_X
  * Prove: full.x vs this seed -> nm IDENTICAL (12 public business funcs + BSS)
- * Cap residual: xlang_target_cpu_print (FILE star / fprintf) + OS detect (sysctl / proc / #if) in mega rest
+ * Cap residual: xlang_target_cpu_print (Cap io write, fd-handle face 9.7.2) + OS detect (sysctl / proc / #if) in mega rest
  * Regen: ./xlang -E ... src/driver/target_cpu_pure.x | filter DBG + polish prologue
  * NOTE: must use ./xlang (not xlang-x); xlang-x adds driver_ prefix to non-#[no_mangle] funcs.
  */

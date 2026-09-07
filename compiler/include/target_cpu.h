@@ -8,7 +8,7 @@
 #define XLANG_TARGET_CPU_H
 
 #include <stdint.h>
-#include <stdio.h>
+#include <stddef.h>
 
 /** x86/x86_64 特性位（与 arm/riscv 分段，避免混用）。 */
 #define XLANG_CPU_FEAT_SSE2     (1u << 0)
@@ -46,8 +46,17 @@ uint32_t xlang_target_cpu_generic_for_host(void);
  */
 int xlang_target_cpu_resolve(const char *spec, size_t spec_len, uint32_t *out);
 
-/** 将 feature 掩码以稳定键值行打印到 out（供 `--print-target-cpu` 与门禁解析）。 */
-void xlang_target_cpu_print(FILE *out, uint32_t features);
+/**
+ * Print the feature mask as stable key=value lines (for `--print-target-cpu`
+ * and gate greps).
+ * @param out Opaque stdout handle (*u8, e.g. from driver_stdio_stdout());
+ *            kept for face parity with the .x authority `out: *u8` — the
+ *            Cap implementation always writes through raw fd 1 and ignores
+ *            the handle value (NULL allowed).
+ * Cap residual 9.7.2: face unified with .x authority — no libc FILE*.
+ * PLATFORM: SHARED (LINUX | DARWIN | WINDOWS) — Cap io write, fd 1.
+ */
+void xlang_target_cpu_print(uint8_t *out, uint32_t features);
 
 /** driver 分派前暂存已解析 feature（lib_key→state 不可直传 pctx 时用）。 */
 void driver_set_pending_target_cpu_features(uint32_t features);

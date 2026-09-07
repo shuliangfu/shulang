@@ -16,7 +16,6 @@
  */
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,7 +90,11 @@ extern void driver_bump_stack_limit(void);
 extern DriverCompileStateSU *driver_compile_state_alloc_c(void);
 extern void driver_compile_state_free_c(DriverCompileStateSU *state);
 extern int32_t driver_compile_parse_argv_impl_c(int32_t argc, uint8_t *argv, DriverCompileStateSU *state);
-extern void xlang_target_cpu_print(FILE *out, uint32_t features);
+/* Cap residual 9.7.2: fd-handle face — print target goes through
+ * driver_stdio_stdout (encoded fd 1), no libc FILE star / stdout. */
+extern void xlang_target_cpu_print(uint8_t *out, uint32_t features);
+extern uint8_t *driver_stdio_stdout(void);
+extern uint8_t *driver_dispatch_opt_default(void);
 
 /** asm 后端：lib_key sidecar → lib_roots，委托 driver_run_asm_backend。 */
 int32_t driver_run_asm_backend_impl_c(uint8_t *input_path, uint8_t *out_path, uint8_t *lib_key, uint8_t *target,
@@ -121,7 +124,8 @@ int32_t driver_run_emit_c_path_impl_c(uint8_t *input_path, uint8_t *out_path, ui
   p.n_lib_roots = n;
   p.want_asm_backend = 0;
   p.target = target && target[0] ? (const char *)target : NULL;
-  p.opt_level = (opt_level && opt_level[0]) ? (const char *)opt_level : "2";
+  p.opt_level = (opt_level && opt_level[0]) ? (const char *)opt_level
+                                            : (const char *)driver_dispatch_opt_default();
   p.use_lto = use_lto != 0;
   /* wave227 G.7: link_abi_getenv (not raw getenv); host residual = link_abi_getenv_impl. */
   {
@@ -239,7 +243,7 @@ int32_t driver_run_compiler_full_x_impl_c(int32_t argc, uint8_t *argv) {
     return 1;
   }
   if (state->print_target_cpu) {
-    xlang_target_cpu_print(stdout, (uint32_t)state->target_cpu_features);
+    xlang_target_cpu_print(driver_stdio_stdout(), (uint32_t)state->target_cpu_features);
     driver_compile_state_free_c(state);
     return 0;
   }

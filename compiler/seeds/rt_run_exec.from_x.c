@@ -14,9 +14,8 @@
  */
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <xlang_fmt_cap.h> /* Cap residual 10.7.2: run-test cmd path → Cap snprintf */
-/* G.7: Cap after stdio for rt_run_exec cold seed. */
+/* G.7: Cap snprintf mapping (no libc stdio since 9.7.2). */
 #undef snprintf
 #define snprintf xlang_snprintf
 #include <string.h>
@@ -39,7 +38,10 @@ extern void diag_reportf(const char *file, int line, int col, const char *kind, 
                          ...);
 extern void diag_report_with_code(const char *file, int line, int col, const char *kind, const char *code,
                                   const char *msg, const char *detail);
-extern void xlang_target_cpu_print(FILE *out, uint32_t features);
+/* Cap residual 9.7.2: fd-handle face — print goes through driver_stdio_stdout
+ * (encoded fd 1), no libc FILE star / stdout. */
+extern void xlang_target_cpu_print(uint8_t *out, uint32_t features);
+extern uint8_t *driver_stdio_stdout(void);
 extern int xlang_waitpid_retry(pid_t pid, int *status_out);
 extern const char *xlang_repo_root_from_argv0(const char *argv0);
 /* wave226 G.7: bash test shell via public pure thin link_abi_system (wave224 → _impl host system). */
@@ -109,7 +111,7 @@ int runtime_test_status_to_rc(const char *script, int st) {
 
 /** X run_compiler_full_x：`--print-target-cpu` 早退打印 feature。 */
 int32_t driver_print_target_cpu_features_c(int32_t features) {
-  xlang_target_cpu_print(stdout, (uint32_t)features);
+  xlang_target_cpu_print(driver_stdio_stdout(), (uint32_t)features);
   return 0;
 }
 
