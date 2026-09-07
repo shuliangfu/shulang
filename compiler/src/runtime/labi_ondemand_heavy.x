@@ -2329,8 +2329,11 @@ export function labi_std_fk_gate_sym_count(fk: i32): i32 {
   if (fk == 8) {
     return 2;
   }
+  // PLATFORM: SHARED — math gate complete (was 29: std_math_* + sin/cos/
+  // sin_c/cos_c/floor_c/pi_c). +31 runtime_math_libm freestanding faces so a
+  // sole fmin/fmax/fabs/ceil/... UNDEF opens the gate too (see table note).
   if (fk == 9) {
-    return 29;
+    return 60;
   }
   // PLATFORM: SHARED — cookbook sqlite_available unique UNDEF (is_available).
   // Was 3 needles std_db_sqlite / sqlite3_open / db_sqlite_open. Matcher exact
@@ -2784,6 +2787,137 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
       }
       if (i == 28) {
         let p: *u8 = "math_pi_c";
+        return p;
+      }
+      // PLATFORM: SHARED — fk9 gate was incomplete (only sin/cos/sin_c/cos_c/
+      // floor_c/pi_c freestanding faces). Sole callers of any other
+      // runtime_math_libm export (fmin/fmax/fabs/ceil/... — exact7v linked only
+      // because floor_c rode along) never opened the gate → std/math/math.o
+      // plan leaf skipped → runtime_math_libm.o never pulled → UNDEF at ld.
+      // G.7 complete surface: every runtime_math_libm.x export that can be the
+      // sole user UNDEF (trig / rounding / exp-log / minmax / fenv Cap faces).
+      if (i == 29) {
+        let p: *u8 = "math_acos_c";
+        return p;
+      }
+      if (i == 30) {
+        let p: *u8 = "math_asin_c";
+        return p;
+      }
+      if (i == 31) {
+        let p: *u8 = "math_atan_c";
+        return p;
+      }
+      if (i == 32) {
+        let p: *u8 = "math_atan2_c";
+        return p;
+      }
+      if (i == 33) {
+        let p: *u8 = "math_cbrt_c";
+        return p;
+      }
+      if (i == 34) {
+        let p: *u8 = "math_ceil_c";
+        return p;
+      }
+      if (i == 35) {
+        let p: *u8 = "math_erf_c";
+        return p;
+      }
+      if (i == 36) {
+        let p: *u8 = "math_erfc_c";
+        return p;
+      }
+      if (i == 37) {
+        let p: *u8 = "math_exp_c";
+        return p;
+      }
+      if (i == 38) {
+        let p: *u8 = "math_expm1_c";
+        return p;
+      }
+      if (i == 39) {
+        let p: *u8 = "math_fabs_c";
+        return p;
+      }
+      if (i == 40) {
+        let p: *u8 = "math_fmax_c";
+        return p;
+      }
+      if (i == 41) {
+        let p: *u8 = "math_fmin_c";
+        return p;
+      }
+      if (i == 42) {
+        let p: *u8 = "math_log_c";
+        return p;
+      }
+      if (i == 43) {
+        let p: *u8 = "math_log1p_c";
+        return p;
+      }
+      if (i == 44) {
+        let p: *u8 = "math_pow_c";
+        return p;
+      }
+      if (i == 45) {
+        let p: *u8 = "math_round_c";
+        return p;
+      }
+      if (i == 46) {
+        let p: *u8 = "math_signum_c";
+        return p;
+      }
+      if (i == 47) {
+        let p: *u8 = "math_sqrt_c";
+        return p;
+      }
+      if (i == 48) {
+        let p: *u8 = "math_tan_c";
+        return p;
+      }
+      if (i == 49) {
+        let p: *u8 = "math_trunc_c";
+        return p;
+      }
+      if (i == 50) {
+        let p: *u8 = "math_fenv_available_c";
+        return p;
+      }
+      if (i == 51) {
+        let p: *u8 = "math_fenv_capability_smoke_c";
+        return p;
+      }
+      if (i == 52) {
+        let p: *u8 = "math_fenv_clear_c";
+        return p;
+      }
+      if (i == 53) {
+        let p: *u8 = "math_fenv_emit_cap_report";
+        return p;
+      }
+      if (i == 54) {
+        let p: *u8 = "math_fenv_fe_to_mask";
+        return p;
+      }
+      if (i == 55) {
+        let p: *u8 = "math_fenv_mask_to_fe";
+        return p;
+      }
+      if (i == 56) {
+        let p: *u8 = "math_fenv_raise_c";
+        return p;
+      }
+      if (i == 57) {
+        let p: *u8 = "math_fenv_smoke_c";
+        return p;
+      }
+      if (i == 58) {
+        let p: *u8 = "math_fenv_test_c";
+        return p;
+      }
+      if (i == 59) {
+        let p: *u8 = "math_special_near";
         return p;
       }
       return 0 as *u8;

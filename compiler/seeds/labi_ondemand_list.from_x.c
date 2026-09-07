@@ -3732,7 +3732,13 @@ int labi_std_fk_gate_sym_count(int fk) {
   if (fk == 6) return 32;
   if (fk == 7) return 4;
   if (fk == 8) return 2;
-  if (fk == 9) return 29;
+  /* PLATFORM: SHARED — runtime_math_libm freestanding face gate completion
+   * (9.2.4 Fix F). Was 29 needles; the 31 freestanding C-ABI faces
+   * (math_acos_c .. math_special_near) were absent, so a user TU whose only
+   * UNDEFs are e.g. math_fmin_c/math_fmax_c never opened the fk9 gate and
+   * the std/math/math.o plan leaf stayed closed -> UNDEF at ld.
+   * Twin of labi_ondemand_heavy.x labi_std_fk_gate_sym_count (fk9 = 60). */
+  if (fk == 9) return 60;
   /* PLATFORM: SHARED — cookbook sqlite_available unique UNDEF (is_available).
    * Was 3 needles; matcher exact so prefix std_db_sqlite never fires.
    * Twin of labi_ondemand_heavy.x. 29 unique import faces + legacy 3. */
@@ -3897,6 +3903,42 @@ const char *labi_std_fk_gate_sym_at(int fk, int i) {
     if (i == 26) return "math_cos_c";
     if (i == 27) return "math_floor_c";
     if (i == 28) return "math_pi_c";
+    /* PLATFORM: SHARED — 9.2.4 Fix F gate completion: the 31 freestanding
+     * runtime_math_libm C-ABI faces appended in the same order as the .x
+     * authority (labi_ondemand_heavy.x labi_std_fk_gate_sym_at fk9 29..59),
+     * so a user TU whose sole UNDEF is any one of these opens fk9 and the
+     * std/math/math.o plan leaf links runtime_math_libm.o. Twin semantics. */
+    if (i == 29) return "math_acos_c";
+    if (i == 30) return "math_asin_c";
+    if (i == 31) return "math_atan_c";
+    if (i == 32) return "math_atan2_c";
+    if (i == 33) return "math_cbrt_c";
+    if (i == 34) return "math_ceil_c";
+    if (i == 35) return "math_erf_c";
+    if (i == 36) return "math_erfc_c";
+    if (i == 37) return "math_exp_c";
+    if (i == 38) return "math_expm1_c";
+    if (i == 39) return "math_fabs_c";
+    if (i == 40) return "math_fmax_c";
+    if (i == 41) return "math_fmin_c";
+    if (i == 42) return "math_log_c";
+    if (i == 43) return "math_log1p_c";
+    if (i == 44) return "math_pow_c";
+    if (i == 45) return "math_round_c";
+    if (i == 46) return "math_signum_c";
+    if (i == 47) return "math_sqrt_c";
+    if (i == 48) return "math_tan_c";
+    if (i == 49) return "math_trunc_c";
+    if (i == 50) return "math_fenv_available_c";
+    if (i == 51) return "math_fenv_capability_smoke_c";
+    if (i == 52) return "math_fenv_clear_c";
+    if (i == 53) return "math_fenv_emit_cap_report";
+    if (i == 54) return "math_fenv_fe_to_mask";
+    if (i == 55) return "math_fenv_mask_to_fe";
+    if (i == 56) return "math_fenv_raise_c";
+    if (i == 57) return "math_fenv_smoke_c";
+    if (i == 58) return "math_fenv_test_c";
+    if (i == 59) return "math_special_near";
     return NULL;
   }
   if (fk == 10) {
