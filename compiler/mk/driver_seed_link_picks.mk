@@ -97,24 +97,33 @@ MAIN_LINK_FLAGS =
 endif
 else
 ifeq ($(UNAME_S),Darwin)
+# PLATFORM: MACOS — runtime_asm_io_stubs.o (XLANG_WEAK io twin bag) provides
+# xlang_sys_write/read/writev for src/runtime_driver_no_c.o: rt_entry.x is
+# SHARED and since Cap 9.1.8 declares `export extern xlang_sys_write` (raw
+# write leaf). freestanding_io strong twin is Linux-x86_64-only asm, so the
+# Darwin seed phase1/final pure-ld fails U _xlang_sys_write from
+# _rt_entry_strlen without this slot. G.7: same face as the Linux
+# MAIN_LINK_O freestanding_io slot above and as the g05_relink_env.sh
+# Darwin MAIN_LINK_O slot (weak twin loses to any strong twin when both
+# are linked).
 ifeq ($(UNAME_M),arm64)
-MAIN_LINK_O = src/asm/crt0_arm64.o
-MAIN_LINK_REBUILD = src/asm/crt0_arm64.o
+MAIN_LINK_O = src/asm/crt0_arm64.o runtime_asm_io_stubs.o
+MAIN_LINK_REBUILD = src/asm/crt0_arm64.o runtime_asm_io_stubs.o
 MAIN_LINK_FLAGS = -e _start -nostartfiles
 else
 ifeq ($(UNAME_M),aarch64)
-MAIN_LINK_O = src/asm/crt0_arm64.o
-MAIN_LINK_REBUILD = src/asm/crt0_arm64.o
+MAIN_LINK_O = src/asm/crt0_arm64.o runtime_asm_io_stubs.o
+MAIN_LINK_REBUILD = src/asm/crt0_arm64.o runtime_asm_io_stubs.o
 MAIN_LINK_FLAGS = -e _start -nostartfiles
 else
 ifeq ($(UNAME_M),x86_64)
-MAIN_LINK_O = src/asm/crt0_darwin_x86_64.o
-MAIN_LINK_REBUILD = src/asm/crt0_darwin_x86_64.o
+MAIN_LINK_O = src/asm/crt0_darwin_x86_64.o runtime_asm_io_stubs.o
+MAIN_LINK_REBUILD = src/asm/crt0_darwin_x86_64.o runtime_asm_io_stubs.o
 MAIN_LINK_FLAGS = -e _start -nostartfiles
 else
 ifeq ($(UNAME_M),amd64)
-MAIN_LINK_O = src/asm/crt0_darwin_x86_64.o
-MAIN_LINK_REBUILD = src/asm/crt0_darwin_x86_64.o
+MAIN_LINK_O = src/asm/crt0_darwin_x86_64.o runtime_asm_io_stubs.o
+MAIN_LINK_REBUILD = src/asm/crt0_darwin_x86_64.o runtime_asm_io_stubs.o
 MAIN_LINK_FLAGS = -e _start -nostartfiles
 else
 MAIN_LINK_O = src/main_driver.o
