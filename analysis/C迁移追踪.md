@@ -27,7 +27,7 @@
 | Mega 去 pin M4（阶段 7） | 🟡 | 冷链关 pin 5/5；**7.4.6–7.4.9** pin 孪生已落盘；双端 L4＠`b5be5ed97` bstrict **129**；parser seed 物理删／CI 漂移闸 ⬜ |
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
-| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`）；余 9.2–3 ⬜ |
+| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／**9.2.1**／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`；9.2.1 ＠`2a9f3dcae`）；余 9.2.2–6／9.3 ⬜（勘正后多为大域，逐条立波） |
 | 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
@@ -267,12 +267,12 @@
 
 ### 9.2 第三方库（P2）
 
-- ⬜ **9.2.1** mbedtls BIO send／recv  
-- ⬜ **9.2.2** zlib deflateInit2_／inflateInit2_  
-- ⬜ **9.2.3** ed25519 ref10（.inc 宏）  
-- ⬜ **9.2.4** libm `math_*_impl`（32 桥）  
-- ⬜ **9.2.5** arrow SIMD kernels  
-- ⬜ **9.2.6** sqlite3 C API  
+- ✅ **9.2.1** mbedtls BIO send／recv — **Cap net 闭环 ✅（`2a9f3dcae`）**：`runtime_tls_mbedtls_bio.from_x.c` BIO 回调 libc `send`／`recv` → `xlang_net_sendto`／`xlang_net_recvfrom`（9.1.7 权威；flags 0／NULL 地址＝字节语义等价；Cap 面「负返回→errno」映射保留，EAGAIN→WANT_WRITE／WANT_READ 分支原样）；mbedtls 本体仍链系统库（第三方依赖有意保留，Cap 化的是胶层 libc 调用）。验收＝双端 try-heat 重建 rc=0＋nm U 面 send/recv 清零（仅余 errno 脸＋`mbedtls_ssl_set_bio`）＋socketpair 行为 probe 双端 3/3（正常 roundtrip r=5／空非阻塞 EAGAIN→WANT_READ=-26880／写满 EAGAIN→WANT_WRITE）＋双端 L2 5/5＠`2a9f3dcae`＋12 门全 ok
+- ⬜ **9.2.2** zlib deflateInit2_／inflateInit2_（勘正：`std/compress/zlib`＝extern 绑定系统 -lz，依赖有意保留；C 桥＝zlib.h 宏展开等价，属 9.3.2 域；无胶层 libc 残）
+- ⬜ **9.2.3** ed25519 ref10（.inc 宏）
+- ⬜ **9.2.4** libm `math_*_impl`（32 桥）— 勘正：fdlibm 级算法移植（大域，独立立波）
+- ⬜ **9.2.5** arrow SIMD kernels — 勘正：extern 系统库绑定＋独立大域
+- ⬜ **9.2.6** sqlite3 C API — 勘正：extern 系统库绑定＋独立大域
 
 ### 9.3 宏展开（P2）
 
