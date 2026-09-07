@@ -31941,16 +31941,12 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
   let rc: i32 = 0;
   let mov_eax: u8[2] = [];
   // Cap-fn-ptr scratch (slice0 #[no_mangle] LEA); kept at top for .x let discipline.
+  // 9.4.2: the Mach-O '_' / ELF bare spell lives in pipe_modlet_lea_fn_sym_to_rax.
   let fnptr_off: i32 = 0;
   let fnptr_vlen: i32 = 0;
   let fnptr_fi: i32 = 0;
-  let fnptr_nm: i32 = 0;
-  let fnptr_macho: i32 = 0;
-  let fnptr_k: i32 = 0;
-  let fnptr_sym_len: i32 = 0;
   let fnptr_mod: *u8 = 0 as *u8;
   let fnptr_vname: u8[128] = [];
-  let fnptr_sym: u8[130] = [];
   if (glue_expr_is_await_at_c(arena, expr_ref) != 0) {
     return pipeline_asm_emit_await_sync_elf_impl(arena, elf_ctx, expr_ref, ctx, ta);
   }
@@ -32250,29 +32246,10 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
             }
             if (fnptr_fi >= 0) {
               // Cap-fn-ptr: load effective address of any same-module function into rax/x0.
-              // Both #[no_mangle] and standard functions use source-level symbol names
-              // (prefixed with leading underscore on Mach-O).
+              // 9.4.2: symbol spell (Mach-O '_' / ELF bare) is the
+              // pipe_modlet_lea_fn_sym_to_rax authority.
               unsafe {
-                fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
-              }
-              if (fnptr_macho != 0) {
-                fnptr_sym[0] = 95 as u8;
-                fnptr_k = 0;
-                while (fnptr_k < fnptr_vlen) {
-                  fnptr_sym[fnptr_k + 1] = fnptr_vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = fnptr_vlen + 1;
-              } else {
-                fnptr_k = 0;
-                while (fnptr_k < fnptr_vlen) {
-                  fnptr_sym[fnptr_k] = fnptr_vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = fnptr_vlen;
-              }
-              unsafe {
-                rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &fnptr_sym[0], fnptr_sym_len, ta);
+                rc = pipe_modlet_lea_fn_sym_to_rax(elf_ctx, &fnptr_vname[0], fnptr_vlen, ta);
               }
               return rc;
             }
@@ -32843,6 +32820,99 @@ export function pipeline_asm_modlet_store_from_rax_elf_c(elf_ctx: *u8, name: *u8
 }
 
 /**
+ * LEA a same-module function's link symbol into rax/x0.
+ * 9.4.2 single authority for the Cap-fn-ptr symbol spell (was inlined in
+ * pipeline_asm_emit_as_elf_impl, the VAR fast face, and their twins):
+ * source-level name; Mach-O leading '_' on Darwin, bare ELF symbol on
+ * Linux. Callers must have confirmed the name resolves to a same-module
+ * function (glue_module_func_index_by_name_c >= 0); this face re-checks
+ * bounds only.
+ * @param elf_ctx *u8 - ElfCodegenCtx*
+ * @param name *u8 - source-level function name
+ * @param name_len i32 - name length (1..127)
+ * @param ta i32 - target arch (0=x86_64 1=arm64)
+ * @return i32 - 0 ok; -1 bad args / encode fail
+ * Exported for the first-wins fnptr_as thin (same spell, one authority).
+ * PLATFORM: SHARED · MACOS Mach-O '_' · LINUX ELF bare name.
+ */
+#[no_mangle]
+export function pipe_modlet_lea_fn_sym_to_rax(elf_ctx: *u8, name: *u8, name_len: i32, ta: i32): i32 {
+  let sym: u8[130] = [];
+  let len: i32 = 0;
+  let k: i32 = 0;
+  let macho: i32 = 0;
+  let rc: i32 = 0;
+  if (elf_ctx == (0 as *u8) || name == (0 as *u8) || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1)) {
+    return 0 - 1;
+  }
+  unsafe {
+    macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
+  }
+  if (macho != 0) {
+    sym[0] = 95 as u8;
+    k = 0;
+    while (k < name_len) {
+      unsafe {
+        sym[k + 1] = name[k];
+      }
+      k = k + 1;
+    }
+    len = name_len + 1;
+  } else {
+    k = 0;
+    while (k < name_len) {
+      unsafe {
+        sym[k] = name[k];
+      }
+      k = k + 1;
+    }
+    len = name_len;
+  }
+  unsafe {
+    rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &sym[0], len, ta);
+  }
+  return rc;
+}
+
+/**
+ * LEA a non-local named binding's ADDRESS into rax/x0 (9.4.2).
+ * Module-let COMMON cell first (pipeline_asm_modlet_lea_rax_arch — the
+ * same home the generic VAR emit reads, array bit30 included), then the
+ * same-module function link symbol. Returns -1 when the name is neither:
+ * callers loud-fail (ADDR_OF keeps -99; lvalue keeps -1).
+ * @param elf_ctx *u8 - ElfCodegenCtx*
+ * @param m *u8 - Module* (fn lookup; null skips the fn branch)
+ * @param name *u8 - source-level name
+ * @param name_len i32 - name length (1..127)
+ * @param ta i32 - target arch
+ * @return i32 - 0 ok; -1 not a modlet cell / not a same-module fn
+ * Exported: the FROM_X seed rest lvalue fallback (Ubuntu hybrid) resolves
+ * this WEAK mega face; the cold student uses the _cold static twin.
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function pipe_modlet_lea_named_binding_addr_to_rax(elf_ctx: *u8, m: *u8, name: *u8, name_len: i32, ta: i32): i32 {
+  let idx: i32 = 0;
+  let fi: i32 = 0;
+  if (elf_ctx == (0 as *u8) || name == (0 as *u8) || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1)) {
+    return 0 - 1;
+  }
+  idx = pipeline_asm_modlet_find(name, name_len);
+  if (idx >= 0) {
+    return pipeline_asm_modlet_lea_rax_arch(elf_ctx, idx, ta);
+  }
+  if (m != (0 as *u8)) {
+    unsafe {
+      fi = glue_module_func_index_by_name_c(m, name, name_len);
+    }
+    if (fi >= 0) {
+      return pipe_modlet_lea_fn_sym_to_rax(elf_ctx, name, name_len, ta);
+    }
+  }
+  return 0 - 1;
+}
+
+/**
  * FNV-1a 32-bit mix of one byte (unsigned 32-bit wrap).
  * Same basis/prime as asm_empty_text_stub_label (G.7: no second hash family).
  * @param h i64 — hash in 0..2^32-1
@@ -33208,9 +33278,15 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
           // STRING_LIT-bearing arrays must not take the .data bake path:
           // their elems are addresses. The has-string predicate walks the
           // ARRAY_LIT (recursively) so nested `[K][N]*u8` rows are covered.
+          // 9.4.2: ptr/fn-typed tables with address elems (bare fn /
+          // `fn as *u8` / `&global`) stay COMMON too — the bake cannot
+          // express relocations; the entry seeder materializes each
+          // address (lea sym/cell → store).
           if (
             ik2 == 46 && tk2 == 10 && ne2 > 0 &&
-            pipe_modlet_array_lit_has_string_elem(a, init_ref2) == 0
+            pipe_modlet_array_lit_has_string_elem(a, init_ref2) == 0 &&
+            pipe_modlet_array_lit_has_ptr_addr_elem(
+              a, init_ref2, pipeline_type_elem_ref_at(a, type_ref2)) == 0
           ) {
             unsafe {
               data_len_now = pipeline_elf_ctx_emit_data_len(elf_ctx);
@@ -33538,20 +33614,194 @@ function pipe_modlet_array_lit_elem_const_val(
 }
 
 /**
+ * Detect ARRAY_LIT elems holding compile-time addresses (9.4.2): dest
+ * elem type ptr (9) / fn (18) with elem VAR (3, bare same-module fn),
+ * AS (54, `fn as *u8`), or ADDR_OF (51, `&global` / `&fn`). Recursive
+ * over nested TYPE_ARRAY rows, mirroring the entry seeder walk. Prepare
+ * keeps such arrays COMMON: the .data bake cannot express link-time
+ * relocations, and seed_nonzero_inits materializes each address at
+ * hoist-target entry (lea sym/cell → store). Ptr-typed dest only — a
+ * bare global in an i32 table is a value copy and keeps the fold path.
+ * @param arena *u8 - ASTArena
+ * @param init_ref i32 - ARRAY_LIT expr
+ * @param elem_ty i32 - dest elem type_ref at this nesting level
+ * @return i32 - 1 = has address elem (any level); 0 = none
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
+ */
+function pipe_modlet_array_lit_has_ptr_addr_elem(
+  arena: *u8, init_ref: i32, elem_ty: i32
+): i32 {
+  let ne: i32 = 0;
+  let ei: i32 = 0;
+  let eref: i32 = 0;
+  let ek: i32 = 0;
+  let etk: i32 = 0;
+  if (arena == (0 as *u8) || init_ref <= 0 || elem_ty <= 0) {
+    return 0;
+  }
+  unsafe {
+    etk = pipeline_type_kind_ord_at(arena, elem_ty);
+  }
+  if (etk != 9 && etk != 18 && etk != 10) {
+    return 0;
+  }
+  unsafe {
+    ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  }
+  ei = 0;
+  while (ei < ne) {
+    unsafe {
+      eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    }
+    if (eref > 0) {
+      unsafe {
+        ek = pipeline_expr_kind_ord_at(arena, eref);
+      }
+      if (etk == 10) {
+        // Nested row: recurse with the row's elem type (seeder twin walk).
+        if (ek == 46) {
+          if (pipe_modlet_array_lit_has_ptr_addr_elem(
+              arena, eref, pipeline_type_elem_ref_at(arena, elem_ty)) != 0) {
+            return 1;
+          }
+        }
+      } else {
+        if (ek == 3 || ek == 51 || ek == 54) {
+          return 1;
+        }
+      }
+    }
+    ei = ei + 1;
+  }
+  return 0;
+}
+
+/**
+ * Seed one address-valued ARRAY_LIT elem (9.4.2) at rbx+off.
+ * Accepts bare same-module fn (VAR 3), `fn as *u8` (AS 54), and ADDR_OF
+ * (51) over a global let or fn. The address is resolved at hoist-target
+ * entry: bare/AS fn name → link symbol (pipe_modlet_lea_fn_sym_to_rax),
+ * ADDR_OF → modlet COMMON cell address first, then fn symbol (shared
+ * resolver). A VAR naming a module let is a VALUE copy, not an address
+ * literal: return 1 so the caller's const fold loud-fails (historic
+ * behavior, never a silent zero).
+ * @param arena *u8 - ASTArena
+ * @param elf_ctx *u8 - ElfCodegenCtx
+ * @param m *u8 - Module*
+ * @param eref i32 - element expr ref
+ * @param esz i32 - dest elem byte size (must be 8: pointers/fn addrs)
+ * @param off i32 - byte offset of the elem inside the COMMON cell
+ * @param ta i32 - target arch
+ * @return i32 - 0 = stored; 1 = not an address elem (caller falls back
+ *         to the const fold); -1 = loud fail
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
+ */
+function pipe_modlet_seed_ptr_addr_elem_to_rbx(
+  arena: *u8, elf_ctx: *u8, m: *u8, eref: i32, esz: i32, off: i32, ta: i32
+): i32 {
+  let ek: i32 = 0;
+  let is_addr_of: i32 = 0;
+  let nref: i32 = 0;
+  let vlen: i32 = 0;
+  let name: u8[128] = [];
+  let fi: i32 = 0;
+  let rc: i32 = 0;
+  if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || eref <= 0) {
+    return 1;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+  }
+  if (ek == 54) {
+    unsafe {
+      nref = pipeline_expr_as_operand_ref_at(arena, eref);
+    }
+  } else {
+    if (ek == 51) {
+      is_addr_of = 1;
+      unsafe {
+        nref = pipeline_expr_unary_operand_ref_at(arena, eref);
+      }
+    } else {
+      if (ek != 3) {
+        return 1;
+      }
+      nref = eref;
+    }
+  }
+  if (nref <= 0) {
+    return 1;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, nref);
+  }
+  if (ek != 3) {
+    return 1;
+  }
+  unsafe {
+    vlen = pipeline_expr_var_name_len(arena, nref);
+  }
+  if (vlen <= 0 || vlen > 127) {
+    return 0 - 1;
+  }
+  unsafe {
+    pipeline_expr_var_name_into(arena, nref, &name[0]);
+  }
+  if (is_addr_of != 0) {
+    // &global → COMMON cell address (modlet-first); &fn → link symbol.
+    rc = pipe_modlet_lea_named_binding_addr_to_rax(elf_ctx, m, &name[0], vlen, ta);
+    if (rc != 0) {
+      return 0 - 1;
+    }
+  } else {
+    if (m == (0 as *u8)) {
+      return 1;
+    }
+    unsafe {
+      fi = glue_module_func_index_by_name_c(m, &name[0], vlen);
+    }
+    if (fi < 0) {
+      // Bare name that is not a same-module fn (module-let value copy):
+      // not an address literal — the const fold loud-fails downstream.
+      return 1;
+    }
+    rc = pipe_modlet_lea_fn_sym_to_rax(elf_ctx, &name[0], vlen, ta);
+    if (rc != 0) {
+      return 0 - 1;
+    }
+  }
+  if (esz != 8) {
+    // Pointer/fn addresses are 8B; narrower elem types never reach here.
+    return 0 - 1;
+  }
+  unsafe {
+    rc = backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, off, esz, ta);
+  }
+  if (rc != 0) {
+    return 0 - 1;
+  }
+  return 0;
+}
+
+/**
  * Store ARRAY_LIT LIT elems into COMMON already LEA'd in rbx.
  * One nested ARRAY_LIT level is enough for `[K][N]T` rows; deeper
- * nest is a later leaf. Empty lit is a no-op (BSS stays zero).
+ * nest is a later leaf. Empty lit is a no-op (BSS zero).
+ * 9.4.2: ptr/fn-typed tables with address elems (bare fn / `fn as *u8` /
+ * `&global`) store the link-time address via
+ * pipe_modlet_seed_ptr_addr_elem_to_rbx — `m` feeds the fn lookup.
  * @param arena *u8 - ASTArena
  * @param elf_ctx *u8 - ElfCodegenCtx
  * @param init_ref i32 - ARRAY_LIT expr
  * @param elem_ty i32 - dest elem type_ref (scalar or TYPE_ARRAY row)
  * @param ta i32 - 0=x86_64 1=arm64
  * @param base_off i32 - byte offset in the COMMON cell
+ * @param m *u8 - Module* (address-elem fn lookup; may be null)
  * @return i32 - 0 ok; -1 store fail
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
  */
 function pipe_modlet_seed_array_lit_elems_to_rbx(
-  arena: *u8, elf_ctx: *u8, init_ref: i32, elem_ty: i32, ta: i32, base_off: i32
+  arena: *u8, elf_ctx: *u8, init_ref: i32, elem_ty: i32, ta: i32, base_off: i32, m: *u8
 ): i32 {
   let ne: i32 = 0;
   let ei: i32 = 0;
@@ -33564,6 +33814,7 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
   let row_sz: i32 = 0;
   let rc: i32 = 0;
   let hi: i32 = 0;
+  let sa: i32 = 0;
   if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || init_ref <= 0) {
     return 0;
   }
@@ -33600,7 +33851,7 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
         }
         if (ek == 46) {
           rc = pipe_modlet_seed_array_lit_elems_to_rbx(
-            arena, elf_ctx, eref, inner_et, ta, base_off + ei * row_sz);
+            arena, elf_ctx, eref, inner_et, ta, base_off + ei * row_sz, m);
           if (rc != 0) {
             return rc;
           }
@@ -33652,6 +33903,21 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
           return 0 - 1;
         }
       } else {
+        if ((etk == 9 || etk == 18) && m != (0 as *u8)) {
+          // 9.4.2 address-valued elem (bare fn / `fn as *u8` / `&global`):
+          // resolve the link-time address at hoist-target entry and store
+          // 8B into COMMON. sa==1 → not an address literal, fall through
+          // to the const fold (which loud-fails, keeping old behavior).
+          sa = pipe_modlet_seed_ptr_addr_elem_to_rbx(
+            arena, elf_ctx, m, eref, esz, base_off + ei * esz, ta);
+          if (sa < 0) {
+            return 0 - 1;
+          }
+          if (sa == 0) {
+            ei = ei + 1;
+            continue;
+          }
+        }
         // LIT / EXPR_NEG-over-LIT elem: fold to the constant value. A
         // negative imm passes hi=-1 so the (hi:lo) imm64 halves rebuild
         // the two's-complement value in rax before the esz store. Any
@@ -33779,7 +34045,7 @@ export function pipeline_asm_modlet_seed_nonzero_inits_elf_c(elf_ctx: *u8, ta: i
                 }
                 if (pipeline_asm_modlet_lea_rbx_arch(elf_ctx, idx, ta) == 0) {
                   rc2 = pipe_modlet_seed_array_lit_elems_to_rbx(
-                    arena, elf_ctx, init_ref, et, ta, 0);
+                    arena, elf_ctx, init_ref, et, ta, 0, mod);
                   if (rc2 != 0) {
                     return rc2;
                   }
@@ -34552,6 +34818,7 @@ export function pipeline_asm_emit_addr_of_elf_c(arena: *u8, elf_ctx: *u8, expr_r
   let vlen: i32 = 0;
   let off: i32 = 0;
   let rc: i32 = 0;
+  let gmod: *u8 = 0 as *u8;
   unsafe {
     op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
   }
@@ -34578,6 +34845,22 @@ export function pipeline_asm_emit_addr_of_elf_c(arena: *u8, elf_ctx: *u8, expr_r
       }
     }
     if (off < 0) {
+      // 9.4.2: non-local binding — module-let COMMON cell (modlet-first,
+      // the home the generic VAR emit reads) or same-module fn link
+      // symbol. Shared resolver authority; twin of the lvalue_eff_addr
+      // fallback the first-wins thin path exercises. Loud -99 only when
+      // the name is neither (`let p:*i32=&g;` / `&tab` / `&fn`).
+      unsafe {
+        gmod = pipeline_asm_emit_module_ref_c();
+      }
+      if (gmod != (0 as *u8)) {
+        unsafe {
+          rc = pipe_modlet_lea_named_binding_addr_to_rax(elf_ctx, gmod, &vname[0], vlen, ta);
+        }
+        if (rc == 0) {
+          return 0;
+        }
+      }
       return 0 - 99;
     }
     unsafe {
@@ -56136,13 +56419,9 @@ export function pipeline_asm_emit_expr_elf_fast(arena: *u8, elf_ctx: *u8, expr_r
   let mod: *u8 = 0 as *u8;
   let mod_imm: i32 = 0;
   let vtr: i32 = 0;
-  /* Cap-fn-ptr bare VAR LEA scratch (10.3.1 slice3 / 10.3.2). PLATFORM: SHARED. */
-  let fnptr_sym: u8[130] = [];
-  let fnptr_sym_len: i32 = 0;
-  let fnptr_k: i32 = 0;
+  /* Cap-fn-ptr bare VAR LEA scratch (10.3.1 slice3 / 10.3.2). PLATFORM: SHARED.
+   * 9.4.2: the Mach-O '_' / ELF bare spell lives in pipe_modlet_lea_fn_sym_to_rax. */
   let fnptr_fi: i32 = 0;
-  let fnptr_nm: i32 = 0;
-  let fnptr_macho: i32 = 0;
   let cap_tr: i32 = 0;
   let cap_ko: i32 = 0;
   let cap_er: i32 = 0;
@@ -56322,26 +56601,11 @@ export function pipeline_asm_emit_expr_elf_fast(arena: *u8, elf_ctx: *u8, expr_r
             fnptr_fi = glue_module_func_index_by_name_c(mod, &vname[0], vlen);
             if (fnptr_fi >= 0) {
               // Cap-fn-ptr: load effective address of any same-module function into rax/x0.
-              // Both #[no_mangle] and standard functions use source-level symbol names
-              // (prefixed with leading underscore on Mach-O).
-              fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
-              if (fnptr_macho != 0) {
-                fnptr_sym[0] = 95 as u8;
-                fnptr_k = 0;
-                while (fnptr_k < vlen) {
-                  fnptr_sym[fnptr_k + 1] = vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = vlen + 1;
-              } else {
-                fnptr_k = 0;
-                while (fnptr_k < vlen) {
-                  fnptr_sym[fnptr_k] = vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = vlen;
+              // 9.4.2: symbol spell (Mach-O '_' / ELF bare) is the
+              // pipe_modlet_lea_fn_sym_to_rax authority.
+              unsafe {
+                return pipe_modlet_lea_fn_sym_to_rax(elf_ctx, &vname[0], vlen, ta);
               }
-              return backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &fnptr_sym[0], fnptr_sym_len, ta);
             }
           }
         }
@@ -71923,6 +72187,21 @@ export function pipeline_asm_emit_lvalue_eff_addr_elf_c(arena: *u8, elf_ctx: *u8
       off = asm_ctx_local_find_offset_scoped(ctx, arena, &vname[0], vlen);
     }
     if (off < 0) {
+      // 9.4.2: non-local binding → module-let COMMON cell (modlet-first,
+      // twin of the generic VAR rvalue path) or same-module fn link
+      // symbol. Address lands in rax/x0 — correct for ADDR_OF consumers
+      // and for store targets alike. Loud -1 only when the name is
+      // neither (`&g` via the first-wins strict_minimal thin reaches
+      // exactly here).
+      mod = pipeline_asm_emit_module_ref_c();
+      if (mod != (0 as *u8)) {
+        unsafe {
+          rc = pipe_modlet_lea_named_binding_addr_to_rax(elf_ctx, mod, &vname[0], vlen, ta);
+        }
+        if (rc == 0) {
+          return 0;
+        }
+      }
       return 0 - 1;
     }
     // Lvalue VAR defaults to lea; *T/T[N] load via holds_indirect + decl type.

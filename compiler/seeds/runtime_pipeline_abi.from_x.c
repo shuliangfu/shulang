@@ -15273,7 +15273,7 @@ extern int32_t backend_enc_cvtsi2sd_rax_from_u64_arch(void *elf_ctx, int32_t ta)
 extern int32_t backend_enc_cvtsi2sd_rax_from_i64_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_cvtsi2sd_rax_from_i32_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_cvtss2sd_rax_from_f32_bits_arch(void *elf_ctx, int32_t ta);
-/* Cap-fn-ptr (10.3.2): LEA encoder + module lookup faces used by emit_as Cap path. */
+  /* Cap-fn-ptr (10.3.2): LEA encoder + module lookup faces used by emit_as Cap path. */
 extern int32_t backend_enc_lea_sym_to_reg_arch(void *elf_ctx, int32_t reg, uint8_t *name, int32_t name_len, int32_t ta);
 extern void *glue_emit_module_from_ctx(void *ctx);
 extern int32_t glue_module_func_index_by_name_c(void *mod, uint8_t *name, int32_t name_len);
@@ -15282,6 +15282,8 @@ extern int32_t pipeline_expr_var_name_len(void *arena, int32_t expr_ref);
 extern void pipeline_expr_var_name_into(void *arena, int32_t expr_ref, uint8_t *out64);
 extern int32_t pipeline_module_func_is_no_mangle_at(void *m, int32_t fi);
 extern int32_t pipeline_elf_ctx_macho_leading_underscore(uint8_t *ctx_bytes);
+/* 9.4.2: fn-symbol LEA authority cold twin (defined in the modlet cluster). */
+static int32_t pipe_modlet_lea_fn_sym_to_rax_cold(void *elf_ctx, uint8_t *name, int32_t name_len, int32_t ta);
 
 #endif /* close remaining wave136 FROM_X for leftover-PE await/as unique */
 
@@ -15616,29 +15618,16 @@ int32_t pipeline_asm_emit_as_elf_impl(void *arena, void *elf_ctx, int32_t expr_r
         int32_t fnptr_vlen = pipeline_expr_var_name_len(arena, op);
         if (fnptr_vlen > 0 && fnptr_vlen < 128) {
           uint8_t fnptr_vname[128];
-          uint8_t fnptr_sym[130];
-          int32_t fnptr_sym_len = 0;
-          int32_t fnptr_k = 0;
           int32_t fnptr_fi = 0;
-          int32_t fnptr_macho = 0;
           void *fnptr_mod = 0;
           pipeline_expr_var_name_into(arena, op, fnptr_vname);
           fnptr_mod = glue_emit_module_from_ctx(ctx);
           if (fnptr_mod) {
             fnptr_fi = glue_module_func_index_by_name_c(fnptr_mod, fnptr_vname, fnptr_vlen);
             if (fnptr_fi >= 0) {
-              fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
-              if (fnptr_macho != 0) {
-                fnptr_sym[0] = (uint8_t)'_';
-                for (fnptr_k = 0; fnptr_k < fnptr_vlen; fnptr_k++)
-                  fnptr_sym[fnptr_k + 1] = fnptr_vname[fnptr_k];
-                fnptr_sym_len = fnptr_vlen + 1;
-              } else {
-                for (fnptr_k = 0; fnptr_k < fnptr_vlen; fnptr_k++)
-                  fnptr_sym[fnptr_k] = fnptr_vname[fnptr_k];
-                fnptr_sym_len = fnptr_vlen;
-              }
-              return backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, fnptr_sym, fnptr_sym_len, ta);
+              /* 9.4.2: symbol spell (Mach-O '_' / ELF bare) is the
+               * pipe_modlet_lea_fn_sym_to_rax authority (cold twin). */
+              return pipe_modlet_lea_fn_sym_to_rax_cold(elf_ctx, fnptr_vname, fnptr_vlen, ta);
             }
           }
         }
@@ -16655,6 +16644,47 @@ int32_t pipeline_asm_modlet_store_from_rax_elf_c(void *elf_ctx, uint8_t *name, i
   return backend_enc_store_rax_to_rbx_indirect_arch(elf_ctx, 8, ta);
 }
 
+/* 9.4.2 cold twins of the pipe_modlet_lea_* resolver authorities
+ * (runtime_pipeline_abi.x modlet cluster): the Mach-O '_' / ELF bare
+ * fn-symbol spell, and the non-local named-binding address resolver
+ * (modlet COMMON cell first, then same-module fn). PLATFORM: SHARED ·
+ * MACOS Mach-O '_' · LINUX ELF bare name. */
+static int32_t pipe_modlet_lea_fn_sym_to_rax_cold(void *elf_ctx, uint8_t *name, int32_t name_len, int32_t ta) {
+  uint8_t sym[130];
+  int32_t len = 0, k = 0, macho = 0, rc = 0;
+  if (!elf_ctx || !name || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1))
+    return -1;
+  macho = pipeline_elf_ctx_macho_leading_underscore((uint8_t *)elf_ctx);
+  if (macho != 0) {
+    sym[0] = (uint8_t)'_';
+    for (k = 0; k < name_len; k++)
+      sym[k + 1] = name[k];
+    len = name_len + 1;
+  } else {
+    for (k = 0; k < name_len; k++)
+      sym[k] = name[k];
+    len = name_len;
+  }
+  rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, sym, len, ta);
+  return rc;
+}
+
+static int32_t pipe_modlet_lea_named_binding_addr_to_rax_cold(void *elf_ctx, void *m, uint8_t *name,
+                                                              int32_t name_len, int32_t ta) {
+  int32_t idx = 0, fi = 0;
+  if (!elf_ctx || !name || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1))
+    return -1;
+  idx = pipeline_asm_modlet_find_cold(name, name_len);
+  if (idx >= 0)
+    return pipeline_asm_modlet_lea_rax_arch_cold(elf_ctx, idx, ta);
+  if (m) {
+    fi = glue_module_func_index_by_name_c(m, name, name_len);
+    if (fi >= 0)
+      return pipe_modlet_lea_fn_sym_to_rax_cold(elf_ctx, name, name_len, ta);
+  }
+  return -1;
+}
+
 /* Module/Arena field accessors for cold twin (mirror product LP64 layout). */
 static int32_t cold_mod_num_top_level_lets(void *m) {
   if (!m) return 0;
@@ -16778,11 +16808,92 @@ static int32_t pipe_modlet_array_lit_elem_const_val_cold(void *arena, int32_t er
  * the pointer (emitter loud-fails on len > 126). Twin of
  * runtime_pipeline_abi.x pipe_modlet_seed_array_lit_elems_to_rbx.
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
+/* 9.4.2 cold twin: detect ARRAY_LIT elems holding compile-time addresses
+ * (dest elem ptr 9 / fn 18 with elem VAR 3 / AS 54 / ADDR_OF 51),
+ * recursive over nested TYPE_ARRAY rows. Such arrays stay COMMON — the
+ * .data bake cannot express relocations; seed_nonzero_inits materializes
+ * each address at hoist-target entry. PLATFORM: SHARED. */
+static int32_t pipe_modlet_array_lit_has_ptr_addr_elem_cold(void *arena, int32_t init_ref, int32_t elem_ty) {
+  int32_t ne = 0, ei = 0, eref = 0, ek = 0, etk = 0;
+  if (!arena || init_ref <= 0 || elem_ty <= 0)
+    return 0;
+  etk = pipeline_type_kind_ord_at(arena, elem_ty);
+  if (etk != 9 && etk != 18 && etk != 10)
+    return 0;
+  ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  for (ei = 0; ei < ne; ei++) {
+    eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    if (eref <= 0)
+      continue;
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+    if (etk == 10) {
+      if (ek == 46 &&
+          pipe_modlet_array_lit_has_ptr_addr_elem_cold(arena, eref, pipeline_type_elem_ref_at(arena, elem_ty)) != 0)
+        return 1;
+    } else {
+      if (ek == 3 || ek == 51 || ek == 54)
+        return 1;
+    }
+  }
+  return 0;
+}
+
+/* 9.4.2 cold twin: seed one address-valued ARRAY_LIT elem at rbx+off.
+ * Bare/AS fn name → link symbol; ADDR_OF → modlet COMMON cell address
+ * first, then fn symbol. A VAR naming a module let is a VALUE copy —
+ * return 1 so the caller's const fold loud-fails. Returns 0 stored,
+ * 1 not-an-address-elem (caller falls back), -1 loud fail.
+ * PLATFORM: SHARED. */
+static int32_t pipe_modlet_seed_ptr_addr_elem_to_rbx_cold(void *arena, uint8_t *elf_ctx, void *m, int32_t eref,
+                                                          int32_t esz, int32_t off, int32_t ta) {
+  int32_t ek = 0, is_addr_of = 0, nref = 0, vlen = 0, fi = 0, rc = 0;
+  uint8_t name[128];
+  if (!arena || !elf_ctx || eref <= 0)
+    return 1;
+  ek = pipeline_expr_kind_ord_at(arena, eref);
+  if (ek == 54) {
+    nref = pipeline_expr_as_operand_ref_at(arena, eref);
+  } else if (ek == 51) {
+    is_addr_of = 1;
+    nref = pipeline_expr_unary_operand_ref_at(arena, eref);
+  } else if (ek != 3) {
+    return 1;
+  } else {
+    nref = eref;
+  }
+  if (nref <= 0)
+    return 1;
+  ek = pipeline_expr_kind_ord_at(arena, nref);
+  if (ek != 3)
+    return 1;
+  vlen = pipeline_expr_var_name_len(arena, nref);
+  if (vlen <= 0 || vlen > 127)
+    return -1;
+  pipeline_expr_var_name_into(arena, nref, name);
+  if (is_addr_of) {
+    if (pipe_modlet_lea_named_binding_addr_to_rax_cold(elf_ctx, m, name, vlen, ta) != 0)
+      return -1;
+  } else {
+    if (!m)
+      return 1;
+    fi = glue_module_func_index_by_name_c(m, name, vlen);
+    if (fi < 0)
+      return 1;
+    if (pipe_modlet_lea_fn_sym_to_rax_cold(elf_ctx, name, vlen, ta) != 0)
+      return -1;
+  }
+  if (esz != 8)
+    return -1;
+  if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, off, esz, ta) != 0)
+    return -1;
+  return 0;
+}
+
 static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t *elf_ctx,
                                                             int32_t init_ref, int32_t elem_ty,
-                                                            int32_t ta, int32_t base_off) {
+                                                            int32_t ta, int32_t base_off, void *m) {
   int32_t ne = 0, ei = 0, eref = 0, ek = 0, ev = 0, esz = 4, etk = 0;
-  int32_t inner_et = 0, row_sz = 0, rc = 0;
+  int32_t inner_et = 0, row_sz = 0, rc = 0, sa = 0;
   if (!arena || !elf_ctx || init_ref <= 0)
     return 0;
   if (elem_ty > 0)
@@ -16806,7 +16917,7 @@ static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t
       ek = pipeline_expr_kind_ord_at(arena, eref);
       if (ek == 46) {
         rc = pipe_modlet_seed_array_lit_elems_to_rbx_cold(arena, elf_ctx, eref, inner_et, ta,
-                                                          base_off + ei * row_sz);
+                                                          base_off + ei * row_sz, m);
         if (rc != 0)
           return rc;
       }
@@ -16836,6 +16947,17 @@ static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t
       if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta) != 0)
         return -1;
     } else {
+      /* 9.4.2 address-valued elem (bare fn / `fn as *u8` / `&global`):
+       * resolve the link-time address at hoist-target entry, store 8B.
+       * sa==1 → not an address literal, fall through to the fold. */
+      sa = 1;
+      if ((etk == 9 || etk == 18) && m)
+        sa = pipe_modlet_seed_ptr_addr_elem_to_rbx_cold(arena, elf_ctx, m, eref, esz,
+                                                        base_off + ei * esz, ta);
+      if (sa < 0)
+        return -1;
+      if (sa == 0)
+        continue;
       /* LIT / EXPR_NEG-over-LIT elem: fold to the constant value. A
        * negative imm passes hi=-1 so the (hi:lo) imm64 halves rebuild
        * the two's-complement value in rax before the esz store. Any
@@ -17041,7 +17163,14 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
           tk2 = pipeline_type_kind_ord_at(a, type_ref2);
           ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
           if (ik2 == 46 && tk2 == 10 && ne2 > 0 &&
-              !pipe_modlet_array_lit_has_string_elem_cold(a, init_ref2)) {
+              !pipe_modlet_array_lit_has_string_elem_cold(a, init_ref2) &&
+              /* 9.4.2: ptr/fn-typed tables with address elems stay COMMON
+               * (bake cannot express relocations; entry seeder resolves).
+               * Unwrap the ARRAY type to its elem type first — the
+               * predicate walk mirrors the entry seeder, which receives
+               * the already-unwrapped elem type (et) from its caller. */
+              !pipe_modlet_array_lit_has_ptr_addr_elem_cold(
+                  a, init_ref2, pipeline_type_elem_ref_at(a, type_ref2))) {
             data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
             if (data_len_now < 0)
               data_len_now = 0;
@@ -17149,7 +17278,7 @@ int32_t pipeline_asm_modlet_seed_nonzero_inits_elf_c(void *elf_ctx, int32_t ta) 
       if (pipeline_asm_modlet_lea_rbx_arch_cold(elf_ctx, idx, ta) != 0)
         continue;
       rc2 = pipe_modlet_seed_array_lit_elems_to_rbx_cold(arena, (uint8_t *)elf_ctx, init_ref, et,
-                                                         ta, 0);
+                                                         ta, 0, mod);
       if (rc2 != 0)
         return rc2;
     }
@@ -17535,6 +17664,7 @@ int32_t pipeline_asm_emit_addr_of_elf_c(void *arena, void *elf_ctx, int32_t expr
   uint8_t vname[128];
   int32_t vlen;
   int32_t off;
+  void *gmod;
   op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
   if (op <= 0)
     return -1;
@@ -17547,8 +17677,15 @@ int32_t pipeline_asm_emit_addr_of_elf_c(void *arena, void *elf_ctx, int32_t expr
     off = asm_ctx_local_find_offset_scoped(ctx, arena, vname, vlen);
     if (off < 0)
       off = asm_ctx_local_find_offset(ctx, vname, vlen);
-    if (off < 0)
+    if (off < 0) {
+      /* 9.4.2: non-local binding — module-let COMMON cell (modlet-first)
+       * or same-module fn link symbol; shared resolver authority, twin of
+       * the .x ADDR_OF fallback. Loud FAST_UNHANDLED only when neither. */
+      gmod = pipeline_asm_emit_module_ref_c();
+      if (gmod && pipe_modlet_lea_named_binding_addr_to_rax_cold(elf_ctx, gmod, vname, vlen, ta) == 0)
+        return 0;
       return PIPELINE_ASM_ELF_EXPR_FAST_UNHANDLED;
+    }
     return backend_enc_lea_rbp_to_rax_arch(elf_ctx, off, ta);
   }
   if (ok == 47) {
@@ -32377,8 +32514,21 @@ int32_t pipeline_asm_emit_lvalue_eff_addr_elf_c(void *arena, void *elf_ctx, int3
     off = glue_call_arg_resolve_var_stack_off_elf_c(arena, ctx, lval_ref);
     if (off < 0)
       off = glue_var_expr_stack_off_elf_c(arena, ctx, lval_ref);
-    if (off < 0)
+    if (off < 0) {
+      /* 9.4.2: non-local binding → module-let COMMON cell (modlet-first)
+       * or same-module fn link symbol; shared resolver authority, twin of
+       * the .x lvalue fallback. Loud -1 only when the name is neither. */
+      void *gmod = 0;
+      uint8_t vname[128];
+      int32_t vlen = pipeline_expr_var_name_len(arena, lval_ref);
+      if (vlen > 0 && vlen <= 127) {
+        pipeline_expr_var_name_into(arena, lval_ref, vname);
+        gmod = pipeline_asm_emit_module_ref_c();
+        if (gmod && pipe_modlet_lea_named_binding_addr_to_rax_cold(elf_ctx, gmod, vname, vlen, ta) == 0)
+          return 0;
+      }
       return -1;
+    }
     return glue_enc_local_slot_ptr_or_addr_elf_c(arena, elf_ctx, lval_ref, off, ctx, ta);
   }
   /* FIELD=44: recurse base, *T mid-chain load, add layout_offset.
