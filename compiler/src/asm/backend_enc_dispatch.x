@@ -2781,6 +2781,17 @@ export function backend_enc_cvttsd2si_rax_from_f64_bits_arch(elf_ctx: *u8, ta: i
  */
 #[no_mangle]
 export function backend_enc_cvtsd2ss_eax_from_f64_bits_arch(elf_ctx: *u8, ta: i32): i32 {
+  if (ta == 1) {
+    if (elf_ctx == 0 as *u8) { return 0 - 1; }
+    unsafe {
+      // fmov d0, x0 — move f64 bits from x0 into d0 (0x9e670000).
+      if (arch_arm64_enc_enc_u32_le(elf_ctx, 0 - 1637416960) != 0) { return 0 - 1; }
+      // fcvt s0, d0 — double to single convert (0x1e624000).
+      if (arch_arm64_enc_enc_u32_le(elf_ctx, 509755392) != 0) { return 0 - 1; }
+      // fmov w0, s0 — move f32 bits from s0 into w0 (0x1e260000).
+      return arch_arm64_enc_enc_u32_le(elf_ctx, 505806848);
+    }
+  }
   if (ta != 0) { return 0 - 1; }
   if (elf_ctx == 0) { return 0 - 1; }
   unsafe {

@@ -37852,6 +37852,14 @@ export function pipeline_asm_emit_assign_elf_c(arena: *u8, elf_ctx: *u8, expr_re
     if (rc != 0) {
       return -1;
     }
+    // f32 dest + f64 rhs: demote to f32 bits before the 4-byte store, else the
+    // store keeps only the low 32 bits of the f64 (shared truncation defect).
+    unsafe {
+      rc = glue_maybe_demote_f64_to_f32_eax_elf_c(arena, elf_ctx, ctx, ltr, right_ref, ta);
+    }
+    if (rc != 0) {
+      return -1;
+    }
     if (ltr > 0) {
       unsafe {
         ltk = pipeline_type_kind_ord_at(arena, ltr);
@@ -40591,6 +40599,48 @@ export function glue_maybe_promote_f32_to_f64_rax_elf_c(arena: *u8, elf_ctx: *u8
   if (dk == 15 && sk == 14) {
     unsafe {
       return backend_enc_cvtss2sd_rax_from_f32_bits_arch(elf_ctx, ta);
+    }
+  }
+  return 0;
+}
+
+/**
+ * Maybe demote f64 bits in rax/x0 to f32 bits in eax/w0 (cvtsd2ss / fcvt).
+ * Symmetric counterpart of glue_maybe_promote_f32_to_f64_rax_elf_c. Scalar
+ * f32-dest store sites (let-init / assign) must call this BEFORE the 4-byte
+ * store whenever the init expr is f64-valued: without it the store keeps only
+ * the low 32 bits of the f64 (both x86_64 and arm64 truncated; wave616 fixed
+ * only the `as f32` cast path).
+ * Source f64-ness uses glue_binop_operand_is_scalar_f64_elf_c — the same
+ * classifier the cmp/binop emitters trust (resolved stamp, VAR decl type,
+ * CALL return kind, FLOAT_LIT default, binop recursion) — because a binop
+ * init usually has no resolved type stamp at emit time.
+ * @param arena *u8 - ASTArena*
+ * @param elf_ctx *u8 - ElfCodegenCtx*
+ * @param ctx *u8 - AsmFuncCtx* (VAR decl lookup; may be null)
+ * @param dest_ty_ref i32 - dest type ref; f32 (kind 14) triggers demote
+ * @param src_expr_ref i32 - source expr ref; f64-valued required; <=0 no-op
+ * @param ta i32 - target arch (0 x86_64 / 1 arm64)
+ * @return i32 - 0 ok or no-op; -1 encode failure
+ * PLATFORM: SHARED type gate / LINUX+MACOS x86_64|arm64 encode via arch helper.
+ */
+#[no_mangle]
+export function glue_maybe_demote_f64_to_f32_eax_elf_c(arena: *u8, elf_ctx: *u8, ctx: *u8, dest_ty_ref: i32, src_expr_ref: i32, ta: i32): i32 {
+  let dk: i32 = 0;
+  let is_f64_src: i32 = 0;
+  if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || dest_ty_ref <= 0 || src_expr_ref <= 0) {
+    return 0;
+  }
+  unsafe {
+    dk = pipeline_type_kind_ord_at(arena, dest_ty_ref);
+    is_f64_src = glue_binop_operand_is_scalar_f64_elf_c(arena, ctx, src_expr_ref);
+  }
+  // f32 dest (kind 14) with f64-valued source: typeck already permits the
+  // narrowing init/assign; the bit-level convert is owned here (G.7 single
+  // authority — same encoder the `as f32` cast path uses).
+  if (dk == 14 && is_f64_src != 0) {
+    unsafe {
+      return backend_enc_cvtsd2ss_eax_from_f64_bits_arch(elf_ctx, ta);
     }
   }
   return 0;
@@ -57656,6 +57706,7 @@ function glue_block_body_emit_let_init(arena: *u8, elf_ctx: *u8, block_ref: i32,
   let vtype_ref: i32 = 0;
   let rc: i32 = 0;
   let slot_off: i32 = 0;
+  let init_f32_lit: i32 = 0;
 
   unsafe {
     slot_off = backend_asm_ctx_slot_offset(ctx, slot);
@@ -57801,6 +57852,8 @@ function glue_block_body_emit_let_init(arena: *u8, elf_ctx: *u8, block_ref: i32,
       init_ko = pipeline_expr_kind_ord_at(arena, init_ref);
       // GLUE_TYPE_KIND_F32_ORD = 14; EXPR_LIT = 1
       if (let_ty > 0 && pipeline_type_kind_ord_at(arena, let_ty) == 14 && init_ko == 1) {
+        // Dest-typed literal emit: value already f32 bits — skip demote at store.
+        init_f32_lit = 1;
         rc = glue_emit_float_lit_to_rax_elf_c(arena, elf_ctx, init_ref, ta, let_ty, 0);
       } else {
         rc = pipeline_asm_emit_expr_elf_rec(arena, elf_ctx, init_ref, ctx, ta);
@@ -57817,6 +57870,18 @@ function glue_block_body_emit_let_init(arena: *u8, elf_ctx: *u8, block_ref: i32,
   if (let_ty2 > 0) {
     unsafe {
       if (pipeline_type_kind_ord_at(arena, let_ty2) == 14) {
+        // f32 dest with f64-typed init: demote to f32 bits before the 4-byte
+        // store — else the store keeps only the low 32 bits of the f64.
+        // Skip when the dest-typed literal fast path already emitted f32 bits
+        // or the index-cache init provided the value.
+        if (ix_init == 0 && init_f32_lit == 0) {
+          unsafe {
+            rc = glue_maybe_demote_f64_to_f32_eax_elf_c(arena, elf_ctx, ctx, let_ty2, init_ref, ta);
+          }
+          if (rc != 0) {
+            return 0 - 1;
+          }
+        }
         rc = backend_enc_store_eax_to_rbp_arch(elf_ctx, slot_off, ta);
         if (rc != 0) {
           return 0 - 1;

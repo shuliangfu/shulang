@@ -18362,6 +18362,9 @@ extern int32_t glue_emit_vector_type_let_init_elf_c(void *arena, void *elf_ctx, 
 extern int32_t glue_float_promote_src_ty_ref_c(void *arena, int32_t expr_ref);
 extern int32_t glue_maybe_promote_f32_to_f64_rax_elf_c(void *arena, void *elf_ctx, int32_t dest_ty_ref,
                                                         int32_t src_ty_ref, int32_t ta);
+extern int32_t glue_binop_operand_is_scalar_f64_elf_c(void *arena, void *ctx, int32_t expr_ref);
+extern int32_t glue_maybe_demote_f64_to_f32_eax_elf_c(void *arena, void *elf_ctx, void *ctx, int32_t dest_ty_ref,
+                                                      int32_t src_expr_ref, int32_t ta);
 extern int32_t glue_index_elem_byte_sz_from_type_ref_c(void *arena, int32_t tr);
 extern int32_t pipeline_expr_kind_ord_at(void *arena, int32_t expr_ref);
 extern int32_t pipeline_expr_resolved_type_ref(void *arena, int32_t expr_ref);
@@ -19045,6 +19048,10 @@ int32_t pipeline_asm_emit_assign_elf_c(void *arena, void *elf_ctx, int32_t expr_
       int32_t rty = glue_float_promote_src_ty_ref_c(arena, right_ref);
       int32_t ltk;
       if (glue_maybe_promote_f32_to_f64_rax_elf_c(arena, elf_ctx, ltr, rty, ta) != 0)
+        return -1;
+      /* f32 dest + f64 rhs: demote to f32 bits before the 4-byte store, else
+       * the store keeps only the low 32 bits of the f64 (shared truncation). */
+      if (glue_maybe_demote_f64_to_f32_eax_elf_c(arena, elf_ctx, ctx, ltr, right_ref, ta) != 0)
         return -1;
       ltk = (ltr > 0) ? pipeline_type_kind_ord_at(arena, ltr) : 0;
       if (ltk == 11) {
@@ -21222,6 +21229,44 @@ int32_t glue_maybe_promote_f32_to_f64_rax_elf_c(struct ast_ASTArena *arena,
   /* Only true widen f32→f64 needs convert (identity no-op). */
   if (dk == W144_TYPE_F64 && sk == W144_TYPE_F32)
     return backend_enc_cvtss2sd_rax_from_f32_bits_arch(elf_ctx, ta);
+  return 0;
+}
+
+/**
+ * glue_maybe_demote_f64_to_f32_eax_elf_c — symmetric counterpart of the
+ * promote above. f32-dest store sites (let-init / assign) must call this
+ * BEFORE the 4-byte store whenever the init expr is f64-valued: without it
+ * the store keeps only the low 32 bits of the f64 (both x86_64 and arm64
+ * truncated; wave616 fixed only the `as f32` cast path).
+ *
+ * Source f64-ness uses glue_binop_operand_is_scalar_f64_elf_c — the same
+ * classifier the cmp/binop emitters trust — because a binop init usually has
+ * no resolved type stamp at emit time.
+ *
+ * Contract:
+ *   - arena / elf_ctx non-NULL; dest_ty_ref / src_expr_ref > 0; else no-op 0.
+ *   - dest f32 (kind 14) + f64-valued src expr → cvtsd2ss demote; else no-op.
+ *   - backend_enc_cvtsd2ss_eax_from_f64_bits_arch: 0 OK / -1 encode fail.
+ *
+ * @return 0 OK or no-op (not f64→f32); -1 encode fail.
+ *
+ * PLATFORM: SHARED type gate / LINUX+MACOS x86_64|arm64 encode via arch helper.
+ */
+int32_t glue_maybe_demote_f64_to_f32_eax_elf_c(struct ast_ASTArena *arena,
+                                               struct platform_elf_ElfCodegenCtx *elf_ctx,
+                                               void *ctx, int32_t dest_ty_ref, int32_t src_expr_ref,
+                                               int32_t ta) {
+  int32_t dk;
+  int32_t is_f64_src;
+  if (!arena || !elf_ctx || dest_ty_ref <= 0 || src_expr_ref <= 0)
+    return 0;
+  dk = pipeline_type_kind_ord_at(arena, dest_ty_ref);
+  is_f64_src = glue_binop_operand_is_scalar_f64_elf_c(arena, ctx, src_expr_ref);
+  /* f32 dest with f64-valued source: typeck already permits the narrowing
+   * init/assign; the bit-level convert is owned here (G.7 single authority —
+   * same encoder the `as f32` cast path uses). */
+  if (dk == W144_TYPE_F32 && is_f64_src)
+    return backend_enc_cvtsd2ss_eax_from_f64_bits_arch(elf_ctx, ta);
   return 0;
 }
 
