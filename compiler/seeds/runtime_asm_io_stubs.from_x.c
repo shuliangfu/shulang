@@ -304,7 +304,7 @@ __attribute__((weak)) uint32_t xlang_target_cpu_detect_host(void) {
 }
 
 /** F-03：sync.x 机器码不在 io.o；本 TU 提供 io_write/io_read 同步 ABI。 */
-ptrdiff_t io_write(int fd, const uint8_t *buf, size_t count, unsigned timeout_ms) {
+XLANG_WEAK ptrdiff_t io_write(int fd, const uint8_t *buf, size_t count, unsigned timeout_ms) {
   (void)timeout_ms;
   if (!buf && count > 0)
     return (ptrdiff_t)-1;
@@ -312,7 +312,7 @@ ptrdiff_t io_write(int fd, const uint8_t *buf, size_t count, unsigned timeout_ms
 }
 
 /** 同步读；hello 等仅写 stdout 时 read 路径可为空实现。 */
-ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
+XLANG_WEAK ptrdiff_t io_read(int fd, uint8_t *buf, size_t count, unsigned timeout_ms) {
   (void)timeout_ms;
   if (!buf && count > 0)
     return (ptrdiff_t)-1;
@@ -333,7 +333,7 @@ static int32_t g_io_read_ptr_backend = 0;
  * call io.read_ptr(from_fd(fd)) on a regular file. Length cell is the
  * same g_io_read_ptr_len used by std_io_ptr_len (G.7 single buffer).
  * Generation bumps on every call (read_ptr.x); backend forced 0. */
-uint8_t *io_read_ptr(unsigned handle, unsigned timeout_ms) {
+XLANG_WEAK uint8_t *io_read_ptr(unsigned handle, unsigned timeout_ms) {
   ptrdiff_t r;
   (void)timeout_ms;
   g_io_read_ptr_gen = g_io_read_ptr_gen + 1;
@@ -350,12 +350,12 @@ uint8_t *io_read_ptr(unsigned handle, unsigned timeout_ms) {
  * Historic body always returned 0 (length stub), so ptr_len() never
  * observed a successful read. Complete the existing face (G.7).
  * PLATFORM: SHARED. */
-int32_t io_read_ptr_len(void) {
+XLANG_WEAK int32_t io_read_ptr_len(void) {
   return g_io_read_ptr_len;
 }
 
 /** std.io.core 注册单缓冲桩。 */
-int32_t io_register_buffer(uint8_t *ptr, size_t len) {
+XLANG_WEAK int32_t io_register_buffer(uint8_t *ptr, size_t len) {
   (void)ptr;
   (void)len;
   return 0;
@@ -372,7 +372,7 @@ XLANG_WEAK int32_t xlang_io_register(uint8_t *ptr, size_t len, size_t handle) {
 
 /** driver 侧 Buffer 描述符注册。 */
 typedef struct { uint8_t *ptr; size_t length; size_t handle; } xlang_buffer_abi_t;
-int32_t xlang_io_register_buf(intptr_t buf) {
+XLANG_WEAK int32_t xlang_io_register_buf(intptr_t buf) {
   const xlang_buffer_abi_t *b = (const xlang_buffer_abi_t *)(uintptr_t)buf;
   if (!b)
     return -1;
@@ -1011,7 +1011,7 @@ XlangSliceU8 std_io_read_ptr_slice(size_t handle, uint32_t timeout_ms) {
  * 批量读桩：net/tcp 等链 net.o 时解析 io_read_batch；seed 路径退化为首段 io_read。
  * 参数 p1..p3 在桩 v1 中忽略，与 bootstrap_seed_io_stubs.c 行为一致。
  */
-ptrdiff_t io_read_batch(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2,
+XLANG_WEAK ptrdiff_t io_read_batch(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2,
                         size_t l2, uint8_t *p3, size_t l3, int32_t n, unsigned timeout_ms) {
   (void)p1;
   (void)l1;
@@ -1026,7 +1026,7 @@ ptrdiff_t io_read_batch(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t 
 /**
  * 批量写桩：net/tcp 等链 net.o 时解析 io_write_batch；seed 路径退化为首段 io_write。
  */
-ptrdiff_t io_write_batch(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2,
+XLANG_WEAK ptrdiff_t io_write_batch(int32_t fd, uint8_t *p0, size_t l0, uint8_t *p1, size_t l1, uint8_t *p2,
                          size_t l2, uint8_t *p3, size_t l3, int32_t n, unsigned timeout_ms) {
   (void)p1;
   (void)l1;
@@ -1045,7 +1045,7 @@ typedef struct XlangIoBatchBuf {
 } XlangIoBatchBuf;
 
 /** 批量读 buf 桩：逐段 io_read 累加；timeout_ms 在桩 v1 中仅传给首段。 */
-ptrdiff_t io_read_batch_buf(int32_t fd, const XlangIoBatchBuf *bufs, int32_t n, unsigned timeout_ms) {
+XLANG_WEAK ptrdiff_t io_read_batch_buf(int32_t fd, const XlangIoBatchBuf *bufs, int32_t n, unsigned timeout_ms) {
   ptrdiff_t total = 0;
   int32_t i;
   if (!bufs || n <= 0)
@@ -1115,7 +1115,7 @@ XLANG_WEAK int32_t io_uring_prefetch_fd(int32_t fd) {
 }
 
 /** 批量写 buf 桩：逐段 io_write 累加。 */
-ptrdiff_t io_write_batch_buf(int32_t fd, const XlangIoBatchBuf *bufs, int32_t n, unsigned timeout_ms) {
+XLANG_WEAK ptrdiff_t io_write_batch_buf(int32_t fd, const XlangIoBatchBuf *bufs, int32_t n, unsigned timeout_ms) {
   ptrdiff_t total = 0;
   int32_t i;
   if (!bufs || n <= 0)

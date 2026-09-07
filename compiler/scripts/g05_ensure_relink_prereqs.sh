@@ -437,6 +437,19 @@ g05_ensure_l2_or_seed() {
 
 if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
   echo "g05_ensure_relink_prereqs: hot rebuild (cc, no make)"
+  # Cap 9.1.8 Darwin/Windows relink provider freshness: g05 MAIN_LINK_O carries
+  # runtime_asm_io_stubs.o (weak xlang_sys_write/read/writev for rt_entry.x SHARED
+  # Cap leaf; freestanding_io strong twin is Linux-x86_64-only). The g05 path does
+  # not run build_xlang_asm.sh (its seed-newer rule lives there), so refresh here
+  # with the same command; also keeps the 9.5.3 Cap print template current in the
+  # product link. Same flags as build_xlang_asm.sh line ~5294.
+  # PLATFORM: SHARED compile (slot only linked on MACOS|WINDOWS; Linux rebuild is
+  # a harmless SHARED-surface compile validation).
+  if [ -f seeds/runtime_asm_io_stubs.from_x.c ] && { [ ! -f runtime_asm_io_stubs.o ] || [ seeds/runtime_asm_io_stubs.from_x.c -nt runtime_asm_io_stubs.o ]; }; then
+    echo "g05_ensure: cc seeds/runtime_asm_io_stubs.from_x.c → runtime_asm_io_stubs.o (seed-newer refresh)"
+    # shellcheck disable=SC2086
+    $CC $BASE_CFLAGS -fPIE -c seeds/runtime_asm_io_stubs.from_x.c -o runtime_asm_io_stubs.o
+  fi
   # wave765 G.7: labi multi-slice product PREFER → ensure try-labi-prefer
   # (single body; L0..L9+L8b+L8c + rest FROM_X → cc -r; cold full seed fallback).
   # Leaf = src/runtime_link_abi.o (R1_CORE cold twin). No dual inline hybrid.

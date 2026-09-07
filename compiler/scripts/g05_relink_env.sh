@@ -52,11 +52,20 @@ case "$UNAME_S" in
   _ASM_GLUE_DUP_LDFLAGS=""
   case "$UNAME_M" in
   arm64|aarch64)
-  _MAIN_LINK_O="src/asm/crt0_arm64.o"
+  # PLATFORM: MACOS arm64 — runtime_asm_io_stubs.o (XLANG_WEAK io twin) provides
+  # xlang_sys_write/read/writev for src/runtime_driver_no_c.o: rt_entry.x is
+  # SHARED and since Cap 9.1.8 declares `export extern xlang_sys_write` (raw
+  # write leaf). The freestanding_io strong twin is Linux-x86_64-only asm, so
+  # without this slot the Darwin g05 pure-ld fails U _xlang_sys_write from
+  # _rt_entry_strlen. G.7: same face as the Linux MAIN_LINK_O freestanding_io
+  # slot; the weak twin loses to any strong twin when both are linked.
+  _MAIN_LINK_O="src/asm/crt0_arm64.o runtime_asm_io_stubs.o"
   _MAIN_LINK_FLAGS="-e _start -nostartfiles"
   ;;
   x86_64|amd64)
-  _MAIN_LINK_O="src/asm/crt0_darwin_x86_64.o"
+  # PLATFORM: MACOS x86_64 — same xlang_sys_* provider slot as arm64 above
+  # (rt_entry.x SHARED Cap 9.1.8 leaf; freestanding_io is Linux-only).
+  _MAIN_LINK_O="src/asm/crt0_darwin_x86_64.o runtime_asm_io_stubs.o"
   _MAIN_LINK_FLAGS="-e _start -nostartfiles"
   ;;
   *)
@@ -107,7 +116,13 @@ case "$UNAME_S" in
   _ASM_GLUE_DUP_LDFLAGS="-Wl,--allow-multiple-definition"
   case "$UNAME_M" in
   x86_64|amd64)
-  _MAIN_LINK_O="src/asm/crt0_mingw.o"
+  # PLATFORM: WINDOWS — same xlang_sys_* provider slot as Darwin: rt_entry.x is
+  # SHARED and since Cap 9.1.8 references xlang_sys_write (freestanding_io
+  # strong twin is Linux-x86_64-only). PE XLANG_WEAK expands empty (strong def)
+  # and --allow-multiple-definition is first-wins, so a real strong twin linked
+  # ahead would still win. Needs MSYS2 gate confirmation (not covered by
+  # macOS/Ubuntu L2).
+  _MAIN_LINK_O="src/asm/crt0_mingw.o runtime_asm_io_stubs.o"
   _MAIN_LINK_FLAGS="-Wl,--stack,268435456"
   ;;
   *)
