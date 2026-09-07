@@ -16690,6 +16690,96 @@ static void pipe_modlet_assign_unique_label_cold(int idx, uint32_t module_fp) {
   g_pipeline_asm_modlet_cold.label_len[idx] = 21;
 }
 
+/* Report whether an ARRAY_LIT contains STRING_LIT elements (recursively).
+ * String elements are ADDRESSES — cells holding them must stay COMMON and
+ * seed at hoist-target entry; the .data bake pokes raw bytes and cannot
+ * express pointers (no relocations). Twin of runtime_pipeline_abi.x
+ * pipe_modlet_array_lit_has_string_elem.
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
+static int32_t pipe_modlet_array_lit_has_string_elem_cold(void *arena, int32_t init_ref) {
+  int32_t ne = 0, ei = 0, eref = 0, ek = 0;
+  if (!arena || init_ref <= 0)
+    return 0;
+  ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  for (ei = 0; ei < ne; ei++) {
+    eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    if (eref <= 0)
+      continue;
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+    if (ek == 59)
+      return 1;
+    if (ek == 46 && pipe_modlet_array_lit_has_string_elem_cold(arena, eref) != 0)
+      return 1;
+  }
+  return 0;
+}
+
+/* Store ARRAY_LIT elems into the COMMON cell already LEA'd in rbx
+ * (hoist-target seed). LIT elems mov-imm64 + store; STRING_LIT elems
+ * emit the string bytes inline in .text, LEA them into rax/x0 and store
+ * the pointer (emitter loud-fails on len > 126). Twin of
+ * runtime_pipeline_abi.x pipe_modlet_seed_array_lit_elems_to_rbx.
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
+static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t *elf_ctx,
+                                                            int32_t init_ref, int32_t elem_ty,
+                                                            int32_t ta, int32_t base_off) {
+  int32_t ne = 0, ei = 0, eref = 0, ek = 0, ev = 0, esz = 4, etk = 0;
+  int32_t inner_et = 0, row_sz = 0, rc = 0;
+  if (!arena || !elf_ctx || init_ref <= 0)
+    return 0;
+  if (elem_ty > 0)
+    etk = pipeline_type_kind_ord_at(arena, elem_ty);
+  if (etk == 10) {
+    inner_et = pipeline_type_elem_ref_at(arena, elem_ty);
+    ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+    row_sz = glue_fixed_array_total_bytes_c(arena, elem_ty, 0);
+    if (row_sz <= 0)
+      row_sz = glue_array_lit_force_esz_from_elem_type_c(arena, elem_ty);
+    if (ne <= 0 || ne > 1024)
+      return 0;
+    for (ei = 0; ei < ne; ei++) {
+      eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+      if (eref <= 0)
+        continue;
+      ek = pipeline_expr_kind_ord_at(arena, eref);
+      if (ek == 46) {
+        rc = pipe_modlet_seed_array_lit_elems_to_rbx_cold(arena, elf_ctx, eref, inner_et, ta,
+                                                          base_off + ei * row_sz);
+        if (rc != 0)
+          return rc;
+      }
+    }
+    return 0;
+  }
+  esz = glue_array_lit_force_esz_from_elem_type_c(arena, elem_ty);
+  if (esz != 1 && esz != 2 && esz != 4 && esz != 8)
+    esz = 4;
+  ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  if (ne <= 0 || ne > 1024)
+    return 0;
+  for (ei = 0; ei < ne; ei++) {
+    eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    if (eref <= 0)
+      continue;
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+    if (ek == 0) {
+      ev = pipeline_expr_int_val_at(arena, eref);
+      if (backend_enc_mov_imm64_to_rax_arch(elf_ctx, ev, 0, ta) != 0)
+        return -1;
+      if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta) != 0)
+        return -1;
+    } else if (ek == 59) {
+      /* STRING_LIT: lea baked .text bytes into rax/x0, store the pointer. */
+      rc = glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, eref, ta);
+      if (rc != 0)
+        return rc;
+      if (backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta) != 0)
+        return -1;
+    }
+  }
+  return 0;
+}
+
 /**
  * Bake ARRAY_LIT LIT elems into an already-reserved .data cell.
  * Twin of runtime_pipeline_abi.x pipe_modlet_bake_array_lit_elems_to_data.
@@ -16831,6 +16921,8 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
     else if (csz >= 16)
       calign = 16;
     /* Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when it fits (library TU).
+     * Cells holding STRING_LIT elems stay COMMON (bake pokes bytes, cannot
+     * express pointers) — they seed at hoist-target entry instead.
      * Empty `[]` stays COMMON. Oversized non-empty → COMMON + hoist seed.
      * PLATFORM: SHARED — twin of runtime_pipeline_abi.x prepare emit. */
     if (pipeline_asm_modlet_cell_is_array_cold(csz_raw)) {
@@ -16855,7 +16947,8 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
           ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
           tk2 = pipeline_type_kind_ord_at(a, type_ref2);
           ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
-          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
+          if (ik2 == 46 && tk2 == 10 && ne2 > 0 &&
+              !pipe_modlet_array_lit_has_string_elem_cold(a, init_ref2)) {
             data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
             if (data_len_now < 0)
               data_len_now = 0;
@@ -16921,8 +17014,53 @@ int32_t pipeline_asm_modlet_seed_nonzero_inits_elf_c(void *elf_ctx, int32_t ta) 
                                                  g_pipeline_asm_modlet_cold.name_len[i], ta) != 0)
       return -1;
   }
-  /* Live .x also seeds TYPE_ARRAY ARRAY_LIT LIT elems into COMMON
-   * (skips .data-backed). Cold twin remains scalar-only for ARRAY_LIT. */
+  /* Module TYPE_ARRAY ARRAY_LIT (const + mutable) → COMMON is BSS zero
+   * until seeded here (hoist skips all TYPE_ARRAY). dest-SLICE wrap /
+   * INDEX LEA the cell; without this seed A[0] reads 0. .data-backed
+   * cells are skipped (bytes already baked at prepare; stores into
+   * Mach-O __DATA,__const may fault after final link). Twin of the
+   * runtime_pipeline_abi.x tail walk in seed_nonzero_inits. */
+  {
+    extern void *pipeline_asm_emit_ctx_arena_get(void);
+    void *arena = pipeline_asm_emit_ctx_arena_get();
+    void *mod = pipeline_asm_emit_module_ref_c();
+    int32_t nlets, nexprs, tl;
+    if (!arena || !mod)
+      return 0;
+    nlets = cold_mod_num_top_level_lets(mod);
+    nexprs = cold_arena_num_exprs(arena);
+    for (tl = 0; tl < nlets; tl++) {
+      int32_t nlen = pipeline_module_top_level_let_name_len(mod, tl);
+      uint8_t name_buf[128];
+      int32_t k, idx, csz, init_ref, type_ref, ik, tk, et, rc2;
+      if (nlen <= 0 || nlen > 127)
+        continue;
+      for (k = 0; k < nlen; k++)
+        name_buf[k] = (uint8_t)pipeline_module_top_level_let_name_byte_at(mod, tl, k);
+      idx = pipeline_asm_modlet_find_cold(name_buf, nlen);
+      if (idx < 0)
+        continue;
+      csz = g_pipeline_asm_modlet_cold.cell_size[idx];
+      if (!pipeline_asm_modlet_cell_is_array_cold(csz) ||
+          pipeline_asm_modlet_cell_is_data_cold(csz))
+        continue;
+      init_ref = pipeline_module_top_level_let_init_ref(mod, tl);
+      type_ref = pipeline_module_top_level_let_type_ref(mod, tl);
+      if (init_ref <= 0 || init_ref > nexprs || type_ref <= 0)
+        continue;
+      ik = pipeline_expr_kind_ord_at(arena, init_ref);
+      tk = pipeline_type_kind_ord_at(arena, type_ref);
+      if (ik != 46 || tk != 10)
+        continue;
+      et = pipeline_type_elem_ref_at(arena, type_ref);
+      if (pipeline_asm_modlet_lea_rbx_arch_cold(elf_ctx, idx, ta) != 0)
+        continue;
+      rc2 = pipe_modlet_seed_array_lit_elems_to_rbx_cold(arena, (uint8_t *)elf_ctx, init_ref, et,
+                                                         ta, 0);
+      if (rc2 != 0)
+        return rc2;
+    }
+  }
   return 0;
 }
 

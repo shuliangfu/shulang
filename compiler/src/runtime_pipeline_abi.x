@@ -806,6 +806,9 @@ export extern "C" function backend_enc_sar_cl_eax_arch(elf_ctx: *u8, ta: i32): i
 export extern "C" function backend_enc_store_rax_to_rbx_offset_arch(elf_ctx: *u8, off: i32, load_sz: i32, ta: i32): i32;
 export extern "C" function backend_enc_store_rdx_to_rbp_arch(elf_ctx: *u8, slot_off: i32, ta: i32): i32;
 export extern "C" function backend_enc_store_eax_to_rbp_arch(elf_ctx: *u8, offset: i32, ta: i32): i32;
+// Declared at file top (not next to its later callers): C twin of this TU
+// needs decl-before-use — pipe_modlet_seed_array_lit_elems_to_rbx calls it.
+export extern "C" function glue_asm_emit_string_lit_ptr_rax_elf_c(arena: *u8, elf_ctx: *u8, str_expr_ref: i32, ta: i32): i32;
 // wave151 pure-owned leave: pipeline_expr_field_access_load_byte_sz lives in EOF wave151 section.
 // wave151 pure-owned leave: pipeline_expr_field_access_is_enum_variant lives in EOF wave151 section.
 export extern "C" function pipeline_expr_array_lit_num_elems_at(arena: *u8, expr_ref: i32): i32;
@@ -33116,8 +33119,11 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       }
     }
     // Non-empty TYPE_ARRAY ARRAY_LIT → bake into F7 .data when it fits.
-    // Empty `u8[N]=[]` stays COMMON (BSS). Oversized non-empty falls back
-    // to COMMON + hoist seed (historic). PLATFORM: SHARED library-TU .data.
+    // Cells holding STRING_LIT elems stay COMMON: the bake pokes raw bytes
+    // and cannot express pointers (no relocations), so those cells seed at
+    // hoist-target entry instead (lea str → store). Empty `u8[N]=[]` stays
+    // COMMON (BSS). Oversized non-empty falls back to COMMON + hoist seed
+    // (historic). PLATFORM: SHARED library-TU .data.
     if (pipe_modlet_cell_is_array(csz_raw) != 0) {
       nlen2 = pipe_load_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_name_len(i));
       nbase2 = pipe_modlet_off_name(i);
@@ -33159,7 +33165,13 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
             tk2 = pipeline_type_kind_ord_at(a, type_ref2);
             ne2 = pipeline_expr_array_lit_num_elems_at(a, init_ref2);
           }
-          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
+          // STRING_LIT-bearing arrays must not take the .data bake path:
+          // their elems are addresses. The has-string predicate walks the
+          // ARRAY_LIT (recursively) so nested `[K][N]*u8` rows are covered.
+          if (
+            ik2 == 46 && tk2 == 10 && ne2 > 0 &&
+            pipe_modlet_array_lit_has_string_elem(a, init_ref2) == 0
+          ) {
             unsafe {
               data_len_now = pipeline_elf_ctx_emit_data_len(elf_ctx);
             }
@@ -33359,6 +33371,53 @@ function pipe_modlet_bake_array_lit_elems_to_data(
 }
 
 /**
+ * Report whether an ARRAY_LIT contains STRING_LIT elements (recursively).
+ * String elements bake as ADDRESSES, not bytes — a cell holding them must
+ * stay COMMON and be seeded at hoist-target entry (lea str → store rax);
+ * the .data bake path pokes raw bytes and cannot express pointers without
+ * relocations, so prepare must not route such cells to .data.
+ * @param arena *u8 - ASTArena
+ * @param init_ref i32 - ARRAY_LIT expr
+ * @return i32 - 1 = has STRING_LIT elem (any nesting level); 0 = none
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
+ */
+function pipe_modlet_array_lit_has_string_elem(
+  arena: *u8, init_ref: i32
+): i32 {
+  let ne: i32 = 0;
+  let ei: i32 = 0;
+  let eref: i32 = 0;
+  let ek: i32 = 0;
+  if (arena == (0 as *u8) || init_ref <= 0) {
+    return 0;
+  }
+  unsafe {
+    ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  }
+  ei = 0;
+  while (ei < ne) {
+    unsafe {
+      eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    }
+    if (eref > 0) {
+      unsafe {
+        ek = pipeline_expr_kind_ord_at(arena, eref);
+      }
+      if (ek == 59) {
+        return 1;
+      }
+      if (ek == 46) {
+        if (pipe_modlet_array_lit_has_string_elem(arena, eref) != 0) {
+          return 1;
+        }
+      }
+    }
+    ei = ei + 1;
+  }
+  return 0;
+}
+
+/**
  * Store ARRAY_LIT LIT elems into COMMON already LEA'd in rbx.
  * One nested ARRAY_LIT level is enough for `[K][N]T` rows; deeper
  * nest is a later leaf. Empty lit is a no-op (BSS stays zero).
@@ -33457,6 +33516,25 @@ function pipe_modlet_seed_array_lit_elems_to_rbx(
         }
         if (rc != 0) {
           return 0 - 1;
+        }
+      } else {
+        // STRING_LIT elem: emit the string bytes inline in .text and LEA
+        // their address (rax/x0), then store esz bytes at rbx+off. The
+        // cells reach here only because prepare keeps string-bearing
+        // arrays COMMON (has-string predicate); loud-fails on len > 126.
+        if (ek == 59) {
+          unsafe {
+            rc = glue_asm_emit_string_lit_ptr_rax_elf_c(arena, elf_ctx, eref, ta);
+          }
+          if (rc != 0) {
+            return rc;
+          }
+          unsafe {
+            rc = backend_enc_store_rax_to_rbx_offset_arch(elf_ctx, base_off + ei * esz, esz, ta);
+          }
+          if (rc != 0) {
+            return 0 - 1;
+          }
         }
       }
     }
@@ -50299,7 +50377,6 @@ export extern "C" function pipeline_asm_emit_method_call_elf_c(arena: *u8, elf_c
 // wave154 pure-owned: pipeline_asm_emit_struct_lit_elf_c body in EOF section.
 // wave162 pure-owned: pipeline_asm_emit_break_elf_c / continue_elf_c body in EOF.
 export extern "C" function backend_emit_expr_elf_slow(arena: *u8, elf_ctx: *u8, expr_ref: i32, ctx: *u8, ta: i32): i32;
-export extern "C" function glue_asm_emit_string_lit_ptr_rax_elf_c(arena: *u8, elf_ctx: *u8, str_expr_ref: i32, ta: i32): i32;
 /** Stage10 10.2.1: EXPR_ASM (60) template emit — authority in backend_call_dispatch. */
 export extern "C" function pipeline_asm_try_emit_inline_asm_expr_elf_c(arena: *u8, elf_ctx: *u8, expr_ref: i32, ctx: *u8, ta: i32): i32;
 // wave203 pure-owned: glue_call_arg_resolve_var_stack_off_elf_c at EOF (#[no_mangle]).
