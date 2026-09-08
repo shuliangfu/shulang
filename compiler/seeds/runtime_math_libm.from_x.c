@@ -52,16 +52,13 @@ double math_floor_impl(double x) { return floor(x); }
 double math_ceil_impl(double x) { return ceil(x); }
 double math_trunc_impl(double x) { return trunc(x); }
 double math_round_impl(double x) { return round(x); }
-double math_sin_impl(double x) { return sin(x); }
-double math_cos_impl(double x) { return cos(x); }
-double math_tan_impl(double x) { return tan(x); }
+/* math_sin_impl / math_cos_impl / math_tan_impl libm splices removed (9.2.4). */
 double math_asin_impl(double x) { return asin(x); }
 double math_acos_impl(double x) { return acos(x); }
 double math_atan_impl(double x) { return atan(x); }
 double math_atan2_impl(double y, double x) { return atan2(y, x); }
-/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p: fdlibm .x ports on the product path;
- * math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl /
- * math_log1p_impl / math_expm1_impl libm splices removed (same-semantics
+/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan: fdlibm .x ports on the
+ * product path; matching math_*_impl libm splices removed (same-semantics
  * C cold twins live in the guarded block). */
 double math_pow_impl(double base, double exp) { return pow(base, exp); }
 double math_fabs_impl(double x) { return fabs(x); }
@@ -78,9 +75,8 @@ double math_erfc_impl(double x) { return erfc(x); }
  */
 
 #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
-double math_sin_c(double x) { return math_sin_impl(x); }
-double math_cos_c(double x) { return math_cos_impl(x); }
-double math_tan_c(double x) { return math_tan_impl(x); }
+/* math_sin_c / math_cos_c / math_tan_c removed from splice: fdlibm .x ports
+ * + guarded cold twins below (9.2.4). */
 double math_asin_c(double x) { return math_asin_impl(x); }
 double math_acos_c(double x) { return math_acos_impl(x); }
 double math_atan_c(double x) { return math_atan_impl(x); }
@@ -682,6 +678,470 @@ double math_log1p_c(double x) {
   if (k == 0) return f - (hfsq - s * (hfsq + rr));
   return (double)k * ln2hi - ((hfsq - (s * (hfsq + rr) + ((double)k * ln2lo + c))) - f);
 }
+
+/* === 9.2.4 sin/cos/tan cold twins: fdlibm s_sin/s_cos/s_tan + kernels + rem_pio2 ===
+ * Same algorithm as src/asm/runtime_math_libm.x. Helpers are static (not
+ * part of the public math_*_c ABI). PLATFORM: SHARED — FP_CONTRACT already
+ * OFF above this block.
+ */
+static int32_t hi_of(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  return (int32_t)(v.u >> 32);
+}
+static int32_t lo_of(double x) {
+  union { double d; uint64_t u; } v; v.d = x;
+  return (int32_t)(v.u & 0xffffffffu);
+}
+static void set_hi(double *x, int32_t h) {
+  union { double d; uint64_t u; } v; v.d = *x;
+  v.u = ((uint64_t)(uint32_t)h << 32) | (v.u & 0xffffffffull);
+  *x = v.d;
+}
+static void set_lo(double *x, int32_t l) {
+  union { double d; uint64_t u; } v; v.d = *x;
+  v.u = (v.u & 0xffffffff00000000ull) | (uint32_t)l;
+  *x = v.d;
+}
+/* fdlibm s_scalbn.c (needed by k_rem_pio2). */
+static double twin_scalbn(double x, int n) {
+  const double two54 = 18014398509481984.0;
+  const double twom54 = 5.5511151231257827e-17;
+  union { double d; uint64_t u; } huge, tiny;
+  huge.u = 9094988921128908188ull; /* 1e300 */
+  tiny.u = 118622047889322841ull;  /* 1e-300 */
+  union { double d; uint64_t u; } v; v.d = x;
+  int32_t hx = (int32_t)(v.u >> 32);
+  int32_t lx = (int32_t)(v.u & 0xffffffffu);
+  int32_t k = (hx & 0x7ff00000) >> 20;
+  if (k == 0) {
+    if ((lx | (hx & 0x7fffffff)) == 0) return x;
+    v.d = x * two54;
+    hx = (int32_t)(v.u >> 32);
+    k = ((hx & 0x7ff00000) >> 20) - 54;
+    if (n < -50000) return tiny.d * x;
+  }
+  if (k == 0x7ff) return x + x;
+  k = k + n;
+  if (k > 0x7fe) {
+    double s = (hx < 0) ? -huge.d : huge.d;
+    return huge.d * s;
+  }
+  if (k > 0) {
+    uint32_t nhx = ((uint32_t)hx & 0x800fffffu) | ((uint32_t)k << 20);
+    v.u = ((uint64_t)nhx << 32) | (v.u & 0xffffffffull);
+    return v.d;
+  }
+  if (k <= -54) {
+    if (n > 50000) {
+      double s = (hx < 0) ? -huge.d : huge.d;
+      return huge.d * s;
+    }
+    double s = (hx < 0) ? -tiny.d : tiny.d;
+    return tiny.d * s;
+  }
+  k += 54;
+  {
+    uint32_t nhx = ((uint32_t)hx & 0x800fffffu) | ((uint32_t)k << 20);
+    v.u = ((uint64_t)nhx << 32) | (v.u & 0xffffffffull);
+    return v.d * twom54;
+  }
+}
+
+static double twin_floor(double x) { return floor(x); }
+
+/* ---- two_over_pi 24-bit chunks (all fit in positive i32) ---- */
+static const int32_t two_over_pi[66] = {
+  10680707, 7228996, 1387004, 2578385, 16069853, 12639074,
+  9804092, 4427841, 16666979, 11263675, 12935607, 2387514,
+  4345298, 14681673, 3074569, 13734428, 16653803, 1880361,
+  10960616, 8533493, 3062596, 8710556, 7349940, 6258241,
+  3772886, 3769171, 3798172, 8675211, 12450088, 3874808,
+  9961438, 366607, 15675153, 9132554, 7151469, 3571407,
+  2607881, 12013382, 4155038, 6285869, 7677882, 13102053,
+  15825725, 473591, 9065106, 15363067, 6271263, 9264392,
+  5636912, 4652155, 7056368, 13614112, 10155062, 1944035,
+  9527646, 15080200, 6658437, 6231200, 6832269, 16767104,
+  5075751, 3212806, 1398474, 7579849, 6349435, 12618859
+};
+static const int32_t npio2_hw[32] = {
+  1073291771, 1074340347, 1074977148, 1075388923, 1075800698, 1076025724,
+  1076231611, 1076437499, 1076643386, 1076849274, 1076971356, 1077074300,
+  1077177244, 1077280187, 1077383131, 1077486075, 1077589019, 1077691962,
+  1077794906, 1077897850, 1077968460, 1078019932, 1078071404, 1078122876,
+  1078174348, 1078225820, 1078277292, 1078328763, 1078380235, 1078431707,
+  1078483179, 1078534651
+};
+
+/* ---- k_sin ---- */
+static double kernel_sin(double x, double y, int iy) {
+  const double half = 0.5;
+  const double S1 = -1.66666666666666324348e-01;
+  const double S2 =  8.33333333332248946124e-03;
+  const double S3 = -1.98412698298579493134e-04;
+  const double S4 =  2.75573137070700676789e-06;
+  const double S5 = -2.50507602534068634195e-08;
+  const double S6 =  1.58969099521155010221e-10;
+  int32_t ix = hi_of(x) & 0x7fffffff;
+  if (ix < 0x3e400000) {
+    if ((int)x == 0) return x;
+  }
+  double z = x * x;
+  double v = z * x;
+  double r = S2 + z * (S3 + z * (S4 + z * (S5 + z * S6)));
+  if (iy == 0) return x + v * (S1 + z * r);
+  return x - ((z * (half * y - v * r) - y) - v * S1);
+}
+
+/* ---- k_cos ---- */
+static double kernel_cos(double x, double y) {
+  const double one = 1.0;
+  const double C1 =  4.16666666666666019037e-02;
+  const double C2 = -1.38888888888741095749e-03;
+  const double C3 =  2.48015872894767294178e-05;
+  const double C4 = -2.75573143513906633035e-07;
+  const double C5 =  2.08757232129817482790e-09;
+  const double C6 = -1.13596475577881948265e-11;
+  int32_t ix = hi_of(x) & 0x7fffffff;
+  if (ix < 0x3e400000) {
+    if ((int)x == 0) return one;
+  }
+  double z = x * x;
+  double r = z * (C1 + z * (C2 + z * (C3 + z * (C4 + z * (C5 + z * C6)))));
+  if (ix < 0x3FD33333) return one - (0.5 * z - (z * r - x * y));
+  double qx;
+  if (ix > 0x3fe90000) {
+    qx = 0.28125;
+  } else {
+    qx = 0.0;
+    set_hi(&qx, ix - 0x00200000);
+    set_lo(&qx, 0);
+  }
+  double hz = 0.5 * z - qx;
+  double a = one - qx;
+  return a - (hz - (z * r - x * y));
+}
+
+/* ---- k_tan ---- */
+static double kernel_tan(double x, double y, int iy) {
+  const double T0 =  3.33333333333334091986e-01;
+  const double T1 =  1.33333333333201242699e-01;
+  const double T2 =  5.39682539762260521377e-02;
+  const double T3 =  2.18694882948595424599e-02;
+  const double T4 =  8.86323982359930005737e-03;
+  const double T5 =  3.59207910759131235356e-03;
+  const double T6 =  1.45620945432529025516e-03;
+  const double T7 =  5.88041240820264096874e-04;
+  const double T8 =  2.46463134818469906812e-04;
+  const double T9 =  7.81794442939557092300e-05;
+  const double T10 = 7.14072491382608190305e-05;
+  const double T11 = -1.85586374855275456654e-05;
+  const double T12 = 2.59073051863633712884e-05;
+  const double one = 1.0;
+  const double pio4 = 7.85398163397448278999e-01;
+  const double pio4lo = 3.06161699786838301793e-17;
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  if (ix < 0x3e300000) {
+    if ((int)x == 0) {
+      if (((ix | lo_of(x)) | (iy + 1)) == 0) return one / fabs(x);
+      else {
+        if (iy == 1) return x;
+        else {
+          double z, w, v, t, a, s;
+          z = w = x + y;
+          set_lo(&z, 0);
+          v = y - (z - x);
+          t = a = -one / w;
+          set_lo(&t, 0);
+          s = one + t * z;
+          return t + a * (s + t * v);
+        }
+      }
+    }
+  }
+  if (ix >= 0x3FE59428) {
+    if (hx < 0) { x = -x; y = -y; }
+    double z = pio4 - x;
+    double w = pio4lo - y;
+    x = z + w;
+    y = 0.0;
+  }
+  {
+    double z = x * x;
+    double w = z * z;
+    double r = T1 + w * (T3 + w * (T5 + w * (T7 + w * (T9 + w * T11))));
+    double v = z * (T2 + w * (T4 + w * (T6 + w * (T8 + w * (T10 + w * T12)))));
+    double s = z * x;
+    r = y + z * (s * (r + v) + y);
+    r += T0 * s;
+    w = x + r;
+    if (ix >= 0x3FE59428) {
+      double vv = (double)iy;
+      return (double)(1 - ((hx >> 30) & 2)) * (vv - 2.0 * (x - (w * w / (w + vv) - r)));
+    }
+    if (iy == 1) return w;
+    {
+      double a, t, z2, v2, s2;
+      z2 = w;
+      set_lo(&z2, 0);
+      v2 = r - (z2 - x);
+      t = a = -1.0 / w;
+      set_lo(&t, 0);
+      s2 = 1.0 + t * z2;
+      return t + a * (s2 + t * v2);
+    }
+  }
+}
+
+/* ---- k_rem_pio2 (prec=2 path used by e_rem_pio2) ---- */
+static const double PIo2[8] = {
+  1.57079625129699707031e+00,
+  7.54978941586159635335e-08,
+  5.39030252995776476554e-15,
+  3.28200341580791294123e-22,
+  1.27065575308067607349e-29,
+  1.22933308981111328932e-36,
+  2.73370053816464559624e-44,
+  2.16741683877804819444e-51
+};
+
+static int kernel_rem_pio2(double *x, double *y, int e0, int nx, int prec, const int32_t *ipio2) {
+  const double zero = 0.0, one = 1.0;
+  const double two24 = 16777216.0;
+  const double twon24 = 5.9604644775390625e-08;
+  const int init_jk[4] = {2, 3, 4, 6};
+  int jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
+  double z, fw, f[20], fq[20], q[20];
+  jk = init_jk[prec];
+  jp = jk;
+  jx = nx - 1;
+  jv = (e0 - 3) / 24; if (jv < 0) jv = 0;
+  q0 = e0 - 24 * (jv + 1);
+  j = jv - jx; m = jx + jk;
+  for (i = 0; i <= m; i++, j++) f[i] = (j < 0) ? zero : (double)ipio2[j];
+  for (i = 0; i <= jk; i++) {
+    for (j = 0, fw = 0.0; j <= jx; j++) fw += x[j] * f[jx + i - j];
+    q[i] = fw;
+  }
+  jz = jk;
+recompute:
+  for (i = 0, j = jz, z = q[jz]; j > 0; i++, j--) {
+    fw = (double)((int)(twon24 * z));
+    iq[i] = (int)(z - two24 * fw);
+    z = q[j - 1] + fw;
+  }
+  z = twin_scalbn(z, q0);
+  z -= 8.0 * twin_floor(z * 0.125);
+  n = (int)z;
+  z -= (double)n;
+  ih = 0;
+  if (q0 > 0) {
+    i = (iq[jz - 1] >> (24 - q0)); n += i;
+    iq[jz - 1] -= i << (24 - q0);
+    ih = iq[jz - 1] >> (23 - q0);
+  } else if (q0 == 0) ih = iq[jz - 1] >> 23;
+  else if (z >= 0.5) ih = 2;
+  if (ih > 0) {
+    n += 1; carry = 0;
+    for (i = 0; i < jz; i++) {
+      j = iq[i];
+      if (carry == 0) {
+        if (j != 0) { carry = 1; iq[i] = 0x1000000 - j; }
+      } else iq[i] = 0xffffff - j;
+    }
+    if (q0 > 0) {
+      if (q0 == 1) iq[jz - 1] &= 0x7fffff;
+      else if (q0 == 2) iq[jz - 1] &= 0x3fffff;
+    }
+    if (ih == 2) {
+      z = one - z;
+      if (carry != 0) z -= twin_scalbn(one, q0);
+    }
+  }
+  if (z == zero) {
+    j = 0;
+    for (i = jz - 1; i >= jk; i--) j |= iq[i];
+    if (j == 0) {
+      for (k = 1; iq[jk - k] == 0; k++);
+      for (i = jz + 1; i <= jz + k; i++) {
+        f[jx + i] = (double)ipio2[jv + i];
+        for (j = 0, fw = 0.0; j <= jx; j++) fw += x[j] * f[jx + i - j];
+        q[i] = fw;
+      }
+      jz += k;
+      goto recompute;
+    }
+  }
+  if (z == 0.0) {
+    jz -= 1; q0 -= 24;
+    while (iq[jz] == 0) { jz--; q0 -= 24; }
+  } else {
+    z = twin_scalbn(z, -q0);
+    if (z >= two24) {
+      fw = (double)((int)(twon24 * z));
+      iq[jz] = (int)(z - two24 * fw);
+      jz += 1; q0 += 24;
+      iq[jz] = (int)fw;
+    } else iq[jz] = (int)z;
+  }
+  fw = twin_scalbn(one, q0);
+  for (i = jz; i >= 0; i--) {
+    q[i] = fw * (double)iq[i]; fw *= twon24;
+  }
+  for (i = jz; i >= 0; i--) {
+    for (fw = 0.0, k = 0; k <= jp && k <= jz - i; k++) fw += PIo2[k] * q[i + k];
+    fq[jz - i] = fw;
+  }
+  /* prec is 2 for double */
+  fw = 0.0;
+  for (i = jz; i >= 0; i--) fw += fq[i];
+  y[0] = (ih == 0) ? fw : -fw;
+  fw = fq[0] - fw;
+  for (i = 1; i <= jz; i++) fw += fq[i];
+  y[1] = (ih == 0) ? fw : -fw;
+  return n & 7;
+}
+
+/* ---- e_rem_pio2 ---- */
+static int rem_pio2(double x, double *y) {
+  const double half = 0.5;
+  const double two24 = 16777216.0;
+  const double invpio2 = 6.36619772367581382433e-01;
+  const double pio2_1  = 1.57079632673412561417e+00;
+  const double pio2_1t = 6.07710050650619224932e-11;
+  const double pio2_2  = 6.07710050630396597660e-11;
+  const double pio2_2t = 2.02226624879595063154e-21;
+  const double pio2_3  = 2.02226624871116645580e-21;
+  const double pio2_3t = 8.47842766036889956997e-32;
+  double z, w, t, r, fn;
+  double tx[3];
+  int e0, i, j, nx, n, ix, hx;
+  hx = hi_of(x);
+  ix = hx & 0x7fffffff;
+  if (ix <= 0x3fe921fb) { y[0] = x; y[1] = 0; return 0; }
+  if (ix < 0x4002d97c) {
+    if (hx > 0) {
+      z = x - pio2_1;
+      if (ix != 0x3ff921fb) {
+        y[0] = z - pio2_1t;
+        y[1] = (z - y[0]) - pio2_1t;
+      } else {
+        z -= pio2_2;
+        y[0] = z - pio2_2t;
+        y[1] = (z - y[0]) - pio2_2t;
+      }
+      return 1;
+    } else {
+      z = x + pio2_1;
+      if (ix != 0x3ff921fb) {
+        y[0] = z + pio2_1t;
+        y[1] = (z - y[0]) + pio2_1t;
+      } else {
+        z += pio2_2;
+        y[0] = z + pio2_2t;
+        y[1] = (z - y[0]) + pio2_2t;
+      }
+      return -1;
+    }
+  }
+  if (ix <= 0x413921fb) {
+    t = fabs(x);
+    n = (int)(t * invpio2 + half);
+    fn = (double)n;
+    r = t - fn * pio2_1;
+    w = fn * pio2_1t;
+    if (n < 32 && ix != npio2_hw[n - 1]) {
+      y[0] = r - w;
+    } else {
+      j = ix >> 20;
+      y[0] = r - w;
+      i = j - ((hi_of(y[0]) >> 20) & 0x7ff);
+      if (i > 16) {
+        t = r;
+        w = fn * pio2_2;
+        r = t - w;
+        w = fn * pio2_2t - ((t - r) - w);
+        y[0] = r - w;
+        i = j - ((hi_of(y[0]) >> 20) & 0x7ff);
+        if (i > 49) {
+          t = r;
+          w = fn * pio2_3;
+          r = t - w;
+          w = fn * pio2_3t - ((t - r) - w);
+          y[0] = r - w;
+        }
+      }
+    }
+    y[1] = (r - y[0]) - w;
+    if (hx < 0) { y[0] = -y[0]; y[1] = -y[1]; return -n; }
+    else return n;
+  }
+  if (ix >= 0x7ff00000) { y[0] = y[1] = x - x; return 0; }
+  z = 0.0;
+  set_lo(&z, lo_of(x));
+  e0 = (ix >> 20) - 1046;
+  set_hi(&z, ix - (e0 << 20));
+  for (i = 0; i < 2; i++) {
+    tx[i] = (double)((int)(z));
+    z = (z - tx[i]) * two24;
+  }
+  tx[2] = z;
+  nx = 3;
+  while (tx[nx - 1] == 0.0) nx--;
+  n = kernel_rem_pio2(tx, y, e0, nx, 2, two_over_pi);
+  if (hx < 0) { y[0] = -y[0]; y[1] = -y[1]; return -n; }
+  return n;
+}
+
+double math_sin_c(double x) {
+  double y[2], z = 0.0;
+  int n, ix;
+  ix = hi_of(x);
+  ix &= 0x7fffffff;
+  if (ix <= 0x3fe921fb) return kernel_sin(x, z, 0);
+  else if (ix >= 0x7ff00000) return x - x;
+  else {
+    n = rem_pio2(x, y);
+    switch (n & 3) {
+      case 0: return kernel_sin(y[0], y[1], 1);
+      case 1: return kernel_cos(y[0], y[1]);
+      case 2: return -kernel_sin(y[0], y[1], 1);
+      default: return -kernel_cos(y[0], y[1]);
+    }
+  }
+}
+
+double math_cos_c(double x) {
+  double y[2], z = 0.0;
+  int n, ix;
+  ix = hi_of(x);
+  ix &= 0x7fffffff;
+  if (ix <= 0x3fe921fb) return kernel_cos(x, z);
+  else if (ix >= 0x7ff00000) return x - x;
+  else {
+    n = rem_pio2(x, y);
+    switch (n & 3) {
+      case 0: return kernel_cos(y[0], y[1]);
+      case 1: return -kernel_sin(y[0], y[1], 1);
+      case 2: return -kernel_cos(y[0], y[1]);
+      default: return kernel_sin(y[0], y[1], 1);
+    }
+  }
+}
+
+double math_tan_c(double x) {
+  double y[2], z = 0.0;
+  int n, ix;
+  ix = hi_of(x);
+  ix &= 0x7fffffff;
+  if (ix <= 0x3fe921fb) return kernel_tan(x, z, 1);
+  else if (ix >= 0x7ff00000) return x - x;
+  else {
+    n = rem_pio2(x, y);
+    return kernel_tan(y[0], y[1], 1 - ((n & 1) << 1));
+  }
+}
+
 #endif
 
 /* === signum: thin provides full .x impl; rest keeps C copy for cold path === */

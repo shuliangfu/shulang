@@ -21,6 +21,9 @@
 //   libm); seed keeps same-semantics C cold twins under the same guard
 // 9.2.4 expm1/log1p (2026-09-08): fdlibm s_expm1.c / s_log1p.c full .x ports
 //   (no libm); seed keeps same-semantics C cold twins under the same guard
+// 9.2.4 sin/cos/tan (2026-09-08): fdlibm s_sin.c / s_cos.c / s_tan.c plus
+//   k_sin/k_cos/k_tan + e_rem_pio2 / k_rem_pio2 full .x ports (no libm);
+//   seed keeps same-semantics C cold twins under the same guard
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -30,9 +33,10 @@ export extern "C" function math_floor_impl(x: f64): f64;
 export extern "C" function math_ceil_impl(x: f64): f64;
 export extern "C" function math_trunc_impl(x: f64): f64;
 export extern "C" function math_round_impl(x: f64): f64;
-export extern "C" function math_sin_impl(x: f64): f64;
-export extern "C" function math_cos_impl(x: f64): f64;
-export extern "C" function math_tan_impl(x: f64): f64;
+/* 9.2.4 sin/cos/tan (2026-09-08): fdlibm s_sin.c / s_cos.c / s_tan.c full
+ * .x ports on the product path; math_sin_impl / math_cos_impl /
+ * math_tan_impl libm splices removed (same-semantics C cold twins live
+ * in the guarded seed block). */
 export extern "C" function math_asin_impl(x: f64): f64;
 export extern "C" function math_acos_impl(x: f64): f64;
 export extern "C" function math_atan_impl(x: f64): f64;
@@ -103,8 +107,9 @@ export function math_special_near(a: f64, b: f64, eps: f64): i32 {
 // bit-level implementations (fdlibm semantics, no libm call on the product
 // path). Punning goes through pointer casts (let p: *u64 = &v as *u64), all
 // masks are computed with shifts from a u64 one — no large hex literals.
-// Remaining wrappers (sin/cos/tan/pow/erf/...) still forward to the C seed
-// _impl bridges. exact-7 + exp/log + sqrt/cbrt are full .x; the seed keeps
+// Remaining wrappers (pow/asin/acos/atan/atan2/erf/erfc) still forward to
+// the C seed _impl bridges. exact-7 + exp/log + sqrt/cbrt + expm1/log1p +
+// sin/cos/tan are full .x; the seed keeps
 // same-semantics cold twins under `#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X`
 // (G.4: same commit, same semantics on both paths).
 
@@ -284,20 +289,812 @@ export function math_round_c(x: f64): f64 {
   return t;
 }
 
+/**
+ * Returns the high 32 bits of x as a signed i32 (fdlibm __HI).
+ * @param x f64 - any bit pattern
+ * @return i32 - bits 63..32 of x, two's-complement
+ * PLATFORM: SHARED — pointer pun; no libm.
+ */
+function math_trig_hi(x: f64): i32 {
+  let r: f64 = x;
+  let bits: u64 = 0;
+  unsafe {
+    let p: *u64 = &r as *u64;
+    bits = *p;
+  }
+  return ((bits >> 32) as u32) as i32;
+}
+
+/**
+ * Returns the low 32 bits of x as a signed i32 (fdlibm __LO).
+ * @param x f64 - any bit pattern
+ * @return i32 - bits 31..0 of x, two's-complement
+ * PLATFORM: SHARED — pointer pun; no libm.
+ */
+function math_trig_lo(x: f64): i32 {
+  let r: f64 = x;
+  let bits: u64 = 0;
+  unsafe {
+    let p: *u64 = &r as *u64;
+    bits = *p;
+  }
+  return (bits as u32) as i32;
+}
+
+/**
+ * Returns a copy of x with the high word replaced (fdlibm __HI(x)=h).
+ * @param x f64 - source bits
+ * @param h i32 - new high word
+ * @return f64 - (h << 32) | lo(x)
+ * PLATFORM: SHARED
+ */
+function math_trig_with_hi(x: f64, h: i32): f64 {
+  let r: f64 = x;
+  unsafe {
+    let p: *u64 = &r as *u64;
+    let b: u64 = *p;
+    *p = (((h as u32) as u64) << 32) | (b & 4294967295);
+  }
+  return r;
+}
+
+/**
+ * Returns a copy of x with the low word replaced (fdlibm __LO(x)=l).
+ * @param x f64 - source bits
+ * @param l i32 - new low word
+ * @return f64 - hi(x) | (uint32)l
+ * PLATFORM: SHARED
+ */
+function math_trig_with_lo(x: f64, l: i32): f64 {
+  let r: f64 = x;
+  unsafe {
+    let p: *u64 = &r as *u64;
+    let b: u64 = *p;
+    *p = (b & 18446744069414584320) | ((l as u32) as u64);
+  }
+  return r;
+}
+
+/**
+ * fdlibm s_scalbn.c: return x * 2^n via the exponent field.
+ * Used only by kernel rem_pio2 (q0 is a modest integer).
+ * @param x f64 - finite or special
+ * @param n i32 - binary exponent adjustment
+ * @return f64 - scalbn(x, n); overflow/underflow follow fdlibm huge/tiny
+ * PLATFORM: SHARED freestanding
+ */
+function math_trig_scalbn(x: f64, n: i32): f64 {
+  let two54: f64 = 18014398509481984 as f64;
+  let twom54: f64 = 0.0;
+  let huge: f64 = 0.0;
+  let tiny: f64 = 0.0;
+  unsafe {
+    let p54: *u64 = &twom54 as *u64;
+    *p54 = 4363988038922010624;     /* 0x3c90000000000000 = 2^-54 */
+    let ph: *u64 = &huge as *u64;
+    *ph = 9094988921128908188;      /* 0x7e37e43c8800759c = 1e300 */
+    let pt: *u64 = &tiny as *u64;
+    *pt = 118622047889322841;       /* 0x01a56e1fc2f8f359 = 1e-300 */
+  }
+  let r: f64 = x;
+  let bits: u64 = 0;
+  unsafe {
+    let p: *u64 = &r as *u64;
+    bits = *p;
+  }
+  let hx: i32 = ((bits >> 32) as u32) as i32;
+  let lx: i32 = (bits as u32) as i32;
+  let k: i32 = (hx & 2146435072) >> 20;   /* 0x7ff00000 */
+  if (k == 0) {
+    if ((lx | (hx & 2147483647)) == 0) {
+      return r;
+    }
+    r = r * two54;
+    unsafe {
+      let p2: *u64 = &r as *u64;
+      bits = *p2;
+    }
+    hx = ((bits >> 32) as u32) as i32;
+    k = ((hx & 2146435072) >> 20) - 54;
+    if (n < (0 - 50000)) {
+      return tiny * x;
+    }
+  }
+  if (k == 2047) {
+    return r + r;
+  }
+  k = k + n;
+  if (k > 2046) {
+    let s: f64 = huge;
+    if (hx < 0) {
+      s = 0.0 - huge;
+    }
+    return huge * s;
+  }
+  if (k > 0) {
+    let nhx: u32 = ((hx as u32) & 2148532223) | ((k as u32) << 20); /* 0x800fffff */
+    unsafe {
+      let p3: *u64 = &r as *u64;
+      *p3 = ((nhx as u64) << 32) | (bits & 4294967295);
+    }
+    return r;
+  }
+  if (k <= (0 - 54)) {
+    if (n > 50000) {
+      let s2: f64 = huge;
+      if (hx < 0) {
+        s2 = 0.0 - huge;
+      }
+      return huge * s2;
+    }
+    let s3: f64 = tiny;
+    if (hx < 0) {
+      s3 = 0.0 - tiny;
+    }
+    return tiny * s3;
+  }
+  k = k + 54;
+  let nhx2: u32 = ((hx as u32) & 2148532223) | ((k as u32) << 20);
+  unsafe {
+    let p4: *u64 = &r as *u64;
+    *p4 = ((nhx2 as u64) << 32) | (bits & 4294967295);
+  }
+  return r * twom54;
+}
+
+/**
+ * 24-bit chunk i of 2/pi (fdlibm two_over_pi[i], 0..65).
+ * @param i i32 - index; caller keeps 0 <= i <= 65
+ * @return i32 - 24-bit chunk as a positive integer
+ * PLATFORM: SHARED
+ */
+function math_two_over_pi(i: i32): i32 {
+  let t: [66]i32 = [10680707, 7228996, 1387004, 2578385, 16069853, 12639074, 9804092, 4427841, 16666979, 11263675, 12935607, 2387514, 4345298, 14681673, 3074569, 13734428, 16653803, 1880361, 10960616, 8533493, 3062596, 8710556, 7349940, 6258241, 3772886, 3769171, 3798172, 8675211, 12450088, 3874808, 9961438, 366607, 15675153, 9132554, 7151469, 3571407, 2607881, 12013382, 4155038, 6285869, 7677882, 13102053, 15825725, 473591, 9065106, 15363067, 6271263, 9264392, 5636912, 4652155, 7056368, 13614112, 10155062, 1944035, 9527646, 15080200, 6658437, 6231200, 6832269, 16767104, 5075751, 3212806, 1398474, 7579849, 6349435, 12618859];
+  return t[i];
+}
+
+/**
+ * High word of n*pi/2 for n=1..32 (fdlibm npio2_hw[n-1]).
+ * @param n i32 - n in 1..32
+ * @return i32 - high word of n*pi/2
+ * PLATFORM: SHARED
+ */
+function math_npio2_hw(n: i32): i32 {
+  let t: [32]i32 = [1073291771, 1074340347, 1074977148, 1075388923, 1075800698, 1076025724, 1076231611, 1076437499, 1076643386, 1076849274, 1076971356, 1077074300, 1077177244, 1077280187, 1077383131, 1077486075, 1077589019, 1077691962, 1077794906, 1077897850, 1077968460, 1078019932, 1078071404, 1078122876, 1078174348, 1078225820, 1078277292, 1078328763, 1078380235, 1078431707, 1078483179, 1078534651];
+  return t[n - 1];
+}
+
+/**
+ * 24-bit chunk i of pi/2 (fdlibm PIo2[i], 0..7). Tiny chunks are
+ * bit-punned (decimal literals cannot round-trip below ~1e-20).
+ * @param i i32 - index 0..7
+ * @return f64 - PIo2[i]
+ * PLATFORM: SHARED
+ */
+function math_pio2_chunk(i: i32): f64 {
+  let v: f64 = 0.0;
+  let u: u64 = 0;
+  if (i == 0) { u = 4609753056584663040; }
+  if (i == 1) { u = 4500296887714185216; }
+  if (i == 2) { u = 4393339057296375808; }
+  if (i == 3) { u = 4285399695318056960; }
+  if (i == 4) { u = 4174867106174599168; }
+  if (i == 5) { u = 4069606033725587456; }
+  if (i == 6) { u = 3955147982449410048; }
+  if (i == 7) { u = 3848874662444400640; }
+  unsafe {
+    let p: *u64 = &v as *u64;
+    *p = u;
+  }
+  return v;
+}
+
+/**
+ * fdlibm __kernel_sin(x, y, iy): sin on [-pi/4, pi/4].
+ * @param x f64 - primary reduced argument, |x| <= pi/4
+ * @param y f64 - tail of x (0 when iy == 0)
+ * @param iy i32 - 0 if y is zero, else 1
+ * @return f64 - sin(x+y) on the primary range
+ * PLATFORM: SHARED freestanding
+ */
+function math_kernel_sin(x: f64, y: f64, iy: i32): f64 {
+  let half: f64 = 0.5;
+  let s1: f64 = 0.0 - 0.16666666666666632435;            /* 0xbfc5555555555549 */
+  let s2: f64 = 0.0083333333333224894612;                /* 0x3f8111111110f8a6 */
+  let s3: f64 = 0.0 - 0.00019841269829857949313;         /* 0xbf2a01a019c161d5 */
+  let s4: f64 = 0.0000027557313707070067679;             /* 0x3ec71de357b1fe7d */
+  let s5: f64 = 0.0 - 0.00000002505076025340686342;      /* 0xbe5ae5e68a2b9ceb */
+  let s6: f64 = 0.00000000015896909952115501022;         /* 0x3de5d93a5acfd57c */
+  let ix: i32 = math_trig_hi(x) & 2147483647;
+  if (ix < 1044381696) {          /* |x| < 2^-27 (0x3e400000) */
+    if ((x as i32) == 0) {
+      return x;
+    }
+  }
+  let z: f64 = x * x;
+  let v: f64 = z * x;
+  let r: f64 = s2 + z * (s3 + z * (s4 + z * (s5 + z * s6)));
+  if (iy == 0) {
+    return x + v * (s1 + z * r);
+  }
+  return x - ((z * (half * y - v * r) - y) - v * s1);
+}
+
+/**
+ * fdlibm __kernel_cos(x, y): cos on [-pi/4, pi/4].
+ * @param x f64 - primary reduced argument, |x| <= pi/4
+ * @param y f64 - tail of x
+ * @return f64 - cos(x+y) on the primary range
+ * PLATFORM: SHARED freestanding
+ */
+function math_kernel_cos(x: f64, y: f64): f64 {
+  let one: f64 = 1.0;
+  let c1: f64 = 0.041666666666666601904;                 /* 0x3fa555555555554c */
+  let c2: f64 = 0.0 - 0.0013888888888874109575;          /* 0xbf56c16c16c15177 */
+  let c3: f64 = 0.000024801587289476729418;              /* 0x3efa01a019cb1590 */
+  let c4: f64 = 0.0 - 0.00000027557314351390663303;      /* 0xbe927e4f809c52ad */
+  let c5: f64 = 0.0000000020875723212981748279;          /* 0x3e21ee9ebdb4b1c4 */
+  let c6: f64 = 0.0 - 0.000000000011359647557788194826;  /* 0xbda8fae9be8838d4 */
+  let ix: i32 = math_trig_hi(x) & 2147483647;
+  if (ix < 1044381696) {          /* |x| < 2^-27 */
+    if ((x as i32) == 0) {
+      return one;
+    }
+  }
+  let z: f64 = x * x;
+  let r: f64 = z * (c1 + z * (c2 + z * (c3 + z * (c4 + z * (c5 + z * c6)))));
+  if (ix < 1070805811) {          /* |x| < 0.3 (0x3FD33333) */
+    return one - (0.5 * z - (z * r - x * y));
+  }
+  let qx: f64 = 0.28125;
+  if (ix <= 1072234496) {         /* x <= 0.78125 (0x3fe90000) */
+    qx = math_trig_with_lo(math_trig_with_hi(0.0, ix - 2097152), 0);
+  }
+  let hz: f64 = 0.5 * z - qx;
+  let a: f64 = one - qx;
+  return a - (hz - (z * r - x * y));
+}
+
+/**
+ * fdlibm __kernel_tan(x, y, iy): tan on [-pi/4, pi/4], or -1/tan when iy == -1.
+ * @param x f64 - primary reduced argument
+ * @param y f64 - tail of x
+ * @param iy i32 - 1 -> tan, -1 -> -1/tan (odd quadrant)
+ * @return f64 - tan(x+y) or -1/tan(x+y)
+ * PLATFORM: SHARED freestanding
+ */
+function math_kernel_tan(x: f64, y: f64, iy: i32): f64 {
+  let t0: f64 = 0.33333333333333409199;                  /* 0x3fd5555555555563 */
+  let t1: f64 = 0.1333333333332012427;                   /* 0x3fc111111110fe7a */
+  let t2: f64 = 0.053968253976226052138;                 /* 0x3faba1ba1bb341fe */
+  let t3: f64 = 0.02186948829485954246;                  /* 0x3f9664f48406d637 */
+  let t4: f64 = 0.0088632398235993000574;                /* 0x3f8226e3e96e8493 */
+  let t5: f64 = 0.0035920791075913123536;                /* 0x3f6d6d22c9560328 */
+  let t6: f64 = 0.0014562094543252902552;                /* 0x3f57dbc8fee08315 */
+  let t7: f64 = 0.00058804124082026409687;               /* 0x3f4344d8f2f26501 */
+  let t8: f64 = 0.00024646313481846990681;               /* 0x3f3026f71a8d1068 */
+  let t9: f64 = 0.00007817944429395570923;               /* 0x3f147e88a03792a6 */
+  let t10: f64 = 0.000071407249138260819031;             /* 0x3f12b80f32f0a7e9 */
+  let t11: f64 = 0.0 - 0.000018558637485527545665;       /* 0xbef375cbdb605373 */
+  let t12: f64 = 0.000025907305186363371288;             /* 0x3efb2a7074bf7ad4 */
+  let one: f64 = 1.0;
+  let pio4: f64 = 0.785398163397448279;                  /* 0x3fe921fb54442d18 */
+  let pio4lo: f64 = 0.0;
+  unsafe {
+    let pp: *u64 = &pio4lo as *u64;
+    *pp = 4359948597267291143;      /* 0x3c81a62633145c07 */
+  }
+  let xx: f64 = x;
+  let yy: f64 = y;
+  let hx: i32 = math_trig_hi(xx);
+  let ix: i32 = hx & 2147483647;
+  if (ix < 1043333120) {          /* |x| < 2^-28 (0x3e300000) */
+    if ((xx as i32) == 0) {
+      if (((ix | math_trig_lo(xx)) | (iy + 1)) == 0) {
+        let ax: f64 = xx;
+        unsafe {
+          let pa: *u64 = &ax as *u64;
+          *pa = *pa & 9223372036854775807;
+        }
+        return one / ax;
+      }
+      if (iy == 1) {
+        return xx;
+      }
+      let w0: f64 = xx + yy;
+      let z0: f64 = math_trig_with_lo(w0, 0);
+      let v0: f64 = yy - (z0 - xx);
+      let a0: f64 = (0.0 - one) / w0;
+      let tt: f64 = math_trig_with_lo(a0, 0);
+      let s0: f64 = one + tt * z0;
+      return tt + a0 * (s0 + tt * v0);
+    }
+  }
+  if (ix >= 1072010280) {         /* |x| >= 0.6744 (0x3FE59428) */
+    if (hx < 0) {
+      xx = 0.0 - xx;
+      yy = 0.0 - yy;
+    }
+    let z1: f64 = pio4 - xx;
+    let w1: f64 = pio4lo - yy;
+    xx = z1 + w1;
+    yy = 0.0;
+  }
+  let z: f64 = xx * xx;
+  let w: f64 = z * z;
+  let r: f64 = t1 + w * (t3 + w * (t5 + w * (t7 + w * (t9 + w * t11))));
+  let v: f64 = z * (t2 + w * (t4 + w * (t6 + w * (t8 + w * (t10 + w * t12)))));
+  let s: f64 = z * xx;
+  r = yy + z * (s * (r + v) + yy);
+  r = r + t0 * s;
+  w = xx + r;
+  if (ix >= 1072010280) {
+    let vv: f64 = iy as f64;
+    let sgn: i32 = 1 - ((((hx as u32) >> 30) & 2) as i32);
+    return (sgn as f64) * (vv - 2.0 * (xx - (w * w / (w + vv) - r)));
+  }
+  if (iy == 1) {
+    return w;
+  }
+  let z2: f64 = math_trig_with_lo(w, 0);
+  let v2: f64 = r - (z2 - xx);
+  let a2: f64 = (0.0 - 1.0) / w;
+  let t2b: f64 = math_trig_with_lo(a2, 0);
+  let s2: f64 = 1.0 + t2b * z2;
+  return t2b + a2 * (s2 + t2b * v2);
+}
+
+/**
+ * fdlibm __kernel_rem_pio2 for double precision (prec = 2).
+ * Computes y[0]+y[1] = x - n*pi/2 with |y| <= pi/2; returns n mod 8.
+ * Local arrays of 20 hold the 24-bit chunks (fdlibm f/q/iq/fq).
+ * goto-recompute is a while flag (X has no goto).
+ * @param tx0 f64 - 24-bit chunk 0 of |x|
+ * @param tx1 f64 - chunk 1
+ * @param tx2 f64 - chunk 2
+ * @param e0 i32 - exponent of tx0 (ilogb(|x|)-23)
+ * @param nx i32 - number of nonzero chunks (1..3)
+ * @param y0 *f64 - out: primary reduced argument
+ * @param y1 *f64 - out: tail
+ * @return i32 - n & 7
+ * PLATFORM: SHARED freestanding
+ */
+function math_kernel_rem_pio2(tx0: f64, tx1: f64, tx2: f64, e0: i32, nx: i32, y0: *f64, y1: *f64): i32 {
+  let zero: f64 = 0.0;
+  let one: f64 = 1.0;
+  let two24: f64 = 16777216 as f64;
+  let twon24: f64 = 0.000000059604644775390625;   /* 2^-24 */
+  let jk: i32 = 4;   /* init_jk[2] for extended/double-tail */
+  let jp: i32 = jk;
+  let jx: i32 = nx - 1;
+  let jv: i32 = (e0 - 3) / 24;
+  if (jv < 0) {
+    jv = 0;
+  }
+  let q0: i32 = e0 - 24 * (jv + 1);
+  let f: [20]f64 = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+  let q: [20]f64 = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+  let fq: [20]f64 = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+  let iq: [20]i32 = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  let j: i32 = jv - jx;
+  let m: i32 = jx + jk;
+  let i: i32 = 0;
+  while (i <= m) {
+    if (j < 0) {
+      f[i] = zero;
+    } else {
+      f[i] = math_two_over_pi(j) as f64;
+    }
+    i = i + 1;
+    j = j + 1;
+  }
+  i = 0;
+  while (i <= jk) {
+    let fw: f64 = 0.0;
+    let jj: i32 = 0;
+    while (jj <= jx) {
+      let xj: f64 = tx0;
+      if (jj == 1) {
+        xj = tx1;
+      }
+      if (jj == 2) {
+        xj = tx2;
+      }
+      fw = fw + xj * f[jx + i - jj];
+      jj = jj + 1;
+    }
+    q[i] = fw;
+    i = i + 1;
+  }
+  let jz: i32 = jk;
+  let again: i32 = 1;
+  let n: i32 = 0;
+  let ih: i32 = 0;
+  let z: f64 = 0.0;
+  while (again == 1) {
+    again = 0;
+    i = 0;
+    j = jz;
+    z = q[jz];
+    while (j > 0) {
+      let fw2: f64 = ((twon24 * z) as i32) as f64;
+      iq[i] = (z - two24 * fw2) as i32;
+      z = q[j - 1] + fw2;
+      i = i + 1;
+      j = j - 1;
+    }
+    z = math_trig_scalbn(z, q0);
+    z = z - 8.0 * math_floor_c(z * 0.125);
+    n = z as i32;
+    z = z - (n as f64);
+    ih = 0;
+    if (q0 > 0) {
+      let sh: i32 = 24 - q0;
+      i = iq[jz - 1] >> sh;
+      n = n + i;
+      iq[jz - 1] = iq[jz - 1] - (i << sh);
+      ih = iq[jz - 1] >> (23 - q0);
+    } else {
+      if (q0 == 0) {
+        ih = iq[jz - 1] >> 23;
+      } else {
+        if (z >= 0.5) {
+          ih = 2;
+        }
+      }
+    }
+    if (ih > 0) {
+      n = n + 1;
+      let carry: i32 = 0;
+      i = 0;
+      while (i < jz) {
+        j = iq[i];
+        if (carry == 0) {
+          if (j != 0) {
+            carry = 1;
+            iq[i] = 16777216 - j;
+          }
+        } else {
+          iq[i] = 16777215 - j;
+        }
+        i = i + 1;
+      }
+      if (q0 > 0) {
+        if (q0 == 1) {
+          iq[jz - 1] = iq[jz - 1] & 8388607;
+        } else {
+          if (q0 == 2) {
+            iq[jz - 1] = iq[jz - 1] & 4194303;
+          }
+        }
+      }
+      if (ih == 2) {
+        z = one - z;
+        if (carry != 0) {
+          z = z - math_trig_scalbn(one, q0);
+        }
+      }
+    }
+    if (z == zero) {
+      j = 0;
+      i = jz - 1;
+      while (i >= jk) {
+        j = j | iq[i];
+        i = i - 1;
+      }
+      if (j == 0) {
+        let k: i32 = 1;
+        while (iq[jk - k] == 0) {
+          k = k + 1;
+        }
+        i = jz + 1;
+        while (i <= (jz + k)) {
+          f[jx + i] = math_two_over_pi(jv + i) as f64;
+          let fw3: f64 = 0.0;
+          let jj2: i32 = 0;
+          while (jj2 <= jx) {
+            let xj2: f64 = tx0;
+            if (jj2 == 1) {
+              xj2 = tx1;
+            }
+            if (jj2 == 2) {
+              xj2 = tx2;
+            }
+            fw3 = fw3 + xj2 * f[jx + i - jj2];
+            jj2 = jj2 + 1;
+          }
+          q[i] = fw3;
+          i = i + 1;
+        }
+        jz = jz + k;
+        again = 1;
+      }
+    }
+  }
+  if (z == 0.0) {
+    jz = jz - 1;
+    q0 = q0 - 24;
+    while (iq[jz] == 0) {
+      jz = jz - 1;
+      q0 = q0 - 24;
+    }
+  } else {
+    z = math_trig_scalbn(z, 0 - q0);
+    if (z >= two24) {
+      let fw4: f64 = ((twon24 * z) as i32) as f64;
+      iq[jz] = (z - two24 * fw4) as i32;
+      jz = jz + 1;
+      q0 = q0 + 24;
+      iq[jz] = (fw4 as i32);
+    } else {
+      iq[jz] = z as i32;
+    }
+  }
+  let fw5: f64 = math_trig_scalbn(one, q0);
+  i = jz;
+  while (i >= 0) {
+    q[i] = fw5 * (iq[i] as f64);
+    fw5 = fw5 * twon24;
+    i = i - 1;
+  }
+  i = jz;
+  while (i >= 0) {
+    let fw6: f64 = 0.0;
+    let k2: i32 = 0;
+    while ((k2 <= jp) && (k2 <= (jz - i))) {
+      fw6 = fw6 + math_pio2_chunk(k2) * q[i + k2];
+      k2 = k2 + 1;
+    }
+    fq[jz - i] = fw6;
+    i = i - 1;
+  }
+  let fw7: f64 = 0.0;
+  i = jz;
+  while (i >= 0) {
+    fw7 = fw7 + fq[i];
+    i = i - 1;
+  }
+  if (ih == 0) {
+    unsafe { *y0 = fw7; }
+  } else {
+    unsafe { *y0 = 0.0 - fw7; }
+  }
+  fw7 = fq[0] - fw7;
+  i = 1;
+  while (i <= jz) {
+    fw7 = fw7 + fq[i];
+    i = i + 1;
+  }
+  if (ih == 0) {
+    unsafe { *y1 = fw7; }
+  } else {
+    unsafe { *y1 = 0.0 - fw7; }
+  }
+  return n & 7;
+}
+
+/**
+ * fdlibm __ieee754_rem_pio2: reduce x to y0+y1 = x - n*pi/2 in [-pi/4, pi/4].
+ * @param x f64 - argument
+ * @param y0 *f64 - out primary
+ * @param y1 *f64 - out tail
+ * @return i32 - n (quadrant index; sign follows x)
+ * PLATFORM: SHARED freestanding
+ */
+function math_rem_pio2(x: f64, y0: *f64, y1: *f64): i32 {
+  let half: f64 = 0.5;
+  let two24: f64 = 16777216 as f64;
+  let invpio2: f64 = 0.63661977236758138243;             /* 0x3fe45f306dc9c883 */
+  let pio2_1: f64 = 1.5707963267341256142;               /* 0x3ff921fb54400000 */
+  let pio2_1t: f64 = 0.000000000060771005065061922493;   /* 0x3dd0b4611a626331 */
+  let pio2_2: f64 = 0.000000000060771005063039659766;    /* 0x3dd0b4611a600000 */
+  let pio2_2t: f64 = 0.0;
+  let pio2_3: f64 = 0.0;
+  let pio2_3t: f64 = 0.0;
+  unsafe {
+    let p2t: *u64 = &pio2_2t as *u64;
+    *p2t = 4297306550709743731;     /* 0x3ba3198a2e037073 */
+    let p3: *u64 = &pio2_3 as *u64;
+    *p3 = 4297306550709518336;      /* 0x3ba3198a2e000000 */
+    let p3t: *u64 = &pio2_3t as *u64;
+    *p3t = 4142048980368378305;     /* 0x397b839a252049c1 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  if (ix <= 1072243195) {         /* |x| ~<= pi/4 (0x3fe921fb) */
+    unsafe { *y0 = x; *y1 = 0.0; }
+    return 0;
+  }
+  if (ix < 1073928572) {          /* |x| < 3pi/4 (0x4002d97c) */
+    if (hx > 0) {
+      let z: f64 = x - pio2_1;
+      if (ix != 1073291771) {     /* 0x3ff921fb */
+        unsafe {
+          *y0 = z - pio2_1t;
+          *y1 = (z - *y0) - pio2_1t;
+        }
+      } else {
+        z = z - pio2_2;
+        unsafe {
+          *y0 = z - pio2_2t;
+          *y1 = (z - *y0) - pio2_2t;
+        }
+      }
+      return 1;
+    }
+    let z2: f64 = x + pio2_1;
+    if (ix != 1073291771) {
+      unsafe {
+        *y0 = z2 + pio2_1t;
+        *y1 = (z2 - *y0) + pio2_1t;
+      }
+    } else {
+      z2 = z2 + pio2_2;
+      unsafe {
+        *y0 = z2 + pio2_2t;
+        *y1 = (z2 - *y0) + pio2_2t;
+      }
+    }
+    return 0 - 1;
+  }
+  if (ix <= 1094263291) {         /* |x| ~<= 2^19*(pi/2) (0x413921fb) */
+    let t: f64 = x;
+    if (hx < 0) {
+      t = 0.0 - x;
+    }
+    let n: i32 = (t * invpio2 + half) as i32;
+    let fn: f64 = n as f64;
+    let r: f64 = t - fn * pio2_1;
+    let w: f64 = fn * pio2_1t;
+    if ((n < 32) && (ix != math_npio2_hw(n))) {
+      unsafe { *y0 = r - w; }
+    } else {
+      let jj: i32 = ix >> 20;
+      unsafe { *y0 = r - w; }
+      let i2: i32 = jj - ((math_trig_hi(unsafe { *y0 }) >> 20) & 2047);
+      if (i2 > 16) {
+        t = r;
+        w = fn * pio2_2;
+        r = t - w;
+        w = fn * pio2_2t - ((t - r) - w);
+        unsafe { *y0 = r - w; }
+        i2 = jj - ((math_trig_hi(unsafe { *y0 }) >> 20) & 2047);
+        if (i2 > 49) {
+          t = r;
+          w = fn * pio2_3;
+          r = t - w;
+          w = fn * pio2_3t - ((t - r) - w);
+          unsafe { *y0 = r - w; }
+        }
+      }
+    }
+    unsafe { *y1 = (r - *y0) - w; }
+    if (hx < 0) {
+      unsafe { *y0 = 0.0 - *y0; *y1 = 0.0 - *y1; }
+      return 0 - n;
+    }
+    return n;
+  }
+  if (ix >= 2146435072) {         /* inf or NaN */
+    unsafe { *y0 = x - x; *y1 = x - x; }
+    return 0;
+  }
+  let z3: f64 = math_trig_with_lo(0.0, math_trig_lo(x));
+  let e0: i32 = (ix >> 20) - 1046;
+  z3 = math_trig_with_hi(z3, ix - (e0 << 20));
+  let tx0: f64 = (z3 as i32) as f64;
+  z3 = (z3 - tx0) * two24;
+  let tx1: f64 = (z3 as i32) as f64;
+  z3 = (z3 - tx1) * two24;
+  let tx2: f64 = z3;
+  let nx: i32 = 3;
+  if (tx2 == 0.0) {
+    nx = 2;
+    if (tx1 == 0.0) {
+      nx = 1;
+    }
+  }
+  let n2: i32 = math_kernel_rem_pio2(tx0, tx1, tx2, e0, nx, y0, y1);
+  if (hx < 0) {
+    unsafe { *y0 = 0.0 - *y0; *y1 = 0.0 - *y1; }
+    return 0 - n2;
+  }
+  return n2;
+}
+
+/**
+ * Computes sin(x): the sine of x, returned as f64.
+ *
+ * fdlibm s_sin.c port (Sun reference, error < 1 ulp):
+ * 1. |x| ~<= pi/4 uses the degree-13 kernel directly (tail = 0).
+ * 2. Inf/NaN returns NaN via x-x.
+ * 3. Otherwise rem_pio2 reduces x to y0+y1 in [-pi/4, pi/4] and n = k mod 4
+ *    selects (S, C, -S, -C) on the four quadrants.
+ * Constants are Python-verified against the fdlibm hex comments.
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_sin_c(x: f64): f64 {
-  unsafe { return math_sin_impl(x); }
+  let ix: i32 = math_trig_hi(x) & 2147483647;
+  if (ix <= 1072243195) {         /* |x| ~<= pi/4 */
+    return math_kernel_sin(x, 0.0, 0);
+  }
+  if (ix >= 2146435072) {         /* inf or NaN */
+    return x - x;
+  }
+  let y0: f64 = 0.0;
+  let y1: f64 = 0.0;
+  let n: i32 = math_rem_pio2(x, &y0 as *f64, &y1 as *f64);
+  let q: i32 = n & 3;
+  if (q == 0) {
+    return math_kernel_sin(y0, y1, 1);
+  }
+  if (q == 1) {
+    return math_kernel_cos(y0, y1);
+  }
+  if (q == 2) {
+    return 0.0 - math_kernel_sin(y0, y1, 1);
+  }
+  return 0.0 - math_kernel_cos(y0, y1);
 }
 
+/**
+ * Computes cos(x): the cosine of x, returned as f64.
+ *
+ * fdlibm s_cos.c port (Sun reference, error < 1 ulp): same reduction as
+ * sin; n mod 4 selects (C, -S, -C, S). A few inputs sit 1 ulp off
+ * correctly-rounded host libm and are pinned to fdlibm (see trig_rc probe).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_cos_c(x: f64): f64 {
-  unsafe { return math_cos_impl(x); }
+  let ix: i32 = math_trig_hi(x) & 2147483647;
+  if (ix <= 1072243195) {
+    return math_kernel_cos(x, 0.0);
+  }
+  if (ix >= 2146435072) {
+    return x - x;
+  }
+  let y0: f64 = 0.0;
+  let y1: f64 = 0.0;
+  let n: i32 = math_rem_pio2(x, &y0 as *f64, &y1 as *f64);
+  let q: i32 = n & 3;
+  if (q == 0) {
+    return math_kernel_cos(y0, y1);
+  }
+  if (q == 1) {
+    return 0.0 - math_kernel_sin(y0, y1, 1);
+  }
+  if (q == 2) {
+    return 0.0 - math_kernel_cos(y0, y1);
+  }
+  return math_kernel_sin(y0, y1, 1);
 }
 
+/**
+ * Computes tan(x): the tangent of x, returned as f64.
+ *
+ * fdlibm s_tan.c port (Sun reference, error < 1 ulp): |x| ~<= pi/4 uses
+ * the degree-27 kernel; otherwise rem_pio2 + kernel with iy = 1-2*(n&1)
+ * (odd quadrants return -1/tan). A few inputs sit 1 ulp off host libm
+ * and are pinned to fdlibm (see trig_rc probe).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_tan_c(x: f64): f64 {
-  unsafe { return math_tan_impl(x); }
+  let ix: i32 = math_trig_hi(x) & 2147483647;
+  if (ix <= 1072243195) {
+    return math_kernel_tan(x, 0.0, 1);
+  }
+  if (ix >= 2146435072) {
+    return x - x;
+  }
+  let y0: f64 = 0.0;
+  let y1: f64 = 0.0;
+  let n: i32 = math_rem_pio2(x, &y0 as *f64, &y1 as *f64);
+  return math_kernel_tan(y0, y1, 1 - ((n & 1) << 1));
 }
+
 
 #[no_mangle]
 export function math_asin_c(x: f64): f64 {
