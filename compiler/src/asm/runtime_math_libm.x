@@ -26,6 +26,9 @@
 //   seed keeps same-semantics C cold twins under the same guard
 // 9.2.4 pow (2026-09-08): fdlibm e_pow.c full .x port (no libm); seed keeps
 //   a same-semantics C cold twin under the same guard
+// 9.2.4 asin/acos/atan (2026-09-08): fdlibm e_asin.c / e_acos.c / s_atan.c
+//   full .x ports (no libm); seed keeps same-semantics C cold twins under
+//   the same guard. atan2 remains a host-libm splice this wave.
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -39,9 +42,10 @@ export extern "C" function math_round_impl(x: f64): f64;
  * .x ports on the product path; math_sin_impl / math_cos_impl /
  * math_tan_impl libm splices removed (same-semantics C cold twins live
  * in the guarded seed block). */
-export extern "C" function math_asin_impl(x: f64): f64;
-export extern "C" function math_acos_impl(x: f64): f64;
-export extern "C" function math_atan_impl(x: f64): f64;
+/* 9.2.4 asin/acos/atan (2026-09-08): fdlibm e_asin.c / e_acos.c / s_atan.c
+ * full .x ports on the product path; math_asin_impl / math_acos_impl /
+ * math_atan_impl libm splices removed (same-semantics C cold twins live
+ * in the guarded seed block). atan2 remains a host-libm splice. */
 export extern "C" function math_atan2_impl(y: f64, x: f64): f64;
 /* 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports on
  * the product path; math_sqrt_impl / math_cbrt_impl libm splices removed
@@ -73,6 +77,7 @@ export function math_special_near(a: f64, b: f64, eps: f64): i32;
 export function math_fenv_mask_to_fe(mask: i32): i32;
 export function math_fenv_fe_to_mask(fe: i32): i32;
 export function math_fenv_emit_cap_report(avail: i32): void;
+export function math_sqrt_c(x: f64): f64;
 
 // === doc anchor ===
 
@@ -1100,19 +1105,275 @@ export function math_tan_c(x: f64): f64 {
 }
 
 
+/**
+ * fdlibm asin/acos rational R(t) = p(t)/q(t).
+ * Horner evaluation of the degree-5/4 Remez approximant of
+ * (asin(s)-s)/s^3 on t = s^2 (or t = (1-|x|)/2 on the |x|>=0.5 path).
+ * Shared by math_asin_c and math_acos_c (G.7: one polynomial, two callers).
+ * @param t f64 - s^2 or (1-|x|)/2; finite and in [0, 0.5]
+ * @return f64 - p/q (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_asin_rational(t: f64): f64 {
+  let pS0: f64 = 0.1666666666666666574148081281236954964697360992431640625; /* 0x3FC55555, 0x55555555 */
+  let pS1: f64 = 0.0 - 0.325565818622400915405279420156148262321949005126953125; /* 0xBFD4D612, 0x03EB6F7D */
+  let pS2: f64 = 0.2012125321348629258810802866719313897192478179931640625; /* 0x3FC9C155, 0x0E884455 */
+  let pS3: f64 = 0.0 - 0.040055534500679411402668250730130239389836788177490234375; /* 0xBFA48228, 0xB5688F3B */
+  let pS4: f64 = 0.000791534994289814532175686423443039529956877231597900390625; /* 0x3F49EFE0, 0x7501B288 */
+  let pS5: f64 = 0.0000347933107596021167569506904460041596394148655235767364501953125; /* 0x3F023DE1, 0x0DFDF709 */
+  let qS1: f64 = 0.0 - 2.403394911734414218784650074667297303676605224609375; /* 0xC0033A27, 0x1C8A2D4B */
+  let qS2: f64 = 2.020945760233505694714040146209299564361572265625; /* 0x40002AE5, 0x9C598AC8 */
+  let qS3: f64 = 0.0 - 0.68828397160545329303005246401880867779254913330078125; /* 0xBFE6066C, 0x1B8D0159 */
+  let qS4: f64 = 0.0770381505559019352791239043654059059917926788330078125; /* 0x3FB3B8C5, 0xB12E9282 */
+  let one: f64 = 1.0;
+  let p: f64 = t * (pS0 + t * (pS1 + t * (pS2 + t * (pS3 + t * (pS4 + t * pS5)))));
+  let q: f64 = one + t * (qS1 + t * (qS2 + t * (qS3 + t * qS4)));
+  return p / q;
+}
+
+/**
+ * Computes asin(x): the inverse sine of x, returned in radians.
+ *
+ * fdlibm e_asin.c port (Sun reference, error < 1 ulp):
+ * 1. |x| >= 1: asin(+-1) = +-pi/2 (inexact); |x|>1 or NaN -> (x-x)/(x-x).
+ * 2. |x| < 0.5: tiny |x| < 2^-27 returns x (inexact if x!=0); else
+ *    x + x*R(x^2) with R the shared Remez rational.
+ * 3. 0.5 <= |x| < 1: pi/2 - 2*asin(sqrt((1-|x|)/2)). |x| > 0.975 uses the
+ *    direct form; otherwise a hi/lo split of sqrt(z) (lo word cleared)
+ *    keeps the subtraction exact. Sign of x is restored at the end.
+ * Uses math_sqrt_c and math_trig_hi/lo/with_hi/with_lo (G.7). fabs is
+ * defined later in this file, so |x| is recovered by clearing the sign
+ * bit via math_trig_with_hi(x, ix).
+ * A few inputs sit 1 ulp off correctly-rounded host libm and are pinned
+ * to fdlibm (see invtrig_rc probe).
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param x f64 - argument in [-1, 1] for a finite result
+ * @return f64 - asin(x) in [-pi/2, pi/2] (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_asin_c(x: f64): f64 {
-  unsafe { return math_asin_impl(x); }
+  let one: f64 = 1.0;
+  let pio2_hi: f64 = 1.5707963267948965579989817342720925807952880859375; /* 0x3FF921FB, 0x54442D18 */
+  let pio2_lo: f64 = 0.0000000000000000612323399573676603586882014729198302312846062338790032; /* 0x3C91A626, 0x33145C07 */
+  let pio4_hi: f64 = 0.78539816339744827899949086713604629039764404296875; /* 0x3FE921FB, 0x54442D18 */
+  let huge: f64 = 0.0;
+  unsafe {
+    let ph: *u64 = &huge as *u64;
+    *ph = 9094988921128908188;      /* 0x7e37e43c8800759c = 1e300 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  let t: f64 = 0.0;
+  let w: f64 = 0.0;
+  let c: f64 = 0.0;
+  let r: f64 = 0.0;
+  let s: f64 = 0.0;
+  if (ix >= 1072693248) {           /* |x| >= 1 (0x3ff00000) */
+    if (((ix - 1072693248) | math_trig_lo(x)) == 0) {
+      return x * pio2_hi + x * pio2_lo;
+    }
+    return (x - x) / (x - x);
+  } else if (ix < 1071644672) {     /* |x| < 0.5 (0x3fe00000) */
+    if (ix < 1044381696) {          /* |x| < 2^-27 (0x3e400000) */
+      if ((huge + x) > one) {
+        return x;
+      }
+      return x;
+    }
+    t = x * x;
+    w = math_asin_rational(t);
+    return x + x * w;
+  }
+  /* 1 > |x| >= 0.5: restore abs via cleared sign bit (fabs lives later). */
+  w = one - math_trig_with_hi(x, ix);
+  t = w * 0.5;
+  r = math_asin_rational(t);
+  s = math_sqrt_c(t);
+  if (ix >= 1072640819) {           /* |x| > 0.975 (0x3FEF3333) */
+    t = pio2_hi - (2.0 * (s + s * r) - pio2_lo);
+  } else {
+    w = math_trig_with_lo(s, 0);
+    c = (t - w * w) / (s + w);
+    r = 2.0 * s * r - (pio2_lo - 2.0 * c);
+    t = pio4_hi - (r - (pio4_hi - 2.0 * w));
+  }
+  if (hx > 0) {
+    return t;
+  }
+  return 0.0 - t;
 }
 
+/**
+ * Computes acos(x): the inverse cosine of x, returned in radians.
+ *
+ * fdlibm e_acos.c port (Sun reference, error < 1 ulp). Not implemented
+ * as pi/2 - asin(x): the cancellation-safe rearrangement is the
+ * authority (G.7: this is the acos path; it only reuses the shared
+ * R polynomial and math_sqrt_c).
+ * 1. |x| >= 1: acos(1)=0, acos(-1)=pi (via pi+2*pio2_lo), else NaN.
+ * 2. |x| < 0.5: tiny |x| < 2^-57 returns pio2_hi+pio2_lo; else
+ *    pio2_hi - (x - (pio2_lo - x*R(x^2))).
+ * 3. x < -0.5: pi - 2*asin(sqrt((1+x)/2)).
+ * 4. x > 0.5: 2*asin(sqrt((1-x)/2)) with a hi/lo split of sqrt(z).
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param x f64 - argument in [-1, 1] for a finite result
+ * @return f64 - acos(x) in [0, pi] (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_acos_c(x: f64): f64 {
-  unsafe { return math_acos_impl(x); }
+  let one: f64 = 1.0;
+  let pi: f64 = 3.141592653589793115997963468544185161590576171875; /* 0x400921FB, 0x54442D18 */
+  let pio2_hi: f64 = 1.5707963267948965579989817342720925807952880859375; /* 0x3FF921FB, 0x54442D18 */
+  let pio2_lo: f64 = 0.0000000000000000612323399573676603586882014729198302312846062338790032; /* 0x3C91A626, 0x33145C07 */
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  let z: f64 = 0.0;
+  let r: f64 = 0.0;
+  let w: f64 = 0.0;
+  let s: f64 = 0.0;
+  let c: f64 = 0.0;
+  let df: f64 = 0.0;
+  if (ix >= 1072693248) {           /* |x| >= 1 (0x3ff00000) */
+    if (((ix - 1072693248) | math_trig_lo(x)) == 0) {
+      if (hx > 0) {
+        return 0.0;
+      }
+      return pi + 2.0 * pio2_lo;
+    }
+    return (x - x) / (x - x);
+  }
+  if (ix < 1071644672) {            /* |x| < 0.5 (0x3fe00000) */
+    if (ix <= 1012924416) {         /* |x| < 2^-57 (0x3c600000) */
+      return pio2_hi + pio2_lo;
+    }
+    z = x * x;
+    r = math_asin_rational(z);
+    return pio2_hi - (x - (pio2_lo - x * r));
+  } else if (hx < 0) {
+    z = (one + x) * 0.5;
+    s = math_sqrt_c(z);
+    r = math_asin_rational(z);
+    w = r * s - pio2_lo;
+    return pi - 2.0 * (s + w);
+  }
+  z = (one - x) * 0.5;
+  s = math_sqrt_c(z);
+  df = math_trig_with_lo(s, 0);
+  c = (z - df * df) / (s + df);
+  r = math_asin_rational(z);
+  w = r * s + c;
+  return 2.0 * (df + w);
 }
 
+/**
+ * Computes atan(x): the inverse tangent of x, returned in radians.
+ *
+ * fdlibm s_atan.c port (Sun reference, error < 1 ulp):
+ * 1. Reduce to positive via atan(x) = -atan(-x).
+ * 2. Range reduction by chopped 4t+0.25 into five intervals, then a
+ *    degree-11 odd polynomial in z=t^2 split into even/odd Horner sums.
+ * 3. |x| >= 2^66: NaN stays NaN (x+x); +-inf / huge finite -> +-pi/2.
+ * 4. |x| < 2^-29 returns x (inexact).
+ * Uses math_trig_hi/lo/with_hi (G.7). fabs lives later, so |x| is
+ * recovered by clearing the sign bit. id selects atanhi/atanlo.
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param x f64 - any bit pattern
+ * @return f64 - atan(x) in (-pi/2, pi/2) (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_atan_c(x: f64): f64 {
-  unsafe { return math_atan_impl(x); }
+  let atanhi0: f64 = 0.463647609000806093515478778499527834355831146240234375; /* 0x3FDDAC67, 0x0561BB4F */
+  let atanhi1: f64 = 0.78539816339744827899949086713604629039764404296875; /* 0x3FE921FB, 0x54442D18 */
+  let atanhi2: f64 = 0.98279372324732905408239957978366874158382415771484375; /* 0x3FEF730B, 0xD281F69B */
+  let atanhi3: f64 = 1.5707963267948965579989817342720925807952880859375; /* 0x3FF921FB, 0x54442D18 */
+  let atanlo0: f64 = 0.0000000000000000226987774529616870924083441919624105525186829473722333; /* 0x3C7A2B7F, 0x222F65E2 */
+  let atanlo1: f64 = 0.0000000000000000306161699786838301793441007364599151156423031169395016; /* 0x3C81A626, 0x33145C07 */
+  let atanlo2: f64 = 0.0000000000000000139033110312309984515998633820766532312801858490810061; /* 0x3C700788, 0x7AF0CBBD */
+  let atanlo3: f64 = 0.0000000000000000612323399573676603586882014729198302312846062338790032; /* 0x3C91A626, 0x33145C07 */
+  let aT0: f64 = 0.333333333333329318026727605683845467865467071533203125; /* 0x3FD55555, 0x5555550D */
+  let aT1: f64 = 0.0 - 0.19999999999876483247618352834251709282398223876953125; /* 0xBFC99999, 0x9998EBC4 */
+  let aT2: f64 = 0.1428571427250346637105593572414363734424114227294921875; /* 0x3FC24924, 0x920083FF */
+  let aT3: f64 = 0.0 - 0.11111110405462355787964412456858553923666477203369140625; /* 0xBFBC71C6, 0xFE231671 */
+  let aT4: f64 = 0.0909088713343650656195649162327754311263561248779296875; /* 0x3FB745CD, 0xC54C206E */
+  let aT5: f64 = 0.0 - 0.07691876205044829994950106311080162413418292999267578125; /* 0xBFB3B0F2, 0xAF749A6D */
+  let aT6: f64 = 0.06661073137387531206687896201401599682867527008056640625; /* 0x3FB10D66, 0xA0D03D51 */
+  let aT7: f64 = 0.0 - 0.05833570133790573486454178464555297978222370147705078125; /* 0xBFADDE2D, 0x52DEFD9A */
+  let aT8: f64 = 0.049768779946159323601673207804196863435208797454833984375; /* 0x3FA97B4B, 0x24760DEB */
+  let aT9: f64 = 0.0 - 0.036531572744216915527015743236916023306548595428466796875; /* 0xBFA2B444, 0x2C6A6C2F */
+  let aT10: f64 = 0.0162858201153657823623266409640564233995974063873291015625; /* 0x3F90AD3A, 0xE322DA11 */
+  let one: f64 = 1.0;
+  let huge: f64 = 0.0;
+  unsafe {
+    let ph: *u64 = &huge as *u64;
+    *ph = 9094988921128908188;      /* 0x7e37e43c8800759c = 1e300 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  let id: i32 = 0 - 1;
+  let w: f64 = 0.0;
+  let s1: f64 = 0.0;
+  let s2: f64 = 0.0;
+  let z: f64 = 0.0;
+  let xx: f64 = x;
+  if (ix >= 1141899264) {           /* |x| >= 2^66 (0x44100000) */
+    if (ix > 2146435072) {          /* NaN (0x7ff00000) */
+      return x + x;
+    }
+    if ((ix == 2146435072) && (math_trig_lo(x) != 0)) {
+      return x + x;
+    }
+    if (hx > 0) {
+      return atanhi3 + atanlo3;
+    }
+    return (0.0 - atanhi3) - atanlo3;
+  }
+  if (ix < 1071382528) {            /* |x| < 0.4375 (0x3fdc0000) */
+    if (ix < 1042284544) {          /* |x| < 2^-29 (0x3e200000) */
+      if ((huge + x) > one) {
+        return x;
+      }
+    }
+    id = 0 - 1;
+  } else {
+    xx = math_trig_with_hi(x, ix);  /* fabs: clear sign bit */
+    if (ix < 1072889856) {          /* |x| < 1.1875 (0x3ff30000) */
+      if (ix < 1072037888) {        /* 7/16 <= |x| < 11/16 (0x3fe60000) */
+        id = 0;
+        xx = (2.0 * xx - one) / (2.0 + xx);
+      } else {
+        id = 1;
+        xx = (xx - one) / (xx + one);
+      }
+    } else {
+      if (ix < 1073971200) {        /* |x| < 2.4375 (0x40038000) */
+        id = 2;
+        xx = (xx - 1.5) / (one + 1.5 * xx);
+      } else {
+        id = 3;
+        xx = (0.0 - 1.0) / xx;
+      }
+    }
+  }
+  z = xx * xx;
+  w = z * z;
+  s1 = z * (aT0 + w * (aT2 + w * (aT4 + w * (aT6 + w * (aT8 + w * aT10)))));
+  s2 = w * (aT1 + w * (aT3 + w * (aT5 + w * (aT7 + w * aT9))));
+  if (id < 0) {
+    return xx - xx * (s1 + s2);
+  }
+  if (id == 0) {
+    z = atanhi0 - ((xx * (s1 + s2) - atanlo0) - xx);
+  } else if (id == 1) {
+    z = atanhi1 - ((xx * (s1 + s2) - atanlo1) - xx);
+  } else if (id == 2) {
+    z = atanhi2 - ((xx * (s1 + s2) - atanlo2) - xx);
+  } else {
+    z = atanhi3 - ((xx * (s1 + s2) - atanlo3) - xx);
+  }
+  if (hx < 0) {
+    return 0.0 - z;
+  }
+  return z;
 }
 
 #[no_mangle]

@@ -52,14 +52,12 @@ double math_floor_impl(double x) { return floor(x); }
 double math_ceil_impl(double x) { return ceil(x); }
 double math_trunc_impl(double x) { return trunc(x); }
 double math_round_impl(double x) { return round(x); }
-/* math_sin_impl / math_cos_impl / math_tan_impl libm splices removed (9.2.4). */
-double math_asin_impl(double x) { return asin(x); }
-double math_acos_impl(double x) { return acos(x); }
-double math_atan_impl(double x) { return atan(x); }
+/* math_sin_impl / math_cos_impl / math_tan_impl / math_asin_impl /
+ * math_acos_impl / math_atan_impl libm splices removed (9.2.4). */
 double math_atan2_impl(double y, double x) { return atan2(y, x); }
-/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow: fdlibm .x ports on
- * the product path; matching math_*_impl libm splices removed
- * (same-semantics C cold twins live in the guarded block). */
+/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow/asin/acos/atan:
+ * fdlibm .x ports on the product path; matching math_*_impl libm splices
+ * removed (same-semantics C cold twins live in the guarded block). */
 double math_fabs_impl(double x) { return fabs(x); }
 double math_fmin_impl(double a, double b) { return fmin(a, b); }
 double math_fmax_impl(double a, double b) { return fmax(a, b); }
@@ -74,15 +72,14 @@ double math_erfc_impl(double x) { return erfc(x); }
  */
 
 #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
-/* math_sin_c / math_cos_c / math_tan_c removed from splice: fdlibm .x ports
- * + guarded cold twins below (9.2.4). */
-double math_asin_c(double x) { return math_asin_impl(x); }
-double math_acos_c(double x) { return math_acos_impl(x); }
-double math_atan_c(double x) { return math_atan_impl(x); }
+/* math_sin_c / math_cos_c / math_tan_c / math_asin_c / math_acos_c /
+ * math_atan_c removed from splice: fdlibm .x ports + guarded cold twins
+ * below (9.2.4). */
 double math_atan2_c(double y, double x) { return math_atan2_impl(y, x); }
 /* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c / math_log1p_c /
- * math_expm1_c / math_pow_c removed from the splice block: fdlibm .x
- * ports + guarded cold twins below (9.2.4). */
+ * math_expm1_c / math_pow_c / math_asin_c / math_acos_c / math_atan_c
+ * removed from the splice block: fdlibm .x ports + guarded cold twins
+ * below (9.2.4). */
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
 #endif
@@ -1359,6 +1356,172 @@ double math_pow_c(double base, double exp) {
     set_hi(&z, hi_of(z) + (n << 20));
   }
   return s * z;
+}
+
+/* fdlibm e_asin.c / e_acos.c / s_atan.c cold twins — isomorphic with
+ * math_asin_c / math_acos_c / math_atan_c in src/asm/runtime_math_libm.x.
+ * Shared R(t)=p/q lives in twin_asin_rational (G.7). |x| via set_hi
+ * (fabs lives later). y-range sqrt uses math_sqrt_c. Decimal literals
+ * are the fdlibm source constants (Python-verified against the hex
+ * comments). PLATFORM: SHARED. */
+static double twin_asin_rational(double t) {
+  static const double pS0 = 1.66666666666666657415e-01;
+  static const double pS1 = -3.25565818622400915405e-01;
+  static const double pS2 = 2.01212532134862925881e-01;
+  static const double pS3 = -4.00555345006794114027e-02;
+  static const double pS4 = 7.91534994289814532176e-04;
+  static const double pS5 = 3.47933107596021167570e-05;
+  static const double qS1 = -2.40339491173441421878e+00;
+  static const double qS2 = 2.02094576023350569471e+00;
+  static const double qS3 = -6.88283971605453293030e-01;
+  static const double qS4 = 7.70381505559019352791e-02;
+  static const double one = 1.0;
+  double p = t * (pS0 + t * (pS1 + t * (pS2 + t * (pS3 + t * (pS4 + t * pS5)))));
+  double q = one + t * (qS1 + t * (qS2 + t * (qS3 + t * qS4)));
+  return p / q;
+}
+
+double math_asin_c(double x) {
+  static const double one = 1.0;
+  static const double pio2_hi = 1.57079632679489655800e+00;
+  static const double pio2_lo = 6.12323399573676603587e-17;
+  static const double pio4_hi = 7.85398163397448278999e-01;
+  union { double d; uint64_t u; } huge;
+  huge.u = 9094988921128908188ull; /* 1e300 */
+  double t, w, c, r, s;
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  if (ix >= 0x3ff00000) {
+    if (((ix - 0x3ff00000) | lo_of(x)) == 0)
+      return x * pio2_hi + x * pio2_lo;
+    return (x - x) / (x - x);
+  } else if (ix < 0x3fe00000) {
+    if (ix < 0x3e400000) {
+      if (huge.d + x > one) return x;
+      return x;
+    }
+    return x + x * twin_asin_rational(x * x);
+  }
+  w = x;
+  set_hi(&w, ix);
+  w = one - w;
+  t = w * 0.5;
+  r = twin_asin_rational(t);
+  s = math_sqrt_c(t);
+  if (ix >= 0x3FEF3333) {
+    t = pio2_hi - (2.0 * (s + s * r) - pio2_lo);
+  } else {
+    w = s;
+    set_lo(&w, 0);
+    c = (t - w * w) / (s + w);
+    r = 2.0 * s * r - (pio2_lo - 2.0 * c);
+    t = pio4_hi - (r - (pio4_hi - 2.0 * w));
+  }
+  if (hx > 0) return t;
+  return -t;
+}
+
+double math_acos_c(double x) {
+  static const double one = 1.0;
+  static const double pi = 3.14159265358979311600e+00;
+  static const double pio2_hi = 1.57079632679489655800e+00;
+  static const double pio2_lo = 6.12323399573676603587e-17;
+  double z, r, w, s, c, df;
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  if (ix >= 0x3ff00000) {
+    if (((ix - 0x3ff00000) | lo_of(x)) == 0) {
+      if (hx > 0) return 0.0;
+      return pi + 2.0 * pio2_lo;
+    }
+    return (x - x) / (x - x);
+  }
+  if (ix < 0x3fe00000) {
+    if (ix <= 0x3c600000) return pio2_hi + pio2_lo;
+    r = twin_asin_rational(x * x);
+    return pio2_hi - (x - (pio2_lo - x * r));
+  } else if (hx < 0) {
+    z = (one + x) * 0.5;
+    s = math_sqrt_c(z);
+    r = twin_asin_rational(z);
+    w = r * s - pio2_lo;
+    return pi - 2.0 * (s + w);
+  }
+  z = (one - x) * 0.5;
+  s = math_sqrt_c(z);
+  df = s;
+  set_lo(&df, 0);
+  c = (z - df * df) / (s + df);
+  r = twin_asin_rational(z);
+  w = r * s + c;
+  return 2.0 * (df + w);
+}
+
+double math_atan_c(double x) {
+  static const double atanhi0 = 4.63647609000806093515e-01;
+  static const double atanhi1 = 7.85398163397448278999e-01;
+  static const double atanhi2 = 9.82793723247329054082e-01;
+  static const double atanhi3 = 1.57079632679489655800e+00;
+  static const double atanlo0 = 2.26987774529616870924e-17;
+  static const double atanlo1 = 3.06161699786838301793e-17;
+  static const double atanlo2 = 1.39033110312309984516e-17;
+  static const double atanlo3 = 6.12323399573676603587e-17;
+  static const double aT0 = 3.33333333333329318027e-01;
+  static const double aT1 = -1.99999999998764832476e-01;
+  static const double aT2 = 1.42857142725034663711e-01;
+  static const double aT3 = -1.11111104054623557880e-01;
+  static const double aT4 = 9.09088713343650656196e-02;
+  static const double aT5 = -7.69187620504482999495e-02;
+  static const double aT6 = 6.66107313738753120669e-02;
+  static const double aT7 = -5.83357013379057348645e-02;
+  static const double aT8 = 4.97687799461593236017e-02;
+  static const double aT9 = -3.65315727442169155270e-02;
+  static const double aT10 = 1.62858201153657823623e-02;
+  static const double one = 1.0;
+  union { double d; uint64_t u; } huge;
+  huge.u = 9094988921128908188ull; /* 1e300 */
+  double w, s1, s2, z, xx = x;
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  int32_t id = -1;
+  if (ix >= 0x44100000) {
+    if (ix > 0x7ff00000 || (ix == 0x7ff00000 && (lo_of(x) != 0)))
+      return x + x;
+    if (hx > 0) return atanhi3 + atanlo3;
+    return -atanhi3 - atanlo3;
+  }
+  if (ix < 0x3fdc0000) {
+    if (ix < 0x3e200000) {
+      if (huge.d + x > one) return x;
+    }
+    id = -1;
+  } else {
+    set_hi(&xx, ix);
+    if (ix < 0x3ff30000) {
+      if (ix < 0x3fe60000) {
+        id = 0; xx = (2.0 * xx - one) / (2.0 + xx);
+      } else {
+        id = 1; xx = (xx - one) / (xx + one);
+      }
+    } else {
+      if (ix < 0x40038000) {
+        id = 2; xx = (xx - 1.5) / (one + 1.5 * xx);
+      } else {
+        id = 3; xx = -1.0 / xx;
+      }
+    }
+  }
+  z = xx * xx;
+  w = z * z;
+  s1 = z * (aT0 + w * (aT2 + w * (aT4 + w * (aT6 + w * (aT8 + w * aT10)))));
+  s2 = w * (aT1 + w * (aT3 + w * (aT5 + w * (aT7 + w * aT9))));
+  if (id < 0) return xx - xx * (s1 + s2);
+  if (id == 0) z = atanhi0 - ((xx * (s1 + s2) - atanlo0) - xx);
+  else if (id == 1) z = atanhi1 - ((xx * (s1 + s2) - atanlo1) - xx);
+  else if (id == 2) z = atanhi2 - ((xx * (s1 + s2) - atanlo2) - xx);
+  else z = atanhi3 - ((xx * (s1 + s2) - atanlo3) - xx);
+  if (hx < 0) return -z;
+  return z;
 }
 
 #endif
