@@ -32,6 +32,10 @@
 // 9.2.4 atan2 (2026-09-08): fdlibm e_atan2.c full .x port (no libm); reuses
 //   math_atan_c (G.7); seed keeps a same-semantics C cold twin under the
 //   same guard.
+// 9.2.4 erf/erfc (2026-09-08): fdlibm s_erf.c / s_erfc.c full .x ports (no
+//   libm); shared P/Q, P1/Q1, R1/S1, R2/S2 rationals plus the two-exp
+//   tail (G.7); seed keeps same-semantics C cold twins under the same
+//   guard.
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -52,6 +56,10 @@ export extern "C" function math_round_impl(x: f64): f64;
 /* 9.2.4 atan2 (2026-09-08): fdlibm e_atan2.c full .x port on the product
  * path; math_atan2_impl libm splice removed (same-semantics C cold twin
  * lives in the guarded seed block). Reuses math_atan_c (G.7). */
+/* 9.2.4 erf/erfc (2026-09-08): fdlibm s_erf.c / s_erfc.c full .x ports on
+ * the product path; math_erf_impl / math_erfc_impl libm splices removed
+ * (same-semantics C cold twins live in the guarded seed block). Shared
+ * rationals + exp tail (G.7); reuses math_exp_c / math_fabs_c. */
 /* 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports on
  * the product path; math_sqrt_impl / math_cbrt_impl libm splices removed
  * (same-semantics C cold twins live in the guarded seed block). */
@@ -64,8 +72,6 @@ export extern "C" function math_round_impl(x: f64): f64;
 export extern "C" function math_fabs_impl(x: f64): f64;
 export extern "C" function math_fmin_impl(a: f64, b: f64): f64;
 export extern "C" function math_fmax_impl(a: f64, b: f64): f64;
-export extern "C" function math_erf_impl(x: f64): f64;
-export extern "C" function math_erfc_impl(x: f64): f64;
 /* 9.2.4 expm1/log1p (2026-09-08): fdlibm s_expm1.c / s_log1p.c full .x ports
  * on the product path; math_log1p_impl / math_expm1_impl libm splices
  * removed (same-semantics C cold twins live in the guarded seed block). */
@@ -2447,14 +2453,281 @@ export function math_fmax_c(a: f64, b: f64): f64 {
   return b;
 }
 
-#[no_mangle]
-export function math_erf_c(x: f64): f64 {
-  unsafe { return math_erf_impl(x); }
+/**
+ * fdlibm erf/erfc rational P/Q on |x| < 0.84375.
+ * Horner evaluation of the degree-4/5 Remez approximant of (erf(x)-x)/x
+ * on z = x^2. Shared by math_erf_c and math_erfc_c (G.7: one polynomial).
+ * @param z f64 - x^2; finite and in [0, 0.84375^2]
+ * @return f64 - P/Q (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_erf_pq(z: f64): f64 {
+  let pp0: f64 = 0.1283791670955125585606992899556644260883331298828125; /* 0x3FC06EBA, 0x8214DB68 */
+  let pp1: f64 = 0.0 - 0.325042107247001499370497867857920937240123748779296875; /* 0xBFD4CD7D, 0x691CB913 */
+  let pp2: f64 = 0.0 - 0.0284817495755985104766150328714502393268048763275146484375; /* 0xBF9D2A51, 0xDBD7194F */
+  let pp3: f64 = 0.0 - 0.0057702702964894415915697578611798235215246677398681640625; /* 0xBF77A291, 0x236668E4 */
+  let pp4: f64 = 0.0 - 0.000023763016656650162608359344584840755487675778567790985107421875; /* 0xBEF8EAD6, 0x120016AC */
+  let qq1: f64 = 0.397917223959155352819294648725190199911594390869140625; /* 0x3FD97779, 0xCDDADC09 */
+  let qq2: f64 = 0.0650222499887672944485217385590658523142337799072265625; /* 0x3FB0A54C, 0x5536CEBA */
+  let qq3: f64 = 0.005081306281875765627764618415085351443849503993988037109375; /* 0x3F74D022, 0xC4D36B0F */
+  let qq4: f64 = 0.0001324947380043216445255627178312352043576538562774658203125; /* 0x3F215DC9, 0x221C1A10 */
+  let qq5: f64 = 0.0 - 0.00000396022827877536812320180548141479448531754314899444580078125; /* 0xBED09C43, 0x42A26120 */
+  let one: f64 = 1.0;
+  let r: f64 = pp0 + z * (pp1 + z * (pp2 + z * (pp3 + z * pp4)));
+  let s: f64 = one + z * (qq1 + z * (qq2 + z * (qq3 + z * (qq4 + z * qq5))));
+  return r / s;
 }
 
+/**
+ * fdlibm erf/erfc rational P1/Q1 on |x| in [0.84375, 1.25].
+ * Horner evaluation of erf(1+s) - erx, s = |x| - 1. Shared by
+ * math_erf_c and math_erfc_c (G.7: one polynomial).
+ * @param s f64 - |x| - 1; finite and in [-0.15625, 0.25]
+ * @return f64 - P1/Q1 (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_erf_paqa(s: f64): f64 {
+  let pa0: f64 = 0.0 - 0.0023621185607526594407712394740883610211312770843505859375; /* 0xBF6359B8, 0xBEF77538 */
+  let pa1: f64 = 0.414856118683748331665839259585482068359851837158203125; /* 0x3FDA8D00, 0xAD92B34D */
+  let pa2: f64 = 0.0 - 0.372207876035701323846893728841678239405155181884765625; /* 0xBFD7D240, 0xFBB8C3F1 */
+  let pa3: f64 = 0.3183466199011617536740459399879910051822662353515625; /* 0x3FD45FCA, 0x805120E4 */
+  let pa4: f64 = 0.0 - 0.110894694282396677476043578280950896441936492919921875; /* 0xBFBC6398, 0x3D3E28EC */
+  let pa5: f64 = 0.035478304325618235937067623808616190217435359954833984375; /* 0x3FA22A36, 0x599795EB */
+  let pa6: f64 = 0.0 - 0.0021663755948687908430005943927199041354469954967498779296875; /* 0xBF61BF38, 0x0A96073F */
+  let qa1: f64 = 0.10642088040084422828623900159072945825755596160888671875; /* 0x3FBB3E66, 0x18EEE323 */
+  let qa2: f64 = 0.54039791770217104893703208290389738976955413818359375; /* 0x3FE14AF0, 0x92EB6F33 */
+  let qa3: f64 = 0.07182865441419626628682948421555920504033565521240234375; /* 0x3FB2635C, 0xD99FE9A7 */
+  let qa4: f64 = 0.1261712198087616421116052833895082585513591766357421875; /* 0x3FC02660, 0xE763351F */
+  let qa5: f64 = 0.013637083912029050736247626218755613081157207489013671875; /* 0x3F8BEDC2, 0x6B51DD1C */
+  let qa6: f64 = 0.01198449984679910741702801857400118024088442325592041015625; /* 0x3F888B54, 0x5735151D */
+  let one: f64 = 1.0;
+  let p: f64 = pa0 + s * (pa1 + s * (pa2 + s * (pa3 + s * (pa4 + s * (pa5 + s * pa6)))));
+  let q: f64 = one + s * (qa1 + s * (qa2 + s * (qa3 + s * (qa4 + s * (qa5 + s * qa6)))));
+  return p / q;
+}
+
+/**
+ * fdlibm erfc rational R1/S1 on |x| in [1.25, 1/0.35].
+ * Horner evaluation of log(erfc(x)*x) - x*x + 0.5625 on s = 1/x^2.
+ * Shared by math_erf_c and math_erfc_c (G.7: one polynomial).
+ * @param s f64 - 1/x^2; finite
+ * @return f64 - R1/S1 (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_erf_rasa(s: f64): f64 {
+  let ra0: f64 = 0.0 - 0.00986494403484714822705203829400488757528364658355712890625; /* 0xBF843412, 0x600D6435 */
+  let ra1: f64 = 0.0 - 0.693858572707181764371853205375373363494873046875; /* 0xBFE63416, 0xE4BA7360 */
+  let ra2: f64 = 0.0 - 10.558626225323290981350510264746844768524169921875; /* 0xC0251E04, 0x41B0E726 */
+  let ra3: f64 = 0.0 - 62.37533245032600603963146568275988101959228515625; /* 0xC04F300A, 0xE4CBA38D */
+  let ra4: f64 = 0.0 - 162.39666946257347035498241893947124481201171875; /* 0xC0644CB1, 0x84282266 */
+  let ra5: f64 = 0.0 - 184.60509290671103599379421211779117584228515625; /* 0xC067135C, 0xEBCCABB2 */
+  let ra6: f64 = 0.0 - 81.287435506306593424596940167248249053955078125; /* 0xC0545265, 0x57E4D2F2 */
+  let ra7: f64 = 0.0 - 9.81432934416914548592103528790175914764404296875; /* 0xC023A0EF, 0xC69AC25C */
+  let sa1: f64 = 19.651271667439257129217367037199437618255615234375; /* 0x4033A6B9, 0xBD707687 */
+  let sa2: f64 = 137.657754143519042600019020028412342071533203125; /* 0x4061350C, 0x526AE721 */
+  let sa3: f64 = 434.56587747522922882126295007765293121337890625; /* 0x407B290D, 0xD58A1A71 */
+  let sa4: f64 = 645.3872717332678803359158337116241455078125; /* 0x40842B19, 0x21EC2868 */
+  let sa5: f64 = 429.008140027567833385546691715717315673828125; /* 0x407AD021, 0x57700314 */
+  let sa6: f64 = 108.63500554177943513423088006675243377685546875; /* 0x405B28A3, 0xEE48AE2C */
+  let sa7: f64 = 6.57024977031928170134733591112308204174041748046875; /* 0x401A47EF, 0x8E484A93 */
+  let sa8: f64 = 0.0 - 0.06042441521485809874381089912276365794241428375244140625; /* 0xBFAEEFF2, 0xEE749A62 */
+  let one: f64 = 1.0;
+  let r: f64 = ra0 + s * (ra1 + s * (ra2 + s * (ra3 + s * (ra4 + s * (ra5 + s * (ra6 + s * ra7))))));
+  let q: f64 = one + s * (sa1 + s * (sa2 + s * (sa3 + s * (sa4 + s * (sa5 + s * (sa6 + s * (sa7 + s * sa8)))))));
+  return r / q;
+}
+
+/**
+ * fdlibm erfc rational R2/S2 on |x| in [1/0.35, 28].
+ * Horner evaluation of log(erfc(x)*x) - x*x + 0.5625 on s = 1/x^2.
+ * Shared by math_erf_c and math_erfc_c (G.7: one polynomial).
+ * @param s f64 - 1/x^2; finite
+ * @return f64 - R2/S2 (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_erf_rbsb(s: f64): f64 {
+  let rb0: f64 = 0.0 - 0.0098649429247000992859728540906871785409748554229736328125; /* 0xBF843412, 0x39E86F4A */
+  let rb1: f64 = 0.0 - 0.7992832376805230065741625367081724107265472412109375; /* 0xBFE993BA, 0x70C285DE */
+  let rb2: f64 = 0.0 - 17.75795491775475198892308981157839298248291015625; /* 0xC031C209, 0x555F995A */
+  let rb3: f64 = 0.0 - 160.636384855821916062268428504467010498046875; /* 0xC064145D, 0x43C5ED98 */
+  let rb4: f64 = 0.0 - 637.5664433683896277216263115406036376953125; /* 0xC083EC88, 0x1375F228 */
+  let rb5: f64 = 0.0 - 1025.09513161107724954490549862384796142578125; /* 0xC0900461, 0x6A2E5992 */
+  let rb6: f64 = 0.0 - 483.51919160865139701854786835610866546630859375; /* 0xC07E384E, 0x9BDC383F */
+  let sb1: f64 = 30.33806074348245829241932369768619537353515625; /* 0x403E568B, 0x261D5190 */
+  let sb2: f64 = 325.7925129965739188264706172049045562744140625; /* 0x40745CAE, 0x221B9F0A */
+  let sb3: f64 = 1536.729586084436959936283528804779052734375; /* 0x409802EB, 0x189D5118 */
+  let sb4: f64 = 3199.8582195085955390823073685169219970703125; /* 0x40A8FFB7, 0x688C246A */
+  let sb5: f64 = 2553.0504064331644258345477283000946044921875; /* 0x40A3F219, 0xCEDF3BE6 */
+  let sb6: f64 = 474.52854120695536721541429869830608367919921875; /* 0x407DA874, 0xE79FE763 */
+  let sb7: f64 = 0.0 - 22.44095244658581833618882228620350360870361328125; /* 0xC03670E2, 0x42712D62 */
+  let one: f64 = 1.0;
+  let r: f64 = rb0 + s * (rb1 + s * (rb2 + s * (rb3 + s * (rb4 + s * (rb5 + s * rb6)))));
+  let q: f64 = one + s * (sb1 + s * (sb2 + s * (sb3 + s * (sb4 + s * (sb5 + s * (sb6 + s * sb7))))));
+  return r / q;
+}
+
+/**
+ * fdlibm erf/erfc asymptotic tail: exp(-z*z-0.5625)*exp((z-x)*(z+x)+R/S)
+ * with z = x after the low word is cleared (single-precision split so
+ * -z*z is exact). Shared by math_erf_c and math_erfc_c (G.7).
+ * Reuses math_exp_c and math_trig_with_lo.
+ * @param x f64 - |x| (already fabs'd); finite and >= 1.25
+ * @param rs f64 - R/S from math_erf_rasa or math_erf_rbsb
+ * @return f64 - the two-exp product (fdlibm discrete-op bits)
+ * PLATFORM: SHARED freestanding (no libm).
+ */
+function math_erf_exp_tail(x: f64, rs: f64): f64 {
+  let z: f64 = math_trig_with_lo(x, 0);
+  return math_exp_c((0.0 - z * z) - 0.5625) * math_exp_c((z - x) * (z + x) + rs);
+}
+
+/**
+ * Computes erf(x): the error function of x, returned as f64.
+ *
+ * fdlibm s_erf.c port (Sun reference, error < 1 ulp):
+ * 1. Specials: erf(NaN)=NaN, erf(+-inf)=+-1, erf(+-0)=+-0 (odd).
+ * 2. |x| < 0.84375: x + x*R(x^2) with R = P/Q (shared math_erf_pq).
+ *    |x| < 2^-28 uses the first series term x + efx*x (subnormals scale
+ *    by 1/8 to avoid spurious underflow).
+ * 3. |x| in [0.84375, 1.25]: sign(x)*(erx + P1/Q1(|x|-1)) with erx the
+ *    24-bit rounding of erf(1).
+ * 4. |x| >= 6: sign(x)*(1-tiny) (inexact); |x| in (1.25, 6) uses the
+ *    complementary asymptotic (1/x)*exp(-x*x-0.5625+R/S) via
+ *    math_erf_exp_tail, then erf = sign(x)*(1 - erfc(|x|)).
+ * Threshold 1/0.35 is 0x4006DB6E here (erfc uses 0x4006DB6D; fdlibm
+ * original, do not unify). Reuses math_fabs_c / math_exp_c (G.7).
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param x f64 - any bit pattern
+ * @return f64 - erf(x) (fdlibm discrete-op bits)
+ */
+#[no_mangle]
+export function math_erf_c(x: f64): f64 {
+  let erx: f64 = 0.845062911510467529296875; /* 0x3FEB0AC1, 0x60000000 */
+  let efx: f64 = 0.1283791670955125863162749055845779366791248321533203125; /* 0x3FC06EBA, 0x8214DB69 */
+  let efx8: f64 = 1.0270333367641006905301992446766234934329986572265625; /* 0x3FF06EBA, 0x8214DB69 */
+  let tiny: f64 = 0.0;
+  unsafe {
+    let pt: *u64 = &tiny as *u64;
+    *pt = 118622047889322841;       /* 0x01a56e1fc2f8f359 = 1e-300 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  if (ix >= 2146435072) {           /* 0x7ff00000 inf/NaN */
+    let i: i32 = ((((hx as u32) >> 31) << 1) as i32);
+    return ((1 - i) as f64) + 1.0 / x; /* erf(+-inf)=+-1; NaN stays NaN */
+  }
+  if (ix < 1072365568) {            /* 0x3feb0000 |x|<0.84375 */
+    if (ix < 1043333120) {          /* 0x3e300000 |x|<2**-28 */
+      if (ix < 8388608) {           /* 0x00800000 subnormal */
+        return (8.0 * x + efx8 * x) / 8.0;
+      }
+      return x + efx * x;
+    }
+    let y: f64 = math_erf_pq(x * x);
+    return x + x * y;
+  }
+  if (ix < 1072955392) {            /* 0x3ff40000 |x|<1.25 */
+    let y: f64 = math_erf_paqa(math_fabs_c(x) - 1.0);
+    if (hx >= 0) {
+      return erx + y;
+    }
+    return (0.0 - erx) - y;
+  }
+  if (ix >= 1075314688) {           /* 0x40180000 |x|>=6 */
+    if (hx >= 0) {
+      return 1.0 - tiny;
+    }
+    return tiny - 1.0;
+  }
+  let ax: f64 = math_fabs_c(x);
+  let s: f64 = 1.0 / (ax * ax);
+  let rs: f64 = 0.0;
+  if (ix < 1074191214) {            /* 0x4006DB6E |x|<1/0.35 */
+    rs = math_erf_rasa(s);
+  } else {
+    rs = math_erf_rbsb(s);
+  }
+  let r: f64 = math_erf_exp_tail(ax, rs);
+  if (hx >= 0) {
+    return 1.0 - r / ax;
+  }
+  return r / ax - 1.0;
+}
+
+/**
+ * Computes erfc(x): the complementary error function 1-erf(x), as f64.
+ *
+ * fdlibm s_erfc.c port (Sun reference, error < 1 ulp). Not a naive
+ * 1-erf(x) (cancellation for large |x|). Interval split:
+ * 1. Specials: erfc(NaN)=NaN, erfc(+inf)=0, erfc(-inf)=2.
+ * 2. |x| < 0.84375: 1-(x+x*R) for x < 0.25, else 0.5-((x-0.5)+x*R)
+ *    (R = shared math_erf_pq). |x| < 2^-56 returns 1-x.
+ * 3. |x| in [0.84375, 1.25]: (1-erx)-P1/Q1 if x>0, else 1+(erx+P1/Q1).
+ * 4. |x| < 28: (1/x)*exp(-x*x-0.5625+R/S) via math_erf_exp_tail;
+ *    x < -6 returns 2-tiny. |x| >= 28: tiny*tiny (underflow) if x>0,
+ *    else 2-tiny.
+ * Threshold 1/0.35 is 0x4006DB6D here (erf uses 0x4006DB6E; fdlibm
+ * original, do not unify). Reuses math_fabs_c / math_exp_c (G.7).
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param x f64 - any bit pattern
+ * @return f64 - erfc(x) (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_erfc_c(x: f64): f64 {
-  unsafe { return math_erfc_impl(x); }
+  let erx: f64 = 0.845062911510467529296875; /* 0x3FEB0AC1, 0x60000000 */
+  let half: f64 = 0.5;
+  let tiny: f64 = 0.0;
+  unsafe {
+    let pt: *u64 = &tiny as *u64;
+    *pt = 118622047889322841;       /* 0x01a56e1fc2f8f359 = 1e-300 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let ix: i32 = hx & 2147483647;
+  if (ix >= 2146435072) {           /* 0x7ff00000 inf/NaN */
+    let i: i32 = ((((hx as u32) >> 31) << 1) as i32);
+    return (i as f64) + 1.0 / x;    /* erfc(+-inf)=0,2; NaN stays NaN */
+  }
+  if (ix < 1072365568) {            /* 0x3feb0000 |x|<0.84375 */
+    if (ix < 1013972992) {          /* 0x3c700000 |x|<2**-56 */
+      return 1.0 - x;
+    }
+    let y: f64 = math_erf_pq(x * x);
+    if (hx < 1070596096) {          /* 0x3fd00000 x<1/4 */
+      return 1.0 - (x + x * y);
+    }
+    let r: f64 = x * y;
+    r = r + (x - half);
+    return half - r;
+  }
+  if (ix < 1072955392) {            /* 0x3ff40000 |x|<1.25 */
+    let y: f64 = math_erf_paqa(math_fabs_c(x) - 1.0);
+    if (hx >= 0) {
+      return (1.0 - erx) - y;
+    }
+    return 1.0 + (erx + y);
+  }
+  if (ix < 1077673984) {            /* 0x403c0000 |x|<28 */
+    let ax: f64 = math_fabs_c(x);
+    let s: f64 = 1.0 / (ax * ax);
+    let rs: f64 = 0.0;
+    if (ix < 1074191213) {          /* 0x4006DB6D |x|<1/0.35 */
+      rs = math_erf_rasa(s);
+    } else {
+      if ((hx < 0) && (ix >= 1075314688)) { /* x < -6 */
+        return 2.0 - tiny;
+      }
+      rs = math_erf_rbsb(s);
+    }
+    let r: f64 = math_erf_exp_tail(ax, rs);
+    if (hx > 0) {
+      return r / ax;
+    }
+    return 2.0 - r / ax;
+  }
+  if (hx > 0) {
+    return tiny * tiny;
+  }
+  return 2.0 - tiny;
 }
 
 /**

@@ -3,17 +3,20 @@
  * Product PREFER_X_O: xlang-c -E(.x) -> thin.o + ld -r with rest (seeds/runtime_math_libm.from_x.c)
  * Prove: full.x vs this surface -> nm IDENTICAL (34 #[no_mangle])
  * Mode: mixed - 2 DIRECT compute + thin+rest forwards to _impl
- *   + 14 full implementations (9.2.4: math_exp_c / math_log_c / math_sqrt_c /
+ *   + 16 full implementations (9.2.4: math_exp_c / math_log_c / math_sqrt_c /
  *   math_cbrt_c / math_expm1_c / math_log1p_c / math_sin_c / math_cos_c /
  *   math_tan_c / math_pow_c / math_asin_c / math_acos_c / math_atan_c /
- *   math_atan2_c fdlibm ports, isomorphic with the .x authority; matching
- *   math_*_impl bridges for those fourteen are gone).
- * Cap residual: remaining extern bridges (math_*_impl) for erf/erfc/...
+ *   math_atan2_c / math_erf_c / math_erfc_c fdlibm ports, isomorphic with
+ *   the .x authority; matching math_*_impl bridges for those sixteen are
+ *   gone).
+ * Cap residual: remaining extern bridges (math_*_impl) for exact-7
+ *   floor/ceil/trunc/round/fabs/fmin/fmax surface wrappers (product .x
+ *   already full bit-level; surface lag is not this knife).
  * No doc_anchor (runtime_math_libm.x has none).
  * Note: math_ prefix not trigger ast_ (confirmed wave545+).
  * Logic: 34 functions = 2 DIRECT (math_signum_c + math_special_near)
- *   + thin+rest forwards to math_*_impl + 14 full impls
- *   (exp/log/sqrt/cbrt/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2).
+ *   + thin+rest forwards to math_*_impl + 16 full impls
+ *   (exp/log/sqrt/cbrt/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2/erf/erfc).
  * Regen: ./xlang-c -E ... runtime_math_libm.x | filter DBG + polish prologue
  */
 #include <stdint.h>
@@ -62,13 +65,12 @@ extern double math_round_impl(double x);
  * (9.2.4). */
 /* math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl /
  * math_log1p_impl / math_expm1_impl / math_pow_impl / math_asin_impl /
- * math_acos_impl / math_atan_impl / math_atan2_impl bridges removed
- * (9.2.4): those fourteen are full fdlibm implementations on both ends. */
+ * math_acos_impl / math_atan_impl / math_atan2_impl / math_erf_impl /
+ * math_erfc_impl bridges removed (9.2.4): those sixteen are full fdlibm
+ * implementations on both ends. */
 extern double math_fabs_impl(double x);
 extern double math_fmin_impl(double a, double b);
 extern double math_fmax_impl(double a, double b);
-extern double math_erf_impl(double x);
-extern double math_erfc_impl(double x);
 extern int32_t math_fenv_mask_to_fe_impl(int32_t mask);
 extern int32_t math_fenv_fe_to_mask_impl(int32_t fe);
 extern void math_fenv_emit_cap_report_impl(int32_t avail);
@@ -1366,11 +1368,175 @@ double math_fmin_c(double a, double b) {
 double math_fmax_c(double a, double b) {
   return math_fmax_impl(a, b);
 }
+/* fdlibm s_erf.c / s_erfc.c surface twins — isomorphic with math_erf_c /
+ * math_erfc_c in src/asm/runtime_math_libm.x. Shared static rationals
+ * (G.7). Reuses math_exp_c / math_fabs_c. Full-precision literals (do
+ * not paste lossy -E %f). PLATFORM: SHARED. */
+static double twin_erf_pq(double z) {
+  static const double pp0 =  1.28379167095512558561e-01;
+  static const double pp1 = -3.25042107247001499370e-01;
+  static const double pp2 = -2.84817495755985104766e-02;
+  static const double pp3 = -5.77027029648944159157e-03;
+  static const double pp4 = -2.37630166566501626084e-05;
+  static const double qq1 =  3.97917223959155352819e-01;
+  static const double qq2 =  6.50222499887672944485e-02;
+  static const double qq3 =  5.08130628187576562776e-03;
+  static const double qq4 =  1.32494738004321644526e-04;
+  static const double qq5 = -3.96022827877536812320e-06;
+  double r = pp0+z*(pp1+z*(pp2+z*(pp3+z*pp4)));
+  double s = 1.0+z*(qq1+z*(qq2+z*(qq3+z*(qq4+z*qq5))));
+  return r/s;
+}
+static double twin_erf_paqa(double s) {
+  static const double pa0 = -2.36211856075265944077e-03;
+  static const double pa1 =  4.14856118683748331666e-01;
+  static const double pa2 = -3.72207876035701323847e-01;
+  static const double pa3 =  3.18346619901161753674e-01;
+  static const double pa4 = -1.10894694282396677476e-01;
+  static const double pa5 =  3.54783043256182359371e-02;
+  static const double pa6 = -2.16637559486879084300e-03;
+  static const double qa1 =  1.06420880400844228286e-01;
+  static const double qa2 =  5.40397917702171048937e-01;
+  static const double qa3 =  7.18286544141962662868e-02;
+  static const double qa4 =  1.26171219808761642112e-01;
+  static const double qa5 =  1.36370839120290507362e-02;
+  static const double qa6 =  1.19844998467991074170e-02;
+  double P = pa0+s*(pa1+s*(pa2+s*(pa3+s*(pa4+s*(pa5+s*pa6)))));
+  double Q = 1.0+s*(qa1+s*(qa2+s*(qa3+s*(qa4+s*(qa5+s*qa6)))));
+  return P/Q;
+}
+static double twin_erf_rasa(double s) {
+  static const double ra0 = -9.86494403484714822705e-03;
+  static const double ra1 = -6.93858572707181764372e-01;
+  static const double ra2 = -1.05586262253232909814e+01;
+  static const double ra3 = -6.23753324503260060396e+01;
+  static const double ra4 = -1.62396669462573470355e+02;
+  static const double ra5 = -1.84605092906711035994e+02;
+  static const double ra6 = -8.12874355063065934246e+01;
+  static const double ra7 = -9.81432934416914548592e+00;
+  static const double sa1 =  1.96512716674392571292e+01;
+  static const double sa2 =  1.37657754143519042600e+02;
+  static const double sa3 =  4.34565877475229228821e+02;
+  static const double sa4 =  6.45387271733267880336e+02;
+  static const double sa5 =  4.29008140027567833386e+02;
+  static const double sa6 =  1.08635005541779435134e+02;
+  static const double sa7 =  6.57024977031928170135e+00;
+  static const double sa8 = -6.04244152148580987438e-02;
+  double R = ra0+s*(ra1+s*(ra2+s*(ra3+s*(ra4+s*(ra5+s*(ra6+s*ra7))))));
+  double S = 1.0+s*(sa1+s*(sa2+s*(sa3+s*(sa4+s*(sa5+s*(sa6+s*(sa7+s*sa8)))))));
+  return R/S;
+}
+static double twin_erf_rbsb(double s) {
+  static const double rb0 = -9.86494292470009928597e-03;
+  static const double rb1 = -7.99283237680523006574e-01;
+  static const double rb2 = -1.77579549177547519889e+01;
+  static const double rb3 = -1.60636384855821916062e+02;
+  static const double rb4 = -6.37566443368389627722e+02;
+  static const double rb5 = -1.02509513161107724954e+03;
+  static const double rb6 = -4.83519191608651397019e+02;
+  static const double sb1 =  3.03380607434824582924e+01;
+  static const double sb2 =  3.25792512996573918826e+02;
+  static const double sb3 =  1.53672958608443695994e+03;
+  static const double sb4 =  3.19985821950859553908e+03;
+  static const double sb5 =  2.55305040643316442583e+03;
+  static const double sb6 =  4.74528541206955367215e+02;
+  static const double sb7 = -2.24409524465858183362e+01;
+  double R = rb0+s*(rb1+s*(rb2+s*(rb3+s*(rb4+s*(rb5+s*rb6)))));
+  double S = 1.0+s*(sb1+s*(sb2+s*(sb3+s*(sb4+s*(sb5+s*(sb6+s*sb7))))));
+  return R/S;
+}
+static double twin_erf_exp_tail(double x, double rs) {
+  double z = x;
+  set_lo(&z, 0);
+  return math_exp_c(-z*z-0.5625)*math_exp_c((z-x)*(z+x)+rs);
+}
 double math_erf_c(double x) {
-  return math_erf_impl(x);
+  static const double erx  = 8.45062911510467529297e-01;
+  static const double efx  = 1.28379167095512586316e-01;
+  static const double efx8 = 1.02703333676410069053e+00;
+  union { double d; uint64_t u; } tiny;
+  tiny.u = 118622047889322841ull; /* 1e-300 */
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  if (ix >= 0x7ff00000) {
+    int32_t i = (int32_t)(((uint32_t)hx >> 31) << 1);
+    return (double)(1 - i) + 1.0 / x;
+  }
+  if (ix < 0x3feb0000) {
+    if (ix < 0x3e300000) {
+      if (ix < 0x00800000)
+        return (8.0 * x + efx8 * x) / 8.0;
+      return x + efx * x;
+    }
+    {
+      double y = twin_erf_pq(x * x);
+      return x + x * y;
+    }
+  }
+  if (ix < 0x3ff40000) {
+    double y = twin_erf_paqa(math_fabs_c(x) - 1.0);
+    if (hx >= 0) return erx + y;
+    return -erx - y;
+  }
+  if (ix >= 0x40180000) {
+    if (hx >= 0) return 1.0 - tiny.d;
+    return tiny.d - 1.0;
+  }
+  {
+    double ax = math_fabs_c(x);
+    double s = 1.0 / (ax * ax);
+    double rs = (ix < 0x4006DB6E) ? twin_erf_rasa(s) : twin_erf_rbsb(s);
+    double r = twin_erf_exp_tail(ax, rs);
+    if (hx >= 0) return 1.0 - r / ax;
+    return r / ax - 1.0;
+  }
 }
 double math_erfc_c(double x) {
-  return math_erfc_impl(x);
+  static const double erx = 8.45062911510467529297e-01;
+  static const double half = 0.5;
+  union { double d; uint64_t u; } tiny;
+  tiny.u = 118622047889322841ull; /* 1e-300 */
+  int32_t hx = hi_of(x);
+  int32_t ix = hx & 0x7fffffff;
+  if (ix >= 0x7ff00000)
+    return (double)(((uint32_t)hx >> 31) << 1) + 1.0 / x;
+  if (ix < 0x3feb0000) {
+    if (ix < 0x3c700000)
+      return 1.0 - x;
+    {
+      double y = twin_erf_pq(x * x);
+      if (hx < 0x3fd00000)
+        return 1.0 - (x + x * y);
+      {
+        double r = x * y;
+        r += (x - half);
+        return half - r;
+      }
+    }
+  }
+  if (ix < 0x3ff40000) {
+    double y = twin_erf_paqa(math_fabs_c(x) - 1.0);
+    if (hx >= 0) return (1.0 - erx) - y;
+    return 1.0 + (erx + y);
+  }
+  if (ix < 0x403c0000) {
+    double ax = math_fabs_c(x);
+    double s = 1.0 / (ax * ax);
+    double rs;
+    if (ix < 0x4006DB6D)
+      rs = twin_erf_rasa(s);
+    else {
+      if (hx < 0 && ix >= 0x40180000) return 2.0 - tiny.d;
+      rs = twin_erf_rbsb(s);
+    }
+    {
+      double r = twin_erf_exp_tail(ax, rs);
+      if (hx > 0) return r / ax;
+      return 2.0 - r / ax;
+    }
+  }
+  if (hx > 0) return tiny.d * tiny.d;
+  return 2.0 - tiny.d;
 }
 /* math_log1p_c / math_expm1_c (9.2.4, 2026-09-08): full fdlibm s_log1p.c /
  * s_expm1.c ports, isomorphic with src/asm/runtime_math_libm.x (same
