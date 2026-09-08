@@ -444,6 +444,7 @@
 
 | 项 | 状态 | 备注 |
 |----|------|------|
+| u64 slice 步长＋core_slice ensure＋xlang_sys 针/fio 推送（run-slice/run-process 双端绿） | ✅ | ①elem ≤8；②L4 wipe 自愈 ensure；③sys 针表 34→38＋freestanding_io_x86_64.o 推送＠`f7e9a16a7`；bstrict 单红 run-compress（zstd/brotli 未建） |
 | load_byte_sz TYPE_PTR 剥壳（thin 切片权威＋mega/seed 孪生同 commit） | ✅ | 指针参数基（`s: *S`）剥到 elem 再布局匹配；**上链谜底＝`field_load_sz_thin.x` 注入切片才是链上胜者**（inject first-wins T）；run-string 门禁绿＝std 红簇全闭＠`16745b87e` |
 | dep 嵌套 VAR block_ref 回填（rest 航道 walker＋typeck 接线） | ✅ | parser 只盖块级 stmt、typeck 盖嵌套；`glue_fill_var_block_refs_c` 表达式树全覆盖（含 ASSIGN 28-38）＠`b86679ad9`；gdb 证盖章✓／base resolved✓；残＝load_byte_sz PTR 剥壳不上链（prefer 航道胜者谜，与 _rec 同） |
 | dep 返回位匿名 STRUCT_LIT 盖章（rest 航道 C walker＋typeck 包装器） | ✅ | parse-only dep 无 typeck → 返回位 lit 无类型名 → 字段/返回分类按 slice 推断（std_string_new 存栈指针）；`glue_stamp_return_lits_in_block_c` 预跑补章＠`d38be40d6`；emit 侧补章上不了链（prefer 航道胜者恒无章）；残＝caller 帧尺寸不足（多 260B String 局部槽在 rsp 下） |
