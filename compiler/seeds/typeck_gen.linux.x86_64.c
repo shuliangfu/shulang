@@ -5872,6 +5872,8 @@ void typeck_merge_dep_struct_layouts_into_entry(struct ast_Module * mod, struct 
         (void)((di = (di + 1)));
         continue;
       }
+      /* Sync dep offsets against the dep arena BEFORE copy. PLATFORM: SHARED. */
+      glue_sync_struct_layout_field_offsets_c(dm, darena);
       (void)((ndm_sl = pipeline_module_num_struct_layouts_at(dm)));
       (void)((k = 0));
       while ((k < ndm_sl)) {
