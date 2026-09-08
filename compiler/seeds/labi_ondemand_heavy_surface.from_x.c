@@ -370,11 +370,11 @@ int32_t labi_fk0_sym_count(int32_t k) {
     return 2;
   }
   if ((k ==3)) {
-    return 3;
+    return 4;
   }
   /* PLATFORM: SHARED — json.o fk0 complete (mirror labi_ondemand_heavy.x). */
   if ((k ==4)) {
-    return 6;
+    return 12;
   }
   if ((k ==5)) {
     return 4;
@@ -384,7 +384,7 @@ int32_t labi_fk0_sym_count(int32_t k) {
     return 12;
   }
   if ((k ==7)) {
-    return 7;
+    return 11;
   }
   if ((k ==8)) {
     return 4;
@@ -512,6 +512,10 @@ uint8_t * labi_fk0_sym_at(int32_t k, int32_t i) {
       uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x68\x74\x74\x70\x5f\x63\x6c\x69\x65\x6e\x74\x5f\x6e\x65\x77");
       return p;
     }
+    if ((i ==3)) {
+      uint8_t * p = ((uint8_t *)"http_get_c");
+      return p;
+    }
     return ((uint8_t *)(0));
   }
   /* PLATFORM: SHARED — exact UNDEF needles for std/json/json.o (k==4). */
@@ -538,6 +542,30 @@ uint8_t * labi_fk0_sym_at(int32_t k, int32_t i) {
     }
     if ((i ==5)) {
       uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x6a\x73\x6f\x6e\x5f\x73\x6b\x69\x70\x5f\x76\x61\x6c\x75\x65");
+      return p;
+    }
+    if ((i ==6)) {
+      uint8_t * p = ((uint8_t *)"json_parse_null_c");
+      return p;
+    }
+    if ((i ==7)) {
+      uint8_t * p = ((uint8_t *)"json_parse_number_c");
+      return p;
+    }
+    if ((i ==8)) {
+      uint8_t * p = ((uint8_t *)"json_parse_bool_c");
+      return p;
+    }
+    if ((i ==9)) {
+      uint8_t * p = ((uint8_t *)"json_parse_string_c");
+      return p;
+    }
+    if ((i ==10)) {
+      uint8_t * p = ((uint8_t *)"json_parse_string_view_c");
+      return p;
+    }
+    if ((i ==11)) {
+      uint8_t * p = ((uint8_t *)"json_skip_value_c");
       return p;
     }
     return ((uint8_t *)(0));
@@ -641,6 +669,22 @@ uint8_t * labi_fk0_sym_at(int32_t k, int32_t i) {
     }
     if ((i ==6)) {
       uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x68\x61\x73\x68\x5f\x77\x72\x69\x74\x65\x5f\x75\x38\x5f\x70\x74\x72\x5f\x75\x33\x32");
+      return p;
+    }
+    if ((i ==7)) {
+      uint8_t * p = ((uint8_t *)"hash_sip_bytes_c");
+      return p;
+    }
+    if ((i ==8)) {
+      uint8_t * p = ((uint8_t *)"hash_sip_free_c");
+      return p;
+    }
+    if ((i ==9)) {
+      uint8_t * p = ((uint8_t *)"hash_xxhash64_bytes_c");
+      return p;
+    }
+    if ((i ==10)) {
+      uint8_t * p = ((uint8_t *)"hash_xxhash64_seed_bytes_c");
       return p;
     }
     return ((uint8_t *)(0));

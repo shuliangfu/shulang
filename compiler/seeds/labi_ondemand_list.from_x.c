@@ -2814,11 +2814,12 @@ int labi_fk0_sym_count(int k) {
   if (k == 2)
     return 2;
   if (k == 3)
-    return 3;
-  /* PLATFORM: SHARED — json.o fk0 gate complete (mirror labi_ondemand_heavy.x).
-   * Was: parse + dead stringify. Sole parse_null UNDEF never opened gate. */
+    return 4;
+  /* PLATFORM: SHARED — json.o fk0 gate (mirror labi_ondemand_heavy.x).
+   * std_json_parse* needles miss after asm co-emit of wrappers (T in user.o);
+   * sole UNDEF is json_parse_*_c. Parse/skip family including bare *_c. */
   if (k == 4)
-    return 6;
+    return 12;
   if (k == 5)
     return 4;
   /* PLATFORM: SHARED — path.o fk0 complete (mirror labi_ondemand_heavy.x).
@@ -2827,7 +2828,7 @@ int labi_fk0_sym_count(int k) {
   if (k == 6)
     return 12;
   if (k == 7)
-    return 7;
+    return 11;
   /* PLATFORM: SHARED — error.o fk0 complete (mirror heavy.x; was 4).
    * EXC soft SKIP: sole code_invalid/io_err_generic/chain_* never opened gate.
    * G.7: every public std_error_* export ×57. */
@@ -2932,10 +2933,14 @@ const char *labi_fk0_sym_at(int k, int i) {
       return "std_http_request";
     if (i == 2)
       return "std_http_client_new";
+    /* PLATFORM: SHARED — asm co-emit T std_http_get; sole U http_get_c. */
+    if (i == 3)
+      return "http_get_c";
     return NULL;
   }
   /* PLATFORM: SHARED — exact UNDEF needles for std/json/json.o (k==4).
-   * Exact match only; parse does not cover parse_null/number/string. */
+   * Exact match only; parse does not cover parse_null/number/string, and
+   * std_json_parse* do not cover json_parse_*_c after asm wrapper co-emit. */
   if (k == 4) {
     if (i == 0)
       return "std_json_parse";
@@ -2949,6 +2954,18 @@ const char *labi_fk0_sym_at(int k, int i) {
       return "std_json_parse_string_view";
     if (i == 5)
       return "std_json_skip_value";
+    if (i == 6)
+      return "json_parse_null_c";
+    if (i == 7)
+      return "json_parse_number_c";
+    if (i == 8)
+      return "json_parse_bool_c";
+    if (i == 9)
+      return "json_parse_string_c";
+    if (i == 10)
+      return "json_parse_string_view_c";
+    if (i == 11)
+      return "json_skip_value_c";
     return NULL;
   }
   if (k == 5) {
@@ -3007,6 +3024,15 @@ const char *labi_fk0_sym_at(int k, int i) {
       return "std_hash_free";
     if (i == 6)
       return "std_hash_write_u8_ptr_u32";
+    /* PLATFORM: SHARED — asm co-emit T std_hash_*; sole U hash_*_c (run-hash/set). */
+    if (i == 7)
+      return "hash_sip_bytes_c";
+    if (i == 8)
+      return "hash_sip_free_c";
+    if (i == 9)
+      return "hash_xxhash64_bytes_c";
+    if (i == 10)
+      return "hash_xxhash64_seed_bytes_c";
     return NULL;
   }
   if (k == 8) {

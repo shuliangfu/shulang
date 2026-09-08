@@ -484,14 +484,15 @@ export function labi_fk0_sym_count(k: i32): i32 {
     return 2;
   }
   if (k == 3) {
-    return 3;
+    return 4;
   }
-  // PLATFORM: SHARED — json.o gate was incomplete (only parse + dead stringify).
-  // Sole callers of parse_null/number/string never opened the gate → UNDEF at ld
-  // (boundary json_invalid; run-json OK only because main also UNDEFs std_json_parse).
-  // G.7 complete surface: exact needles for public parse/skip family (nm exact match).
+  // PLATFORM: SHARED — json.o gate: std_json_parse* needles are not enough on
+  // product asm -o. Co-emit of mod.x wrappers makes those T in user.o; the sole
+  // remaining UNDEF is the extern "C" / --bare-impl json_*_c body in json.x
+  // (run-json / boundary json_invalid: json_parse_null_c). Exact matcher.
+  // G.7 complete parse/skip family including bare *_c so json.o is pushed.
   if (k == 4) {
-    return 6;
+    return 12;
   }
   if (k == 5) {
     return 4;
@@ -504,7 +505,7 @@ export function labi_fk0_sym_count(k: i32): i32 {
     return 12;
   }
   if (k == 7) {
-    return 7;
+    return 11;
   }
   // PLATFORM: SHARED — error.o fk0 complete (was 4: http/ok/io timeout/cancel).
   // EXC-006 sole code_invalid/io_err_generic/chain_* never opened gate → soft SKIP.
@@ -692,11 +693,18 @@ export function labi_fk0_sym_at(k: i32, i: i32): *u8 {
         let p: *u8 = "std_http_client_new";
         return p;
       }
+      // PLATFORM: SHARED — asm -o co-emits std_http_get as T; sole UNDEF is
+      // extern "C" http_get_c (run-http). Exact matcher; G.7 complete.
+      if (i == 3) {
+        let p: *u8 = "http_get_c";
+        return p;
+      }
       return 0 as *u8;
     }
     // PLATFORM: SHARED — fk0 k==4 std/json/json.o exact UNDEF needles.
     // Must list every public export that can appear as the sole UNDEF in user.o;
-    // matcher is exact (rest==len), so std_json_parse does NOT cover parse_null.
+    // matcher is exact (rest==len), so std_json_parse does NOT cover parse_null
+    // and does NOT cover json_parse_null_c after asm co-emit of the wrapper.
     if (k == 4) {
       if (i == 0) {
         let p: *u8 = "std_json_parse";
@@ -720,6 +728,33 @@ export function labi_fk0_sym_at(k: i32, i: i32): *u8 {
       }
       if (i == 5) {
         let p: *u8 = "std_json_skip_value";
+        return p;
+      }
+      // PLATFORM: SHARED — bare --bare-impl / extern "C" parse family.
+      // Product asm -o co-emits mod.x wrappers (T std_json_parse*); remaining
+      // U is json_parse_*_c. Push json.o (ld --allow-multiple-definition).
+      if (i == 6) {
+        let p: *u8 = "json_parse_null_c";
+        return p;
+      }
+      if (i == 7) {
+        let p: *u8 = "json_parse_number_c";
+        return p;
+      }
+      if (i == 8) {
+        let p: *u8 = "json_parse_bool_c";
+        return p;
+      }
+      if (i == 9) {
+        let p: *u8 = "json_parse_string_c";
+        return p;
+      }
+      if (i == 10) {
+        let p: *u8 = "json_parse_string_view_c";
+        return p;
+      }
+      if (i == 11) {
+        let p: *u8 = "json_skip_value_c";
         return p;
       }
       return 0 as *u8;
@@ -825,6 +860,24 @@ export function labi_fk0_sym_at(k: i32, i: i32): *u8 {
       }
       if (i == 6) {
         let p: *u8 = "std_hash_write_u8_ptr_u32";
+        return p;
+      }
+      // PLATFORM: SHARED — asm -o co-emits std_hash_* wrappers as T; sole UNDEF
+      // is --bare-impl hash_sip_*_c / hash_xxhash64_*_c (run-hash / run-set).
+      if (i == 7) {
+        let p: *u8 = "hash_sip_bytes_c";
+        return p;
+      }
+      if (i == 8) {
+        let p: *u8 = "hash_sip_free_c";
+        return p;
+      }
+      if (i == 9) {
+        let p: *u8 = "hash_xxhash64_bytes_c";
+        return p;
+      }
+      if (i == 10) {
+        let p: *u8 = "hash_xxhash64_seed_bytes_c";
         return p;
       }
       return 0 as *u8;
