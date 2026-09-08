@@ -11,8 +11,8 @@
 | **编译器二进制** | `xlang` / `xlang_asm`（完整构建后的产品二进制） |
 | **源文件后缀** | `.x` |
 | **项目构建** | `build.x` — 用 X 语言描述构建策略（`xlang build` / `build_tool` / `xlang-build.sh`） |
-| **现阶段（2026-08-20）** | **产品 L4 钉盘 `f7424ae47`**（2026-08-15 双端真冷 + bstrict **129/129**；前序 `e364f4a37` 2026-08-11 → `d79a368b2` 2026-08-10 → `36363b90f` …）。tip 在 **`self-hosting`**：TYPE_DYN／vtable **F1–F7 双端 L2 绿** · 写 `let x: Trait = a`（**不要**写 `dyn Trait`，**P013**）· dest extras 嵌套 ARRAY／SLICE／PTR dest-stamp 已收到 `[][2][]*T` · 日常 **不升钉**（仅 L2）。MG Makefile **已删**（0-make hub）。**尚未完全自举** — 冷启动仍需 seed / 宿主 `cc`；`pipeline_abi` mega **硬禁** pure-asm 产品路径（host-cc residual 仍在）。 |
-| **进度仪表盘** | [自举进度](analysis/自举进度.md) · [自举时序](analysis/自举时序.md) · [C 迁移债](analysis/C迁移追踪.md) · [Makefile 映射](analysis/Makefile迁移表.md) · [叶 residual](compiler/docs/LEAF_PATTERN_RESIDUAL.md) · [8 月 19 日归档](analysis/自举进度-归档-2026-08-19.md) · [8 月 18 日归档](analysis/自举进度-归档-2026-08-18.md) |
+| **现阶段（2026-09-08）** | **产品 L4 钉盘 `b5be5ed97`**（2026-09-02 双端真冷 + bstrict **129/129**；前序 `e8176cbe5` 2026-08-23 → `f7424ae47` 2026-08-15）。tip 在 **`self-hosting`**：Cap residual **9.x** 进行中（9.1／9.3／9.4.2–6／9.5／9.6／9.7 已闭；**9.2.4 libm** 探针链 Fix A–F + arm64 f64 AAPCS64 根修已闭；fdlibm exp/log 端口已开写）· leftover unique **0** · 写 `let x: Trait = a`（**不要**写 `dyn Trait`，**P013**）· 日常 L2 **不升钉**。MG Makefile **已删**（0-make hub）。**尚未完全自举** — 冷启动仍需 seed / 宿主 `cc`；`pipeline_abi` mega **硬禁** pure-asm 产品路径（`pipeline_x` host-cc residual 仍在）。 |
+| **进度仪表盘** | [自举进度](analysis/自举进度.md) · [自举时序](analysis/自举时序.md) · [C 迁移债](analysis/C迁移追踪.md) · [Makefile 映射](analysis/Makefile迁移表.md) · [叶 residual](compiler/docs/LEAF_PATTERN_RESIDUAL.md) · [9 月 7 日归档](analysis/自举进度-归档-2026-09-07.md) · [9 月 6 日归档](analysis/自举进度-归档-2026-09-06.md) |
 | **English** | [README.md](README.md) |
 
 ---
@@ -25,7 +25,7 @@
 4. [仓库结构](#四仓库结构)
 5. [标准库](#五标准库)
 6. [编译器架构](#六编译器架构)
-7. [自举状态](#七自举状态摘要--2026-08-20)
+7. [自举状态](#七自举状态摘要--2026-09-08)
 8. [里程碑](#八里程碑)
 9. [测试与质量](#九测试与质量)
 10. [性能基准测试](#十性能基准测试)
@@ -39,8 +39,8 @@
 | 你是… | 先看 | 再看 |
 |-------|------|------|
 | **应用 / 库作者** | [§二 快速开始](#二快速开始) · Hello World | [§三 CLI](#三编译器用法) · [§五 标准库](#五标准库) · [docs/](docs/README.md) |
-| **工具链 / 编译器贡献者** | [§二](#二快速开始) · [§四 仓库结构](#四仓库结构) · [§十三](#十三贡献) | [§七 自举](#七自举状态摘要--2026-08-20) · 实时 [自举进度](analysis/自举进度.md) · [AGENTS.md](AGENTS.md) |
-| **放行 / 钉盘审阅** | 文首状态表 · [§七](#七自举状态摘要--2026-08-20) | 仅认 L4 真冷 + 双端 bstrict **129**；L2 绿 ≠ 升钉 |
+| **工具链 / 编译器贡献者** | [§二](#二快速开始) · [§四 仓库结构](#四仓库结构) · [§十三](#十三贡献) | [§七 自举](#七自举状态摘要--2026-09-08) · 实时 [自举进度](analysis/自举进度.md) · [AGENTS.md](AGENTS.md) |
+| **放行 / 钉盘审阅** | 文首状态表 · [§七](#七自举状态摘要--2026-09-08) | 仅认 L4 真冷 + 双端 bstrict **129**；L2 绿 ≠ 升钉 |
 | **要 residual 实时数字** | **别只看本文** — 打开 [自举进度](analysis/自举进度.md) 或 `./xbuild bc-inventory` | README 是快照；冲突时以仪表盘为准 |
 
 **文档职责（禁止混权威）：** 根 README = 产品与上手着陆页；`analysis/自举进度.md` = 自举实时 KPI；`compiler/docs/SELFHOST.md` = 操作手册；`docs/` = 面向用户的语言语法；`AGENTS.md` + skill `xlang-selfhost-product-gate` = 工程纪律。
@@ -143,7 +143,7 @@ Linux 宿主更关心 **内核年代 + 架构 + 目标格式（ELF）** 以及**
 | Windows 11 / 10 | ARM64 | **2** | 实验 / 尽力；非 CI 主路径 |
 | 纯 MSVC PE 产品路径 | * | **2** | 当前门禁锻炼的是 MinGW hybrid |
 
-Windows 现状是**产品路径上的 hybrid / min-gate 绿**，不是「完整自举 L4 金标」。详见 [自举状态](#七自举状态摘要--2026-08-20)；有文档时见 [Windows 平台限制与测试指南](analysis/Windows平台限制与测试指南.md)。
+Windows 现状是**hybrid / min-gate 绿**且 leftover unique **0**，不是「完整自举 L4 金标」。详见 [自举状态](#七自举状态摘要--2026-09-08)；有文档时见 [Windows 平台限制与测试指南](analysis/Windows平台限制与测试指南.md)。
 
 #### 明确不支持（Tier 3 — 勿默认会修）
 
@@ -241,19 +241,20 @@ $XLANG check examples/hello.x
 
 ```bash
 export XLANG=./compiler/xlang_asm
+./xbuild l2-matrix                 # 日常产品矩阵（rv / option / hello / si / f32）
 ./tests/run-all.sh
 XLANG_BSTRICT_SKIP_BUILD=1 ./tests/run-all-bstrict.sh   # 产品闸门（约 129 脚本）
 ./tests/run-linux-a09-a11-gate.sh
 ./tests/run-freestanding-hello.sh  # Linux x86_64 freestanding S4 烟测
 ```
 
-凡谈**自举 / 产品放行**，项目要求 **L4 真冷**（擦除 `compiler` / `std` / `core` 下**全部** `.o` 并重链二进制）+ **双端** `run-all-bstrict` 全绿。
+凡谈**自举 / 产品放行**，项目要求 **L4 真冷**（擦除 `compiler` / `std` / `core` 下**全部** `.o`，用 `./xbuild bootstrap-driver-seed` 重链二进制 — **不是** `make`）+ **双端** `run-all-bstrict` 全绿。
 
 详见 [自举方法](analysis/自举方法.md) · [SELFHOST.md](compiler/docs/SELFHOST.md)。
 
-> **日常 tip 的 L2 绿 ≠ 升 L4 钉盘。**  
-> **现行产品 L4 钉盘 = `f7424ae47`**（双端真冷 + **129/129**，2026-08-15）。residual tip 可只跑 **L2** 推进，**默认不升钉**。  
-> 自举收口期间默认 L2/L4 产品节奏下 **`xlang check` 语法闸门暂停**；仅在明确 dogfood check 面时再跑（见 [§七](#七自举状态摘要--2026-08-20)）。
+> **日常双端 L2 绿 ≠ 升 L4 钉盘。**  
+> **现行产品 L4 钉盘 = `b5be5ed97`**（双端真冷 + **129/129**，2026-09-02）。residual tip 可只跑 **L2** 推进，**默认不升钉**。  
+> 自举收口期间默认 L2/L4 产品节奏下 **`xlang check` 语法闸门暂停**；仅在明确 dogfood check 面时再跑（见 [§七](#七自举状态摘要--2026-09-08)）。
 
 ---
 
@@ -418,51 +419,60 @@ xlang/
 
 ---
 
-## 七、自举状态（摘要 · 2026-08-20）
+## 七、自举状态（摘要 · 2026-09-08）
 
 > **实时数字以** [自举进度.md](analysis/自举进度.md) · [C迁移追踪.md](analysis/C迁移追踪.md) · [LEAF_PATTERN_RESIDUAL.md](compiler/docs/LEAF_PATTERN_RESIDUAL.md) · inventory `./xbuild bc-inventory` **为准**。  
 > README 只给摘要；**禁止**把 Stage2 / prove / WPO / **日常 L2 绿**写成 L4 重钉或「完全自举」。  
-> **Makefile 物理删除已完成**（wave941/942）。产品入口仅为 **`./xbuild`** — 禁止再引入 `make -C` 编排。
+> **Makefile 物理删除已完成**（wave941/942）。产品入口仅为 **`./xbuild`** — 禁止再引入 `make -C` 编排。冷启动走 **`./xbuild bootstrap-driver-seed`**，不是 `make bootstrap-driver-seed`。
 
 ### 产品轨
 
 | 项 | 状态 |
 |----|------|
-| **L4 放行钉盘（现行）** | **`f7424ae47`**（2026-08-15）— 双端 **真冷** + 产品矩阵 + bstrict **129/129**；pin 蛋已从本波 `xlang_asm` 刷新；含 Stage12.0.5 pure-asm residual 收口 |
-| 钉盘谱系（旧 → 新） | `9bb7a757c` → `77b334842` → `db809e00f` → `36363b90f` → `d79a368b2` → `e364f4a37` → **`f7424ae47`** |
+| **L4 放行钉盘（现行）** | **`b5be5ed97`**（2026-09-02）— 双端 **真冷** + 产品矩阵 + bstrict **129/129**；pin 蛋已从本波 `xlang_asm` 刷新；Darwin L4 默认 `JOBS=1` |
+| 钉盘谱系（旧 → 新） | `36363b90f` → `d79a368b2` → `e364f4a37` → `f7424ae47`（2026-08-15）→ `e8176cbe5`（2026-08-23）→ **`b5be5ed97`** |
 | 产品 bstrict 套件 | **129**（`tests/run-all-bstrict.sh`；日志须 `OK (129 scripts…)`） |
-| Ubuntu L4 + 全量 bstrict（钉盘） | ✅ **129/129** @ **`f7424ae47`**（金标实验室 · wall ~24m45s） |
-| macOS L4 + 全量 bstrict（钉盘） | ✅ **129/129** @ **`f7424ae47`**（wall ~63m38s） |
-| residual tip（≠ 钉盘） | inventory **present 0** · **prefer pure-asm 产品默认** · TYPE_DYN／vtable **F1–F7** 双端 L2 绿（`self-hosting`）· dest extras 嵌套 dest-stamp 已收到 `[][2][]*T` · 日常 L2 **不升钉** |
-| Windows hybrid / phys-del min-gate | ✅ 已复证绿（wave922 谱系）；tip 漂移仍须复证 |
+| Ubuntu L4 + 全量 bstrict（钉盘） | ✅ **129/129** @ **`b5be5ed97`**（金标实验室 · wall **17m47s**） |
+| macOS L4 + 全量 bstrict（钉盘） | ✅ **129/129** @ **`b5be5ed97`**（wall **137m25s**，`JOBS=1`） |
+| 日常闸门（tip） | **双端 L2 产品矩阵** — `./xbuild l2-matrix`（rv42／opt102／hello／si／f32）。SHARED 叶须 **mac + Ubuntu**。 |
+| residual tip（≠ 钉盘） | inventory **present 0** · leftover unique **0** · **prefer pure-asm 产品默认** · Cap **9.x** 进行中（见前排）· 日常 L2 **不升钉** |
+| Windows hybrid / leftover unique | leftover unique **0** · min-gate **全绿** · leftover-PE hybrid 仅 Windows 在线时额外跑（与 Ubuntu 双系统互斥）。hybrid 绿 ≠ 产品 L4 |
 | 金标主机 | **Ubuntu x86_64**（回家局域网：`ubuntu-server`；外地实验室可用 `ubuntu-remote-server`／frp） |
 | 验收二进制 | 本波 g05 / pure-ld relink 的 `compiler/xlang_asm` — **禁止**残留 Stage2 `xlang_asm2` 或旧 stage1 |
 | `xlang check` 闸门 | 自举收口期间默认 L2/L4 产品节奏下 **暂停**；不是 residual 叶的默认绿/红判据 |
+| nest 冻帽 | **64** — 禁止本叶抬到 65；禁止默认 assemble `parser.x`／`pipeline_abi` mega |
 
 ### 今天「可用」指什么
 
-在**用户产品路径**（`xlang_asm` → `-o` / 运行 / freestanding / 门禁）上，放行钉盘已覆盖大量已收口面——net PRIMARY、bare struct lit、CTFE match 折叠、X ABI P0b、Windows hybrid gate、CLI help、freestanding S4 / NL-07、hosted asm 矩阵、**prefer 族 pure-asm 产品默认**、Stage12.0.5 pure-asm residual（钉盘时 compile residual 13/13）等。
+在**用户产品路径**（`xlang_asm` → `-o` / 运行 / freestanding / 门禁）上，放行钉盘已覆盖大量已收口面——net PRIMARY、bare struct lit、CTFE match 折叠、X ABI P0b、TYPE_DYN／vtable（写 `let x: Trait = a`）、dest extras dest-stamp、Windows hybrid min-gate、CLI help、freestanding S4 / NL-07、hosted asm 矩阵、**prefer 族 pure-asm 产品默认**等。
 
-**residual tip 的 L2 绿不会自动抬升 L4 钉盘。** soft pure-asm std residual（link ondemand / formal_mod companion）只推进 tip。
+**钉盘之后**，`self-hosting` tip 已收 leftover unique 收割、MATCH dest-park 族、Cap **9.1／9.2.1／9.3／9.4.2–6／9.5／9.6／9.7**、9.2.4 **探针链 Fix A–F**（NaN／f64 demote／exact-7 位级 libm／无序比较／SysV movq／fk9 按需 60 面），以及 **mac arm64 f64 AAPCS64 边界**（GP-bits vs host-cc `d0–d7`／`d0`）。**9.2.4 fdlibm 级端口**（exp/log wave A）是当前 Cap 活叶。
 
-### 轨道（MG / BC / Stage 8 / 终局）
+**residual tip 的 L2 绿不会自动抬升 L4 钉盘。** tip 上的 Ubuntu 真冷复验（如 `@1c46bef21`）是回归检查，不是升钉。
+
+### 轨道（MG / BC / Stage 8–13 / 终局）
 
 | 轨道 | 状态 |
 |------|------|
 | **MG**（Makefile 编排） | ✅ **已完成** — `compiler/Makefile` 已删；0-make hub `tests/lib/compiler-make.sh`；产品入口 `./xbuild` / `./xlang-build.sh` |
 | **BC**（产品 residual host-cc catalog） | 🟢 **30/30 FULLY CLOSED**（wave332）— PRODUCT RETIRED **23/23 = 100%**；HALF=0；产品 PINNED=0；NON-PRODUCT 7 正确 never-product-chain |
-| **M4 五域** | ✅ **5/5** — runtime／typeck／codegen／parser／link_abi 冷链关 pin（适用处 prefer FROM_X 产品默认） |
+| **M4 五域** | ✅ **5/5** 冷链关 pin（适用处 prefer FROM_X 产品默认）。parser seed **物理删／CI 漂移闸**仍 ⬜ |
 | **Stage 8 Track L** | ✅ **30/30 FULLY CLOSED**（Batch 3 · wave332） |
-| **Stage12 / PC prefer** | ✅ prefer pure-asm 产品默认 · FORBID／ALLOW_HOST_CC · **`pipeline_abi` mega pure-asm 硬禁**（host-cc residual 仍在） |
-| **PC / G**（无 seed 冷启动 / 全量零 C） | ⬜ 开 — 冷启动仍需 seed + 宿主 `cc`；mega `pipeline_abi` 非 pure-asm 产品 |
+| **Stage 9 Cap residual** | 🟡 — 9.1／9.2.1／9.3／9.4.2–6／9.5／9.6／9.7 ✅；**开项：** 9.2.4 libm（进行中）· 9.2.5 arrow · 9.2.6 sqlite |
+| **Stage 10 语言 L2** | 🟡 — 10.1.1–2／10.1.4／10.2.1–3（部分）／10.3.*／10.4.1–2 ✅；残 qemu／10.1.3 NT |
+| **Stage12 / PC prefer** | ✅ prefer pure-asm 产品默认 · FORBID／ALLOW_HOST_CC · **`pipeline_abi` mega pure-asm 硬禁**；`pipeline_x` 整 TU 仍 host-cc；`invoke_cc` 未删 |
+| **Stage 12 零 cc 冷启** | 🟡 LINK／`.s`／多数门 ✅；最小 seed／全路径零 `cc` ⬜ |
+| **PC / G**（无 seed 冷启动 / 全量零 C） | ⬜ 开 — 冷启动仍需 seed + 宿主 `cc` |
 
 ### residual inventory（量级）
 
-| 信号 | 值（2026-08-20） |
+| 信号 | 值（2026-09-08） |
 |------|------------------|
 | `./xbuild bc-inventory` present 行 | **0**（catalog 已闭；mega／seed 冷 residual **不**计 present 叶） |
-| soft pure-asm std residual 梯（mac L2） | **已绿至** string／builtin／encoding／ffi／safe-ffi／io／net／heap／fs／path／env／process／**queue** |
-| soft 下一红（示例） | fmt／unicode／compress／debug／…（优先 labi fk0／simple-group／companion **整类**根修，禁止一 monofile 一波） |
+| leftover unique（Windows leftover-PE 收割） | **0** |
+| R2 真迁 | ~**120/128**（~85%） |
+| `pipeline_x` mega | 仍 **host-cc**（不计 present 叶；纯 asm 产品硬禁） |
+| 运维陷阱（2026-09-08） | **陈旧产品 `.o`**：新鲜度只比 `.x` 源时间戳 — 编译器发射修复**不会**自动失效旧 `.o`（防法＝L4 全擦）。mega `.x` 体内改动须 `XLANG_HOST_CC_SEED_FORCE=1`（平日 inject-only thin 捷径不重建 mega 体） |
 | 效率纪律 | **按域 / 整类 / 整叶**，禁止一波一个 BSS micro-cell |
 
 ### 工程轨（量级）
@@ -473,7 +483,7 @@ xlang/
 | **EMPTY** | **18/18** |
 | **N** prove IDENTICAL | **111/111** |
 | Cap residual pure | 按需 L2；产品 prefer pure-asm 处双导出禁令仍在 |
-| **D Stage2** | ✅ freestanding / 行为 parity（**≠** 产品 g05 全链）；双端 Stage2 SHA256 match 已有金标记录 |
+| **D Stage2** | ✅ freestanding / 行为 parity（**≠** 产品 g05 全链）；双端 Stage2 SHA256 match（Ubuntu `9e60e1290` · macOS `343894709`） |
 | Stage2 **WPO** 链 + strict-link + text-gate | ✅ 工程绿（Ubuntu；部分 Darwin N/A） |
 
 ### 明确不宣称
@@ -481,10 +491,11 @@ xlang/
 - **未**宣称「编译器已 100% `.x`、无 seed」
 - **未**把 Stage2 的 `xlang_asm2` 当产品编译器
 - **未**把工程 WPO 绿等同 tip 产品 L4
-- **未**把「tip 双端 L2 residual 检查」写成升 L4 钉 —— 钉盘仍为 **`f7424ae47`**，须下次显式双端 **真冷** 才重钉
-- **未**把 Windows hybrid 绿当成产品 L4 / 自举完成
-- **未**把「Makefile 已删」写成「自举 / 零 host-cc 完成」— seed + `pipeline_abi` mega residual 仍在
-- **未**宣称 soft pure-asm std residual 梯已全绿 — queue 已收；fmt／unicode／compress／debug… 仍开
+- **未**把「双端 L2／tip Ubuntu 真冷复验」写成升 L4 钉 —— 钉盘仍为 **`b5be5ed97`**，须下次显式双端 **真冷** 才重钉
+- **未**把 Windows hybrid／leftover unique 0 当成产品 L4 / 自举完成
+- **未**把「Makefile 已删」写成「自举 / 零 host-cc 完成」— seed + `pipeline_abi`／`pipeline_x` mega residual 仍在
+- **未**宣称 Cap 9 已全闭 — 9.2.4–6（libm／arrow／sqlite）仍开
+- **未**把 mac arm64 f64 卡当仍开 — GP-bits vs AAPCS64 已根修 `@363a68697`＋`@1c46bef21`；Ubuntu 真冷复验 12/12＋L2 5/5
 - 终局物理零 C / 彻底去掉 seed（**G**）仍在路线图，不是本周叙事
 
 **完全自举（D+E+F）：** 阶段 **D**（Stage2 freestanding／parity）+ **E**（编译器产品路径无 C/H）+ **F**（阶段 F：仓库 `std/`／产品面无手写 C）。仅 Stage2 **不等于**完全自举。权威：[SELFHOST.md](compiler/docs/SELFHOST.md)。
@@ -493,9 +504,9 @@ xlang/
 
 ### 近端前排
 
-1. **日常 L2（`self-hosting`）** — F7 dest extras 嵌套 dest-stamp 已收到 `[][2][]*T`；下波 leftover PTR-outer `*[N][]T`（以及 host-C suffix／INDEX 完备）。**默认不升钉**  
-2. **保持 0-make 诚实** — 产品路径只走 `./xbuild`；禁止再引入 `make -C`；prefer pure-asm 默认；禁止 pure-asm `pipeline_abi` mega；wrapper 首参仍 `rdi`／`x0`＝data  
-3. **升钉** 须显式决定 + 双端真冷 — **禁** soft-skip typeck、**禁**双权威；nest 帽仍 **64**
+1. **Cap 9.2.4 libm** — fdlibm 级 `math_*_impl` 端口（32 桥；wave A exp+log 已开写）。探针链 Fix A–F 与 arm64 f64 AAPCS64 边界 **已闭**。随后 9.2.5 arrow／9.2.6 sqlite extern 系统库大域。**默认不升钉**  
+2. **保持 0-make 诚实** — 产品路径只走 `./xbuild`；禁止再引入 `make -C`；prefer pure-asm 默认；禁止 pure-asm `pipeline_abi` mega；nest 帽仍 **64**  
+3. **立卡不动（非本周收口）** — `pipeline_x` host-cc mega · Ubuntu std bstrict 红簇（约 21 脚本）· Defect D typeck XT001 · wpo-full-chain Darwin · 10.7.1 va gate · check 闸门暂停（自举后）
 
 ---
 
@@ -508,8 +519,8 @@ xlang/
 | M2 | import、core/std 子集、多目标 | ✅ |
 | M3 | 泛型、trait、模块、std 扩张 | ✅ |
 | M4 | DCE、`-O2`/`-Os`、体积 / 性能基线 | ✅ 部分 |
-| M5 | 自举（编译器可重编自身） | 🟡 **产品路径可用 + 自举推进中**；**冷启动仍需 seed**；MG **已删**（0-make）；BC catalog **present 0**／Track **30/30 CLOSED**；soft pure-asm std residual **进行中** |
-| **当前** | L4 钉 **`f7424ae47`**（双端 129 · 2026-08-15）；tip `self-hosting` F7 TYPE_DYN／vtable + dest extras dest-stamp 至 `[][2][]*T`；写 `let x: Trait = a`；BC／Stage8 **CLOSED** · MG ✅ · prefer pure-asm 默认 | 见 [仪表盘](analysis/自举进度.md) |
+| M5 | 自举（编译器可重编自身） | 🟡 **产品路径可用 + 自举推进中**；**冷启动仍需 seed**；MG **已删**（0-make）；BC catalog **present 0**／Track **30/30 CLOSED**；Cap 9 residual **进行中**（9.2.4 libm） |
+| **当前** | L4 钉 **`b5be5ed97`**（双端 129 · 2026-09-02）；tip `self-hosting` Cap **9.2.4** + leftover unique **0**；写 `let x: Trait = a`；BC／Stage8 **CLOSED** · MG ✅ · prefer pure-asm 默认 | 见 [仪表盘](analysis/自举进度.md) |
 
 ---
 
@@ -517,6 +528,7 @@ xlang/
 
 | 套件 | 命令 |
 |------|------|
+| 日常产品矩阵（L2） | `XLANG=./compiler/xlang_asm ./xbuild l2-matrix` |
 | 全量回归 | `./tests/run-all.sh` |
 | 产品 bstrict | `XLANG=./compiler/xlang_asm XLANG_BSTRICT_SKIP_BUILD=1 ./tests/run-all-bstrict.sh` |
 | 推送前 P0 | `XLANG=./compiler/xlang_asm ./tests/run-pre-push-p0.sh` |
@@ -648,7 +660,7 @@ xlang/
 
 1. 克隆 → `./xbuild build-tool && ./xbuild first-time`（或 `./xbuild bootstrap-driver-seed`）。  
 2. 日常改动 → `./xbuild build`，`XLANG=./compiler/xlang_asm`，跑相关测试 / gate。  
-3. 产品 / 链接 / **SHARED** 改动 → **Ubuntu 金标**（SHARED 再加 mac）；谈放行须 **L4 真冷** + 双端 bstrict **129**（现行钉盘 **`f7424ae47`**，直至显式升钉）。  
+3. 产品 / 链接 / **SHARED** 改动 → **Ubuntu 金标**（SHARED 再加 mac）；谈放行须 **L4 真冷** + 双端 bstrict **129**（现行钉盘 **`b5be5ed97`**，直至显式升钉）。  
 4. 日常 residual 叶 → **L2**（pure-ld + 产品矩阵探针）；自举收口期间**不要**默认跑 `xlang check` 闸门。  
 5. 提交：Conventional Commits（`feat:` / `fix:` / `docs:` …）；`.x` 新注释用**英文**（见 `AGENTS.md` / G.9）。  
 6. **禁止双权威** — seed 与 `.x` 产品面必须**同 commit**对齐。  
