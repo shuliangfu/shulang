@@ -389,9 +389,10 @@ export function labi_od_simple_group_sym_count(g: i32): i32 {
     return 23;
   }
   // PLATFORM: SHARED — std.io context-timeout formal (run-std-io-context residual).
-  // timeout_from_ctx / read_ctx / write_ctx (mod.x; monofile skip std.io emit).
+  // timeout_from_ctx / read_ctx / write_ctx (mod.x; monofile skip std.io emit)
+  // + handle_from_fd (backend.x; leftover unique asm -o U, no formal backend.o).
   if (g == 19) {
-    return 3;
+    return 4;
   }
   /*
    * wave957: std.unicode formal product probe (run-unicode residual).
@@ -1389,6 +1390,10 @@ export function labi_od_simple_group_sym_at(g: i32, i: i32): *u8 {
     }
     if (i == 2) {
       let p: *u8 = "std_io_write_ctx";
+      return p;
+    }
+    if (i == 3) {
+      let p: *u8 = "std_io_backend_handle_from_fd";
       return p;
     }
     return 0 as *u8;

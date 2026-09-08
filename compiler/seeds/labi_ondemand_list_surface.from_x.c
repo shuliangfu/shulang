@@ -259,7 +259,7 @@ int32_t labi_od_simple_group_sym_count(int32_t g) {
     return 23; /* std.simd VECTOR mid + binop/dot/fma + scalar faces + select_lane */
   }
   if ((g ==19)) {
-    return 3; /* std.io ctx-timeout */
+    return 4; /* std.io ctx-timeout + handle_from_fd */
   }
   return 0;
 }
@@ -641,6 +641,7 @@ uint8_t * labi_od_simple_group_sym_at(int32_t g, int32_t i) {
     if ((i ==0)) { uint8_t * p = ((uint8_t *)"std_io_timeout_from_ctx"); return p; }
     if ((i ==1)) { uint8_t * p = ((uint8_t *)"std_io_read_ctx"); return p; }
     if ((i ==2)) { uint8_t * p = ((uint8_t *)"std_io_write_ctx"); return p; }
+    if ((i ==3)) { uint8_t * p = ((uint8_t *)"std_io_backend_handle_from_fd"); return p; }
     return ((uint8_t *)(0));
   }
   return ((uint8_t *)(0));

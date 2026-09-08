@@ -213,7 +213,7 @@ int labi_od_simple_group_sym_count(int g) {
   if (g == 18)
     return 23; /* std.simd VECTOR mid + binop/dot/fma + scalar faces + select_lane */
   if (g == 19)
-    return 3; /* std.io ctx-timeout STD-091 */
+    return 4; /* std.io ctx-timeout STD-091 + handle_from_fd */
   /* wave957: std.unicode formal (run-unicode residual). */
   if (g == 20)
     return 8;
@@ -748,6 +748,8 @@ const char *labi_od_simple_group_sym_at(int g, int i) {
       return "std_io_read_ctx";
     if (i == 2)
       return "std_io_write_ctx";
+    if (i == 3)
+      return "std_io_backend_handle_from_fd";
     return NULL;
   }
   /*

@@ -27,6 +27,17 @@ extern int32_t std_error_io_err_timeout(void);
 extern int32_t std_io_read(size_t handle, uint8_t *ptr, size_t len, uint32_t timeout_ms);
 extern int32_t std_io_write(size_t handle, uint8_t *ptr, size_t len, uint32_t timeout_ms);
 
+/*
+ * PLATFORM: SHARED — leftover unique asm -o leaves U std_io_backend_handle_from_fd
+ * (backend.x is not co-emitted; skip_asm_dep_codegen + no formal backend.o).
+ * Authority body ≡ std/io/backend.x handle_from_fd: return fd as usize.
+ * G.7: complete this io.o c_face vehicle (g==19), do not add a second .o.
+ */
+size_t std_io_backend_handle_from_fd(int32_t fd, int32_t unused) {
+  (void)unused;
+  return (size_t)fd;
+}
+
 enum {
   STD_IO_CTX_MS_CANCELLED = -1,
   STD_IO_CTX_MS_EXPIRED = -2
