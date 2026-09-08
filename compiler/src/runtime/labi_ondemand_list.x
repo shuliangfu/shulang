@@ -3951,7 +3951,10 @@ export function link_abi_user_o_needs_std_heap_page_mmap(user_o: *u8): i32 {
  */
 #[no_mangle]
 export function labi_od_sys_linux_sym_count(): i32 {
-  return 34;
+  // 38 since 2026-09-09: +4 xlang_sys_* FFI externs the co-emitted
+  // std.sys.linux module leaves U (glue = std/sys/linux.o +
+  // compiler/src/asm/freestanding_io_x86_64.o; run-process BLD001 root).
+  return 38;
 }
 
 /**
@@ -4099,6 +4102,23 @@ export function labi_od_sys_linux_sym_at(i: i32): *u8 {
   }
   if (i == 33) {
     let p: *u8 = "std_sys_linux_linux_sys_module_anchor";
+    return p;
+  }
+  /* PLATFORM: SHARED — xlang_sys_* FFI externs (see sym_count note). */
+  if (i == 34) {
+    let p: *u8 = "xlang_sys_close";
+    return p;
+  }
+  if (i == 35) {
+    let p: *u8 = "xlang_sys_openat";
+    return p;
+  }
+  if (i == 36) {
+    let p: *u8 = "xlang_sys_exit";
+    return p;
+  }
+  if (i == 37) {
+    let p: *u8 = "xlang_sys_connect";
     return p;
   }
   return 0 as *u8;

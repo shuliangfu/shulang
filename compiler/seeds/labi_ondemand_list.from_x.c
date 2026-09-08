@@ -1969,7 +1969,12 @@ int link_abi_user_o_needs_std_heap_page_mmap(const char *user_o) {
 
 /* product sys_linux exact UNDEF table + needs pure orch.
  * PLATFORM: SHARED — exact symbols only (no prefix/strstr probes). */
-int labi_od_sys_linux_sym_count(void) { return 34; }
+/* 38 since 2026-09-09: +4 xlang_sys_* FFI externs the co-emitted
+ * std.sys.linux module leaves U (glue = std/sys/linux.o +
+ * compiler/src/asm/freestanding_io_x86_64.o; hosted user programs
+ * importing std.process died BLD001 — run-process FAIL root).
+ * Mirrors the .x twin. */
+int labi_od_sys_linux_sym_count(void) { return 38; }
 const char *labi_od_sys_linux_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2041,6 +2046,16 @@ const char *labi_od_sys_linux_sym_at(int i) {
     return "std_sys_linux_linux_mmap_file_available";
   if (i == 33)
     return "std_sys_linux_linux_sys_module_anchor";
+
+  /* PLATFORM: SHARED — xlang_sys_* FFI externs (see sym_count note). */
+  if (i == 34)
+    return "xlang_sys_close";
+  if (i == 35)
+    return "xlang_sys_openat";
+  if (i == 36)
+    return "xlang_sys_exit";
+  if (i == 37)
+    return "xlang_sys_connect";
   return NULL;
 }
 
@@ -4576,6 +4591,12 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                                         "../std/sys/linux.o");
             }
             link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_sys_linux(), lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+        /* PLATFORM: LINUX|x86_64 — linux.o only calls xlang_sys_*; the raw
+         * syscall stubs live in compiler/src/asm/freestanding_io_x86_64.o.
+         * Hosted user links that co-emit std.sys.linux need it pushed too
+         * (run-process BLD001 root). Mirrors the .x twin. */
+        (void)link_abi_asm_ld_push_obj(NULL, link_argv0, "compiler/src/asm/freestanding_io_x86_64.o",
+                                       lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
         }
         if (need_sys_macos) {
             /* PLATFORM: SHARED — Darwin cfg import macos_write_*; ensure+push. */
@@ -4609,6 +4630,16 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
         }
     }
     if (link_abi_user_o_needs_core_slice(user_o)) {
+        /* PLATFORM: SHARED — L4 wipe deletes core/slice/slice.o; the silent
+         * skip-missing below then leaves core_subslice_*_c UNDEF
+         * (subslice_split_chunks BLD001). Mirror the sys.o ensure. Mirrors
+         * the .x twin. */
+        {
+            const char *root_cs = xlang_repo_root_from_argv0(link_argv0);
+            if (root_cs && root_cs[0] != '\0')
+                (void)xlang_ensure_formal_std_make_o(root_cs, "core/slice/slice.o",
+                                                     "../core/slice/slice.o");
+        }
         p = asm_link_obj_skip_missing(xlang_rel_o_path_from_argv0(link_argv0, labi_od_rel_core_slice()));
         if (!p && bank)
             p = xlang_asm_ld_try_under_lib_roots(labi_od_rel_core_slice(), lib_roots, n_lib_roots, bank);

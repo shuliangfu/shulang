@@ -34504,7 +34504,9 @@ export function pipeline_asm_index_elem_byte_sz_c(arena: *u8, expr_ref: i32): i3
             let d_elem2: i32 = pipeline_type_elem_ref_at(arena, d_sty2);
             if (d_elem2 > 0) {
               let d_esz2: i32 = glue_index_elem_byte_sz_from_type_ref_c(arena, d_elem2);
-              if (d_esz2 > 0 && d_esz2 < 8) {
+              // <=8 (not <8): a u64/f64 slice element strides 8; the generic
+              // bare-PTR peel below would default to 4 (last_u64 OOB-ish read).
+              if (d_esz2 > 0 && d_esz2 <= 8) {
                 return d_esz2;
               }
             }

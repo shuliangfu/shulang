@@ -4598,6 +4598,14 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
         unsafe {
           let _sl: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, rsl, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
         }
+        // PLATFORM: LINUX|x86_64 — linux.o itself only *calls* xlang_sys_*;
+        // the raw syscall stubs live in compiler/src/asm/freestanding_io_x86_64.o
+        // (product main-link object). Hosted user links that co-emit
+        // std.sys.linux need it pushed too (run-process BLD001
+        // xlang_sys_close/connect root). Mirrors the seed twin.
+        unsafe {
+          let _fio: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, "compiler/src/asm/freestanding_io_x86_64.o", lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
+        }
       }
       if (need_sm != 0) {
         // PLATFORM: SHARED — Darwin cfg import macos_write_*; ensure+push macos.o.
@@ -4663,6 +4671,21 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
     // --- core_slice ---
     let need_cs: i32 = link_abi_user_o_needs_core_slice(user_o);
     if (need_cs != 0) {
+      // PLATFORM: SHARED — L4 wipe deletes core/slice/slice.o; the silent
+      // resolve_or_try skip below then leaves core_subslice_*_c UNDEF
+      // (subslice_split_chunks BLD001). Mirror the sys.o discipline: ensure
+      // the formal make before resolving. G.7: same single ensure authority.
+      let root_cs: *u8 = 0 as *u8;
+      unsafe {
+        root_cs = xlang_repo_root_from_argv0(link_argv0);
+      }
+      if (root_cs != 0 as *u8) {
+        if (root_cs[0] != 0) {
+          unsafe {
+            let _ecs: i32 = xlang_ensure_formal_std_make_o(root_cs, "core/slice/slice.o", "../core/slice/slice.o");
+          }
+        }
+      }
       let csrel: *u8 = labi_od_rel_core_slice();
       let csprim: *u8 = 0 as *u8;
       unsafe {
