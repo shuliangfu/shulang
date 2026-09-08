@@ -28,7 +28,10 @@
 //   a same-semantics C cold twin under the same guard
 // 9.2.4 asin/acos/atan (2026-09-08): fdlibm e_asin.c / e_acos.c / s_atan.c
 //   full .x ports (no libm); seed keeps same-semantics C cold twins under
-//   the same guard. atan2 remains a host-libm splice this wave.
+//   the same guard.
+// 9.2.4 atan2 (2026-09-08): fdlibm e_atan2.c full .x port (no libm); reuses
+//   math_atan_c (G.7); seed keeps a same-semantics C cold twin under the
+//   same guard.
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -45,8 +48,10 @@ export extern "C" function math_round_impl(x: f64): f64;
 /* 9.2.4 asin/acos/atan (2026-09-08): fdlibm e_asin.c / e_acos.c / s_atan.c
  * full .x ports on the product path; math_asin_impl / math_acos_impl /
  * math_atan_impl libm splices removed (same-semantics C cold twins live
- * in the guarded seed block). atan2 remains a host-libm splice. */
-export extern "C" function math_atan2_impl(y: f64, x: f64): f64;
+ * in the guarded seed block). */
+/* 9.2.4 atan2 (2026-09-08): fdlibm e_atan2.c full .x port on the product
+ * path; math_atan2_impl libm splice removed (same-semantics C cold twin
+ * lives in the guarded seed block). Reuses math_atan_c (G.7). */
 /* 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports on
  * the product path; math_sqrt_impl / math_cbrt_impl libm splices removed
  * (same-semantics C cold twins live in the guarded seed block). */
@@ -116,9 +121,9 @@ export function math_special_near(a: f64, b: f64, eps: f64): i32 {
 // bit-level implementations (fdlibm semantics, no libm call on the product
 // path). Punning goes through pointer casts (let p: *u64 = &v as *u64), all
 // masks are computed with shifts from a u64 one — no large hex literals.
-// Remaining wrappers (asin/acos/atan/atan2/erf/erfc) still forward to
-// the C seed _impl bridges. exact-7 + exp/log + sqrt/cbrt + expm1/log1p +
-// sin/cos/tan + pow are full .x; the seed keeps
+// Remaining wrappers (erf/erfc) still forward to the C seed _impl
+// bridges. exact-7 + exp/log + sqrt/cbrt + expm1/log1p + sin/cos/tan +
+// pow + asin/acos/atan + atan2 are full .x; the seed keeps
 // same-semantics cold twins under `#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X`
 // (G.4: same commit, same semantics on both paths).
 
@@ -1376,9 +1381,134 @@ export function math_atan_c(x: f64): f64 {
   return z;
 }
 
+/**
+ * Computes atan2(y, x): the four-quadrant inverse tangent of y/x.
+ *
+ * fdlibm e_atan2.c port (Sun reference, error < 1 ulp). Reuses
+ * math_atan_c for the reduced |y/x| kernel (G.7: one atan). fabs lives
+ * later, so |y/x| is recovered by clearing the sign bit via
+ * math_trig_with_hi. Quadrant is encoded as m = 2*sign(x)+sign(y).
+ * 1. NaN in either argument returns x+y (payload is platform-defined).
+ * 2. x == +1.0 is a fast path to atan(y).
+ * 3. y == +-0: +-0 when x >= 0, +-pi when x < 0 (preserves signed zero).
+ * 4. x == +-0 (y nonzero): +-pi/2 from sign(y). fdlibm does not
+ *    distinguish x=-0 from x=+0 here (IEEE 754-2008 wants +-pi for
+ *    atan2(+-y, -0); this port pins fdlibm).
+ * 5. Inf cases: atan2(+-inf, +-inf) = +-pi/4 or +-3pi/4; atan2(+-y, +inf)
+ *    = +-0; atan2(+-y, -inf) = +-pi; atan2(+-inf, finite) = +-pi/2.
+ * 6. |y/x| > 2^60 uses pi/2; x < 0 and |y|/|x| < 2^-60 uses 0 before
+ *    the quadrant restore.
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param y f64 - numerator (imaginary part of x+iy)
+ * @param x f64 - denominator (real part of x+iy)
+ * @return f64 - atan2(y, x) in [-pi, pi] (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_atan2_c(y: f64, x: f64): f64 {
-  unsafe { return math_atan2_impl(y, x); }
+  let pi_o_4: f64 = 0.78539816339744827899949086713604629039764404296875; /* 0x3FE921FB, 0x54442D18 */
+  let pi_o_2: f64 = 1.5707963267948965579989817342720925807952880859375; /* 0x3FF921FB, 0x54442D18 */
+  let pi: f64 = 3.141592653589793115997963468544185161590576171875; /* 0x400921FB, 0x54442D18 */
+  let pi_lo: f64 = 0.00000000000000012246467991473532071737640294583966046256921246775800637962561268; /* 0x3CA1A626, 0x33145C07 */
+  let tiny: f64 = 0.0;
+  unsafe {
+    let pt: *u64 = &tiny as *u64;
+    *pt = 118622047889322841;       /* 0x01a56e1fc2f8f359 = 1e-300 */
+  }
+  let hx: i32 = math_trig_hi(x);
+  let hy: i32 = math_trig_hi(y);
+  let ix: i32 = hx & 2147483647;
+  let iy: i32 = hy & 2147483647;
+  let lx: i32 = math_trig_lo(x);
+  let ly: i32 = math_trig_lo(y);
+  let z: f64 = 0.0;
+  let ax: f64 = 0.0;
+  let k: i32 = 0;
+  let m: i32 = 0;
+  let zh: u32 = 0;
+  /* NaN: exponent all-ones and (hi mantissa or lo) nonzero. Isomorphic
+   * to fdlibm (ix|((lx|-lx)>>31))>0x7ff00000 with unsigned lx. */
+  if (ix > 2146435072) {            /* 0x7ff00000 */
+    return x + y;
+  }
+  if ((ix == 2146435072) && (lx != 0)) {
+    return x + y;
+  }
+  if (iy > 2146435072) {
+    return x + y;
+  }
+  if ((iy == 2146435072) && (ly != 0)) {
+    return x + y;
+  }
+  if (((hx - 1072693248) | lx) == 0) { /* x == +1.0 (0x3ff00000) */
+    return math_atan_c(y);
+  }
+  m = ((hy >> 31) & 1) | ((hx >> 30) & 2); /* 2*sign(x)+sign(y) */
+  if ((iy | ly) == 0) {             /* y == +-0 */
+    if (m <= 1) {
+      return y;                     /* atan2(+-0, +anything) = +-0 */
+    }
+    if (m == 2) {
+      return pi + tiny;             /* atan2(+0, -anything) = +pi */
+    }
+    return (0.0 - pi) - tiny;       /* atan2(-0, -anything) = -pi */
+  }
+  if ((ix | lx) == 0) {             /* x == +-0, y nonzero */
+    if (hy < 0) {
+      return (0.0 - pi_o_2) - tiny;
+    }
+    return pi_o_2 + tiny;
+  }
+  if (ix == 2146435072) {           /* |x| == inf */
+    if (iy == 2146435072) {         /* |y| == inf */
+      if (m == 0) {
+        return pi_o_4 + tiny;
+      }
+      if (m == 1) {
+        return (0.0 - pi_o_4) - tiny;
+      }
+      if (m == 2) {
+        return 3.0 * pi_o_4 + tiny;
+      }
+      return (0.0 - 3.0 * pi_o_4) - tiny;
+    }
+    if (m == 0) {
+      return 0.0;                   /* atan2(+..., +inf) = +0 */
+    }
+    if (m == 1) {
+      return 0.0 * (0.0 - 1.0);     /* atan2(-..., +inf) = -0 */
+    }
+    if (m == 2) {
+      return pi + tiny;
+    }
+    return (0.0 - pi) - tiny;
+  }
+  if (iy == 2146435072) {           /* |y| == inf, x finite */
+    if (hy < 0) {
+      return (0.0 - pi_o_2) - tiny;
+    }
+    return pi_o_2 + tiny;
+  }
+  k = (iy - ix) >> 20;
+  if (k > 60) {                     /* |y/x| > 2^60 */
+    z = pi_o_2 + 0.5 * pi_lo;
+  } else if ((hx < 0) && (k < (0 - 60))) {
+    z = 0.0;                        /* |y|/|x| < 2^-60 and x < 0 */
+  } else {
+    ax = y / x;
+    ax = math_trig_with_hi(ax, math_trig_hi(ax) & 2147483647);
+    z = math_atan_c(ax);
+  }
+  if (m == 0) {
+    return z;                       /* atan2(+, +) */
+  }
+  if (m == 1) {
+    zh = (math_trig_hi(z) as u32);
+    return math_trig_with_hi(z, ((zh ^ 2147483648) as i32)); /* flip sign, keep -0 */
+  }
+  if (m == 2) {
+    return pi - (z - pi_lo);        /* atan2(+, -) */
+  }
+  return (z - pi_lo) - pi;          /* atan2(-, -) */
 }
 
 /**

@@ -53,9 +53,9 @@ double math_ceil_impl(double x) { return ceil(x); }
 double math_trunc_impl(double x) { return trunc(x); }
 double math_round_impl(double x) { return round(x); }
 /* math_sin_impl / math_cos_impl / math_tan_impl / math_asin_impl /
- * math_acos_impl / math_atan_impl libm splices removed (9.2.4). */
-double math_atan2_impl(double y, double x) { return atan2(y, x); }
-/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow/asin/acos/atan:
+ * math_acos_impl / math_atan_impl / math_atan2_impl libm splices
+ * removed (9.2.4). */
+/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2:
  * fdlibm .x ports on the product path; matching math_*_impl libm splices
  * removed (same-semantics C cold twins live in the guarded block). */
 double math_fabs_impl(double x) { return fabs(x); }
@@ -73,13 +73,12 @@ double math_erfc_impl(double x) { return erfc(x); }
 
 #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
 /* math_sin_c / math_cos_c / math_tan_c / math_asin_c / math_acos_c /
- * math_atan_c removed from splice: fdlibm .x ports + guarded cold twins
- * below (9.2.4). */
-double math_atan2_c(double y, double x) { return math_atan2_impl(y, x); }
+ * math_atan_c / math_atan2_c removed from splice: fdlibm .x ports +
+ * guarded cold twins below (9.2.4). */
 /* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c / math_log1p_c /
- * math_expm1_c / math_pow_c / math_asin_c / math_acos_c / math_atan_c
- * removed from the splice block: fdlibm .x ports + guarded cold twins
- * below (9.2.4). */
+ * math_expm1_c / math_pow_c / math_asin_c / math_acos_c / math_atan_c /
+ * math_atan2_c removed from the splice block: fdlibm .x ports + guarded
+ * cold twins below (9.2.4). */
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
 #endif
@@ -1522,6 +1521,66 @@ double math_atan_c(double x) {
   else z = atanhi3 - ((xx * (s1 + s2) - atanlo3) - xx);
   if (hx < 0) return -z;
   return z;
+}
+
+/* fdlibm e_atan2.c cold twin — isomorphic with math_atan2_c in
+ * src/asm/runtime_math_libm.x. Reuses math_atan_c (G.7). |y/x| via
+ * set_hi (fabs lives later). tiny is 1e-300 bit-pun. PLATFORM: SHARED. */
+double math_atan2_c(double y, double x) {
+  static const double pi_o_4 = 7.8539816339744827900E-01;
+  static const double pi_o_2 = 1.5707963267948965580E+00;
+  static const double pi = 3.1415926535897931160E+00;
+  static const double pi_lo = 1.2246467991473531772E-16;
+  union { double d; uint64_t u; } tiny;
+  tiny.u = 118622047889322841ull; /* 1e-300 */
+  double z, ax;
+  int32_t k, m, hx, hy, ix, iy, lx, ly;
+  hx = hi_of(x); ix = hx & 0x7fffffff; lx = lo_of(x);
+  hy = hi_of(y); iy = hy & 0x7fffffff; ly = lo_of(y);
+  if ((ix > 0x7ff00000) || ((ix == 0x7ff00000) && (lx != 0)) ||
+      (iy > 0x7ff00000) || ((iy == 0x7ff00000) && (ly != 0)))
+    return x + y;
+  if (((hx - 0x3ff00000) | lx) == 0)
+    return math_atan_c(y);
+  m = ((hy >> 31) & 1) | ((hx >> 30) & 2);
+  if ((iy | ly) == 0) {
+    if (m <= 1) return y;
+    if (m == 2) return pi + tiny.d;
+    return -pi - tiny.d;
+  }
+  if ((ix | lx) == 0)
+    return (hy < 0) ? -pi_o_2 - tiny.d : pi_o_2 + tiny.d;
+  if (ix == 0x7ff00000) {
+    if (iy == 0x7ff00000) {
+      if (m == 0) return pi_o_4 + tiny.d;
+      if (m == 1) return -pi_o_4 - tiny.d;
+      if (m == 2) return 3.0 * pi_o_4 + tiny.d;
+      return -3.0 * pi_o_4 - tiny.d;
+    }
+    if (m == 0) return 0.0;
+    if (m == 1) return -0.0;
+    if (m == 2) return pi + tiny.d;
+    return -pi - tiny.d;
+  }
+  if (iy == 0x7ff00000)
+    return (hy < 0) ? -pi_o_2 - tiny.d : pi_o_2 + tiny.d;
+  k = (iy - ix) >> 20;
+  if (k > 60)
+    z = pi_o_2 + 0.5 * pi_lo;
+  else if (hx < 0 && k < -60)
+    z = 0.0;
+  else {
+    ax = y / x;
+    set_hi(&ax, hi_of(ax) & 0x7fffffff);
+    z = math_atan_c(ax);
+  }
+  if (m == 0) return z;
+  if (m == 1) {
+    set_hi(&z, hi_of(z) ^ (int32_t)0x80000000);
+    return z;
+  }
+  if (m == 2) return pi - (z - pi_lo);
+  return (z - pi_lo) - pi;
 }
 
 #endif
