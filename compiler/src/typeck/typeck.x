@@ -6181,8 +6181,11 @@ ctx: *PipelineDepCtx): void {
        * including each dep itself (backend entry). Self-merge would
        * reset_slot the dep's own layout then "copy" from the already-reset
        * slot, wiping field type_refs and offsets to 0 (std.set abort 134 /
-       * std.string exit 3 three-face layout divergence). Skip self. */
+       * std.string exit 3 three-face layout divergence). Skip the self COPY
+       * but still sync: parse-only deps carry stale parse-time offsets and
+       * the dep's own emit runs before the entry merge syncs it. */
       if (dm == mod) {
+        glue_sync_struct_layout_field_offsets_c(dm, darena);
         di = di + 1;
         continue;
       }

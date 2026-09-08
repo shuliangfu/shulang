@@ -5898,6 +5898,7 @@ void typeck_merge_dep_struct_layouts_into_entry(struct ast_Module * mod, struct 
        * each dep itself; self-merge reset_slot wipes the dep's own layout
        * (field type_refs/offsets -> 0). Skip self. Mirrors the .x twin. */
       if ((dm == mod)) {
+        glue_sync_struct_layout_field_offsets_c(dm, darena);
         (void)((di = (di + 1)));
         continue;
       }
