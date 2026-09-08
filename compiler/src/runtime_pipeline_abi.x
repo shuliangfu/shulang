@@ -55019,14 +55019,20 @@ export function glue_field_access_load_bytes_for_type_ref(a: *u8, ty_ref: i32): 
 
 /**
  * Struct layout field offset by field name within layout li.
+ * Prefer the synced table over a live recompute. Import merge copies
+ * stored offsets into the caller module, but remapped field type_refs
+ * often miss in the caller arena (0). Recompute then treats every
+ * field as empty/4-byte and returns 0 — product import of gzip
+ * `ZStream.zalloc` stores at next_in and libz deflateInit2_ SEGV.
  * @param m *u8 - Module*
- * @param a *u8 - ASTArena*
+ * @param a *u8 - ASTArena* (used only when the table is unsynced)
  * @param li i32 - layout index
  * @param field_name *u8 - field name
  * @param flen i32 - name length
  * @return i32 - offset or -1
  * wave151 pure: G.7 authority (was static glue_struct_layout_field_offset_by_name_c).
- * PLATFORM: SHARED.
+ * PLATFORM: SHARED — Darwin AAPCS64 import emit used SP mag from the
+ * same table; Linux x86_64 store_offset consumes this return.
  */
 #[no_mangle]
 export function glue_struct_layout_field_offset_by_name_c(m: *u8, a: *u8, li: i32, field_name: *u8, flen: i32): i32 {
@@ -55035,6 +55041,8 @@ export function glue_struct_layout_field_offset_by_name_c(m: *u8, a: *u8, li: i3
   let fnlen: i32 = 0;
   let feq: i32 = 0;
   let fi: i32 = 0;
+  let stored: i32 = 0;
+  let computed: i32 = 0;
   let fb: u8[128] = [];
   if (m == (0 as *u8) || a == (0 as *u8) || li < 0 || field_name == (0 as *u8) || flen <= 0) {
     return 0 - 1;
@@ -55065,8 +55073,13 @@ export function glue_struct_layout_field_offset_by_name_c(m: *u8, a: *u8, li: i3
     }
     if (feq != 0) {
       unsafe {
-        return glue_struct_layout_compute_field_offset_c(m, a, li, j);
+        stored = pipeline_module_struct_layout_field_offset_at(m, li, j);
+        computed = glue_struct_layout_compute_field_offset_c(m, a, li, j);
       }
+      if (stored != 0) {
+        return stored;
+      }
+      return computed;
     }
     j = j + 1;
   }

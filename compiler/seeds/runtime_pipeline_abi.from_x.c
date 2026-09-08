@@ -29721,7 +29721,17 @@ int32_t glue_struct_layout_field_offset_by_name_c(void *m, void *a, int32_t li,
     }
     if (!feq)
       continue;
-    return glue_struct_layout_compute_field_offset_c(m, a, li, j);
+    /* Prefer synced table. Import merge copies stored offsets; remapped
+     * field type_refs often miss in the caller arena so recompute returns 0
+     * (gzip ZStream zalloc → next_in, libz deflateInit2_ SEGV).
+     * PLATFORM: SHARED. */
+    {
+      int32_t stored = pipeline_module_struct_layout_field_offset_at(m, li, j);
+      int32_t computed = glue_struct_layout_compute_field_offset_c(m, a, li, j);
+      if (stored != 0)
+        return stored;
+      return computed;
+    }
   }
   return -1;
 }
@@ -35928,7 +35938,15 @@ int32_t glue_struct_layout_field_offset_by_name_c(void *m, void *a, int32_t li,
     }
     if (!feq)
       continue;
-    return glue_struct_layout_compute_field_offset_c(m, a, li, j);
+    /* Prefer synced table. Twin of POSIX FROM_X .x authority.
+     * PLATFORM: WINDOWS leftover-PE / SHARED layout query. */
+    {
+      int32_t stored = pipeline_module_struct_layout_field_offset_at(m, li, j);
+      int32_t computed = glue_struct_layout_compute_field_offset_c(m, a, li, j);
+      if (stored != 0)
+        return stored;
+      return computed;
+    }
   }
   return -1;
 }
