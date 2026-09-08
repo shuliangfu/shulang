@@ -229,7 +229,10 @@ int32_t xlang_sqlite3_bind_int_c(int64_t stmt_h, int32_t idx, int32_t val) {
     return sqlite3_bind_int(stmt, idx, val);
 }
 
-/** sqlite3_bind_text（SQLITE_TRANSIENT）。 */
+/* PLATFORM: SHARED — SQLITE_TRANSIENT is a sqlite3.h macro that expands
+ * to ((sqlite3_destructor_type)-1). Cap 9.2.6 standing C rest: .x cannot
+ * expand that destructor typedef, so bind_text stays here (peer of zlib
+ * deflateInit2_impl_c). Do not invent a second destructor constant. */
 int32_t xlang_sqlite3_bind_text_c(int64_t stmt_h, int32_t idx, const uint8_t *text) {
     sqlite3_stmt *stmt = (sqlite3_stmt *)(intptr_t)stmt_h;
     if (!stmt) {

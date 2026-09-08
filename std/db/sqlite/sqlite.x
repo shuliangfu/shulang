@@ -120,13 +120,26 @@ allow(padding) struct DbPoolMem {
 }
 
 let g_db_last_err_bytes: u8[168] = [];
-let g_db_last_err: *DbErrSlot = &g_db_last_err_bytes[0] as *DbErrSlot;
 let g_db_stmt_cache_bytes: u8[4224] = [];
 
-/** Exported function `db_stmt_cache_slot`.
- * Implements `db_stmt_cache_slot`.
- * @param i i32
- * @return *DbCachedStmt
+/**
+ * Typed view of the last-error BSS slot.
+ * G.7: same pattern as db_stmt_cache_slot. A module-level
+ * `let p: *T = &bytes[0] as *T` is COMMON/BSS zero in library TUs —
+ * asm prepare cannot bake an ADDR_OF reloc (9.4.2 standing), and
+ * hoist-target seed never runs in a std .o with no main. Runtime
+ * ADDR_OF of the byte array is the single authority.
+ * @return *DbErrSlot — never null; points at g_db_last_err_bytes
+ * PLATFORM: SHARED — product sqlite open/exec hits this before C API.
+ */
+export function db_err_slot(): *DbErrSlot {
+  return (&g_db_last_err_bytes[0] as *DbErrSlot);
+}
+
+/**
+ * Typed view of stmt-cache slot i.
+ * @param i i32 — index in 0 .. DB_STMT_CACHE_CAP-1
+ * @return *DbCachedStmt — &g_db_stmt_cache_bytes[i * 264]
  */
 export function db_stmt_cache_slot(i: i32): *DbCachedStmt {
   return (&g_db_stmt_cache_bytes[(i * 264) as i32] as *DbCachedStmt);
@@ -171,16 +184,17 @@ extern "C" function xlang_sqlite3_free_c(ptr: i64): void;
  */
 export function db_set_err(code: i32, msg: *u8): void {
   let i: i32 = 0;
-  g_db_last_err.code = code;
-  if (msg == 0 || msg[0] == 0) {
-    g_db_last_err.msg[0] = 0;
+  let slot: *DbErrSlot = db_err_slot();
+  slot.code = code;
+  if ((msg == 0) || (msg[0] == 0)) {
+    slot.msg[0] = 0;
     return;
   }
-  while (i < 159 && msg[i] != 0) {
-    g_db_last_err.msg[i] = msg[i];
+  while ((i < 159) && (msg[i] != 0)) {
+    slot.msg[i] = msg[i];
     i = i + 1;
   }
-  g_db_last_err.msg[i] = 0;
+  slot.msg[i] = 0;
 }
 
 /** Exported function `db_clear_err`.
@@ -188,8 +202,9 @@ export function db_set_err(code: i32, msg: *u8): void {
  * @return void
  */
 export function db_clear_err(): void {
-  g_db_last_err.code = DB_OK;
-  g_db_last_err.msg[0] = 0;
+  let slot: *DbErrSlot = db_err_slot();
+  slot.code = DB_OK;
+  slot.msg[0] = 0;
 }
 
 /** Exported function `db_str_eq`.
@@ -934,10 +949,11 @@ export function db_rollback_c(handle: i64): i32 {
  * @return i32
  */
 export function db_last_code_c(): i32 {
+  let slot: *DbErrSlot = db_err_slot();
   if (db_stub_active() != 0) {
-    return g_db_last_err.code != 0 ? g_db_last_err.code : DB_NOT_IMPL;
+    return (slot.code != 0) ? slot.code : DB_NOT_IMPL;
   }
-  return g_db_last_err.code;
+  return slot.code;
 }
 
 /** Exported function `db_last_error_msg_c`.
@@ -945,8 +961,11 @@ export function db_last_code_c(): i32 {
  * @return *u8
  */
 export function db_last_error_msg_c(): *u8 {
-  if (g_db_last_err.msg[0] == 0) { return 0 as *u8; }
-  return &g_db_last_err.msg[0];
+  let slot: *DbErrSlot = db_err_slot();
+  if (slot.msg[0] == 0) {
+    return 0 as *u8;
+  }
+  return &slot.msg[0];
 }
 
 /** Exported function `db_backend_name_c`.
