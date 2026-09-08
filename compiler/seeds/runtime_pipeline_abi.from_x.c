@@ -29730,7 +29730,11 @@ int32_t glue_struct_layout_field_offset_by_name_c(void *m, void *a, int32_t li,
       int32_t computed = glue_struct_layout_compute_field_offset_c(m, a, li, j);
       if (stored != 0)
         return stored;
-      return computed;
+      if (computed != 0)
+        return computed;
+      if (j == 0)
+        return 0;
+      return -1;
     }
   }
   return -1;
@@ -35945,7 +35949,11 @@ int32_t glue_struct_layout_field_offset_by_name_c(void *m, void *a, int32_t li,
       int32_t computed = glue_struct_layout_compute_field_offset_c(m, a, li, j);
       if (stored != 0)
         return stored;
-      return computed;
+      if (computed != 0)
+        return computed;
+      if (j == 0)
+        return 0;
+      return -1;
     }
   }
   return -1;

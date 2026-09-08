@@ -55079,7 +55079,15 @@ export function glue_struct_layout_field_offset_by_name_c(m: *u8, a: *u8, li: i3
       if (stored != 0) {
         return stored;
       }
-      return computed;
+      if (computed != 0) {
+        return computed;
+      }
+      /* j==0 is a real 0. j>0 with both 0 is an unsynced/remap miss —
+       * return -1 so callers try dep stored offsets (gzip import). */
+      if (j == 0) {
+        return 0;
+      }
+      return 0 - 1;
     }
     j = j + 1;
   }
