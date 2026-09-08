@@ -29683,6 +29683,13 @@ int32_t pipeline_expr_field_access_load_byte_sz(void *a, void *m, int32_t expr_r
     }
   }
   base_tr = pipeline_expr_resolved_type_ref(a, ex->field_access_base_ref);
+  /* PLATFORM: SHARED — peel TYPE_PTR base (s: *S) so the layout match runs.
+   * Mirrors the .x / thin-slice twins. */
+  if (base_tr > 0 && pipeline_type_kind_ord_at(a, base_tr) == 9) {
+    int32_t elem_tr = pipeline_type_elem_ref_at(a, base_tr);
+    if (elem_tr > 0)
+      base_tr = elem_tr;
+  }
   if (base_tr > 0 && pipeline_type_kind_ord_at(a, base_tr) == 8) {
     nlen = pipeline_type_named_name_into(a, base_tr, struct_name);
     if (nlen > 0 && nlen <= 63 && m) {

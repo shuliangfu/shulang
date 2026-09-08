@@ -13,6 +13,7 @@ export extern function pipeline_expr_field_access_name_len(a: *u8, expr_ref: i32
 export extern function pipeline_expr_field_access_name_into(a: *u8, expr_ref: i32, out: *u8): void;
 export extern function pipeline_expr_resolved_type_ref(a: *u8, expr_ref: i32): i32;
 export extern function pipeline_type_kind_ord_at(a: *u8, ty_ref: i32): i32;
+export extern function pipeline_type_elem_ref_at(a: *u8, ref: i32): i32;
 export extern function pipeline_type_named_name_into(a: *u8, ty_ref: i32, out: *u8): i32;
 export extern function pipeline_module_num_struct_layouts_at(m: *u8): i32;
 export extern function pipeline_module_struct_layout_name_len(m: *u8, k: i32): i32;
@@ -118,6 +119,20 @@ export function pipeline_expr_field_access_load_byte_sz(a: *u8, m: *u8, expr_ref
   if (base_tr > 0) {
     unsafe {
       kind_ord = pipeline_type_kind_ord_at(a, base_tr);
+    }
+    /* PLATFORM: SHARED — dep parse-only bases are POINTER params (`s: *S`,
+     * stamped by the block_ref backfill); peel TYPE_PTR (9) to the element
+     * so the layout match runs (else i32 field loads fall to the 8-byte
+     * default and drag padding garbage into address math — std.string
+     * append_char SEGV). Must match the runtime_pipeline_abi.x twin. */
+    if (kind_ord == 9) {
+      unsafe {
+        let elem_tr_lbs: i32 = pipeline_type_elem_ref_at(a, base_tr);
+        if (elem_tr_lbs > 0) {
+          base_tr = elem_tr_lbs;
+          kind_ord = pipeline_type_kind_ord_at(a, base_tr);
+        }
+      }
     }
     if (kind_ord == 8) {
       unsafe {

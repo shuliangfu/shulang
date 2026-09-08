@@ -55690,12 +55690,22 @@ export function pipeline_expr_field_access_load_byte_sz(a: *u8, m: *u8, expr_ref
     }
   }
   // 2) Typed base: match layout by base TYPE_NAMED name, then field type width.
+  // PLATFORM: SHARED — peel TYPE_PTR base (s: *S) so the layout match runs.
   unsafe {
     base_tr = pipeline_expr_resolved_type_ref(a, base_ref);
   }
   if (base_tr > 0) {
     unsafe {
       kind_ord = pipeline_type_kind_ord_at(a, base_tr);
+    }
+    if (kind_ord == 9) {
+      unsafe {
+        let elem_tr_lbs: i32 = pipeline_type_elem_ref_at(a, base_tr);
+        if (elem_tr_lbs > 0) {
+          base_tr = elem_tr_lbs;
+          kind_ord = pipeline_type_kind_ord_at(a, base_tr);
+        }
+      }
     }
     if (kind_ord == 8) {
       unsafe {
