@@ -3569,6 +3569,15 @@ export function xlang_pipeline_dep_prerun_parse_skip_typeck_impl(dep_mod: *u8, d
     driver_x_pipeline_skip_codegen_set(1);
     // G.7 pure large_stack surface (wave56); re-null-checks inside thin gate are fine.
     let ec: i32 = xlang_pipeline_run_x_pipeline_large_stack(dep_mod, dep_arena, src, len, dep_out, one_ctx);
+    if (ec == 0) {
+      // PLATFORM: SHARED — dep prerun skips typeck, so block parent links stay
+      // unbound in the dep arena. Emit-time scope walks (block-let type fallback
+      // in glue_var_decl_type_ref_elf_c) need the parent chain to resolve local
+      // let types; without it u32 `>>` mis-resolves as signed and emits SAR
+      // (core.builtin clz_u32(0x80000000) never terminates). G.7: reuse the
+      // typeck.x patch authority (same call as the light fallback above).
+      pipeline_typeck_patch_all_body_parent_links_c(dep_mod, dep_arena);
+    }
     driver_x_pipeline_skip_codegen_set(0);
     driver_x_pipeline_skip_typeck_set(0);
     if (one_ctx != 0 as *u8) {
@@ -3661,6 +3670,14 @@ export function xlang_pipeline_dep_prerun_parse_only_impl(dep_mod: *u8, dep_aren
     parser_parse_into_init(dep_mod, dep_arena);
     let parse_rc: i32 = pipeline_parse_set_main_from_buf_c(dep_mod, dep_arena, src, len_i32);
     if (parse_rc == 0) {
+      // PLATFORM: SHARED — dep prerun is parse-only (no typeck), so block
+      // parent links stay unbound in the dep arena. Emit-time scope walks
+      // (glue_var_decl_type_ref_elf_c → pipeline_block_resolve_var_type_ref)
+      // need the parent chain to resolve block-let local types; without it
+      // u32 `>>` mis-resolves as signed and emits SAR (core.builtin
+      // clz_u32(0x80000000) never terminates). G.7: reuse the typeck.x patch
+      // authority (same call as the typeck light fallback).
+      pipeline_typeck_patch_all_body_parent_links_c(dep_mod, dep_arena);
       return 0;
     }
     return 0 - 1;

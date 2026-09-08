@@ -335,6 +335,9 @@ void xlang_resolve_import_file_path_multi_impl(const char **lib_roots, int n_lib
 /* G-02f-58 helper protos */
 int xlang_pipeline_dep_prerun_parse_skip_typeck_impl(void *dep_mod, void *dep_arena, const uint8_t *src, size_t len,
     void *dep_out, void *one_ctx);
+/* dep-prerun parent-link patch (G.7 typeck.x authority; unconditional so both
+ * FROM_X hybrid and full-seed compiles see it). */
+void pipeline_typeck_patch_all_body_parent_links_c(void *dep_mod, void *dep_arena);
 int xlang_pipeline_dep_prerun_parse_only_impl(void *dep_mod, void *dep_arena, const uint8_t *src, size_t len);
 
 /* G-02f-57 / G-02f-239 helper protos */
@@ -3255,6 +3258,12 @@ int xlang_pipeline_dep_prerun_parse_skip_typeck_impl(void *dep_mod, void *dep_ar
     driver_x_pipeline_skip_typeck_set(1);
     driver_x_pipeline_skip_codegen_set(1);
     ec = xlang_pipeline_run_x_pipeline_large_stack(dep_mod, dep_arena, src, len, dep_out, one_ctx);
+    /* PLATFORM: SHARED — dep prerun skips typeck, so block parent links stay unbound;
+     * emit-time scope walks (glue_var_decl_type_ref_elf_c) need the parent chain to
+     * resolve block-let local types (u32 >> must emit SHR not SAR). G.7: same
+     * typeck.x patch authority as the light fallback. Mirrors the .x twin. */
+    if (ec == 0)
+        pipeline_typeck_patch_all_body_parent_links_c(dep_mod, dep_arena);
     driver_x_pipeline_skip_codegen_set(0);
     driver_x_pipeline_skip_typeck_set(0);
     if (pctx)
@@ -3384,6 +3393,12 @@ int xlang_pipeline_dep_prerun_parse_only_impl(void *dep_mod, void *dep_arena, co
         diag_reportf(NULL, 0, 0, "note", NULL,
                      "asm debug: dep_prerun_parse_only done rc=%d funcs=%d",
                      (int)parse_rc, pipeline_module_num_funcs(dep_mod));
+    /* PLATFORM: SHARED — parse-only dep prerun leaves block parent links
+     * unbound; emit-time scope walks need them for block-let local types
+     * (u32 >> must emit SHR not SAR). G.7 typeck.x patch authority. Mirrors
+     * the .x twin. */
+    if (parse_rc == 0)
+        pipeline_typeck_patch_all_body_parent_links_c(dep_mod, dep_arena);
     return (parse_rc == 0) ? 0 : -1;
 }
 
