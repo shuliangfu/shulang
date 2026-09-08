@@ -3804,7 +3804,11 @@ int labi_std_fk_gate_sym_count(int fk) {
   if (fk == 5) return 5;
   /* PLATFORM: SHARED — std/atomic complete surface (10.4.1 widen i16/u16/i64/u64 support). */
   if (fk == 6) return 32;
-  if (fk == 7) return 4;
+  /* PLATFORM: SHARED — twin labi_ondemand_heavy.x fk7=19.
+   * Live Ubuntu L8b was count=4 (std_channel_send/recv + channel_send/recv);
+   * asm -o co-emits std_channel_* as T; sole UNDEF channel_i32_free_c
+   * (run-channel). Exact matcher; G.7 complete i32 wrapper faces. */
+  if (fk == 7) return 19;
   if (fk == 8) return 2;
   /* PLATFORM: SHARED — runtime_math_libm freestanding face gate completion
    * (9.2.4 Fix F). Was 29 needles; the 31 freestanding C-ABI faces
@@ -3938,8 +3942,23 @@ const char *labi_std_fk_gate_sym_at(int fk, int i) {
   if (fk == 7) {
     if (i == 0) return "std_channel_send";
     if (i == 1) return "std_channel_recv";
-    if (i == 2) return "channel_send";
-    if (i == 3) return "channel_recv";
+    if (i == 2) return "std_channel_bounded";
+    if (i == 3) return "std_channel_close";
+    if (i == 4) return "std_channel_free";
+    if (i == 5) return "std_channel_try_send";
+    if (i == 6) return "std_channel_try_recv";
+    if (i == 7) return "std_channel_unbounded";
+    if (i == 8) return "channel_send";
+    if (i == 9) return "channel_recv";
+    if (i == 10) return "channel_i32_send_c";
+    if (i == 11) return "channel_i32_bounded_c";
+    if (i == 12) return "channel_i32_unbounded_c";
+    if (i == 13) return "channel_i32_recv_c";
+    if (i == 14) return "channel_i32_try_send_c";
+    if (i == 15) return "channel_i32_try_recv_c";
+    if (i == 16) return "channel_i32_close_c";
+    if (i == 17) return "channel_i32_free_c";
+    if (i == 18) return "channel_i32_is_closed_c";
     return NULL;
   }
   if (fk == 8) {

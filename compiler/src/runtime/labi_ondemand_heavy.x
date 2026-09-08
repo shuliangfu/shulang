@@ -2373,11 +2373,13 @@ export function labi_std_fk_gate_sym_count(fk: i32): i32 {
   if (fk == 6) {
     return 32;
   }
-  // PLATFORM: SHARED — channel product face complete (pure-asm std_channel_*).
-  // Was only send/recv + bare channel_send/recv; sole callers of bounded/close/
-  // free/try_* never opened fk7 → never push channel.o + channel_glue.
+  // PLATFORM: SHARED — channel product face complete (pure-asm std_channel_*
+  // + leftover channel_send/recv + every channel_i32_*_c wrapper body).
+  // Ubuntu L8b leftover was count=4 (send/recv only); asm -o co-emits
+  // std_channel_* as T so the sole UNDEF is channel_i32_free_c (run-channel).
+  // Exact matcher; G.7 complete i32 faces so fk7 pushes channel.o + glue.
   if (fk == 7) {
-    return 10;
+    return 19;
   }
   if (fk == 8) {
     return 2;
@@ -2671,7 +2673,10 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
       return 0 as *u8;
     }
     // PLATFORM: SHARED — fk==7 std/channel complete surface (exact match).
-    // Pure-asm import METHOD → std_channel_*; glue provides channel_i32_*_c.
+    // Pure-asm import METHOD → std_channel_*; leftover C-path channel_send/recv;
+    // glue provides channel_i32_*_c. Asm -o co-emits wrappers as T so the live
+    // UNDEF is the bare *_c body (run-channel: channel_i32_free_c). G.7 complete
+    // every i32 wrapper face in std/channel/mod.x (not the select companion).
     if (fk == 7) {
       if (i == 0) {
         let p: *u8 = "std_channel_send";
@@ -2705,12 +2710,49 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
         let p: *u8 = "std_channel_unbounded";
         return p;
       }
+      // Leftover L8b unique C-path needles (keep; exact match).
       if (i == 8) {
-        let p: *u8 = "channel_i32_send_c";
+        let p: *u8 = "channel_send";
         return p;
       }
       if (i == 9) {
+        let p: *u8 = "channel_recv";
+        return p;
+      }
+      if (i == 10) {
+        let p: *u8 = "channel_i32_send_c";
+        return p;
+      }
+      if (i == 11) {
         let p: *u8 = "channel_i32_bounded_c";
+        return p;
+      }
+      if (i == 12) {
+        let p: *u8 = "channel_i32_unbounded_c";
+        return p;
+      }
+      if (i == 13) {
+        let p: *u8 = "channel_i32_recv_c";
+        return p;
+      }
+      if (i == 14) {
+        let p: *u8 = "channel_i32_try_send_c";
+        return p;
+      }
+      if (i == 15) {
+        let p: *u8 = "channel_i32_try_recv_c";
+        return p;
+      }
+      if (i == 16) {
+        let p: *u8 = "channel_i32_close_c";
+        return p;
+      }
+      if (i == 17) {
+        let p: *u8 = "channel_i32_free_c";
+        return p;
+      }
+      if (i == 18) {
+        let p: *u8 = "channel_i32_is_closed_c";
         return p;
       }
       return 0 as *u8;

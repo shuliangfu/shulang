@@ -1283,7 +1283,7 @@ int32_t labi_std_fk_gate_sym_count(int32_t fk) {
     return 32;
   }
   if ((fk ==7)) {
-    return 10;
+    return 19;
   }
   if ((fk ==8)) {
     return 2;
@@ -1573,11 +1573,47 @@ uint8_t * labi_std_fk_gate_sym_at(int32_t fk, int32_t i) {
       return p;
     }
     if ((i ==8)) {
-      uint8_t * p = ((uint8_t *)"channel_i32_send_c");
+      uint8_t * p = ((uint8_t *)"channel_send");
       return p;
     }
     if ((i ==9)) {
+      uint8_t * p = ((uint8_t *)"channel_recv");
+      return p;
+    }
+    if ((i ==10)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_send_c");
+      return p;
+    }
+    if ((i ==11)) {
       uint8_t * p = ((uint8_t *)"channel_i32_bounded_c");
+      return p;
+    }
+    if ((i ==12)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_unbounded_c");
+      return p;
+    }
+    if ((i ==13)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_recv_c");
+      return p;
+    }
+    if ((i ==14)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_try_send_c");
+      return p;
+    }
+    if ((i ==15)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_try_recv_c");
+      return p;
+    }
+    if ((i ==16)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_close_c");
+      return p;
+    }
+    if ((i ==17)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_free_c");
+      return p;
+    }
+    if ((i ==18)) {
+      uint8_t * p = ((uint8_t *)"channel_i32_is_closed_c");
       return p;
     }
     return ((uint8_t *)(0));
