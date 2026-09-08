@@ -19875,6 +19875,9 @@ func_i: i32, num_funcs: i32): i32 {
 /* Rest-lane C walker: stamp anonymous return-position STRUCT_LITs with the
  * declared return type name (parse-only dep prerun backfill). PLATFORM: SHARED. */
 export extern function glue_stamp_return_lits_in_block_c(arena: *ASTArena, block_ref: i32, rty: i32): void;
+/* Rest-lane C walker: stamp block_ref on nested VAR exprs (parse-only dep
+ * prerun backfill; feeds the emit-phase var type backfill climb). SHARED. */
+export extern function glue_fill_var_block_refs_c(arena: *ASTArena, block_ref: i32): void;
 
 export function typeck_patch_all_body_parent_links(module: *Module, arena: *ASTArena): void {
   // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
@@ -19899,6 +19902,11 @@ export function typeck_patch_all_body_parent_links(module: *Module, arena: *ASTA
         if (rty_pl > 0) {
           glue_stamp_return_lits_in_block_c(arena, br, rty_pl);
         }
+        // PLATFORM: SHARED — parser only stamps block-level stmt exprs;
+        // stamp nested VAR block_refs so the emit-phase param/let type
+        // backfill climb (glue_fill_var_types_from_params_for_func) works
+        // on parse-only deps (field load widths else default to 8 bytes).
+        glue_fill_var_block_refs_c(arena, br);
       }
       i = i + 1;
     }

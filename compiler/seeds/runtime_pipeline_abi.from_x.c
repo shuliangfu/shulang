@@ -58459,6 +58459,151 @@ static W278_Expr *w278_expr_ptr(void *a, int32_t ref) {
   return (W278_Expr *)pipeline_arena_expr_ptr(a, ref);
 }
 
+/* Local protos for the VAR block_ref backfill walker (strict -Wimplicit). */
+extern int32_t pipeline_expr_binop_left_ref_at(void *a, int32_t er);
+extern int32_t pipeline_expr_binop_right_ref_at(void *a, int32_t er);
+extern int32_t pipeline_expr_as_operand_ref_at(void *a, int32_t er);
+extern int32_t pipeline_expr_field_access_base_ref(void *a, int32_t er);
+extern int32_t pipeline_expr_array_lit_num_elems_at(void *a, int32_t er);
+extern int32_t pipeline_expr_array_lit_elem_ref(void *a, int32_t er, int32_t idx);
+extern int32_t pipeline_expr_struct_lit_num_fields(void *a, int32_t er);
+extern int32_t pipeline_expr_struct_lit_init_ref(void *a, int32_t er, int32_t j);
+extern int32_t pipeline_expr_index_base_ref(void *a, int32_t er);
+extern int32_t pipeline_expr_index_index_ref(void *a, int32_t er);
+extern int32_t pipeline_expr_call_num_args_at(void *a, int32_t er);
+extern int32_t pipeline_expr_call_arg_ref(void *a, int32_t er, int32_t idx);
+extern int32_t pipeline_block_let_init_ref(void *a, int32_t br, int32_t li);
+extern int32_t ast_ast_block_num_lets(void *a, int32_t br);
+extern int32_t ast_ast_block_num_consts(void *a, int32_t br);
+extern int32_t pipeline_block_const_init_ref(void *a, int32_t br, int32_t ci);
+
+/**
+ * PLATFORM: SHARED — parse-only dep prerun backfill: stamp block_ref on
+ * VAR exprs (nested anywhere in statement / let-init / const-init expr
+ * trees). The parser only stamps block-level statement exprs; typeck
+ * stamps the rest, and parse-only deps skip typeck — so
+ * glue_fill_var_types_from_params_for_func (which climbs
+ * pipeline_expr_block_ref_at to the owning function) breaks on the first
+ * hop and field-access load widths fall to the 8-byte default (i32
+ * `s.length` drags padding garbage into address math; std.string
+ * append_char SEGV). Stamps only exprs whose block_ref is still 0.
+ */
+static void glue_var_blk_walk_expr(void *a, int32_t er, int32_t blk) {
+  int32_t ko;
+  int32_t l;
+  int32_t r;
+  int32_t i;
+  int32_t n;
+  W278_Expr *ex;
+  if (!a || er <= 0)
+    return;
+  ko = pipeline_expr_kind_ord_at(a, er);
+  if (ko == 3) {
+    ex = w278_expr_ptr(a, er);
+    if (ex && ex->block_ref == 0)
+      ex->block_ref = blk;
+    return;
+  }
+  if ((ko >= 4 && ko <= 21) || (ko >= 28 && ko <= 38)) {
+    /* 4..21 binop family; 28 ASSIGN + 29..38 compound assigns share the
+     * binop left/right operand slots (LHS field bases live here). */
+    glue_var_blk_walk_expr(a, pipeline_expr_binop_left_ref_at(a, er), blk);
+    glue_var_blk_walk_expr(a, pipeline_expr_binop_right_ref_at(a, er), blk);
+    return;
+  }
+  if (ko == 22 || ko == 23 || ko == 24 || ko == 41 || ko == 50 || ko == 51) {
+    glue_var_blk_walk_expr(a, pipeline_expr_unary_operand_ref_at(a, er), blk);
+    return;
+  }
+  l = pipeline_expr_as_operand_ref_at(a, er);
+  if (l > 0) {
+    glue_var_blk_walk_expr(a, l, blk);
+    return;
+  }
+  if (ko == 44) {
+    glue_var_blk_walk_expr(a, pipeline_expr_field_access_base_ref(a, er), blk);
+    return;
+  }
+  if (ko == 46) {
+    n = pipeline_expr_array_lit_num_elems_at(a, er);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_expr_array_lit_elem_ref(a, er, i), blk);
+    return;
+  }
+  if (ko == 45) {
+    n = pipeline_expr_struct_lit_num_fields(a, er);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_expr_struct_lit_init_ref(a, er, i), blk);
+    return;
+  }
+  if (ko == 47) {
+    glue_var_blk_walk_expr(a, pipeline_expr_index_base_ref(a, er), blk);
+    glue_var_blk_walk_expr(a, pipeline_expr_index_index_ref(a, er), blk);
+    return;
+  }
+  if (ko == 48 || ko == 49) {
+    n = pipeline_expr_call_num_args_at(a, er);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_expr_call_arg_ref(a, er, i), blk);
+    return;
+  }
+}
+
+void glue_fill_var_block_refs_c(void *a, int32_t block_ref) {
+  int32_t stack_blk[256];
+  int32_t sp;
+  int32_t cur;
+  int32_t i;
+  int32_t n;
+  int32_t er;
+  W277_Block *b;
+  if (!a || block_ref <= 0)
+    return;
+  sp = 0;
+  stack_blk[sp] = block_ref;
+  sp++;
+  while (sp > 0) {
+    sp--;
+    cur = stack_blk[sp];
+    if (cur <= 0 || cur > w277_as_arena(a)->num_blocks)
+      continue;
+    b = w277_block_at(a, cur);
+    if (!b)
+      continue;
+    n = ast_ast_block_num_expr_stmts(a, cur);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_block_expr_stmt_ref(a, cur, i), cur);
+    er = ast_ast_block_final_expr_ref(a, cur);
+    if (er > 0)
+      glue_var_blk_walk_expr(a, er, cur);
+    n = ast_ast_block_num_lets(a, cur);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_block_let_init_ref(a, cur, i), cur);
+    n = ast_ast_block_num_consts(a, cur);
+    for (i = 0; i < n; i++)
+      glue_var_blk_walk_expr(a, pipeline_block_const_init_ref(a, cur, i), cur);
+    for (i = 0; i < b->num_loops; i++) {
+      int32_t wb = pipeline_block_while_body_ref(a, cur, i);
+      if (wb > 0 && sp < 256) { stack_blk[sp] = wb; sp++; }
+    }
+    for (i = 0; i < b->num_for_loops; i++) {
+      int32_t fb = pipeline_block_for_body_ref(a, cur, i);
+      if (fb > 0 && sp < 256) { stack_blk[sp] = fb; sp++; }
+    }
+    for (i = 0; i < b->num_if_stmts; i++) {
+      int32_t tb = pipeline_block_if_then_body_ref(a, cur, i);
+      if (tb > 0 && sp < 256) { stack_blk[sp] = tb; sp++; }
+      int32_t eb = pipeline_block_if_else_body_ref(a, cur, i);
+      if (eb > 0 && sp < 256) { stack_blk[sp] = eb; sp++; }
+    }
+    for (i = 0; i < b->num_regions; i++) {
+      int32_t rgb = pipeline_block_region_body_ref(a, cur, i);
+      if (rgb > 0 && sp < 256) { stack_blk[sp] = rgb; sp++; }
+    }
+  }
+}
+
+
 static W278_MatchArm *expr_match_arm_at(void *a, int32_t expr_ref, int32_t arm_idx, int create) {
   W278_Sidecar *sc;
   W278_Expr *ex;

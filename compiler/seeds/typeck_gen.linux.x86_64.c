@@ -14890,6 +14890,7 @@ int32_t typeck_x_ast_check_all_funcs_loop(struct ast_Module * module, struct ast
   }
 }
 extern void glue_stamp_return_lits_in_block_c(struct ast_ASTArena * arena, int32_t block_ref, int32_t rty);
+extern void glue_fill_var_block_refs_c(struct ast_ASTArena * arena, int32_t block_ref);
 void typeck_patch_all_body_parent_links(struct ast_Module * module, struct ast_ASTArena * arena) {
   {
     int32_t i = 0;
@@ -14910,6 +14911,9 @@ void typeck_patch_all_body_parent_links(struct ast_Module * module, struct ast_A
           int32_t rty_pl = pipeline_module_func_return_type_at(module, i);
           if ((rty_pl > 0))
             glue_stamp_return_lits_in_block_c(arena, br, rty_pl);
+          /* PLATFORM: SHARED — stamp nested VAR block_refs for the emit-phase
+           * var type backfill climb (parse-only deps). Mirrors the .x twin. */
+          glue_fill_var_block_refs_c(arena, br);
         }
       }
       (void)((i = (i + 1)));
