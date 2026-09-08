@@ -57249,6 +57249,97 @@ int32_t pipeline_block_if_else_body_ref(void *a, int32_t br, int32_t ii) {
 static int32_t expr_has_inner_block(void *a, int32_t expr_ref, int32_t parent_block, int32_t depth);
 static void patch_block_expr_parents(void *a, int32_t block_ref);
 
+/* Local protos for the return-lit stamp walker below (strict -Wimplicit). */
+extern int32_t pipeline_type_kind_ord_at(void *a, int32_t ref);
+extern int32_t pipeline_type_named_name_into(void *arena, int32_t ref, uint8_t *out64);
+extern int32_t pipeline_expr_kind_ord_at(void *a, int32_t er);
+extern int32_t pipeline_expr_unary_operand_ref_at(void *a, int32_t er);
+extern int32_t ast_ast_block_num_expr_stmts(void *a, int32_t br);
+extern int32_t pipeline_expr_struct_lit_type_name_len(void *a, int32_t expr_ref);
+extern void pipeline_expr_struct_lit_type_name_set(void *a, int32_t expr_ref, uint8_t *name, int32_t name_len);
+extern int32_t ast_ast_block_final_expr_ref(void *arena, int32_t block_ref);
+extern int32_t pipeline_block_while_body_ref(void *a, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_for_body_ref(void *a, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_if_then_body_ref(void *a, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_if_else_body_ref(void *a, int32_t block_ref, int32_t i);
+extern int32_t pipeline_block_region_body_ref(void *a, int32_t block_ref, int32_t i);
+
+/**
+ * PLATFORM: SHARED — parse-only dep prerun backfill: stamp anonymous
+ * STRUCT_LIT operands of return statements with the enclosing function's
+ * declared return type name. Without typeck these lits stay unstamped and
+ * every emit consumer (field offsets / store sizes / return classification
+ * via struct_lit_value_bytes) infers per-field — std.string new() `data: []`
+ * mis-sizes as a 16B slice and stores a stack pointer instead of the 256B
+ * inline buffer. Same recovery discipline as let-position (decl type).
+ * Recursive block walk mirrors pipeline_patch_block_parent_links.
+ */
+void glue_stamp_return_lits_in_block_c(void *a, int32_t block_ref, int32_t rty) {
+  int32_t stack_blk[256];
+  int32_t sp;
+  int32_t cur;
+  int32_t i;
+  int32_t ne;
+  int32_t er;
+  int32_t nlen;
+  uint8_t nbuf[128];
+  W277_Block *b;
+  if (!a || block_ref <= 0 || rty <= 0)
+    return;
+  if (pipeline_type_kind_ord_at(a, rty) != 8)
+    return;
+  nlen = pipeline_type_named_name_into(a, rty, nbuf);
+  if (nlen <= 0 || nlen > 127)
+    return;
+  sp = 0;
+  stack_blk[sp] = block_ref;
+  sp++;
+  while (sp > 0) {
+    sp--;
+    cur = stack_blk[sp];
+    if (cur <= 0 || cur > w277_as_arena(a)->num_blocks)
+      continue;
+    b = w277_block_at(a, cur);
+    if (!b)
+      continue;
+    ne = ast_ast_block_num_expr_stmts(a, cur);
+    for (i = 0; i < ne; i++) {
+      er = pipeline_block_expr_stmt_ref(a, cur, i);
+      if (er > 0 && pipeline_expr_kind_ord_at(a, er) == 41) {
+        int32_t rop = pipeline_expr_unary_operand_ref_at(a, er);
+        if (rop > 0 && pipeline_expr_kind_ord_at(a, rop) == 45 &&
+            pipeline_expr_struct_lit_type_name_len(a, rop) <= 0)
+          pipeline_expr_struct_lit_type_name_set(a, rop, nbuf, nlen);
+      }
+    }
+    er = ast_ast_block_final_expr_ref(a, cur);
+    if (er > 0 && pipeline_expr_kind_ord_at(a, er) == 41) {
+      int32_t rop2 = pipeline_expr_unary_operand_ref_at(a, er);
+      if (rop2 > 0 && pipeline_expr_kind_ord_at(a, rop2) == 45 &&
+          pipeline_expr_struct_lit_type_name_len(a, rop2) <= 0)
+        pipeline_expr_struct_lit_type_name_set(a, rop2, nbuf, nlen);
+    }
+    for (i = 0; i < b->num_loops; i++) {
+      int32_t wb = pipeline_block_while_body_ref(a, cur, i);
+      if (wb > 0 && sp < 256) { stack_blk[sp] = wb; sp++; }
+    }
+    for (i = 0; i < b->num_for_loops; i++) {
+      int32_t fb = pipeline_block_for_body_ref(a, cur, i);
+      if (fb > 0 && sp < 256) { stack_blk[sp] = fb; sp++; }
+    }
+    for (i = 0; i < b->num_if_stmts; i++) {
+      int32_t tb = pipeline_block_if_then_body_ref(a, cur, i);
+      if (tb > 0 && sp < 256) { stack_blk[sp] = tb; sp++; }
+      int32_t eb = pipeline_block_if_else_body_ref(a, cur, i);
+      if (eb > 0 && sp < 256) { stack_blk[sp] = eb; sp++; }
+    }
+    for (i = 0; i < b->num_regions; i++) {
+      int32_t rgb = pipeline_block_region_body_ref(a, cur, i);
+      if (rgb > 0 && sp < 256) { stack_blk[sp] = rgb; sp++; }
+    }
+  }
+}
+
 void pipeline_patch_block_parent_links(void *a, int32_t block_ref, int32_t parent_ref) {
   int32_t stack_blk[256];
   int32_t stack_par[256];

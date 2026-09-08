@@ -19872,6 +19872,10 @@ func_i: i32, num_funcs: i32): i32 {
 /**
  * See implementation.
  */
+/* Rest-lane C walker: stamp anonymous return-position STRUCT_LITs with the
+ * declared return type name (parse-only dep prerun backfill). PLATFORM: SHARED. */
+export extern function glue_stamp_return_lits_in_block_c(arena: *ASTArena, block_ref: i32, rty: i32): void;
+
 export function typeck_patch_all_body_parent_links(module: *Module, arena: *ASTArena): void {
   // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
   unsafe {
@@ -19886,6 +19890,15 @@ export function typeck_patch_all_body_parent_links(module: *Module, arena: *ASTA
       br = pipeline_module_func_body_ref_at(module, i);
       if (!ast.ref_is_null(br)) {
         pipeline_patch_block_parent_links(arena, br, 0);
+        // PLATFORM: SHARED — parse-only dep prerun backfill: anonymous
+        // STRUCT_LIT in return position is unstamped without typeck; stamp
+        // the declared return type name so emit-side field offsets / store
+        // sizes / return classification stop inferring per-field (std.string
+        // new() `data: []` mis-sized as a 16B slice). Rest-lane C walker.
+        let rty_pl: i32 = pipeline_module_func_return_type_at(module, i);
+        if (rty_pl > 0) {
+          glue_stamp_return_lits_in_block_c(arena, br, rty_pl);
+        }
       }
       i = i + 1;
     }

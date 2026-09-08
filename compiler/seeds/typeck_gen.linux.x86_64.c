@@ -14889,6 +14889,7 @@ int32_t typeck_x_ast_check_all_funcs_loop(struct ast_Module * module, struct ast
     return 0;
   }
 }
+extern void glue_stamp_return_lits_in_block_c(struct ast_ASTArena * arena, int32_t block_ref, int32_t rty);
 void typeck_patch_all_body_parent_links(struct ast_Module * module, struct ast_ASTArena * arena) {
   {
     int32_t i = 0;
@@ -14902,6 +14903,14 @@ void typeck_patch_all_body_parent_links(struct ast_Module * module, struct ast_A
       (void)((br = pipeline_module_func_body_ref_at(module, i)));
       if (!(ast_ref_is_null(br))) {
         (void)(pipeline_patch_block_parent_links(arena, br, 0));
+        /* PLATFORM: SHARED — parse-only dep prerun backfill: stamp anonymous
+         * return-position STRUCT_LITs with the declared return type name.
+         * Mirrors the .x twin. */
+        {
+          int32_t rty_pl = pipeline_module_func_return_type_at(module, i);
+          if ((rty_pl > 0))
+            glue_stamp_return_lits_in_block_c(arena, br, rty_pl);
+        }
       }
       (void)((i = (i + 1)));
     }
