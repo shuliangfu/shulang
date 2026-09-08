@@ -24,6 +24,8 @@
 // 9.2.4 sin/cos/tan (2026-09-08): fdlibm s_sin.c / s_cos.c / s_tan.c plus
 //   k_sin/k_cos/k_tan + e_rem_pio2 / k_rem_pio2 full .x ports (no libm);
 //   seed keeps same-semantics C cold twins under the same guard
+// 9.2.4 pow (2026-09-08): fdlibm e_pow.c full .x port (no libm); seed keeps
+//   a same-semantics C cold twin under the same guard
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -44,7 +46,9 @@ export extern "C" function math_atan2_impl(y: f64, x: f64): f64;
 /* 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports on
  * the product path; math_sqrt_impl / math_cbrt_impl libm splices removed
  * (same-semantics C cold twins live in the guarded seed block). */
-export extern "C" function math_pow_impl(base: f64, exp: f64): f64;
+/* 9.2.4 pow (2026-09-08): fdlibm e_pow.c full .x port on the product path;
+ * math_pow_impl libm splice removed (same-semantics C cold twin lives in
+ * the guarded seed block). */
 /* 9.2.4 exp/log (2026-09-08): fdlibm e_exp.c / e_log.c full .x ports on the
  * product path; math_exp_impl / math_log_impl libm splices removed (their
  * same-semantics C cold twins live in the guarded seed block). */
@@ -107,9 +111,9 @@ export function math_special_near(a: f64, b: f64, eps: f64): i32 {
 // bit-level implementations (fdlibm semantics, no libm call on the product
 // path). Punning goes through pointer casts (let p: *u64 = &v as *u64), all
 // masks are computed with shifts from a u64 one — no large hex literals.
-// Remaining wrappers (pow/asin/acos/atan/atan2/erf/erfc) still forward to
+// Remaining wrappers (asin/acos/atan/atan2/erf/erfc) still forward to
 // the C seed _impl bridges. exact-7 + exp/log + sqrt/cbrt + expm1/log1p +
-// sin/cos/tan are full .x; the seed keeps
+// sin/cos/tan + pow are full .x; the seed keeps
 // same-semantics cold twins under `#ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X`
 // (G.4: same commit, same semantics on both paths).
 
@@ -1369,9 +1373,360 @@ export function math_cbrt_c(x: f64): f64 {
   return t;
 }
 
+/**
+ * Computes pow(base, exp): base**exp, returned as f64.
+ *
+ * fdlibm e_pow.c port (Sun reference algorithm, error < 1 ulp):
+ * 1. Specials first: y==0 -> 1; any NaN -> x+y; y == +-1 / 2 / 0.5 (sqrt);
+ *    y == +-inf; x == 0 / +-1 / +-inf (with odd-integer sign of a negative
+ *    base); negative non-integer power of a negative base is NaN.
+ * 2. log2(|x|) in two pieces t1+t2 (t1 has 29 trailing zero bits). Subnormal
+ *    x is scaled by 2^53 first. The reduction interval is selected by the
+ *    top 20 significand bits against sqrt(3/2) / sqrt(3).
+ * 3. Multi-precision y*(t1+t2) = n + y' with |y'| <= 0.5, then
+ *    2**n * exp(y'*ln2) via a degree-5 minimax on the same P-polynomial
+ *    used by math_exp_c. Subnormal outputs go through math_trig_scalbn.
+ * 4. fdlibm (not IEEE 754-2008) pins: +-1 ** +-inf is NaN (host libm
+ *    returns 1). A few generic values sit 1 ulp off correctly-rounded host
+ *    libm; the product probe pins fdlibm.
+ * All decimal literals are Python-verified against the fdlibm hex comments
+ * (rule: decimal<->hex conversion via Python only; scientific-notation
+ * literals are not used anywhere in .x). huge/tiny are bit-punned.
+ * PLATFORM: SHARED freestanding (no libm).
+ * @param base f64 - the base x
+ * @param exp f64 - the exponent y
+ * @return f64 - x**y (fdlibm discrete-op bits)
+ */
 #[no_mangle]
 export function math_pow_c(base: f64, exp: f64): f64 {
-  unsafe { return math_pow_impl(base, exp); }
+  let x: f64 = base;
+  let y: f64 = exp;
+  let one: f64 = 1.0;
+  let two: f64 = 2.0;
+  let zero: f64 = 0.0;
+  let two53: f64 = 9007199254740992.0;                   /* 0x4340000000000000 */
+  let l1: f64 = 0.59999999999999464872502130674547515809535980224609; /* 0x3fe3333333333303 */
+  let l2: f64 = 0.42857142857855018425183857289084699004888534545898; /* 0x3fdb6db6db6fabff */
+  let l3: f64 = 0.3333333298183774329181972007063450291752815246582;  /* 0x3fd55555518f264d */
+  let l4: f64 = 0.27272812380853400648916817772260401397943496704102; /* 0x3fd17460a91d4101 */
+  let l5: f64 = 0.23066074577556175406733984800666803494095802307129; /* 0x3fcd864a93c9db65 */
+  let l6: f64 = 0.20697501780033841778383418841258389875292778015137; /* 0x3fca7e284a454eef */
+  let p1: f64 = 0.16666666666666601903656896865868475288152694702148; /* 0x3fc555555555553e */
+  let p2: f64 = 0.0 - 0.00277777777770155933842466389194214571034535765648; /* 0xbf66c16c16bebd93 */
+  let p3: f64 = 0.00006613756321437934361170962738185608031926676631; /* 0x3f11566aaf25de2c */
+  let p4: f64 = 0.0 - 0.00000165339022054652515389633424952586793210684846; /* 0xbebbbd41c5d26bf1 */
+  let p5: f64 = 0.00000004138136797057238460388487247265665303075366; /* 0x3e66376972bea4d0 */
+  let lg2: f64 = 0.69314718055994528622676398299518041312694549560547; /* 0x3fe62e42fefa39ef */
+  let lg2_h: f64 = 0.693147182464599609375;              /* 0x3fe62e4300000000 */
+  let lg2_l: f64 = 0.0 - 0.00000000190465429995776804525041551497972075468468; /* 0xbe205c610ca86c39 */
+  let ovt: f64 = 0.00000000000000008008566259537294101970300253372837; /* 0x3c971547652b82fe */
+  let cp: f64 = 0.96179669392597555432899980587535537779331207275391; /* 0x3feec709dc3a03fd */
+  let cp_h: f64 = 0.961796700954437255859375;            /* 0x3feec709e0000000 */
+  let cp_l: f64 = 0.0 - 0.00000000702846165095275826516275184262412534241804; /* 0xbe3e2fe0145b01f5 */
+  let ivln2: f64 = 1.44269504088896338700465094007086008787155151367188; /* 0x3ff71547652b82fe */
+  let ivln2_h: f64 = 1.44269502162933349609375;          /* 0x3ff7154760000000 */
+  let ivln2_l: f64 = 0.00000001925962991126617468866556595954997455066859; /* 0x3e54ae0bf85ddf44 */
+  let dp_h1: f64 = 0.58496248722076416015625;            /* 0x3fe2b80340000000 */
+  let dp_l1: f64 = 0.0000000135003920212974897128407517727863296208568; /* 0x3e4cfdeb43cfd006 */
+  let third: f64 = 0.33333333333333331482961625624739099293947219848633;
+  let huge: f64 = 0.0;
+  let tiny: f64 = 0.0;
+  unsafe {
+    let ph: *u64 = &huge as *u64;
+    *ph = 9094988921128908188;      /* 0x7e37e43c8800759c = 1e300 */
+    let pt: *u64 = &tiny as *u64;
+    *pt = 118622047889322841;       /* 0x01a56e1fc2f8f359 = 1e-300 */
+  }
+
+  let hx: i32 = math_trig_hi(x);
+  let hy: i32 = math_trig_hi(y);
+  let lx: u32 = math_trig_lo(x) as u32;
+  let ly: u32 = math_trig_lo(y) as u32;
+  let ix: i32 = hx & 2147483647;     /* 0x7fffffff */
+  let iy: i32 = hy & 2147483647;
+
+  /* y == 0 -> 1 (including 0**0 and inf**0). */
+  if ((iy == 0) && (ly == 0)) {
+    return one;
+  }
+
+  /* Any NaN -> x+y (propagates a NaN payload). */
+  if (ix > 2146435072) {            /* 0x7ff00000 */
+    return x + y;
+  }
+  if (ix == 2146435072) {
+    if (lx != 0) {
+      return x + y;
+    }
+  }
+  if (iy > 2146435072) {
+    return x + y;
+  }
+  if (iy == 2146435072) {
+    if (ly != 0) {
+      return x + y;
+    }
+  }
+
+  /* yisint: 0 = not an integer, 1 = odd int, 2 = even int. Only needed
+   * when x < 0 (negative**non-int is NaN; negative**odd keeps the sign). */
+  let yisint: i32 = 0;
+  if (hx < 0) {
+    if (iy >= 1128267776) {         /* |y| >= 2^53 (0x43400000): even int */
+      yisint = 2;
+    } else {
+      if (iy >= 1072693248) {       /* |y| >= 1 (0x3ff00000) */
+        let ke: i32 = (iy >> 20) - 1023;
+        if (ke > 20) {
+          let sh: i32 = 52 - ke;
+          let ju: u32 = ly >> (sh as u32);
+          if ((ju << (sh as u32)) == ly) {
+            yisint = 2 - ((ju as i32) & 1);
+          }
+        } else {
+          if (ly == 0) {
+            let sh2: i32 = 20 - ke;
+            let j2: i32 = iy >> sh2;
+            if ((j2 << sh2) == iy) {
+              yisint = 2 - (j2 & 1);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (ly == 0) {
+    if (iy == 2146435072) {         /* y is +-inf */
+      if ((ix == 1072693248) && (lx == 0)) {
+        return y - y;               /* +-1 ** +-inf = NaN (fdlibm) */
+      } else {
+        if (ix >= 1072693248) {     /* |x| > 1 */
+          if (hy >= 0) {
+            return y;
+          }
+          return zero;
+        } else {
+          if (hy < 0) {
+            return zero - y;
+          }
+          return zero;
+        }
+      }
+    }
+    if (iy == 1072693248) {         /* y is +-1 */
+      if (hy < 0) {
+        return one / x;
+      }
+      return x;
+    }
+    if (hy == 1073741824) {         /* y is 2 */
+      return x * x;
+    }
+    if (hy == 1071644672) {         /* y is +0.5 */
+      if (hx >= 0) {
+        return math_sqrt_c(x);
+      }
+    }
+  }
+
+  /* ax = |x| via clearing the sign bit of the high word. */
+  let ax: f64 = math_trig_with_hi(x, ix);
+
+  if (lx == 0) {
+    if ((ix == 2146435072) || (ix == 0) || (ix == 1072693248)) {
+      let z0: f64 = ax;             /* x is +-0, +-inf, +-1 */
+      if (hy < 0) {
+        z0 = one / z0;
+      }
+      if (hx < 0) {
+        if ((ix == 1072693248) && (yisint == 0)) {
+          z0 = (z0 - z0) / (z0 - z0); /* (-1)**non-int = NaN */
+        } else {
+          if (yisint == 1) {
+            z0 = zero - z0;
+          }
+        }
+      }
+      return z0;
+    }
+  }
+
+  /* xsign = 0 when x < 0, 1 otherwise (fdlibm n = (hx>>31)+1). */
+  let xsign: i32 = 1;
+  if (hx < 0) {
+    xsign = 0;
+  }
+  if ((xsign | yisint) == 0) {
+    return (x - x) / (x - x);       /* negative ** non-int = NaN */
+  }
+
+  let s: f64 = one;                 /* sign of the result */
+  if ((xsign | (yisint - 1)) == 0) {
+    s = zero - one;                 /* negative ** odd int */
+  }
+
+  let t1: f64 = 0.0;
+  let t2: f64 = 0.0;
+  let n: i32 = 0;
+
+  if (iy > 1105199104) {            /* |y| > 2^31 (0x41e00000) */
+    if (iy > 1139802112) {          /* |y| > 2^64 (0x43f00000): o/uflow */
+      if (ix <= 1072693247) {       /* 0x3fefffff */
+        if (hy < 0) {
+          return huge * huge;
+        }
+        return tiny * tiny;
+      }
+      if (ix >= 1072693248) {
+        if (hy > 0) {
+          return huge * huge;
+        }
+        return tiny * tiny;
+      }
+    }
+    if (ix < 1072693247) {
+      if (hy < 0) {
+        return s * huge * huge;
+      }
+      return s * tiny * tiny;
+    }
+    if (ix > 1072693248) {
+      if (hy > 0) {
+        return s * huge * huge;
+      }
+      return s * tiny * tiny;
+    }
+    /* |1-x| <= 2^-20: log(x) ~ x - x^2/2 + x^3/3 - x^4/4. */
+    let th: f64 = ax - one;
+    let wh: f64 = (th * th) * (0.5 - th * (third - th * 0.25));
+    let uh: f64 = ivln2_h * th;
+    let vh: f64 = th * ivln2_l - wh * ivln2;
+    t1 = uh + vh;
+    t1 = math_trig_with_lo(t1, 0);
+    t2 = vh - (t1 - uh);
+  } else {
+    n = 0;
+    if (ix < 1048576) {             /* subnormal |x| (0x00100000) */
+      ax = ax * two53;
+      n = n - 53;
+      ix = math_trig_hi(ax);
+    }
+    n = n + ((ix >> 20) - 1023);
+    let jmant: i32 = ix & 1048575;  /* 0x000fffff */
+    ix = jmant | 1072693248;        /* normalize to [1, 2) */
+    let k: i32 = 0;
+    if (jmant <= 235662) {          /* |x| < sqrt(3/2) (0x3988e) */
+      k = 0;
+    } else {
+      if (jmant < 767610) {         /* |x| < sqrt(3) (0xbb67a) */
+        k = 1;
+      } else {
+        k = 0;
+        n = n + 1;
+        ix = ix - 1048576;
+      }
+    }
+    ax = math_trig_with_hi(ax, ix);
+
+    let bp_k: f64 = 1.0;
+    let dp_h_k: f64 = 0.0;
+    let dp_l_k: f64 = 0.0;
+    if (k == 1) {
+      bp_k = 1.5;
+      dp_h_k = dp_h1;
+      dp_l_k = dp_l1;
+    }
+    let u: f64 = ax - bp_k;
+    let v: f64 = one / (ax + bp_k);
+    let ss: f64 = u * v;
+    let s_h: f64 = math_trig_with_lo(ss, 0);
+    let t_h: f64 = 0.0;
+    let th_hi: i32 = ((ix >> 1) | 536870912) + 524288 + (k << 18);
+    t_h = math_trig_with_hi(t_h, th_hi);
+    let t_l: f64 = ax - (t_h - bp_k);
+    let s_l: f64 = v * ((u - s_h * t_h) - s_h * t_l);
+    let s2: f64 = ss * ss;
+    let rr: f64 = s2 * s2 * (l1 + s2 * (l2 + s2 * (l3 + s2 * (l4 + s2 * (l5 + s2 * l6)))));
+    rr = rr + s_l * (s_h + ss);
+    s2 = s_h * s_h;
+    t_h = 3.0 + s2 + rr;
+    t_h = math_trig_with_lo(t_h, 0);
+    t_l = rr - ((t_h - 3.0) - s2);
+    u = s_h * t_h;
+    v = s_l * t_h + t_l * ss;
+    let ph0: f64 = u + v;
+    ph0 = math_trig_with_lo(ph0, 0);
+    let pl0: f64 = v - (ph0 - u);
+    let zh: f64 = cp_h * ph0;
+    let zl: f64 = cp_l * ph0 + pl0 * cp + dp_l_k;
+    let tn: f64 = n as f64;
+    t1 = (((zh + zl) + dp_h_k) + tn);
+    t1 = math_trig_with_lo(t1, 0);
+    t2 = zl - (((t1 - tn) - dp_h_k) - zh);
+  }
+
+  /* Split y = y1+y2 and multiply by t1+t2. */
+  let y1: f64 = math_trig_with_lo(y, 0);
+  let p_l: f64 = (y - y1) * t1 + y * t2;
+  let p_h: f64 = y1 * t1;
+  let z: f64 = p_l + p_h;
+  let j: i32 = math_trig_hi(z);
+  let i: i32 = math_trig_lo(z);
+  if (j >= 1083179008) {            /* z >= 1024 (0x40900000) */
+    if (((j - 1083179008) | i) != 0) {
+      return s * huge * huge;       /* overflow */
+    } else {
+      if ((p_l + ovt) > (z - p_h)) {
+        return s * huge * huge;
+      }
+    }
+  } else {
+    if ((j & 2147483647) >= 1083231232) { /* z <= -1075 (0x4090cc00) */
+      if (((j + 1064252416) | i) != 0) {  /* j - 0xc090cc00 */
+        return s * tiny * tiny;     /* underflow */
+      } else {
+        if (p_l <= (z - p_h)) {
+          return s * tiny * tiny;
+        }
+      }
+    }
+  }
+
+  /* 2**(p_h+p_l). */
+  i = j & 2147483647;
+  let k2: i32 = (i >> 20) - 1023;
+  n = 0;
+  if (i > 1071644672) {             /* |z| > 0.5 (0x3fe00000) */
+    n = j + (1048576 >> (k2 + 1));
+    k2 = ((n & 2147483647) >> 20) - 1023;
+    let t: f64 = 0.0;
+    let nmask: i32 = (n as u32 & (((1048575 >> k2) as u32) ^ 4294967295)) as i32;
+    t = math_trig_with_hi(t, nmask);
+    n = ((n & 1048575) | 1048576) >> (20 - k2);
+    if (j < 0) {
+      n = 0 - n;
+    }
+    p_h = p_h - t;
+  }
+  let t: f64 = p_l + p_h;
+  t = math_trig_with_lo(t, 0);
+  let u2: f64 = t * lg2_h;
+  let v2: f64 = (p_l - (t - p_h)) * lg2 + t * lg2_l;
+  z = u2 + v2;
+  let w: f64 = v2 - (z - u2);
+  t = z * z;
+  t1 = z - t * (p1 + t * (p2 + t * (p3 + t * (p4 + t * p5))));
+  let r: f64 = (z * t1) / (t1 - two) - (w + z * w);
+  z = one - (r - z);
+  j = math_trig_hi(z);
+  j = j + (n << 20);
+  if ((j >> 20) <= 0) {
+    z = math_trig_scalbn(z, n);
+  } else {
+    z = math_trig_with_hi(z, math_trig_hi(z) + (n << 20));
+  }
+  return s * z;
 }
 
 /**

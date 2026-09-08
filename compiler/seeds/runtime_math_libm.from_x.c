@@ -57,10 +57,9 @@ double math_asin_impl(double x) { return asin(x); }
 double math_acos_impl(double x) { return acos(x); }
 double math_atan_impl(double x) { return atan(x); }
 double math_atan2_impl(double y, double x) { return atan2(y, x); }
-/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan: fdlibm .x ports on the
- * product path; matching math_*_impl libm splices removed (same-semantics
- * C cold twins live in the guarded block). */
-double math_pow_impl(double base, double exp) { return pow(base, exp); }
+/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow: fdlibm .x ports on
+ * the product path; matching math_*_impl libm splices removed
+ * (same-semantics C cold twins live in the guarded block). */
 double math_fabs_impl(double x) { return fabs(x); }
 double math_fmin_impl(double a, double b) { return fmin(a, b); }
 double math_fmax_impl(double a, double b) { return fmax(a, b); }
@@ -81,10 +80,9 @@ double math_asin_c(double x) { return math_asin_impl(x); }
 double math_acos_c(double x) { return math_acos_impl(x); }
 double math_atan_c(double x) { return math_atan_impl(x); }
 double math_atan2_c(double y, double x) { return math_atan2_impl(y, x); }
-double math_pow_c(double base, double exp) { return math_pow_impl(base, exp); }
 /* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c / math_log1p_c /
- * math_expm1_c removed from the splice block: fdlibm .x ports + guarded
- * cold twins below (9.2.4). */
+ * math_expm1_c / math_pow_c removed from the splice block: fdlibm .x
+ * ports + guarded cold twins below (9.2.4). */
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
 #endif
@@ -1140,6 +1138,227 @@ double math_tan_c(double x) {
     n = rem_pio2(x, y);
     return kernel_tan(y[0], y[1], 1 - ((n & 1) << 1));
   }
+}
+
+/* fdlibm e_pow.c cold twin — isomorphic with math_pow_c in
+ * src/asm/runtime_math_libm.x. Decimal literals are the fdlibm source
+ * constants (Python-verified against the hex comments). huge/tiny are
+ * the same bit-puns as the .x authority. y==+0.5 uses math_sqrt_c;
+ * subnormal 2**n uses twin_scalbn. PLATFORM: SHARED. */
+double math_pow_c(double base, double exp) {
+  static const double bp0 = 1.0, bp1 = 1.5;
+  static const double dp_h0 = 0.0, dp_h1 = 5.84962487220764160156e-01;
+  static const double dp_l0 = 0.0, dp_l1 = 1.35003920212974897128e-08;
+  static const double zero = 0.0, one = 1.0, two = 2.0;
+  static const double two53 = 9007199254740992.0;
+  static const double L1 = 5.99999999999994648725e-01;
+  static const double L2 = 4.28571428578550184252e-01;
+  static const double L3 = 3.33333329818377432918e-01;
+  static const double L4 = 2.72728123808534006489e-01;
+  static const double L5 = 2.30660745775561754067e-01;
+  static const double L6 = 2.06975017800338417784e-01;
+  static const double P1 = 1.66666666666666019037e-01;
+  static const double P2 = -2.77777777770155933842e-03;
+  static const double P3 = 6.61375632143793436117e-05;
+  static const double P4 = -1.65339022054652515390e-06;
+  static const double P5 = 4.13813679705723846039e-08;
+  static const double lg2 = 6.93147180559945286227e-01;
+  static const double lg2_h = 6.93147182464599609375e-01;
+  static const double lg2_l = -1.90465429995776804525e-09;
+  static const double ovt = 8.0085662595372944372e-17;
+  static const double cp = 9.61796693925975554329e-01;
+  static const double cp_h = 9.61796700954437255859e-01;
+  static const double cp_l = -7.02846165095275826516e-09;
+  static const double ivln2 = 1.44269504088896338700e+00;
+  static const double ivln2_h = 1.44269502162933349609e+00;
+  static const double ivln2_l = 1.92596299112661746887e-08;
+  union { double d; uint64_t u; } hugeu, tinyu;
+  hugeu.u = 9094988921128908188ull; /* 1e300 */
+  tinyu.u = 118622047889322841ull;  /* 1e-300 */
+  double huge = hugeu.d, tiny = tinyu.d;
+  double x = base, y = exp;
+  double z, ax, z_h, z_l, p_h, p_l;
+  double y1, t1, t2, r, s, t, u, v, w;
+  int i, j, k, yisint, n, xsign;
+  int hx, hy, ix, iy;
+  unsigned lx, ly;
+
+  hx = hi_of(x); lx = (unsigned)lo_of(x);
+  hy = hi_of(y); ly = (unsigned)lo_of(y);
+  ix = hx & 0x7fffffff; iy = hy & 0x7fffffff;
+
+  if ((iy | ly) == 0) return one;
+
+  if (ix > 0x7ff00000 || ((ix == 0x7ff00000) && (lx != 0)) ||
+      iy > 0x7ff00000 || ((iy == 0x7ff00000) && (ly != 0)))
+    return x + y;
+
+  yisint = 0;
+  if (hx < 0) {
+    if (iy >= 0x43400000) yisint = 2;
+    else if (iy >= 0x3ff00000) {
+      k = (iy >> 20) - 0x3ff;
+      if (k > 20) {
+        j = (int)(ly >> (52 - k));
+        if (((unsigned)(j << (52 - k))) == ly) yisint = 2 - (j & 1);
+      } else if (ly == 0) {
+        j = iy >> (20 - k);
+        if ((j << (20 - k)) == iy) yisint = 2 - (j & 1);
+      }
+    }
+  }
+
+  if (ly == 0) {
+    if (iy == 0x7ff00000) {
+      if ((ix == 0x3ff00000) && (lx == 0))
+        return y - y;
+      else if (ix >= 0x3ff00000)
+        return (hy >= 0) ? y : zero;
+      else
+        return (hy < 0) ? -y : zero;
+    }
+    if (iy == 0x3ff00000) {
+      if (hy < 0) return one / x; else return x;
+    }
+    if (hy == 0x40000000) return x * x;
+    if (hy == 0x3fe00000) {
+      if (hx >= 0) return math_sqrt_c(x);
+    }
+  }
+
+  ax = x;
+  set_hi(&ax, ix);
+  if (lx == 0) {
+    if (ix == 0x7ff00000 || ix == 0 || ix == 0x3ff00000) {
+      z = ax;
+      if (hy < 0) z = one / z;
+      if (hx < 0) {
+        if ((ix == 0x3ff00000) && (yisint == 0))
+          z = (z - z) / (z - z);
+        else if (yisint == 1)
+          z = -z;
+      }
+      return z;
+    }
+  }
+
+  xsign = (hx < 0) ? 0 : 1;
+  if ((xsign | yisint) == 0) return (x - x) / (x - x);
+
+  s = one;
+  if ((xsign | (yisint - 1)) == 0) s = -one;
+
+  if (iy > 0x41e00000) {
+    if (iy > 0x43f00000) {
+      if (ix <= 0x3fefffff) return (hy < 0) ? huge * huge : tiny * tiny;
+      if (ix >= 0x3ff00000) return (hy > 0) ? huge * huge : tiny * tiny;
+    }
+    if (ix < 0x3fefffff) return (hy < 0) ? s * huge * huge : s * tiny * tiny;
+    if (ix > 0x3ff00000) return (hy > 0) ? s * huge * huge : s * tiny * tiny;
+    t = ax - one;
+    w = (t * t) * (0.5 - t * (0.3333333333333333333333 - t * 0.25));
+    u = ivln2_h * t;
+    v = t * ivln2_l - w * ivln2;
+    t1 = u + v;
+    set_lo(&t1, 0);
+    t2 = v - (t1 - u);
+  } else {
+    double ss, s2, s_h, s_l, t_h, t_l;
+    double bp_k, dp_h_k, dp_l_k;
+    n = 0;
+    if (ix < 0x00100000) {
+      ax *= two53; n -= 53; ix = hi_of(ax);
+    }
+    n += (ix >> 20) - 0x3ff;
+    j = ix & 0x000fffff;
+    ix = j | 0x3ff00000;
+    if (j <= 0x3988E) k = 0;
+    else if (j < 0xBB67A) k = 1;
+    else { k = 0; n += 1; ix -= 0x00100000; }
+    set_hi(&ax, ix);
+
+    if (k == 0) { bp_k = bp0; dp_h_k = dp_h0; dp_l_k = dp_l0; }
+    else { bp_k = bp1; dp_h_k = dp_h1; dp_l_k = dp_l1; }
+
+    u = ax - bp_k;
+    v = one / (ax + bp_k);
+    ss = u * v;
+    s_h = ss;
+    set_lo(&s_h, 0);
+    t_h = zero;
+    set_hi(&t_h, ((ix >> 1) | 0x20000000) + 0x00080000 + (k << 18));
+    t_l = ax - (t_h - bp_k);
+    s_l = v * ((u - s_h * t_h) - s_h * t_l);
+    s2 = ss * ss;
+    r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
+    r += s_l * (s_h + ss);
+    s2 = s_h * s_h;
+    t_h = 3.0 + s2 + r;
+    set_lo(&t_h, 0);
+    t_l = r - ((t_h - 3.0) - s2);
+    u = s_h * t_h;
+    v = s_l * t_h + t_l * ss;
+    p_h = u + v;
+    set_lo(&p_h, 0);
+    p_l = v - (p_h - u);
+    z_h = cp_h * p_h;
+    z_l = cp_l * p_h + p_l * cp + dp_l_k;
+    t = (double)n;
+    t1 = (((z_h + z_l) + dp_h_k) + t);
+    set_lo(&t1, 0);
+    t2 = z_l - (((t1 - t) - dp_h_k) - z_h);
+  }
+
+  y1 = y;
+  set_lo(&y1, 0);
+  p_l = (y - y1) * t1 + y * t2;
+  p_h = y1 * t1;
+  z = p_l + p_h;
+  j = hi_of(z);
+  i = lo_of(z);
+  if (j >= 0x40900000) {
+    if (((j - 0x40900000) | i) != 0)
+      return s * huge * huge;
+    else {
+      if (p_l + ovt > z - p_h) return s * huge * huge;
+    }
+  } else if ((j & 0x7fffffff) >= 0x4090cc00) {
+    if (((j + 1064252416) | i) != 0)
+      return s * tiny * tiny;
+    else {
+      if (p_l <= z - p_h) return s * tiny * tiny;
+    }
+  }
+
+  i = j & 0x7fffffff;
+  k = (i >> 20) - 0x3ff;
+  n = 0;
+  if (i > 0x3fe00000) {
+    n = j + (0x00100000 >> (k + 1));
+    k = ((n & 0x7fffffff) >> 20) - 0x3ff;
+    t = zero;
+    set_hi(&t, n & ~(0x000fffff >> k));
+    n = ((n & 0x000fffff) | 0x00100000) >> (20 - k);
+    if (j < 0) n = -n;
+    p_h -= t;
+  }
+  t = p_l + p_h;
+  set_lo(&t, 0);
+  u = t * lg2_h;
+  v = (p_l - (t - p_h)) * lg2 + t * lg2_l;
+  z = u + v;
+  w = v - (z - u);
+  t = z * z;
+  t1 = z - t * (P1 + t * (P2 + t * (P3 + t * (P4 + t * P5))));
+  r = (z * t1) / (t1 - two) - (w + z * w);
+  z = one - (r - z);
+  j = hi_of(z);
+  j += (n << 20);
+  if ((j >> 20) <= 0) z = twin_scalbn(z, n);
+  else {
+    set_hi(&z, hi_of(z) + (n << 20));
+  }
+  return s * z;
 }
 
 #endif
