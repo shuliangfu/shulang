@@ -2,15 +2,15 @@
  * G-02f runtime_math_libm R2 mixed surface - isomorphic with src/asm/runtime_math_libm.x
  * Product PREFER_X_O: xlang-c -E(.x) -> thin.o + ld -r with rest (seeds/runtime_math_libm.from_x.c)
  * Prove: full.x vs this surface -> nm IDENTICAL (34 #[no_mangle])
- * Mode: mixed - 2 DIRECT compute + 30 thin+rest forwards to _impl
- *   + 2 full implementations (9.2.4 Wave A 2026-09-08: math_exp_c / math_log_c
- *   fdlibm e_exp.c / e_log.c ports, isomorphic with the .x authority; the two
- *   math_exp_impl / math_log_impl bridges are gone from both ends).
- * Cap residual: 30 extern bridges (math_*_impl)
+ * Mode: mixed - 2 DIRECT compute + thin+rest forwards to _impl
+ *   + 4 full implementations (9.2.4: math_exp_c / math_log_c / math_sqrt_c /
+ *   math_cbrt_c fdlibm ports, isomorphic with the .x authority; the four
+ *   matching math_*_impl bridges are gone from both ends).
+ * Cap residual: remaining extern bridges (math_*_impl) for sin/pow/erf/...
  * No doc_anchor (runtime_math_libm.x has none).
  * Note: math_ prefix not trigger ast_ (confirmed wave545+).
  * Logic: 34 functions = 2 DIRECT (math_signum_c + math_special_near)
- *   + 30 thin+rest forwards to math_*_impl + 2 full impls (exp/log fdlibm).
+ *   + thin+rest forwards to math_*_impl + 4 full impls (exp/log/sqrt/cbrt).
  * Regen: ./xlang-c -E ... runtime_math_libm.x | filter DBG + polish prologue
  */
 #include <stdint.h>
@@ -60,11 +60,9 @@ extern double math_asin_impl(double x);
 extern double math_acos_impl(double x);
 extern double math_atan_impl(double x);
 extern double math_atan2_impl(double y, double x);
-extern double math_sqrt_impl(double x);
-extern double math_cbrt_impl(double x);
 extern double math_pow_impl(double base, double exp);
-/* math_exp_impl / math_log_impl bridges removed (9.2.4 Wave A 2026-09-08):
- * exp/log are full fdlibm implementations on both ends now. */
+/* math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl bridges
+ * removed (9.2.4): those four are full fdlibm implementations on both ends. */
 extern double math_fabs_impl(double x);
 extern double math_fmin_impl(double a, double b);
 extern double math_fmax_impl(double a, double b);
@@ -127,18 +125,12 @@ double math_atan_c(double x) {
 double math_atan2_c(double y, double x) {
   return math_atan2_impl(y, x);
 }
-double math_sqrt_c(double x) {
-  return math_sqrt_impl(x);
-}
-double math_cbrt_c(double x) {
-  return math_cbrt_impl(x);
-}
 double math_pow_c(double base, double exp) {
   return math_pow_impl(base, exp);
 }
-/* math_exp_c (9.2.4 Wave A 2026-09-08): full fdlibm e_exp.c port, isomorphic
- * with src/asm/runtime_math_libm.x math_exp_c (same constants bit-for-bit;
- * decimal literals are Python-verified against the hex comments shown).
+/* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c (9.2.4): full fdlibm
+ * ports, isomorphic with src/asm/runtime_math_libm.x (same constants
+ * bit-for-bit; decimal literals are Python-verified against the hex comments).
  * Surface style keeps the -E lowering shape (pointer-cast punning); unlike
  * raw -E output the literals here are FULL PRECISION — the -E emitter's %f
  * literal printing is lossy (standing compiler-root card) and must not be
@@ -147,6 +139,170 @@ double math_pow_c(double base, double exp) {
  * twin note): arm64 clang fmadd fusion would shift results by 1 ulp vs the
  * .x authority's discrete mul/add. */
 #pragma STDC FP_CONTRACT OFF
+double math_sqrt_c(double x) {
+  double one = 1.0;
+  double tiny = 0.0; /* 1.0e-300: 0x01a56e1fc2f8f359 */
+  (void)((*(uint64_t *)(&(tiny)) = 118622047889322841ULL));
+  double r = x;
+  uint64_t *pr = ((uint64_t *)(&(r)));
+  uint64_t bits = *(pr);
+  int32_t ix0 = ((int32_t)(bits >> 32));
+  uint32_t ix1w = ((uint32_t)(bits & 4294967295ULL));
+  if (((ix0 & 2146435072) == 2146435072)) {
+    return ((r * r) + r);
+  }
+  if ((ix0 <= 0)) {
+    if ((((ix0 & 2147483647) == 0) && (ix1w == 0))) {
+      return r;
+    }
+    if ((ix0 < 0)) {
+      return ((r - r) / (r - r));
+    }
+  }
+  int32_t m = (ix0 >> 20);
+  uint32_t ix0u = ((uint32_t)ix0);
+  if ((m == 0)) {
+    while ((ix0u == 0)) {
+      m = (m - 21);
+      ix0u = (ix0u | (ix1w >> 11));
+      ix1w = (ix1w << 21);
+    }
+    int32_t i = 0;
+    while (((ix0u & 1048576) == 0)) {
+      ix0u = (ix0u << 1);
+      i = (i + 1);
+    }
+    m = (m - (i - 1));
+    if ((i != 0)) {
+      ix0u = (ix0u | (ix1w >> (32 - i)));
+    }
+    ix1w = (ix1w << ((uint32_t)i));
+  }
+  m = (m - 1023);
+  ix0u = ((ix0u & 1048575) | 1048576);
+  if (((m & 1) == 1)) {
+    ix0u = ((ix0u + ix0u) + (ix1w >> 31));
+    ix1w = (ix1w + ix1w);
+  }
+  m = ((m - (m & 1)) / 2);
+  ix0u = ((ix0u + ix0u) + (ix1w >> 31));
+  ix1w = (ix1w + ix1w);
+  uint32_t q = 0;
+  uint32_t q1 = 0;
+  uint32_t s0 = 0;
+  uint32_t s1 = 0;
+  uint32_t rb = 2097152; /* 0x00200000 */
+  while ((rb != 0)) {
+    uint32_t t = (s0 + rb);
+    if ((t <= ix0u)) {
+      s0 = (t + rb);
+      ix0u = (ix0u - t);
+      q = (q + rb);
+    }
+    ix0u = ((ix0u + ix0u) + (ix1w >> 31));
+    ix1w = (ix1w + ix1w);
+    rb = (rb >> 1);
+  }
+  rb = 2147483648u; /* 0x80000000 */
+  while ((rb != 0)) {
+    uint32_t t1 = (s1 + rb);
+    uint32_t t2 = s0;
+    if (((t2 < ix0u) || ((t2 == ix0u) && (t1 <= ix1w)))) {
+      s1 = (t1 + rb);
+      if ((((t1 & 2147483648u) == 2147483648u) && ((s1 & 2147483648u) == 0))) {
+        s0 = (s0 + 1);
+      }
+      ix0u = (ix0u - t2);
+      if ((ix1w < t1)) {
+        ix0u = (ix0u - 1);
+      }
+      ix1w = (ix1w - t1);
+      q1 = (q1 + rb);
+    }
+    ix0u = ((ix0u + ix0u) + (ix1w >> 31));
+    ix1w = (ix1w + ix1w);
+    rb = (rb >> 1);
+  }
+  if (((ix0u | ix1w) != 0)) {
+    double z0 = (one - tiny);
+    if ((z0 >= one)) {
+      double z1 = (one + tiny);
+      if ((q1 == 4294967295u)) {
+        q1 = 0;
+        q = (q + 1);
+      } else if ((z1 > one)) {
+        if ((q1 == 4294967294u)) {
+          q = (q + 1);
+        }
+        q1 = (q1 + 2);
+      } else {
+        q1 = (q1 + (q1 & 1));
+      }
+    }
+  }
+  uint32_t hi0 = ((q >> 1) + 1071644672u); /* 0x3fe00000 */
+  uint32_t lo0 = (q1 >> 1);
+  if (((q & 1) == 1)) {
+    lo0 = (lo0 | 2147483648u);
+  }
+  hi0 = (hi0 + (((uint32_t)m) << 20));
+  double z = 0.0;
+  (void)((*(uint64_t *)(&(z)) = ((((uint64_t)hi0) << 32) | ((uint64_t)lo0))));
+  return z;
+}
+double math_cbrt_c(double x) {
+  double c = 0.5428571428571428;       /* 19/35      0x3fe15f15f15f15f1 */
+  double d = (0.0 - 0.7053061224489796); /* -864/1225  0xbfe691de2532c834 */
+  double e = 1.4142857142857144;       /* 99/70      0x3ff6a0ea0ea0ea0f */
+  double f = 1.6071428571428572;       /* 45/28      0x3ff9b6db6db6db6e */
+  double g = 0.35714285714285715;      /* 5/14       0x3fd6db6db6db6db7 */
+  uint32_t b1 = 715094163;
+  uint32_t b2 = 696219795;
+  double r = x;
+  uint64_t *pr = ((uint64_t *)(&(r)));
+  uint64_t bits = *(pr);
+  uint32_t hi = ((uint32_t)(bits >> 32));
+  uint32_t lo = ((uint32_t)(bits & 4294967295ULL));
+  uint32_t sign = (hi & 2147483648u);
+  uint32_t hx = (hi ^ sign);
+  if ((hx >= 2146435072u)) {
+    return (r + r);
+  }
+  if (((hx | lo) == 0)) {
+    return r;
+  }
+  (void)((*(pr) = ((((uint64_t)hx) << 32) | ((uint64_t)lo))));
+  double t = 0.0;
+  uint64_t *pt = ((uint64_t *)(&(t)));
+  if ((hx < 1048576u)) {
+    (void)((*(pt) = (((uint64_t)1129316352u) << 32)));
+    t = (t * r);
+    uint64_t tb = *(pt);
+    uint32_t thi = ((uint32_t)(tb >> 32));
+    (void)((*(pt) = (((((uint64_t)((thi / 3) + b2)) << 32) | (tb & 4294967295ULL)))));
+  } else {
+    (void)((*(pt) = (((uint64_t)((hx / 3) + b1)) << 32)));
+  }
+  double rr = ((t * t) / r);
+  double s = (c + (rr * t));
+  t = (t * (g + (f / ((s + e) + (d / s)))));
+  {
+    uint64_t tb = *(pt);
+    uint32_t thi = ((uint32_t)(tb >> 32));
+    (void)((*(pt) = (((uint64_t)(thi + 1)) << 32)));
+  }
+  double s2 = (t * t);
+  double r2 = (r / s2);
+  double w = (t + t);
+  double r3 = ((r2 - t) / (w + r2));
+  t = (t + (t * r3));
+  {
+    uint64_t tb = *(pt);
+    uint32_t thi = ((uint32_t)(tb >> 32));
+    (void)((*(pt) = (((((uint64_t)(thi | sign)) << 32) | (tb & 4294967295ULL)))));
+  }
+  return t;
+}
 double math_exp_c(double x) {
   double one = 1.0;
   double half = 0.5;

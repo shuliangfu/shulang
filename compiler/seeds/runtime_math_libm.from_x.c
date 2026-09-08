@@ -59,12 +59,10 @@ double math_asin_impl(double x) { return asin(x); }
 double math_acos_impl(double x) { return acos(x); }
 double math_atan_impl(double x) { return atan(x); }
 double math_atan2_impl(double y, double x) { return atan2(y, x); }
-double math_sqrt_impl(double x) { return sqrt(x); }
-double math_cbrt_impl(double x) { return cbrt(x); }
+/* 9.2.4 sqrt/cbrt/exp/log: fdlibm .x ports on the product path;
+ * math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl libm
+ * splices removed (same-semantics C cold twins live in the guarded block). */
 double math_pow_impl(double base, double exp) { return pow(base, exp); }
-/* 9.2.4 exp/log (2026-09-08): fdlibm e_exp.c / e_log.c full .x ports on the
- * product path; math_exp_impl / math_log_impl libm splices removed (their
- * same-semantics C cold twins live in the guarded block below). */
 double math_fabs_impl(double x) { return fabs(x); }
 double math_fmin_impl(double a, double b) { return fmin(a, b); }
 double math_fmax_impl(double a, double b) { return fmax(a, b); }
@@ -88,11 +86,9 @@ double math_asin_c(double x) { return math_asin_impl(x); }
 double math_acos_c(double x) { return math_acos_impl(x); }
 double math_atan_c(double x) { return math_atan_impl(x); }
 double math_atan2_c(double y, double x) { return math_atan2_impl(y, x); }
-double math_sqrt_c(double x) { return math_sqrt_impl(x); }
-double math_cbrt_c(double x) { return math_cbrt_impl(x); }
 double math_pow_c(double base, double exp) { return math_pow_impl(base, exp); }
-/* math_exp_c / math_log_c removed from the splice block: fdlibm .x port
- * product path + guarded cold twins below (9.2.4, 2026-09-08). */
+/* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c removed from the
+ * splice block: fdlibm .x ports + guarded cold twins below (9.2.4). */
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
 double math_log1p_c(double x) { return math_log1p_impl(x); }
@@ -343,6 +339,175 @@ double math_log_c(double x) {
   }
   if (k == 0) return f - s * (f - rr);
   return dk * ln2hi - ((s * (f - rr) - dk * ln2lo) - f);
+}
+
+/* === sqrt/cbrt cold twins (9.2.4, 2026-09-08): fdlibm e_sqrt.c / s_cbrt.c ===
+ * Same algorithm as src/asm/runtime_math_libm.x math_sqrt_c / math_cbrt_c.
+ * Constants are Python-verified against the hex comments. Punning via union.
+ * sqrt is correctly rounded (bit-identical to host libm on the sample set);
+ * cbrt pins fdlibm (<1 ulp, may sit 1 ulp off correctly-rounded host cbrt).
+ */
+double math_sqrt_c(double x) {
+  const double one = 1.0;
+  union { double d; uint64_t u; } tiny;
+  tiny.u = 118622047889322841ULL; /* 0x01a56e1fc2f8f359 = 1.0e-300 */
+  union { double d; uint64_t u; } v; v.d = x;
+  int32_t ix0 = (int32_t)(v.u >> 32);
+  uint32_t ix1w = (uint32_t)(v.u & 4294967295ULL);
+
+  /* Inf and NaN: x*x+x keeps +inf, quiets NaNs, turns -inf into NaN. */
+  if ((ix0 & 2146435072) == 2146435072) {
+    return v.d * v.d + v.d;
+  }
+  /* Zero and negative: +-0 returns identically; -finite returns 0/0 NaN. */
+  if (ix0 <= 0) {
+    if ((ix0 & 2147483647) == 0 && ix1w == 0) return v.d;
+    if (ix0 < 0) return (v.d - v.d) / (v.d - v.d);
+  }
+
+  int32_t m = ix0 >> 20;
+  uint32_t ix0u = (uint32_t)ix0;
+  if (m == 0) {
+    while (ix0u == 0) {
+      m = m - 21;
+      ix0u = ix0u | (ix1w >> 11);
+      ix1w = ix1w << 21;
+    }
+    int32_t i = 0;
+    while ((ix0u & 1048576u) == 0) {
+      ix0u = ix0u << 1;
+      i = i + 1;
+    }
+    m = m - (i - 1);
+    /* i==0: pin zero-fill (fdlibm ix1>>(32-0) is C shift UB). */
+    if (i != 0) {
+      ix0u = ix0u | (ix1w >> (32 - i));
+    }
+    ix1w = ix1w << (uint32_t)i;
+  }
+  m = m - 1023;
+  ix0u = (ix0u & 1048575u) | 1048576u;
+  if ((m & 1) == 1) {
+    ix0u = ix0u + ix0u + (ix1w >> 31);
+    ix1w = ix1w + ix1w;
+  }
+  /* m >>= 1 with arithmetic semantics for negative m. */
+  m = (m - (m & 1)) / 2;
+
+  ix0u = ix0u + ix0u + (ix1w >> 31);
+  ix1w = ix1w + ix1w;
+  uint32_t q = 0, q1 = 0, s0 = 0, s1 = 0;
+  uint32_t rb = 2097152u;           /* 0x00200000 */
+  while (rb != 0) {
+    uint32_t t = s0 + rb;
+    if (t <= ix0u) {
+      s0 = t + rb;
+      ix0u = ix0u - t;
+      q = q + rb;
+    }
+    ix0u = ix0u + ix0u + (ix1w >> 31);
+    ix1w = ix1w + ix1w;
+    rb = rb >> 1;
+  }
+  rb = 2147483648u;                 /* 0x80000000 */
+  while (rb != 0) {
+    uint32_t t1 = s1 + rb;
+    uint32_t t2 = s0;
+    if (t2 < ix0u || (t2 == ix0u && t1 <= ix1w)) {
+      s1 = t1 + rb;
+      if ((t1 & 2147483648u) == 2147483648u && (s1 & 2147483648u) == 0) {
+        s0 = s0 + 1;
+      }
+      ix0u = ix0u - t2;
+      if (ix1w < t1) {
+        ix0u = ix0u - 1;
+      }
+      ix1w = ix1w - t1;
+      q1 = q1 + rb;
+    }
+    ix0u = ix0u + ix0u + (ix1w >> 31);
+    ix1w = ix1w + ix1w;
+    rb = rb >> 1;
+  }
+
+  if ((ix0u | ix1w) != 0) {
+    double z0 = one - tiny.d;
+    if (z0 >= one) {
+      double z1 = one + tiny.d;
+      if (q1 == 4294967295u) {
+        q1 = 0;
+        q = q + 1;
+      } else if (z1 > one) {
+        if (q1 == 4294967294u) {
+          q = q + 1;
+        }
+        q1 = q1 + 2;
+      } else {
+        q1 = q1 + (q1 & 1);
+      }
+    }
+  }
+
+  uint32_t hi0 = (q >> 1) + 1071644672u; /* 0x3fe00000, Python-verified */
+  uint32_t lo0 = q1 >> 1;
+  if ((q & 1) == 1) {
+    lo0 = lo0 | 2147483648u;
+  }
+  hi0 = hi0 + ((uint32_t)m << 20);
+  union { double d; uint64_t u; } z;
+  z.u = ((uint64_t)hi0 << 32) | (uint64_t)lo0;
+  return z.d;
+}
+
+double math_cbrt_c(double x) {
+  const double c = 0.5428571428571428;        /* 19/35      0x3fe15f15f15f15f1 */
+  const double d = -0.7053061224489796;       /* -864/1225  0xbfe691de2532c834 */
+  const double e = 1.4142857142857144;        /* 99/70      0x3ff6a0ea0ea0ea0f */
+  const double f = 1.6071428571428572;        /* 45/28      0x3ff9b6db6db6db6e */
+  const double g = 0.35714285714285715;       /* 5/14       0x3fd6db6db6db6db7 */
+  const uint32_t b1 = 715094163;              /* (682-0.03306235651)*2**20 */
+  const uint32_t b2 = 696219795;              /* (664-0.03306235651)*2**20 */
+  union { double d; uint64_t u; } v; v.d = x;
+  uint32_t hi = (uint32_t)(v.u >> 32);
+  uint32_t lo = (uint32_t)(v.u & 4294967295ULL);
+  uint32_t sign = hi & 2147483648u;
+  uint32_t hx = hi ^ sign;
+
+  if (hx >= 2146435072u) return v.d + v.d;    /* NaN / +-inf */
+  if ((hx | lo) == 0) return v.d;             /* +-0 */
+
+  v.u = ((uint64_t)hx << 32) | (uint64_t)lo;  /* x <- |x| */
+
+  union { double d; uint64_t u; } t; t.d = 0.0;
+  if (hx < 1048576u) {
+    t.u = ((uint64_t)1129316352u) << 32;      /* 0x43500000 << 32 = 2^54 */
+    t.d = t.d * v.d;
+    uint32_t thi = (uint32_t)(t.u >> 32);
+    t.u = ((uint64_t)(thi / 3 + b2) << 32) | (t.u & 4294967295ULL);
+  } else {
+    t.u = ((uint64_t)(hx / 3 + b1)) << 32;
+  }
+
+  double rr = t.d * t.d / v.d;
+  double s = c + rr * t.d;
+  t.d = t.d * (g + f / (s + e + d / s));
+
+  {
+    uint32_t thi = (uint32_t)(t.u >> 32);
+    t.u = ((uint64_t)(thi + 1) << 32);        /* low word zero, high word +1 */
+  }
+
+  double s2 = t.d * t.d;
+  double r2 = v.d / s2;
+  double w = t.d + t.d;
+  double r3 = (r2 - t.d) / (w + r2);
+  t.d = t.d + t.d * r3;
+
+  {
+    uint32_t thi = (uint32_t)(t.u >> 32);
+    t.u = ((uint64_t)(thi | sign) << 32) | (t.u & 4294967295ULL);
+  }
+  return t.d;
 }
 #endif
 
