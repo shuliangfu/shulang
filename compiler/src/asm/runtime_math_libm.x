@@ -19,6 +19,8 @@
 //   libm); seed keeps same-semantics fdlibm C cold twins under the same guard
 // 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports (no
 //   libm); seed keeps same-semantics C cold twins under the same guard
+// 9.2.4 expm1/log1p (2026-09-08): fdlibm s_expm1.c / s_log1p.c full .x ports
+//   (no libm); seed keeps same-semantics C cold twins under the same guard
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
@@ -47,8 +49,9 @@ export extern "C" function math_fmin_impl(a: f64, b: f64): f64;
 export extern "C" function math_fmax_impl(a: f64, b: f64): f64;
 export extern "C" function math_erf_impl(x: f64): f64;
 export extern "C" function math_erfc_impl(x: f64): f64;
-export extern "C" function math_log1p_impl(x: f64): f64;
-export extern "C" function math_expm1_impl(x: f64): f64;
+/* 9.2.4 expm1/log1p (2026-09-08): fdlibm s_expm1.c / s_log1p.c full .x ports
+ * on the product path; math_log1p_impl / math_expm1_impl libm splices
+ * removed (same-semantics C cold twins live in the guarded seed block). */
 
 // === fenv bridge declarations ===
 
@@ -911,14 +914,315 @@ export function math_erfc_c(x: f64): f64 {
   unsafe { return math_erfc_impl(x); }
 }
 
+/**
+ * Computes log1p(x): the natural logarithm of 1+x, returned as f64.
+ *
+ * fdlibm s_log1p.c port (Sun reference algorithm, error < 1 ulp):
+ * 1. Domain: log1p(-1) = -inf, log1p(x<-1) = NaN, log1p(+inf) = +inf,
+ *    log1p(NaN) propagates. |x| < 2^-54 returns x; |x| < 2^-29 uses
+ *    x - x*x/2. For x in (-0.2929, 0.41422) excluding the tiny path,
+ *    k=0 and f=x is exact (no 1+x reduction).
+ * 2. Otherwise 1+x = 2^k * (1+f) with f in [sqrt(2)/2-1, sqrt(2)-1);
+ *    c = ((1+x)-u)/u corrects the rounding of u=1+x. For |x| >= 2^53
+ *    the extra 1 is lost so u=x and c=0.
+ * 3. log1p(f) = f - (hfsq - s*(hfsq+R)) with s=f/(2+f), z=s^2, and
+ *    R a degree-14 even polynomial (Lp1..Lp7, same bits as math_log_c
+ *    lg1..lg7). |f| < 2^-20 uses the short form hfsq*(1-2f/3).
+ * 4. k*ln2 is added via the hi/lo split plus c.
+ * All constants are plain decimal literals Python-verified against the
+ * fdlibm hex comments (rule: decimal<->hex conversion via Python only).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_log1p_c(x: f64): f64 {
-  unsafe { return math_log1p_impl(x); }
+  let ln2hi: f64 = 0.693147180369123816490;               /* 0x3fe62e42fee00000 */
+  let ln2lo: f64 = 0.000000000190821492927058770002;      /* 0x3dea39ef35793c76 */
+  let two54: f64 = 18014398509481984 as f64;              /* 0x4350000000000000 */
+  let zero: f64 = 0.0;
+  let lp1: f64 = 0.6666666666666735130;                   /* 0x3fe5555555555593 */
+  let lp2: f64 = 0.3999999999940941908;                   /* 0x3fd999999997fa04 */
+  let lp3: f64 = 0.2857142874366239149;                   /* 0x3fd2492494229359 */
+  let lp4: f64 = 0.2222219843214978396;                   /* 0x3fcc71c51d8e78af */
+  let lp5: f64 = 0.1818357216161805012;                   /* 0x3fc7466496cb03de */
+  let lp6: f64 = 0.1531383769920937332;                   /* 0x3fc39a09d078c69f */
+  let lp7: f64 = 0.1479819860511658591;                   /* 0x3fc2f112df3e5244 */
+
+  let r: f64 = x;
+  let pr: *u64 = &r as *u64;
+  let bits: u64 = 0;
+  unsafe { bits = *pr; }
+  let hx: i32 = (bits >> 32) as i32;
+  let ax: i32 = hx & 2147483647;
+  let k: i32 = 1;
+  let f: f64 = 0.0;
+  let c: f64 = 0.0;
+  let hu: i32 = 0;
+  let u: f64 = 0.0;
+
+  /* x < 0.41422 (0x3FDA827A = 1071284858). Signed compare also catches
+   * negatives, including the x <= -1 domain. */
+  if (hx < 1071284858) {
+    if (ax >= 1072693248) {            /* |x| >= 1  (0x3ff00000) */
+      if (r == (0.0 - 1.0)) {
+        return (0.0 - two54) / zero;   /* log1p(-1) = -inf */
+      }
+      return (r - r) / (r - r);        /* log1p(x < -1) = NaN */
+    }
+    if (ax < 1042284544) {             /* |x| < 2^-29 (0x3e200000) */
+      if ((two54 + r) > zero) {
+        if (ax < 1016070144) {         /* |x| < 2^-54 (0x3c900000) */
+          return r;
+        }
+      }
+      return r - r * r * 0.5;
+    }
+    /* -0.2929 < x < 0.41422 uses f=x, k=0 (comment in fdlibm); the
+     * actual predicate is hx>0 OR hx<=(int)0xbfd2bec3 = -1076707645. */
+    if ((hx > 0) || (hx <= -1076707645)) {
+      k = 0;
+      f = r;
+      hu = 1;
+    }
+  }
+  if (hx >= 2146435072) {
+    return r + r;                      /* +inf / NaN */
+  }
+  if (k != 0) {
+    if (hx < 1128267776) {             /* |x| < 2^53 (0x43400000) */
+      u = 1.0 + r;
+      let pu: *u64 = &u as *u64;
+      unsafe { bits = *pu; }
+      hu = (bits >> 32) as i32;
+      k = (hu >> 20) - 1023;
+      if (k > 0) {
+        c = 1.0 - (u - r);
+      } else {
+        c = r - (u - 1.0);
+      }
+      c = c / u;
+    } else {
+      u = r;
+      let pu2: *u64 = &u as *u64;
+      unsafe { bits = *pu2; }
+      hu = (bits >> 32) as i32;
+      k = (hu >> 20) - 1023;
+      c = 0.0;
+    }
+    hu = hu & 1048575;                 /* significand bits 0x000fffff */
+    let pu3: *u64 = &u as *u64;
+    if (hu < 434334) {                 /* 0x6a09e: keep u in [1, sqrt2) */
+      unsafe {
+        let b: u64 = *pu3;
+        let nhi: u64 = (hu as u64) | 1072693248;  /* 0x3ff00000 */
+        *pu3 = (nhi << 32) | (b & 4294967295);
+      }
+    } else {
+      k = k + 1;
+      unsafe {
+        let b: u64 = *pu3;
+        let nhi: u64 = (hu as u64) | 1071644672;  /* 0x3fe00000 */
+        *pu3 = (nhi << 32) | (b & 4294967295);
+      }
+      hu = (1048576 - hu) >> 2;
+    }
+    f = u - 1.0;
+  }
+
+  let hfsq: f64 = 0.5 * f * f;
+  if (hu == 0) {                       /* |f| < 2^-20 */
+    if (f == zero) {
+      if (k == 0) {
+        return zero;
+      }
+      let dk0: f64 = k as f64;
+      c = c + dk0 * ln2lo;
+      return dk0 * ln2hi + c;
+    }
+    let rr0: f64 = hfsq * (1.0 - 0.66666666666666666 * f);
+    if (k == 0) {
+      return f - rr0;
+    }
+    let dk1: f64 = k as f64;
+    return dk1 * ln2hi - ((rr0 - (dk1 * ln2lo + c)) - f);
+  }
+  let s: f64 = f / (2.0 + f);
+  let z: f64 = s * s;
+  let rr: f64 = z * (lp1 + z * (lp2 + z * (lp3 + z * (lp4 + z * (lp5 + z * (lp6 + z * lp7))))));
+  if (k == 0) {
+    return f - (hfsq - s * (hfsq + rr));
+  }
+  let dk: f64 = k as f64;
+  return dk * ln2hi - ((hfsq - (s * (hfsq + rr) + (dk * ln2lo + c))) - f);
 }
 
+/**
+ * Computes expm1(x): exp(x)-1, returned as f64.
+ *
+ * fdlibm s_expm1.c port (Sun reference algorithm, error < 1 ulp):
+ * 1. Argument reduction: x = k*ln2 + r with |r| <= 0.5*ln2; c holds
+ *    the residual (hi-r)-lo so expm1(r+c) ~ expm1(r)+c+r*c.
+ * 2. Primary-range rational: z = r^2/2, R1(z) = 1 + Q1 z + ... + Q5 z^5
+ *    (Qi scaled by 2^i per fdlibm note A). Then
+ *    expm1(r) = r - (r*e - z) with e from the (R1, 3-R1*r/2) form.
+ * 3. Scale-back by k: k=0 returns r-E; k=-1 returns 0.5*(r-E)-0.5;
+ *    k=1 uses the r<-0.25 split; |k| large does 2^k*(1-(E-r))-1;
+ *    otherwise 2^k*((1-2^-k)-(E-r)) or 2^k*(1-((E+2^-k)-r)).
+ * 4. Edges: |x|>=56*ln2 and x<0 returns -1; |x|>=709.78 overflows to
+ *    +inf; expm1(+inf)=+inf, expm1(-inf)=-1; |x|<2^-54 returns x.
+ * All constants are plain decimal literals Python-verified against the
+ * fdlibm hex comments (rule: decimal<->hex conversion via Python only).
+ * PLATFORM: SHARED freestanding (no libm).
+ */
 #[no_mangle]
 export function math_expm1_c(x: f64): f64 {
-  unsafe { return math_expm1_impl(x); }
+  let one: f64 = 1.0;
+  let half: f64 = 0.5;
+  let ln2hi: f64 = 0.693147180369123816490;               /* 0x3fe62e42fee00000 */
+  let ln2lo: f64 = 0.000000000190821492927058770002;      /* 0x3dea39ef35793c76 */
+  let invln2: f64 = 1.44269504088896338700;               /* 0x3ff71547652b82fe */
+  let o_threshold: f64 = 709.782712893383973096;          /* 0x40862e42fefa39ef */
+  let q1: f64 = 0.0 - 0.03333333333333313;                /* 0xbfa11111111110f4 */
+  let q2: f64 = 0.0015873015872548146;                    /* 0x3f5a01a019fe5585 */
+  let q3: f64 = 0.0 - 0.0000793650757867488;              /* 0xbf14ce199eaadbb7 */
+  let q4: f64 = 0.000004008217827329362;                  /* 0x3ed0cfca86e65239 */
+  let q5: f64 = 0.0 - 0.00000020109921818362437;          /* 0xbe8afdb76e09c32d */
+  /* huge = 1.0e300 (0x7e37e43c8800759c) and tiny = 1.0e-300
+   * (0x01a56e1fc2f8f359): scientific literals are banned in .x. */
+  let huge: f64 = 0.0;
+  let tiny: f64 = 0.0;
+  unsafe {
+    let phuge: *u64 = &huge as *u64;
+    *phuge = 9094988921128908188;      /* 0x7e37e43c8800759c */
+    let ptiny: *u64 = &tiny as *u64;
+    *ptiny = 118622047889322841;       /* 0x01a56e1fc2f8f359 */
+  }
+
+  let r: f64 = x;
+  let pr: *u64 = &r as *u64;
+  let bits: u64 = 0;
+  unsafe { bits = *pr; }
+  let hxabs: u64 = (bits >> 32) & 2147483647;
+  let lx: u64 = bits & 4294967295;
+  let xsb: i32 = ((bits >> 63) & 1) as i32;
+
+  /* Filter huge / non-finite arguments. */
+  if (hxabs >= 1078159482) {           /* |x| >= 56*ln2 (0x4043687A) */
+    if (hxabs >= 1082535490) {         /* |x| >= 709.78 (0x40862E42) */
+      if (hxabs >= 2146435072) {       /* inf or NaN */
+        if (((hxabs & 1048575) | lx) != 0) {
+          return r + r;                /* NaN propagates */
+        }
+        if (xsb == 0) {
+          return r;                    /* expm1(+inf) = +inf */
+        }
+        return 0.0 - 1.0;              /* expm1(-inf) = -1 */
+      }
+      if (r > o_threshold) {
+        return huge * huge;            /* overflow -> +inf */
+      }
+    }
+    if (xsb != 0) {                    /* x < -56*ln2 -> -1 (inexact) */
+      if ((r + tiny) < 0.0) {
+        return tiny - one;
+      }
+    }
+  }
+
+  /* Argument reduction. */
+  let k: i32 = 0;
+  let hi: f64 = 0.0;
+  let lo: f64 = 0.0;
+  let corr: f64 = 0.0;
+  if (hxabs > 1071001154) {            /* |x| > 0.5*ln2 (0x3fd62e42) */
+    if (hxabs < 1072734898) {          /* |x| < 1.5*ln2 (0x3ff0a2b2) */
+      if (xsb == 0) {
+        hi = r - ln2hi;
+        lo = ln2lo;
+        k = 1;
+      } else {
+        hi = r + ln2hi;
+        lo = 0.0 - ln2lo;
+        k = 0 - 1;
+      }
+    } else {
+      let hf: f64 = half;
+      if (xsb == 1) {
+        hf = 0.0 - half;
+      }
+      k = (invln2 * r + hf) as i32;
+      let t0: f64 = k as f64;
+      hi = r - t0 * ln2hi;
+      lo = t0 * ln2lo;
+    }
+    r = hi - lo;
+    corr = (hi - r) - lo;
+  } else if (hxabs < 1016070144) {     /* |x| < 2^-54 (0x3c900000) */
+    let t1: f64 = huge + r;
+    return r - (t1 - (huge + r));
+  }
+
+  /* Primary-range rational approximation. */
+  let hfx: f64 = half * r;
+  let hxs: f64 = r * hfx;
+  let r1: f64 = one + hxs * (q1 + hxs * (q2 + hxs * (q3 + hxs * (q4 + hxs * q5))));
+  let t: f64 = 3.0 - r1 * hfx;
+  let e: f64 = hxs * ((r1 - t) / (6.0 - r * t));
+  if (k == 0) {
+    return r - (r * e - hxs);
+  }
+  e = r * (e - corr) - corr;
+  e = e - hxs;
+  if (k == (0 - 1)) {
+    return half * (r - e) - half;
+  }
+  if (k == 1) {
+    if (r < (0.0 - 0.25)) {
+      return (0.0 - 2.0) * (e - (r + half));
+    }
+    return one + 2.0 * (r - e);
+  }
+  let y: f64 = 0.0;
+  if ((k <= -2) || (k > 56)) {
+    y = one - (e - r);
+    let py: *u64 = &y as *u64;
+    unsafe {
+      let b: u64 = *py;
+      let ke: i32 = k << 20;
+      *py = b + ((((ke as u32) as u64)) << 32);
+    }
+    return y - one;
+  }
+  let tt: f64 = one;
+  let ptt: *u64 = &tt as *u64;
+  if (k < 20) {
+    /* tt = 1 - 2^-k via high-word 0x3ff00000 - (0x200000>>k). */
+    unsafe {
+      let thi: u64 = (1072693248 - (2097152 >> k)) as u64;
+      *ptt = thi << 32;
+    }
+    y = tt - (e - r);
+    let py2: *u64 = &y as *u64;
+    unsafe {
+      let b2: u64 = *py2;
+      let ke2: i32 = k << 20;
+      *py2 = b2 + ((((ke2 as u32) as u64)) << 32);
+    }
+  } else {
+    /* tt = 2^-k via high-word (0x3ff-k)<<20. */
+    unsafe {
+      let thi2: u64 = ((1023 - k) << 20) as u64;
+      *ptt = thi2 << 32;
+    }
+    y = r - (e + tt);
+    y = y + one;
+    let py3: *u64 = &y as *u64;
+    unsafe {
+      let b3: u64 = *py3;
+      let ke3: i32 = k << 20;
+      *py3 = b3 + ((((ke3 as u32) as u64)) << 32);
+    }
+  }
+  return y;
 }
 
 // === fenv public API wrappers ===

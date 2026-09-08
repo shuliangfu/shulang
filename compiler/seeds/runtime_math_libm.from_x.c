@@ -59,17 +59,16 @@ double math_asin_impl(double x) { return asin(x); }
 double math_acos_impl(double x) { return acos(x); }
 double math_atan_impl(double x) { return atan(x); }
 double math_atan2_impl(double y, double x) { return atan2(y, x); }
-/* 9.2.4 sqrt/cbrt/exp/log: fdlibm .x ports on the product path;
- * math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl libm
- * splices removed (same-semantics C cold twins live in the guarded block). */
+/* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p: fdlibm .x ports on the product path;
+ * math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl /
+ * math_log1p_impl / math_expm1_impl libm splices removed (same-semantics
+ * C cold twins live in the guarded block). */
 double math_pow_impl(double base, double exp) { return pow(base, exp); }
 double math_fabs_impl(double x) { return fabs(x); }
 double math_fmin_impl(double a, double b) { return fmin(a, b); }
 double math_fmax_impl(double a, double b) { return fmax(a, b); }
 double math_erf_impl(double x) { return erf(x); }
 double math_erfc_impl(double x) { return erfc(x); }
-double math_log1p_impl(double x) { return log1p(x); }
-double math_expm1_impl(double x) { return expm1(x); }
 
 /* === libm thin wrappers (only when NOT in R2 from_x mode) ===
  * 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax) removed from this
@@ -87,12 +86,11 @@ double math_acos_c(double x) { return math_acos_impl(x); }
 double math_atan_c(double x) { return math_atan_impl(x); }
 double math_atan2_c(double y, double x) { return math_atan2_impl(y, x); }
 double math_pow_c(double base, double exp) { return math_pow_impl(base, exp); }
-/* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c removed from the
- * splice block: fdlibm .x ports + guarded cold twins below (9.2.4). */
+/* math_sqrt_c / math_cbrt_c / math_exp_c / math_log_c / math_log1p_c /
+ * math_expm1_c removed from the splice block: fdlibm .x ports + guarded
+ * cold twins below (9.2.4). */
 double math_erf_c(double x) { return math_erf_impl(x); }
 double math_erfc_c(double x) { return math_erfc_impl(x); }
-double math_log1p_c(double x) { return math_log1p_impl(x); }
-double math_expm1_c(double x) { return math_expm1_impl(x); }
 #endif
 
 /* === exact-7 cold twins (9.2.4): same bit-level algorithm as thin .x ===
@@ -508,6 +506,181 @@ double math_cbrt_c(double x) {
     t.u = ((uint64_t)(thi | sign) << 32) | (t.u & 4294967295ULL);
   }
   return t.d;
+}
+
+/* === expm1/log1p cold twins (9.2.4, 2026-09-08): fdlibm s_expm1.c / s_log1p.c ===
+ * Same algorithm as src/asm/runtime_math_libm.x math_expm1_c / math_log1p_c.
+ * Constants are Python-verified against the hex comments. Punning via union.
+ * Both pin fdlibm (<1 ulp); a few inputs sit 1 ulp off correctly-rounded
+ * host libm (expm1(1), expm1(40), log1p(2)) and are pinned in the rc probe.
+ */
+double math_expm1_c(double x) {
+  const double one = 1.0, half = 0.5;
+  const double ln2hi = 0.693147180369123816490;           /* 0x3fe62e42fee00000 */
+  const double ln2lo = 0.000000000190821492927058770002;  /* 0x3dea39ef35793c76 */
+  const double invln2 = 1.44269504088896338700;           /* 0x3ff71547652b82fe */
+  const double o_threshold = 709.782712893383973096;      /* 0x40862e42fefa39ef */
+  const double q1 = -0.03333333333333313;                 /* 0xbfa11111111110f4 */
+  const double q2 =  0.0015873015872548146;               /* 0x3f5a01a019fe5585 */
+  const double q3 = -0.0000793650757867488;               /* 0xbf14ce199eaadbb7 */
+  const double q4 =  0.000004008217827329362;             /* 0x3ed0cfca86e65239 */
+  const double q5 = -0.00000020109921818362437;           /* 0xbe8afdb76e09c32d */
+  union { double d; uint64_t u; } huge, tiny;
+  huge.u = 9094988921128908188ULL;   /* 0x7e37e43c8800759c = 1e300 */
+  tiny.u = 118622047889322841ULL;    /* 0x01a56e1fc2f8f359 = 1e-300 */
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t hxabs = (v.u >> 32) & 2147483647;
+  uint64_t lx = v.u & 4294967295ULL;
+  int xsb = (int)((v.u >> 63) & 1);
+
+  if (hxabs >= 1078159482) {           /* |x| >= 56*ln2 (0x4043687A) */
+    if (hxabs >= 1082535490) {         /* |x| >= 709.78 (0x40862E42) */
+      if (hxabs >= 2146435072) {
+        if (((hxabs & 1048575) | lx) != 0) return x + x;
+        return (xsb == 0) ? x : -1.0;
+      }
+      if (x > o_threshold) return huge.d * huge.d;
+    }
+    if (xsb != 0) {
+      if (x + tiny.d < 0.0) return tiny.d - one;
+    }
+  }
+
+  int k = 0;
+  double hi = 0.0, lo = 0.0, corr = 0.0, r = x;
+  if (hxabs > 1071001154) {            /* |x| > 0.5*ln2 */
+    if (hxabs < 1072734898) {          /* |x| < 1.5*ln2 */
+      if (xsb == 0) { hi = r - ln2hi; lo = ln2lo; k = 1; }
+      else { hi = r + ln2hi; lo = -ln2lo; k = -1; }
+    } else {
+      double hf = half;
+      if (xsb == 1) hf = -half;
+      k = (int)(invln2 * r + hf);
+      double t0 = (double)k;
+      hi = r - t0 * ln2hi;
+      lo = t0 * ln2lo;
+    }
+    r = hi - lo;
+    corr = (hi - r) - lo;
+  } else if (hxabs < 1016070144) {     /* |x| < 2^-54 */
+    double t1 = huge.d + r;
+    return r - (t1 - (huge.d + r));
+  }
+
+  double hfx = half * r;
+  double hxs = r * hfx;
+  double r1 = one + hxs * (q1 + hxs * (q2 + hxs * (q3 + hxs * (q4 + hxs * q5))));
+  double t = 3.0 - r1 * hfx;
+  double e = hxs * ((r1 - t) / (6.0 - r * t));
+  if (k == 0) return r - (r * e - hxs);
+  e = (r * (e - corr) - corr);
+  e -= hxs;
+  if (k == -1) return half * (r - e) - half;
+  if (k == 1) {
+    if (r < -0.25) return -2.0 * (e - (r + half));
+    return one + 2.0 * (r - e);
+  }
+  union { double d; uint64_t u; } y;
+  if (k <= -2 || k > 56) {
+    y.d = one - (e - r);
+    y.u += (uint64_t)(uint32_t)(k << 20) << 32;
+    return y.d - one;
+  }
+  union { double d; uint64_t u; } tt;
+  tt.d = one;
+  if (k < 20) {
+    uint32_t thi = 1072693248u - (2097152u >> k);
+    tt.u = ((uint64_t)thi) << 32;
+    y.d = tt.d - (e - r);
+    y.u += (uint64_t)(uint32_t)(k << 20) << 32;
+  } else {
+    uint32_t thi = (uint32_t)((1023 - k) << 20);
+    tt.u = ((uint64_t)thi) << 32;
+    y.d = r - (e + tt.d);
+    y.d += one;
+    y.u += (uint64_t)(uint32_t)(k << 20) << 32;
+  }
+  return y.d;
+}
+
+double math_log1p_c(double x) {
+  const double ln2hi = 0.693147180369123816490;           /* 0x3fe62e42fee00000 */
+  const double ln2lo = 0.000000000190821492927058770002;  /* 0x3dea39ef35793c76 */
+  const double two54 = 18014398509481984.0;               /* 0x4350000000000000 */
+  const double zero = 0.0;
+  const double lp1 = 0.6666666666666735130;               /* 0x3fe5555555555593 */
+  const double lp2 = 0.3999999999940941908;               /* 0x3fd999999997fa04 */
+  const double lp3 = 0.2857142874366239149;               /* 0x3fd2492494229359 */
+  const double lp4 = 0.2222219843214978396;               /* 0x3fcc71c51d8e78af */
+  const double lp5 = 0.1818357216161805012;               /* 0x3fc7466496cb03de */
+  const double lp6 = 0.1531383769920937332;               /* 0x3fc39a09d078c69f */
+  const double lp7 = 0.1479819860511658591;               /* 0x3fc2f112df3e5244 */
+  union { double d; uint64_t u; } v; v.d = x;
+  int hx = (int)(v.u >> 32);
+  int ax = hx & 2147483647;
+  int k = 1;
+  double f = 0.0, c = 0.0, u = 0.0;
+  int hu = 0;
+
+  if (hx < 1071284858) {               /* x < 0.41422 (0x3FDA827A) */
+    if (ax >= 1072693248) {            /* x <= -1.0 */
+      if (x == -1.0) return -two54 / zero;
+      return (x - x) / (x - x);
+    }
+    if (ax < 1042284544) {             /* |x| < 2^-29 */
+      if (two54 + x > zero && ax < 1016070144) return x; /* |x| < 2^-54 */
+      return x - x * x * 0.5;
+    }
+    if (hx > 0 || hx <= -1076707645) { /* (int)0xbfd2bec3 */
+      k = 0; f = x; hu = 1;
+    }
+  }
+  if (hx >= 2146435072) return x + x;
+  if (k != 0) {
+    union { double d; uint64_t u; } vu;
+    if (hx < 1128267776) {             /* |x| < 2^53 */
+      u = 1.0 + x;
+      vu.d = u;
+      hu = (int)(vu.u >> 32);
+      k = (hu >> 20) - 1023;
+      c = (k > 0) ? 1.0 - (u - x) : x - (u - 1.0);
+      c /= u;
+    } else {
+      u = x;
+      vu.d = u;
+      hu = (int)(vu.u >> 32);
+      k = (hu >> 20) - 1023;
+      c = 0.0;
+    }
+    hu &= 1048575;
+    if (hu < 434334) {                 /* 0x6a09e */
+      uint32_t nhi = (uint32_t)hu | 1072693248u;
+      vu.u = ((uint64_t)nhi << 32) | (vu.u & 4294967295ULL);
+    } else {
+      k += 1;
+      uint32_t nhi = (uint32_t)hu | 1071644672u;
+      vu.u = ((uint64_t)nhi << 32) | (vu.u & 4294967295ULL);
+      hu = (1048576 - hu) >> 2;
+    }
+    u = vu.d;
+    f = u - 1.0;
+  }
+  double hfsq = 0.5 * f * f;
+  if (hu == 0) {
+    if (f == zero) {
+      if (k == 0) return zero;
+      c += (double)k * ln2lo;
+      return (double)k * ln2hi + c;
+    }
+    double rr0 = hfsq * (1.0 - 0.66666666666666666 * f);
+    if (k == 0) return f - rr0;
+    return (double)k * ln2hi - ((rr0 - ((double)k * ln2lo + c)) - f);
+  }
+  double s = f / (2.0 + f);
+  double z = s * s;
+  double rr = z * (lp1 + z * (lp2 + z * (lp3 + z * (lp4 + z * (lp5 + z * (lp6 + z * lp7))))));
+  if (k == 0) return f - (hfsq - s * (hfsq + rr));
+  return (double)k * ln2hi - ((hfsq - (s * (hfsq + rr) + ((double)k * ln2lo + c))) - f);
 }
 #endif
 
