@@ -247,7 +247,7 @@ int32_t labi_od_simple_group_sym_count(int32_t g) {
     return 8;
   }
   if ((g ==15)) {
-    return 14;
+    return 24;
   }
   if ((g ==16)) {
     return 4;
@@ -586,6 +586,16 @@ uint8_t * labi_od_simple_group_sym_at(int32_t g, int32_t i) {
     if ((i ==11)) { uint8_t * p = ((uint8_t *)"std_compress_format_zstd"); return p; }
     if ((i ==12)) { uint8_t * p = ((uint8_t *)"std_compress_mode_compress"); return p; }
     if ((i ==13)) { uint8_t * p = ((uint8_t *)"std_compress_mode_decompress"); return p; }
+    if ((i ==14)) { uint8_t * p = ((uint8_t *)"std_compress_zlib_deflate"); return p; }
+    if ((i ==15)) { uint8_t * p = ((uint8_t *)"std_compress_zlib_inflate"); return p; }
+    if ((i ==16)) { uint8_t * p = ((uint8_t *)"std_compress_gzip_gzip_compress"); return p; }
+    if ((i ==17)) { uint8_t * p = ((uint8_t *)"std_compress_gzip_gzip_decompress"); return p; }
+    if ((i ==18)) { uint8_t * p = ((uint8_t *)"std_compress_deflate"); return p; }
+    if ((i ==19)) { uint8_t * p = ((uint8_t *)"std_compress_inflate"); return p; }
+    if ((i ==20)) { uint8_t * p = ((uint8_t *)"compress_deflate_c"); return p; }
+    if ((i ==21)) { uint8_t * p = ((uint8_t *)"compress_inflate_c"); return p; }
+    if ((i ==22)) { uint8_t * p = ((uint8_t *)"compress_gzip_compress_c"); return p; }
+    if ((i ==23)) { uint8_t * p = ((uint8_t *)"compress_gzip_decompress_c"); return p; }
     return ((uint8_t *)(0));
   }
   if ((g ==16)) {
@@ -1928,7 +1938,7 @@ int32_t link_abi_user_o_needs_async_scheduler(uint8_t * user_o) {
   return 0;
 }
 int32_t labi_od_zlib_undef_sym_count(void) {
-  return 4;
+  return 8;
 }
 uint8_t * labi_od_zlib_undef_sym_at(int32_t i) {
   if ((i < 0)) {
@@ -1948,6 +1958,22 @@ uint8_t * labi_od_zlib_undef_sym_at(int32_t i) {
   }
   if ((i ==3)) {
     uint8_t * p = ((uint8_t *)"\x5f\x75\x6e\x63\x6f\x6d\x70\x72\x65\x73\x73");
+    return p;
+  }
+  if ((i ==4)) {
+    uint8_t * p = ((uint8_t *)"compress2");
+    return p;
+  }
+  if ((i ==5)) {
+    uint8_t * p = ((uint8_t *)"deflate");
+    return p;
+  }
+  if ((i ==6)) {
+    uint8_t * p = ((uint8_t *)"inflate");
+    return p;
+  }
+  if ((i ==7)) {
+    uint8_t * p = ((uint8_t *)"uncompress");
     return p;
   }
   return ((uint8_t *)(0));

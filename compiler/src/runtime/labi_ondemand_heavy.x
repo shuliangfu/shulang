@@ -4920,6 +4920,8 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
               }
             }
             // PLATFORM: SHARED — g15 std.compress formal (run-compress residual).
+            // 9.2.2: facade compress.o is c_face stub; real zlib/gzip are submodule
+            // formal .o (mod+libz) plus runtime_compress_zlib_glue (Init2 macros).
             if (sg == 15) {
               let rt15: *u8 = 0 as *u8;
               unsafe {
@@ -4929,6 +4931,8 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
                 if (rt15[0] != 0) {
                   unsafe {
                     let _fe15: i32 = xlang_ensure_formal_std_make_o(rt15, "std/compress/compress.o", "../std/compress/compress.o");
+                    let _fez: i32 = xlang_ensure_formal_std_make_o(rt15, "std/compress/zlib/zlib.o", "../std/compress/zlib/zlib.o");
+                    let _feg: i32 = xlang_ensure_formal_std_make_o(rt15, "std/compress/gzip/gzip.o", "../std/compress/gzip/gzip.o");
                   }
                 }
               }

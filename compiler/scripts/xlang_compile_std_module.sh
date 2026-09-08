@@ -140,6 +140,9 @@ formal_mod_key_for_out() {
     ../core/assert/assert.o|core/assert/assert.o|*core/assert/assert.o) printf '%s' "core/assert/assert.o" ;;
     ../std/fmt/fmt.o|std/fmt/fmt.o|*std/fmt/fmt.o) printf '%s' "std/fmt/fmt.o" ;;
     ../std/compress/compress.o|std/compress/compress.o|*std/compress/compress.o) printf '%s' "std/compress/compress.o" ;;
+    # PLATFORM: SHARED — 9.2.2 real zlib/gzip product .o (not the facade c_face stub).
+    ../std/compress/zlib/zlib.o|std/compress/zlib/zlib.o|*std/compress/zlib/zlib.o) printf '%s' "std/compress/zlib/zlib.o" ;;
+    ../std/compress/gzip/gzip.o|std/compress/gzip/gzip.o|*std/compress/gzip/gzip.o) printf '%s' "std/compress/gzip/gzip.o" ;;
     ../std/io/driver.o|std/io/driver.o|*std/io/driver.o) printf '%s' "std/io/driver.o" ;;
     # PLATFORM: SHARED — pure-asm std.io ctx-timeout formal (STD-091; ≠ driver nested).
     ../std/io/io.o|std/io/io.o|*std/io/io.o) printf '%s' "std/io/io.o" ;;
@@ -275,6 +278,11 @@ formal_mod_spec_for_key() {
     core/assert/assert.o) printf '%s' "mod|0|../core/assert/mod.x" ;;
     std/fmt/fmt.o) printf '%s' "c_face|0|../std/fmt/formal_surface.c" ;;
     std/compress/compress.o) printf '%s' "c_face|0|../std/compress/formal_surface.c" ;;
+    # PLATFORM: SHARED — 9.2.2: real std.compress.zlib / gzip (mod + libz).
+    # Facade compress.o stays c_face stub (bare deflate/inflate vs zlib.h if monofile).
+    # Submodule vehicles are the product path: compress2 / deflateInit2 glue + -lz.
+    std/compress/zlib/zlib.o) printf '%s' "mod|1|../std/compress/zlib/mod.x|../std/compress/zlib/libz.x" ;;
+    std/compress/gzip/gzip.o) printf '%s' "mod|1|../std/compress/gzip/mod.x|../std/compress/gzip/libz.x" ;;
     std/io/driver.o) printf '%s' "c_face|0|../std/io/driver_formal_surface.c" ;;
     # PLATFORM: SHARED — pure-asm std.io ctx-timeout faces (≡ mod.x; STD-091).
     std/io/io.o) printf '%s' "c_face|0|../std/io/formal_surface.c" ;;
@@ -353,6 +361,8 @@ formal_mod_all_keys() {
     core/assert/assert.o \
     std/fmt/fmt.o \
     std/compress/compress.o \
+    std/compress/zlib/zlib.o \
+    std/compress/gzip/gzip.o \
     std/io/driver.o \
     std/io/io.o \
     std/debug/debug.o \
@@ -1880,6 +1890,18 @@ if command -v nm >/dev/null 2>&1 && [ -f "$out_o" ]; then
       # Import mangle is std_db_sqlite_*; leaf basename sqlite would yield
       # std_sqlite_* (Ubuntu objcopy). Twin of std/io/driver.o → io_driver.
       leaf="db_sqlite"
+      ;;
+    std/compress/zlib/zlib.o)
+      # PLATFORM: SHARED — nested module std.compress.zlib product face.
+      # Import mangle is std_compress_zlib_*; leaf basename zlib would yield
+      # std_zlib_* (Ubuntu objcopy). Twin of sqlite → db_sqlite.
+      leaf="compress_zlib"
+      ;;
+    std/compress/gzip/gzip.o)
+      # PLATFORM: SHARED — nested module std.compress.gzip product face.
+      # Import mangle is std_compress_gzip_* (gzip_compress → gzip_gzip_compress).
+      # Leaf basename gzip would yield std_gzip_* (Ubuntu objcopy).
+      leaf="compress_gzip"
       ;;
     std/db/kv/kv.o)
       # PLATFORM: SHARED — nested module std.db.kv product face.

@@ -367,8 +367,11 @@ export function labi_od_simple_group_sym_count(g: i32): i32 {
   // PLATFORM: SHARED — std.compress formal facade (run-compress residual).
   // Product path previously retired compress.o for C co-emit; pure-asm needs formal T.
   // Count 6→14: cookbook compress_stream_br_zs unique UNDEF stream/format/mode.
+  // Count 14→24 (9.2.2): submodule zlib/gzip unique UNDEFs + Linux co-emit
+  // bare compress_*_c (exact matcher; facade std_compress_gzip_compress does
+  // not fire for std_compress_zlib_deflate / std_compress_gzip_gzip_compress).
   if (g == 15) {
-    return 14;
+    return 24;
   }
   // PLATFORM: SHARED — std.io.driver formal (run-io-driver residual).
   if (g == 16) {
@@ -1195,6 +1198,49 @@ export function labi_od_simple_group_sym_at(g: i32, i: i32): *u8 {
     }
     if (i == 13) {
       let p: *u8 = "std_compress_mode_decompress";
+      return p;
+    }
+    // 9.2.2: direct import std.compress.zlib / std.compress.gzip (Darwin mangle).
+    if (i == 14) {
+      let p: *u8 = "std_compress_zlib_deflate";
+      return p;
+    }
+    if (i == 15) {
+      let p: *u8 = "std_compress_zlib_inflate";
+      return p;
+    }
+    if (i == 16) {
+      let p: *u8 = "std_compress_gzip_gzip_compress";
+      return p;
+    }
+    if (i == 17) {
+      let p: *u8 = "std_compress_gzip_gzip_decompress";
+      return p;
+    }
+    // Facade one-shot zlib (std.compress.deflate / inflate).
+    if (i == 18) {
+      let p: *u8 = "std_compress_deflate";
+      return p;
+    }
+    if (i == 19) {
+      let p: *u8 = "std_compress_inflate";
+      return p;
+    }
+    // Linux product -o co-emits mod.x wrappers; UNDEF is bare *_c (exact).
+    if (i == 20) {
+      let p: *u8 = "compress_deflate_c";
+      return p;
+    }
+    if (i == 21) {
+      let p: *u8 = "compress_inflate_c";
+      return p;
+    }
+    if (i == 22) {
+      let p: *u8 = "compress_gzip_compress_c";
+      return p;
+    }
+    if (i == 23) {
+      let p: *u8 = "compress_gzip_decompress_c";
       return p;
     }
     return 0 as *u8;
@@ -4735,20 +4781,21 @@ export function link_abi_user_o_needs_async_scheduler(user_o: *u8): i32 {
 
 /**
  * Count of zlib UNDEF needles for link_abi_obj_needs_zlib (exact libz symbols).
- * Product complete set (G.7): seed authority _compress2/_deflate/_inflate/_uncompress.
- * @return i32 — 4
- * PLATFORM: SHARED — must match zlib C API surface used by product compress gate
+ * Product complete set (G.7): Mach-O `_compress2` plus ELF bare `compress2`.
+ * @return i32 — 8
+ * PLATFORM: SHARED — Darwin nm U _compress2; Linux nm U compress2 (exact)
  */
 #[no_mangle]
 export function labi_od_zlib_undef_sym_count(): i32 {
-  return 4;
+  return 8;
 }
 
 /**
  * zlib UNDEF needle at index (needs_zlib probe table; exact symbols).
- * @param i i32 — index in [0, 4)
+ * @param i i32 — index in [0, 8)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete zlib undef authority
+ * 0..3 Mach-O leading underscore; 4..7 ELF bare (Ubuntu gold).
  */
 #[no_mangle]
 export function labi_od_zlib_undef_sym_at(i: i32): *u8 {
@@ -4769,6 +4816,22 @@ export function labi_od_zlib_undef_sym_at(i: i32): *u8 {
   }
   if (i == 3) {
     let p: *u8 = "_uncompress";
+    return p;
+  }
+  if (i == 4) {
+    let p: *u8 = "compress2";
+    return p;
+  }
+  if (i == 5) {
+    let p: *u8 = "deflate";
+    return p;
+  }
+  if (i == 6) {
+    let p: *u8 = "inflate";
+    return p;
+  }
+  if (i == 7) {
+    let p: *u8 = "uncompress";
     return p;
   }
   return 0 as *u8;

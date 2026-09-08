@@ -205,7 +205,7 @@ int labi_od_simple_group_sym_count(int g) {
   if (g == 14)
     return 9; /* std.fmt — +format_template cookbook sole UNDEF */
   if (g == 15)
-    return 14; /* std.compress — +stream/format/mode cookbook unique UNDEF */
+    return 24; /* std.compress — +stream/format/mode + 9.2.2 zlib/gzip unique + Linux *_c */
   if (g == 16)
     return 4; /* std.io.driver */
   if (g == 17)
@@ -648,6 +648,28 @@ const char *labi_od_simple_group_sym_at(int g, int i) {
       return "std_compress_mode_compress";
     if (i == 13)
       return "std_compress_mode_decompress";
+    /* 9.2.2: submodule zlib/gzip unique UNDEF (exact; Darwin mangle). */
+    if (i == 14)
+      return "std_compress_zlib_deflate";
+    if (i == 15)
+      return "std_compress_zlib_inflate";
+    if (i == 16)
+      return "std_compress_gzip_gzip_compress";
+    if (i == 17)
+      return "std_compress_gzip_gzip_decompress";
+    if (i == 18)
+      return "std_compress_deflate";
+    if (i == 19)
+      return "std_compress_inflate";
+    /* Linux product -o co-emits mod.x wrappers; UNDEF is bare *_c. */
+    if (i == 20)
+      return "compress_deflate_c";
+    if (i == 21)
+      return "compress_inflate_c";
+    if (i == 22)
+      return "compress_gzip_compress_c";
+    if (i == 23)
+      return "compress_gzip_decompress_c";
     return NULL;
   }
   if (g == 16) {
@@ -2312,7 +2334,7 @@ int link_abi_user_o_needs_async_scheduler(const char *user_o) {
 
 /* wave131: product compress family marker + UNDEF/prefix tables + pure orch.
  * PLATFORM: SHARED — Cap residual exports_marker + has_undef_sym (popen/nm). */
-int labi_od_zlib_undef_sym_count(void) { return 4; }
+int labi_od_zlib_undef_sym_count(void) { return 8; }
 const char *labi_od_zlib_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2324,6 +2346,15 @@ const char *labi_od_zlib_undef_sym_at(int i) {
     return "_inflate";
   if (i == 3)
     return "_uncompress";
+  /* PLATFORM: LINUX — ELF nm U compress2 (exact; Mach-O needles keep _prefix). */
+  if (i == 4)
+    return "compress2";
+  if (i == 5)
+    return "deflate";
+  if (i == 6)
+    return "inflate";
+  if (i == 7)
+    return "uncompress";
   return NULL;
 }
 const char *labi_od_compress_zlib_marker(void) { return "xlang_compress_zlib_marker"; }
@@ -4589,6 +4620,24 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                     pushed_core_formal = 1;
             }
             link_abi_asm_ld_push_obj(NULL, link_argv0, rel, lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+            /* PLATFORM: SHARED — 9.2.2: facade compress.o is c_face stub (return -1).
+             * Real zlib/gzip live in submodule formal .o (mod+libz). Companion ≡
+             * encoding.o → string/base64. Glue provides deflateInit2/inflateInit2. */
+            if (strstr(rel, "std/compress/compress.o")) {
+                const char *include_root = xlang_repo_root_from_argv0(link_argv0);
+                if (include_root && include_root[0]) {
+                    (void)xlang_ensure_formal_std_make_o(include_root, "std/compress/zlib/zlib.o",
+                                                        "../std/compress/zlib/zlib.o");
+                    (void)xlang_ensure_formal_std_make_o(include_root, "std/compress/gzip/gzip.o",
+                                                        "../std/compress/gzip/gzip.o");
+                }
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/zlib/zlib.o", lib_roots, n_lib_roots,
+                                         bank, argv, la, max_la, NULL);
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/gzip/gzip.o", lib_roots, n_lib_roots,
+                                         bank, argv, la, max_la, NULL);
+                /* Glue + -lz stay in asm_ld_append_compress_libs (needs_zlib).
+                 * Do not push runtime_compress_zlib_glue.o here (duplicate T). */
+            }
             /* PLATFORM: SHARED — g12 std/test/test.o monofile C dual (≡ need_test). */
             if (strstr(rel, "std/test/test.o"))
                 labi_std_append_test_monofile_companions(link_argv0, lib_roots, n_lib_roots,
