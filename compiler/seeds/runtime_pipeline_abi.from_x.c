@@ -38025,7 +38025,9 @@ int32_t glue_type_named_layout_size_any_module_elf_c(void *arena, int32_t ty_ref
       di = di + 1;
     }
   }
-  return 0;
+  /* INTEGER-class ≤8B named structs must keep size_simple's 8, not 0.
+   * PLATFORM: SHARED — LINUX|x86_64 SysV INTEGER; MACOS|ARM64 x0. */
+  return sz;
 }
 #endif /* !FROM_X || WIN_LEFTOVER_GROW_VEC — leftover-PE named_layout unique */
 
@@ -38111,6 +38113,7 @@ int32_t glue_func_param_home_width_c(void *arena, void *mod, int32_t func_index,
 #if !defined(XLANG_RUNTIME_PIPELINE_ABI_FROM_X) \
     || defined(XLANG_RUNTIME_PIPELINE_ABI_WIN_LEFTOVER_GROW_VEC)
 extern int32_t pipeline_module_func_return_type_at(void *m, int32_t fi);
+extern int32_t glue_type_named_layout_size_any_module_elf_c(void *arena, int32_t ty_ref);
 
 int32_t glue_func_return_byte_size_c(void *mod, void *arena, int32_t func_index);
 
@@ -38139,7 +38142,21 @@ int32_t glue_func_return_byte_size_c(void *mod, void *arena, int32_t func_index)
   /* TYPE_ARRAY == 10 → E* return (8B), not payload sret */
   if (k == 10)
     return 8;
-  return glue_type_size_simple(mod, arena, rty, 0);
+  {
+    int32_t sz;
+    int32_t nsz;
+    sz = glue_type_size_simple(mod, arena, rty, 0);
+    /* TYPE_NAMED INTEGER-class 8B must not size as 0=void.
+     * PLATFORM: SHARED — LINUX SysV INTEGER rax; MACOS|ARM64 x0. */
+    if (k == 8) {
+      nsz = glue_type_named_layout_size_any_module_elf_c(arena, rty);
+      if (nsz > sz)
+        sz = nsz;
+      if (sz <= 0)
+        return 8;
+    }
+    return sz;
+  }
 }
 #endif /* !FROM_X || WIN_LEFTOVER_GROW_VEC — leftover-PE glue_func_return unique */
 

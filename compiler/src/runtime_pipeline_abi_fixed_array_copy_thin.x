@@ -82,6 +82,125 @@ export extern function glue_emit_struct_type_let_init_elf_c(arena: *u8, elf_ctx:
 export extern function glue_emit_slice_from_array_let_init_elf_c(arena: *u8, elf_ctx: *u8, block_ref: i32, let_idx: i32, init_ref: i32, let_type_ref: i32, ctx: *u8, ta: i32, slice_slot_off: i32): i32;
 export extern function glue_array_lit_emit_scalar_elem_to_rax_elf_c(arena: *u8, elf_ctx: *u8, array_lit_ref: i32, elem_ref: i32, ctx: *u8, ta: i32, force_esz: i32): i32;
 export extern function glue_expr_emit_may_clobber_rbx_elf_c(arena: *u8, expr_ref: i32): i32;
+export extern function glue_type_size_simple(mod: *u8, arena: *u8, ty_ref: i32, depth: i32): i32;
+export extern function glue_type_named_layout_size_any_module_elf_c(arena: *u8, ty_ref: i32): i32;
+export extern function glue_call_arg_resolve_var_stack_off_elf_c(arena: *u8, ctx: *u8, var_ref: i32): i32;
+export extern function asm_local_var_slot_holds_indirect_ptr(arena: *u8, var_ref: i32, mod: *u8, ctx: *u8): i32;
+export extern function pipeline_expr_var_name_len(arena: *u8, expr_ref: i32): i32;
+export extern function pipeline_expr_var_name_into(arena: *u8, expr_ref: i32, dst: *u8): void;
+export extern function pipeline_module_num_funcs(mod: *u8): i32;
+export extern function pipeline_module_func_param_type_ref_for_name(mod: *u8, fi: i32, name: *u8, nlen: i32): i32;
+export extern function asm_ctx_scope_block_ref_at(ctx: *u8): i32;
+export extern function pipeline_block_resolve_var_type_ref(arena: *u8, br: i32, name: *u8, nlen: i32): i32;
+export extern function glue_type_ref_is_named_struct_layout_elf_c(arena: *u8, mod: *u8, ty_ref: i32): i32;
+export extern function glue_type_is_fixed_array(arena: *u8, ty_ref: i32): i32;
+export extern function glue_emit_func_param_is_indirect_array_slot_c(arena: *u8, mod: *u8, var_ref: i32): i32;
+
+/**
+ * CALL-arg VAR: lea stack payload only for MEMORY >16B named structs / T[N].
+ * INTEGER-class ≤16B (including unknown size_simple=0 → 8B) must load bits.
+ * G.7: first-wins twin of runtime_pipeline_abi.x wave190.
+ * PLATFORM: LINUX+MACOS x86_64 SysV INTEGER load; MACOS|ARM64 x0 bits.
+ * @param arena *u8 — ASTArena*; null → 0
+ * @param expr_ref i32 — EXPR_VAR ref
+ * @param ctx *u8 — AsmFuncCtx*
+ * @return i32 — 1 use lea; 0 use load / unknown
+ */
+#[no_mangle]
+export function glue_call_arg_var_use_lea_not_load_elf_c(arena: *u8, expr_ref: i32, ctx: *u8): i32 {
+  let mod: *u8 = 0 as *u8;
+  let holds: i32 = 0;
+  let ko: i32 = 0;
+  let vname: u8[128] = [];
+  let vlen: i32 = 0;
+  let fi: i32 = 0;
+  let nf: i32 = 0;
+  let pty: i32 = 0;
+  let tk: i32 = 0;
+  let scope_br: i32 = 0;
+  let decl_ty: i32 = 0;
+  let sz: i32 = 0;
+  if (arena == (0 as *u8) || ctx == (0 as *u8) || expr_ref <= 0) {
+    return 0;
+  }
+  mod = pipeline_asm_emit_module_ref_c();
+  unsafe {
+    holds = asm_local_var_slot_holds_indirect_ptr(arena, expr_ref, mod, ctx);
+  }
+  if (holds != 0) {
+    return 0;
+  }
+  unsafe {
+    ko = pipeline_expr_kind_ord_at(arena, expr_ref);
+  }
+  if (ko != 3) {
+    return 0;
+  }
+  unsafe {
+    vlen = pipeline_expr_var_name_len(arena, expr_ref);
+  }
+  if (vlen <= 0 || vlen > 127) {
+    return 0;
+  }
+  unsafe {
+    pipeline_expr_var_name_into(arena, expr_ref, &vname[0]);
+  }
+  fi = pipeline_asm_emit_func_index_c();
+  if (mod != (0 as *u8) && fi >= 0) {
+    unsafe {
+      nf = pipeline_module_num_funcs(mod);
+    }
+    if (fi < nf) {
+      unsafe {
+        pty = pipeline_module_func_param_type_ref_for_name(mod, fi, &vname[0], vlen);
+      }
+      if (pty > 0) {
+        unsafe {
+          tk = pipeline_type_kind_ord_at(arena, pty);
+        }
+        if (tk == 9) {
+          return 0;
+        }
+      }
+    }
+  }
+  unsafe {
+    scope_br = asm_ctx_scope_block_ref_at(ctx);
+  }
+  decl_ty = 0;
+  if (scope_br > 0) {
+    unsafe {
+      decl_ty = pipeline_block_resolve_var_type_ref(arena, scope_br, &vname[0], vlen);
+    }
+  }
+  if (decl_ty <= 0) {
+    unsafe {
+      decl_ty = pipeline_expr_resolved_type_ref(arena, expr_ref);
+    }
+  }
+  if (decl_ty <= 0) {
+    return 0;
+  }
+  if (glue_type_ref_is_named_struct_layout_elf_c(arena, mod, decl_ty) != 0) {
+    sz = glue_type_size_simple(mod, arena, decl_ty, 0);
+    if (sz <= 0) {
+      sz = glue_type_named_layout_size_any_module_elf_c(arena, decl_ty);
+    }
+    if (sz > 16) {
+      return 1;
+    }
+    return 0;
+  }
+  if (glue_type_is_fixed_array(arena, decl_ty) != 0) {
+    if (mod != (0 as *u8) && fi >= 0) {
+      if (glue_emit_func_param_is_indirect_array_slot_c(arena, mod, expr_ref) != 0) {
+        return 0;
+      }
+    }
+    return 1;
+  }
+  return 0;
+}
 
 /**
  * EXPR_RETURN ELF emit impl (sret / slice escape / ARRAY_LIT dual-GP / float / tail_join).
@@ -119,6 +238,8 @@ export function pipeline_asm_emit_return_elf_impl(arena: *u8, elf_ctx: *u8, expr
   let tj_lbl: u8[128] = [];
   let ti: i32 = 0;
   let handled: i32 = 0;
+  let ret_off: i32 = 0;
+  let ret_named_sz: i32 = 0;
   let rar_elem: i32 = 0;
   let rar_src: i32 = 0;
   let rar_dst: i32 = 0;
@@ -144,6 +265,47 @@ export function pipeline_asm_emit_return_elf_impl(arena: *u8, elf_ctx: *u8, expr
       ko = pipeline_expr_kind_ord_at(arena, ret_op);
       mod = pipeline_asm_emit_module_ref_c();
       fi = pipeline_asm_emit_func_index_c();
+    }
+    /* Path A0: INTEGER-class ≤8B named struct `return local`. Load the 8
+     * bits into rax/x0. STRUCT_LIT / emit_expr used to lea the slot when
+     * value_bytes sized 0, so Ubuntu SysV returned a callee-local pointer
+     * and `free()` aborted on ArrowColumn. AAPCS64 8B already in x0 bits
+     * (mac false-green). Do not sret (that path is >16B MEMORY).
+     * G.7: must match runtime_pipeline_abi.x (this thin is first-wins inject).
+     * PLATFORM: LINUX+MACOS x86_64 SysV INTEGER rax; MACOS|ARM64 x0. */
+    if (handled == 0 && ko == 3 && (ta == 0 || ta == 1) && mod != (0 as *u8) && fi >= 0) {
+      unsafe {
+        rty = pipeline_module_func_return_type_at(mod, fi);
+      }
+      if (rty > 0) {
+        unsafe {
+          tk = pipeline_type_kind_ord_at(arena, rty);
+        }
+        if (tk == 8) {
+          ret_named_sz = glue_type_size_simple(mod, arena, rty, 0);
+          force_esz = glue_type_named_layout_size_any_module_elf_c(arena, rty);
+          if (force_esz > ret_named_sz) {
+            ret_named_sz = force_esz;
+          }
+          if (ret_named_sz <= 8) {
+            ret_off = glue_call_arg_resolve_var_stack_off_elf_c(arena, ctx, ret_op);
+            if (ret_off < 0) {
+              unsafe {
+                ret_off = glue_var_expr_stack_off_elf_c(arena, ctx, ret_op);
+              }
+            }
+            if (ret_off >= 0) {
+              unsafe {
+                rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, ret_off, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              handled = 1;
+            }
+          }
+        }
+      }
     }
     // Path A: sret return local VAR of large struct
     if (handled == 0 && sret_act != 0 && sret_sz > 16 && (ta == 0 || ta == 1) && ko == 3) {

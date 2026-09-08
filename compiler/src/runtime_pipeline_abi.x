@@ -40813,6 +40813,8 @@ export function pipeline_asm_emit_return_elf_impl(arena: *u8, elf_ctx: *u8, expr
   let tj_lbl: u8[128] = [];
   let ti: i32 = 0;
   let handled: i32 = 0;
+  let ret_off: i32 = 0;
+  let ret_named_sz: i32 = 0;
   let rar_elem: i32 = 0;
   let rar_src: i32 = 0;
   let rar_dst: i32 = 0;
@@ -40838,6 +40840,46 @@ export function pipeline_asm_emit_return_elf_impl(arena: *u8, elf_ctx: *u8, expr
       ko = pipeline_expr_kind_ord_at(arena, ret_op);
       mod = pipeline_asm_emit_module_ref_c();
       fi = pipeline_asm_emit_func_index_c();
+    }
+    /* Path A0: INTEGER-class ≤8B named struct `return local`. Load the 8
+     * bits into rax/x0. STRUCT_LIT / emit_expr used to lea the slot when
+     * value_bytes sized 0, so Ubuntu SysV returned a callee-local pointer
+     * and `free()` aborted on ArrowColumn. AAPCS64 8B already in x0 bits
+     * (mac false-green). Do not sret (that path is >16B MEMORY).
+     * PLATFORM: LINUX+MACOS x86_64 SysV INTEGER rax; MACOS|ARM64 x0. */
+    if (handled == 0 && ko == 3 && (ta == 0 || ta == 1) && mod != (0 as *u8) && fi >= 0) {
+      unsafe {
+        rty = pipeline_module_func_return_type_at(mod, fi);
+      }
+      if (rty > 0) {
+        unsafe {
+          tk = pipeline_type_kind_ord_at(arena, rty);
+        }
+        if (tk == 8) {
+          ret_named_sz = glue_type_size_simple(mod, arena, rty, 0);
+          force_esz = glue_type_named_layout_size_any_module_elf_c(arena, rty);
+          if (force_esz > ret_named_sz) {
+            ret_named_sz = force_esz;
+          }
+          if (ret_named_sz <= 8) {
+            ret_off = glue_call_arg_resolve_var_stack_off_elf_c(arena, ctx, ret_op);
+            if (ret_off < 0) {
+              unsafe {
+                ret_off = glue_var_expr_stack_off_elf_c(arena, ctx, ret_op);
+              }
+            }
+            if (ret_off >= 0) {
+              unsafe {
+                rc = backend_enc_load_rbp_to_rax_arch(elf_ctx, ret_off, ta);
+              }
+              if (rc != 0) {
+                return 0 - 1;
+              }
+              handled = 1;
+            }
+          }
+        }
+      }
     }
     // Path A: sret return local VAR of large struct
     if (handled == 0 && sret_act != 0 && sret_sz > 16 && (ta == 0 || ta == 1) && ko == 3) {
@@ -60674,6 +60716,29 @@ export function pipeline_asm_emit_struct_lit_fields_elf_c(arena: *u8, elf_ctx: *
     }
   }
   vb = pipeline_expr_struct_lit_value_bytes(arena, mod, expr_ref);
+  /* Nameless / missed-layout STRUCT_LIT sized 0 and fell through to lea
+   * (return a callee-local pointer). Recover field span; INTEGER-class
+   * default is 8. PLATFORM: SHARED — SysV rax bits; AAPCS64 x0 bits. */
+  if (vb <= 0) {
+    fi = 0;
+    while (fi < nf) {
+      foff = pipeline_expr_struct_lit_field_offset_at(arena, mod, expr_ref, fi);
+      fsz = glue_struct_lit_field_store_sz(arena, expr_ref, fi);
+      if (foff < 0) {
+        foff = 0;
+      }
+      if (fsz < 0) {
+        fsz = 0;
+      }
+      if (foff + fsz > vb) {
+        vb = foff + fsz;
+      }
+      fi = fi + 1;
+    }
+    if (vb <= 0) {
+      vb = 8;
+    }
+  }
   if (vb > 0 && vb <= 8) {
     unsafe {
       if (backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta) != 0) {
@@ -73538,13 +73603,20 @@ export function glue_call_arg_var_use_lea_not_load_elf_c(arena: *u8, expr_ref: i
     return 0;
   }
   if (glue_type_ref_is_named_struct_layout_elf_c(arena, mod, decl_ty) != 0) {
-    // PLATFORM: LINUX+MACOS x86_64 SysV — ≤16B INTEGER by-value (load);
-    // >16B MEMORY class lea of stack slot.
+    /* PLATFORM: LINUX+MACOS x86_64 SysV — INTEGER class ≤16B by-value (load
+     * bits into GP). MEMORY class >16B lea of the stack slot.
+     * size_simple==0 used to fall into lea: imported 8B POD (ArrowColumn)
+     * then passed a wrapper address, and Ubuntu free() aborted. Unknown
+     * size is INTEGER 8, not MEMORY.
+     * PLATFORM: MACOS|ARM64 AAPCS64 — same load-vs-lea split (x0 bits). */
     sz = glue_type_size_simple(mod, arena, decl_ty, 0);
-    if (sz > 0 && sz <= 16) {
-      return 0;
+    if (sz <= 0) {
+      sz = glue_type_named_layout_size_any_module_elf_c(arena, decl_ty);
     }
-    return 1;
+    if (sz > 16) {
+      return 1;
+    }
+    return 0;
   }
   if (glue_type_is_fixed_array(arena, decl_ty) != 0) {
     // Formal T[N] home is E* (8B): load slot. Local T[N] lea payload.
@@ -73706,7 +73778,12 @@ export function glue_type_named_layout_size_any_module_elf_c(arena: *u8, ty_ref:
       di = di + 1;
     }
   }
-  return 0;
+  /* INTEGER-class ≤8B named structs (ArrowColumn { handle: i64 }) must keep
+   * size_simple's 8, not fall through as 0. 0 made STRUCT_LIT / CALL-arg
+   * treat the slot as MEMORY (lea a dangling pointer) while SysV INTEGER
+   * and AAPCS64 both return/pass the 8 bits in rax/x0.
+   * PLATFORM: SHARED — LINUX|x86_64 SysV INTEGER class; MACOS|ARM64 x0. */
+  return sz;
 }
 
 /**
@@ -73938,6 +74015,8 @@ export function glue_func_return_byte_size_c(mod: *u8, arena: *u8, func_index: i
   let rty: i32 = 0;
   let k: i32 = 0;
   let nf: i32 = 0;
+  let sz: i32 = 0;
+  let nsz: i32 = 0;
   if (mod == (0 as *u8) || arena == (0 as *u8) || func_index < 0) {
     return 0;
   }
@@ -73964,7 +74043,21 @@ export function glue_func_return_byte_size_c(mod: *u8, arena: *u8, func_index: i
   if (k == 10) {
     return 8;
   }
-  return glue_type_size_simple(mod, arena, rty, 0);
+  sz = glue_type_size_simple(mod, arena, rty, 0);
+  /* TYPE_NAMED INTEGER-class 8B (ArrowColumn) must not size as 0=void:
+   * a 0 here skipped sret (correct) but also starved STRUCT_LIT / return
+   * packers of the 8B width so they lea'd the slot.
+   * PLATFORM: SHARED — LINUX SysV INTEGER rax; MACOS|ARM64 x0. */
+  if (k == 8) {
+    nsz = glue_type_named_layout_size_any_module_elf_c(arena, rty);
+    if (nsz > sz) {
+      sz = nsz;
+    }
+    if (sz <= 0) {
+      return 8;
+    }
+  }
+  return sz;
 }
 
 // end wave192 pure-owned leave
