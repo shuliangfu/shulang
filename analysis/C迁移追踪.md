@@ -444,6 +444,7 @@
 
 | 项 | 状态 | 备注 |
 |----|------|------|
+| dep 返回位匿名 STRUCT_LIT 盖章（rest 航道 C walker＋typeck 包装器） | ✅ | parse-only dep 无 typeck → 返回位 lit 无类型名 → 字段/返回分类按 slice 推断（std_string_new 存栈指针）；`glue_stamp_return_lits_in_block_c` 预跑补章＠`d38be40d6`；emit 侧补章上不了链（prefer 航道胜者恒无章）；残＝caller 帧尺寸不足（多 260B String 局部槽在 rsp 下） |
 | self-merge skip 仍 sync dep 布局（typeck merge 自跳分支补 sync） | ✅ | skip-self 全跳漏掉 dep 自发射前唯一 sync 时机（dep emit 先于 entry merge）；只跳 reset_slot/拷贝、保留 `glue_sync_struct_layout_field_offsets_c`＠`ad84d5034`；string cut17 SEGV→净退出；残＝返回位匿名 STRUCT_LIT 盖章（上链航道待查） |
 | DEREF 作 >16B 按值 CALL 实参（push/store memory 权威补 ko==52） | ✅ | `pipeline_asm_push_sysv_memory_by_value_elf_c`／AAPCS64 `store_memory_by_value_to_sp_elf_c` 分支 4 补 EXPR_DEREF（复用 `lvalue_eff_addr` DEREF 面）；`slot(*s,key)` 24B 断编 CG002 → run-set 门禁全绿＠`9b1d575c7`；残＝string compare_append_find exit=4 |
 | typeck merge dep 布局自合并抹零（import 共发射三面漂移根） | ✅ | `typeck_merge_dep_struct_layouts_into_entry` dep 循环跳 `dm == mod`（backend 对每模块含 dep 自身调 merge；自合并 reset_slot 抹 dep ftr/offset → entry 拷零 → let-init 打包／FIELD 读＝size 盲默认／dep 写＝0 三面漂，std.set abort 134／std.string exit 3）；`.x`＋`typeck_gen` seed 同 commit＠`5dc783d96`；残＝dep `*s` DEREF 按值 >16B CG002／mac scratch 点分 dep 不共发射／u64 宽字面量 dep 实参 |
