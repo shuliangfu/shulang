@@ -55116,6 +55116,9 @@ export function glue_dep_layout_field_offset_by_name_c(ctx: *u8, field_name: *u8
   let feq: i32 = 0;
   let fi: i32 = 0;
   let fb: u8[128] = [];
+  let da: *u8 = 0 as *u8;
+  let stored: i32 = 0;
+  let computed: i32 = 0;
   if (ctx == (0 as *u8) || field_name == (0 as *u8) || flen <= 0) {
     return 0 - 1;
   }
@@ -55159,8 +55162,26 @@ export function glue_dep_layout_field_offset_by_name_c(ctx: *u8, field_name: *u8
           }
           if (feq != 0) {
             unsafe {
-              return pipeline_module_struct_layout_field_offset_at(dm, k, j);
+              stored = pipeline_module_struct_layout_field_offset_at(dm, k, j);
             }
+            if (stored != 0) {
+              return stored;
+            }
+            unsafe {
+              da = pipeline_dep_ctx_arena_at(ctx, di);
+            }
+            if (da != (0 as *u8)) {
+              unsafe {
+                computed = glue_struct_layout_compute_field_offset_c(dm, da, k, j);
+              }
+              if (computed != 0) {
+                return computed;
+              }
+            }
+            if (j == 0) {
+              return 0;
+            }
+            /* j>0 both 0: unsynced import layout; try next dep. */
           }
           j = j + 1;
         }
@@ -55202,6 +55223,11 @@ export function glue_field_layout_offset_for_var_base_field(a: *u8, m: *u8, base
   let dep: *u8 = 0 as *u8;
   let dep_off: i32 = 0;
   let kord: i32 = 0;
+  let nd: i32 = 0;
+  let di: i32 = 0;
+  let dm: *u8 = 0 as *u8;
+  let da: *u8 = 0 as *u8;
+  let k2: i32 = 0;
   if (a == (0 as *u8) || m == (0 as *u8) || base_var_ref <= 0 || field_name == (0 as *u8) || flen <= 0 || flen > 127) {
     return 0 - 1;
   }
@@ -55305,12 +55331,38 @@ export function glue_field_layout_offset_for_var_base_field(a: *u8, m: *u8, base
     if (off >= 0) {
       return off;
     }
-    return 0 - 1;
+    /* Caller layout exists but stored/computed are both 0 for j>0
+     * (import merge remapped type_refs). Fall through to the defining
+     * module+arena. PLATFORM: SHARED. */
   }
   unsafe {
     dep = pipeline_asm_emit_dep_pipe_c();
   }
   if (dep != (0 as *u8)) {
+    unsafe {
+      nd = pipeline_dep_ctx_ndep(dep);
+    }
+    di = 0;
+    while (di < nd) {
+      unsafe {
+        dm = pipeline_dep_ctx_module_at(dep, di);
+        da = pipeline_dep_ctx_arena_at(dep, di);
+      }
+      if (dm != (0 as *u8) && da != (0 as *u8)) {
+        unsafe {
+          k2 = glue_struct_layout_index_by_type_name_c(dm, &struct_name[0], nlen);
+        }
+        if (k2 >= 0) {
+          unsafe {
+            off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+          }
+          if (off >= 0) {
+            return off;
+          }
+        }
+      }
+      di = di + 1;
+    }
     unsafe {
       dep_off = typeck_get_field_offset_from_layout_deps(m, dep, &struct_name[0], nlen, field_name, flen);
     }
@@ -55344,6 +55396,11 @@ export function glue_field_layout_offset_for_base_field(a: *u8, m: *u8, base_ref
   let kord: i32 = 0;
   let dep: *u8 = 0 as *u8;
   let dep_off: i32 = 0;
+  let nd: i32 = 0;
+  let di: i32 = 0;
+  let dm: *u8 = 0 as *u8;
+  let da: *u8 = 0 as *u8;
+  let k2: i32 = 0;
   if (a == (0 as *u8) || m == (0 as *u8) || base_ref <= 0 || field_name == (0 as *u8) || flen <= 0 || flen > 127) {
     return 0 - 1;
   }
@@ -55401,6 +55458,30 @@ export function glue_field_layout_offset_for_base_field(a: *u8, m: *u8, base_ref
     dep = pipeline_asm_emit_dep_pipe_c();
   }
   if (dep != (0 as *u8)) {
+    unsafe {
+      nd = pipeline_dep_ctx_ndep(dep);
+    }
+    di = 0;
+    while (di < nd) {
+      unsafe {
+        dm = pipeline_dep_ctx_module_at(dep, di);
+        da = pipeline_dep_ctx_arena_at(dep, di);
+      }
+      if (dm != (0 as *u8) && da != (0 as *u8)) {
+        unsafe {
+          k2 = glue_struct_layout_index_by_type_name_c(dm, &struct_name[0], nlen);
+        }
+        if (k2 >= 0) {
+          unsafe {
+            off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+          }
+          if (off >= 0) {
+            return off;
+          }
+        }
+      }
+      di = di + 1;
+    }
     unsafe {
       dep_off = typeck_get_field_offset_from_layout_deps(m, dep, &struct_name[0], nlen, field_name, flen);
     }

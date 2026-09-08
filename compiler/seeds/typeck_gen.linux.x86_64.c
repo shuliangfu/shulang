@@ -2311,6 +2311,7 @@ extern void pipeline_expr_set_field_access_soa_stride(struct ast_ASTArena * aren
 extern int32_t pipeline_expr_field_access_soa_stride(struct ast_ASTArena * arena, int32_t expr_ref);
 extern void pipeline_debug_trace_named_func_bodies(uint8_t * phase, struct ast_Module * module, struct ast_ASTArena * arena);
 extern void glue_sync_struct_layout_field_offsets_c(struct ast_Module * module, struct ast_ASTArena * arena);
+extern int32_t glue_struct_layout_field_offset_by_name_c(struct ast_Module * module, struct ast_ASTArena * arena, int32_t li, uint8_t * field_name, int32_t flen);
 extern void glue_fill_var_types_from_lets_in_block(struct ast_ASTArena * arena, int32_t block_ref);
 extern void glue_fill_var_types_from_params_for_func(struct ast_Module * module, struct ast_ASTArena * arena, int32_t func_index);
 extern int32_t glue_field_layout_offset_for_base_field(struct ast_ASTArena * arena, struct ast_Module * module, int32_t base_ref, uint8_t * field_name, int32_t flen);
@@ -3573,7 +3574,14 @@ int32_t typeck_get_field_offset_from_layout(struct ast_Module * module, uint8_t 
         int32_t j = 0;
         while ((j < pipeline_module_struct_layout_num_fields(module, k))) {
           if (typeck_layout_field_name_equal(module, k, j, field_name, field_name_len)) {
-            return pipeline_module_struct_layout_field_offset_at(module, k, j);
+            int32_t stored = pipeline_module_struct_layout_field_offset_at(module, k, j);
+            if ((stored != 0)) {
+              return stored;
+            }
+            if ((j == 0)) {
+              return 0;
+            }
+            return -1;
           }
           (void)((j = (j + 1)));
         }
@@ -3618,6 +3626,20 @@ int32_t typeck_get_field_offset_from_layout_deps(struct ast_Module * module, str
         (void)((r = typeck_get_field_offset_from_layout(dm, type_name, type_name_len, field_name, field_name_len)));
         ((r >=0) ? ({   return r;
  }) : 0);
+        struct ast_ASTArena * darena = pipeline_dep_ctx_arena_at(ctx, di);
+        if ((darena !=0)) {
+          int32_t lk = 0;
+          int32_t nsl = pipeline_module_num_struct_layouts_at(dm);
+          while ((lk < nsl)) {
+            if (typeck_layout_name_equal(dm, lk, type_name, type_name_len)) {
+              (void)((r = glue_struct_layout_field_offset_by_name_c(dm, darena, lk, field_name, field_name_len)));
+              if ((r >=0)) {
+                return r;
+              }
+            }
+            (void)((lk = (lk + 1)));
+          }
+        }
       }
       (void)((di = (di + 1)));
     }

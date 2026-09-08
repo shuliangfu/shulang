@@ -791,6 +791,9 @@ export extern function pipeline_debug_trace_named_func_bodies(phase: *u8, module
 arena: *ASTArena): void;
 /* Host-cc layout sync + skip-typeck var type backfill (link surfaces for fill_soa). */
 export extern function glue_sync_struct_layout_field_offsets_c(module: *Module, arena: *ASTArena): void;
+/* Layout field offset by name: prefer stored, else compute with the given arena. */
+export extern function glue_struct_layout_field_offset_by_name_c(module: *Module, arena: *ASTArena,
+li: i32, field_name: *u8, flen: i32): i32;
 export extern function glue_fill_var_types_from_lets_in_block(arena: *ASTArena, block_ref: i32): void;
 export extern function glue_fill_var_types_from_params_for_func(module: *Module, arena: *ASTArena,
 func_index: i32): void;
@@ -2778,7 +2781,19 @@ export function typeck_validate_struct_layouts_zero_padding(module: *Module, are
   }
 }
 
-/* See implementation. */
+/**
+ * Stored layout field offset by type name + field name.
+ * j==0 with stored 0 is a real first-field offset. j>0 with stored 0 is an
+ * unsynced import-merge miss (gzip ZStream.zalloc) — return -1 so deps can
+ * compute against the defining module+arena.
+ * @param module *Module — layout table owner
+ * @param type_name *u8 — struct type name bytes
+ * @param type_name_len i32 — name length
+ * @param field_name *u8 — field name bytes
+ * @param field_name_len i32 — field name length
+ * @return i32 — byte offset, or -1 on miss
+ * PLATFORM: SHARED — Ubuntu gold gzip Init2; Darwin AAPCS64 uses the same table.
+ */
 export function get_field_offset_from_layout(module: *Module, type_name: *u8, type_name_len: i32,
 field_name: *u8, field_name_len: i32): i32 {
   // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
@@ -2789,7 +2804,14 @@ field_name: *u8, field_name_len: i32): i32 {
         let j: i32 = 0;
         while (j < pipeline_module_struct_layout_num_fields(module, k)) {
           if (typeck_layout_field_name_equal(module, k, j, field_name, field_name_len)) {
-            return pipeline_module_struct_layout_field_offset_at(module, k, j);
+            let stored: i32 = pipeline_module_struct_layout_field_offset_at(module, k, j);
+            if (stored != 0) {
+              return stored;
+            }
+            if (j == 0) {
+              return 0;
+            }
+            return - 1;
           }
           j = j + 1;
         }
@@ -2822,7 +2844,18 @@ field_name: *u8, field_name_len: i32): i32 {
   }
 }
 
-/* See implementation. */
+/**
+ * Field offset: caller stored table, then each dep stored table, then
+ * compute with the dep's own arena (field type_refs are dep-arena indices).
+ * @param module *Module — caller / emit module
+ * @param ctx *PipelineDepCtx — dep pipe; null skips dep walk
+ * @param type_name *u8 — struct type name bytes
+ * @param type_name_len i32 — name length
+ * @param field_name *u8 — field name bytes
+ * @param field_name_len i32 — field name length
+ * @return i32 — byte offset, or -1 on miss
+ * PLATFORM: SHARED — product import co-emit of gzip ZStream.
+ */
 export function get_field_offset_from_layout_deps(module: *Module, ctx: *PipelineDepCtx, type_name: *u8,
 type_name_len: i32, field_name: *u8, field_name_len: i32): i32 {
   // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
@@ -2835,7 +2868,6 @@ type_name_len: i32, field_name: *u8, field_name_len: i32): i32 {
     if (ctx == 0 as *PipelineDepCtx) {
       return - 1;
     }
-    /* See implementation. */
     let nd: i32 = pipeline_dep_ctx_ndep(ctx);
     let di: i32 = 0;
     while (di < nd) {
@@ -2844,6 +2876,22 @@ type_name_len: i32, field_name: *u8, field_name_len: i32): i32 {
         r = get_field_offset_from_layout(dm, type_name, type_name_len, field_name, field_name_len);
         if (r >= 0) {
           return r;
+        }
+        /* Defining-module compute: skip-typeck / import merge leaves stored 0. */
+        let darena: *ASTArena = pipeline_dep_ctx_arena_at(ctx, di);
+        if (darena != 0 as *ASTArena) {
+          let k: i32 = 0;
+          let nsl: i32 = pipeline_module_num_struct_layouts_at(dm);
+          while (k < nsl) {
+            if (typeck_layout_name_equal(dm, k, type_name, type_name_len)) {
+              r = glue_struct_layout_field_offset_by_name_c(dm, darena, k, field_name,
+              field_name_len);
+              if (r >= 0) {
+                return r;
+              }
+            }
+            k = k + 1;
+          }
         }
       }
       di = di + 1;

@@ -29316,7 +29316,21 @@ int32_t glue_dep_layout_field_offset_by_name_c(void *ctx, uint8_t *field_name,
           }
           if (!feq)
             continue;
-          return pipeline_module_struct_layout_field_offset_at(dm, k, j);
+          {
+            int32_t stored = pipeline_module_struct_layout_field_offset_at(dm, k, j);
+            int32_t computed;
+            void *da;
+            if (stored != 0)
+              return stored;
+            da = pipeline_dep_ctx_arena_at(ctx, di);
+            if (da) {
+              computed = glue_struct_layout_compute_field_offset_c(dm, da, k, j);
+              if (computed != 0)
+                return computed;
+            }
+            if (j == 0)
+              return 0;
+          }
         }
       }
     }
@@ -29401,15 +29415,33 @@ int32_t glue_field_layout_offset_for_var_base_field(void *a, void *m,
     int32_t off = glue_struct_layout_field_offset_by_name_c(m, a, k, field_name, flen);
     if (off >= 0)
       return off;
-    return -1;
+    /* Caller layout miss (j>0 stored/computed 0): fall through to dep arena. */
   }
   /** import Pair 等：struct layout 在 dep 编译单元（stack_promote_cross_ret 的 p.a/p.b）。 */
   if (g_pipeline_asm_emit_dep_pipe) {
-    int32_t dep_off;
-    dep_off = typeck_get_field_offset_from_layout_deps(m, g_pipeline_asm_emit_dep_pipe, struct_name, nlen, field_name,
-                                                       flen);
-    if (dep_off >= 0)
-      return dep_off;
+    int32_t nd = pipeline_dep_ctx_ndep(g_pipeline_asm_emit_dep_pipe);
+    int32_t di;
+    for (di = 0; di < nd; di++) {
+      void *dm = pipeline_dep_ctx_module_at(g_pipeline_asm_emit_dep_pipe, di);
+      void *da = pipeline_dep_ctx_arena_at(g_pipeline_asm_emit_dep_pipe, di);
+      int32_t k2;
+      int32_t off;
+      if (!dm || !da)
+        continue;
+      k2 = glue_struct_layout_index_by_type_name_c(dm, struct_name, nlen);
+      if (k2 < 0)
+        continue;
+      off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+      if (off >= 0)
+        return off;
+    }
+    {
+      int32_t dep_off;
+      dep_off = typeck_get_field_offset_from_layout_deps(m, g_pipeline_asm_emit_dep_pipe, struct_name, nlen, field_name,
+                                                         flen);
+      if (dep_off >= 0)
+        return dep_off;
+    }
   }
   return -1;
 }
@@ -29457,10 +29489,28 @@ int32_t glue_field_layout_offset_for_base_field(void *a, void *m, int32_t base_r
       return off;
   }
   if (g_pipeline_asm_emit_dep_pipe) {
-    int32_t dep_off = typeck_get_field_offset_from_layout_deps(m, g_pipeline_asm_emit_dep_pipe, struct_name, nlen,
-                                                               field_name, flen);
-    if (dep_off >= 0)
-      return dep_off;
+    int32_t nd = pipeline_dep_ctx_ndep(g_pipeline_asm_emit_dep_pipe);
+    int32_t di;
+    for (di = 0; di < nd; di++) {
+      void *dm = pipeline_dep_ctx_module_at(g_pipeline_asm_emit_dep_pipe, di);
+      void *da = pipeline_dep_ctx_arena_at(g_pipeline_asm_emit_dep_pipe, di);
+      int32_t k2;
+      int32_t off;
+      if (!dm || !da)
+        continue;
+      k2 = glue_struct_layout_index_by_type_name_c(dm, struct_name, nlen);
+      if (k2 < 0)
+        continue;
+      off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+      if (off >= 0)
+        return off;
+    }
+    {
+      int32_t dep_off = typeck_get_field_offset_from_layout_deps(m, g_pipeline_asm_emit_dep_pipe, struct_name, nlen,
+                                                                 field_name, flen);
+      if (dep_off >= 0)
+        return dep_off;
+    }
   }
   return -1;
 }
@@ -35918,6 +35968,9 @@ extern int32_t pipeline_type_named_name_into(void *a, int32_t ty_ref, uint8_t *o
 extern int32_t pipeline_block_resolve_var_type_ref(void *a, int32_t block_ref, uint8_t *vname, int32_t vlen);
 extern int32_t pipeline_asm_emit_func_index_c(void);
 extern void *pipeline_asm_emit_dep_pipe_c(void);
+extern int32_t pipeline_dep_ctx_ndep(void *ctx);
+extern void *pipeline_dep_ctx_module_at(void *ctx, int32_t idx);
+extern void *pipeline_dep_ctx_arena_at(void *ctx, int32_t idx);
 extern int32_t typeck_get_field_offset_from_layout_deps(void *m, void *ctx, uint8_t *type_name, int32_t type_name_len,
                                                        uint8_t *field_name, int32_t field_name_len);
 
@@ -36033,10 +36086,25 @@ int32_t glue_field_layout_offset_for_var_base_field(void *a, void *m,
     off = glue_struct_layout_field_offset_by_name_c(m, a, k, field_name, flen);
     if (off >= 0)
       return off;
-    return -1;
+    /* Caller layout miss (j>0 stored/computed 0): fall through to dep arena. */
   }
   dep = pipeline_asm_emit_dep_pipe_c();
   if (dep) {
+    int32_t nd = pipeline_dep_ctx_ndep(dep);
+    int32_t di;
+    for (di = 0; di < nd; di++) {
+      void *dm = pipeline_dep_ctx_module_at(dep, di);
+      void *da = pipeline_dep_ctx_arena_at(dep, di);
+      int32_t k2;
+      if (!dm || !da)
+        continue;
+      k2 = glue_struct_layout_index_by_type_name_c(dm, struct_name, nlen);
+      if (k2 < 0)
+        continue;
+      off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+      if (off >= 0)
+        return off;
+    }
     dep_off = typeck_get_field_offset_from_layout_deps(m, dep, struct_name, nlen, field_name, flen);
     if (dep_off >= 0)
       return dep_off;
@@ -36087,6 +36155,21 @@ int32_t glue_field_layout_offset_for_base_field(void *a, void *m, int32_t base_r
   }
   dep = pipeline_asm_emit_dep_pipe_c();
   if (dep) {
+    int32_t nd = pipeline_dep_ctx_ndep(dep);
+    int32_t di;
+    for (di = 0; di < nd; di++) {
+      void *dm = pipeline_dep_ctx_module_at(dep, di);
+      void *da = pipeline_dep_ctx_arena_at(dep, di);
+      int32_t k2;
+      if (!dm || !da)
+        continue;
+      k2 = glue_struct_layout_index_by_type_name_c(dm, struct_name, nlen);
+      if (k2 < 0)
+        continue;
+      off = glue_struct_layout_field_offset_by_name_c(dm, da, k2, field_name, flen);
+      if (off >= 0)
+        return off;
+    }
     dep_off = typeck_get_field_offset_from_layout_deps(m, dep, struct_name, nlen, field_name, flen);
     if (dep_off >= 0)
       return dep_off;
