@@ -160,6 +160,10 @@ const char *xlang_runtime_link_abi_user_env_o_path(const char *argv0);
 int xlang_ensure_runtime_link_abi_user_env_o(const char *argv0);
 int xlang_ensure_runtime_process_argv_o(const char *argv0);
 const char *xlang_runtime_process_argv_o_path(const char *argv0);
+/* Forward: defined later; formal env companion calls it. */
+void labi_std_append_process_argv_if(int need, const char *link_argv0,
+    const char **lib_roots, int n_lib_roots, ShuAsmLdPathBank *bank,
+    const char **argv, int *la, int max_la);
 
 #ifndef XLANG_LABI_INVOKE_LD_LIST_FROM_X
 
@@ -884,6 +888,8 @@ void labi_std_append_formal_ensure_for_rel(const char *link_argv0, const char *r
       (void)link_abi_asm_ld_push_obj(xlang_runtime_env_os_o_path(link_argv0), link_argv0,
                                      "compiler/runtime_env_os.o", lib_roots, n_lib_roots,
                                      bank, argv, la, max_la, NULL);
+      /* PLATFORM: SHARED — env.o U process_xlang_*; mirror .x process_argv companion. */
+      labi_std_append_process_argv_if(1, link_argv0, lib_roots, n_lib_roots, bank, argv, la, max_la);
     }
   }
   if (strcmp(rel, "std/random/random.o") == 0) {

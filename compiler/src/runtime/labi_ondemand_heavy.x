@@ -523,7 +523,8 @@ export function labi_fk0_sym_count(k: i32): i32 {
     return 9;
   }
   if (k == 12) {
-    return 11;
+    // PLATFORM: SHARED — +args_iter_count_c / args_iter_at_c (env_iter leftover UNDEF).
+    return 13;
   }
   if (k == 13) {
     return 12;
@@ -1401,6 +1402,16 @@ export function labi_fk0_sym_at(k: i32, i: i32): *u8 {
       // std_env_args_iter_count (args_iter may be co-emitted; exact match).
       if (i == 10) {
         let p: *u8 = "std_env_args_iter_count";
+        return p;
+      }
+      // PLATFORM: SHARED — leftover may emit std_env_args_iter_* as T (fk0 closed) while
+      // leaving args_iter_*_c U (run-env env_iter Ubuntu UNDEF). Complete env fk0 surface.
+      if (i == 11) {
+        let p: *u8 = "args_iter_count_c";
+        return p;
+      }
+      if (i == 12) {
+        let p: *u8 = "args_iter_at_c";
         return p;
       }
       return 0 as *u8;

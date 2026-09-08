@@ -111,6 +111,8 @@ extern int32_t xlang_ensure_runtime_link_abi_user_env_o(uint8_t * argv0);
 extern uint8_t * xlang_runtime_link_abi_user_env_o_path(uint8_t * argv0);
 extern int32_t xlang_ensure_runtime_process_argv_o(uint8_t * argv0);
 extern uint8_t * xlang_runtime_process_argv_o_path(uint8_t * argv0);
+/* Forward: defined later in this surface; formal env companion calls it. */
+void labi_std_append_process_argv_if(int32_t need, uint8_t * link_argv0, uint8_t * * lib_roots, int32_t n_lib_roots, uint8_t * bank, uint8_t * * argv, int32_t * la, int32_t max_la);
 /* wave194 TASK_SPECIAL peers (needs_std_task + scheduler path + push_stable + glue). */
 extern int32_t labi_user_needs_std_task(uint8_t * user_o);
 extern uint8_t * scheduler_o_for_task_link(uint8_t * task_o, uint8_t * explicit_scheduler);
@@ -1382,6 +1384,8 @@ void labi_std_append_formal_ensure_for_rel(uint8_t * link_argv0, uint8_t * rel, 
           (void)((env_p = xlang_runtime_env_os_o_path(link_argv0)));
           int32_t _pe = 0;
           (void)((_pe = link_abi_asm_ld_push_obj(env_p, link_argv0, ((uint8_t *)"\x63\x6f\x6d\x70\x69\x6c\x65\x72\x2f\x72\x75\x6e\x74\x69\x6d\x65\x5f\x65\x6e\x76\x5f\x6f\x73\x2e\x6f"), lib_roots, n_lib_roots, bank, argv, la, max_la, 0)));
+          /* PLATFORM: SHARED — env.o U process_xlang_*; mirror .x process_argv companion. */
+          (void)(labi_std_append_process_argv_if(1, link_argv0, lib_roots, n_lib_roots, bank, argv, la, max_la));
         }
       }
     }
@@ -1779,9 +1783,10 @@ void labi_std_append_primary_for_op(int32_t op, uint8_t * link_argv0, uint8_t * 
     return;
   }
   if ((op ==6)) {
-    int32_t need = 0;
-    (void)((need = labi_user_needs_runtime_env_os(user_o)));
-    if ((need ==0)) {
+    /* PLATFORM: SHARED — unique local need_env only (mirror .x); do not rename op4/op5. */
+    int32_t need_env = 0;
+    (void)((need_env = labi_user_needs_runtime_env_os(user_o)));
+    if ((need_env ==0)) {
       return;
     }
     if ((rel_ok ==0)) {
@@ -2155,7 +2160,10 @@ void xlang_asm_ld_append_std_objs_for_user(uint8_t * link_argv0, uint8_t * user_
         (void)(labi_std_append_primary_for_op(op, link_argv0, user_o, rel, lib_roots, n_lib_roots, bank, argv, la, max_la));
       }
       if ((op ==6)) {
+        /* PLATFORM: SHARED — park bank across primary op6 (leftover smash; mirror .x). */
+        uint8_t * bank_save = bank;
         (void)(labi_std_append_primary_for_op(op, link_argv0, user_o, rel, lib_roots, n_lib_roots, bank, argv, la, max_la));
+        (void)((bank = bank_save));
       }
       if ((op ==1)) {
         (void)(labi_std_append_op_std(link_argv0, user_o, rel, fk, lib_roots, n_lib_roots, bank, argv, la, max_la, flags, &((local_have)[0])));

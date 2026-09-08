@@ -2899,7 +2899,8 @@ int labi_fk0_sym_count(int k) {
   if (k == 11)
     return 9;
   if (k == 12)
-    return 11;
+    /* PLATFORM: SHARED — +args_iter_*_c (mirror heavy; env_iter leftover UNDEF). */
+    return 13;
   if (k == 13)
     return 12;
   if (k == 14)
@@ -3360,6 +3361,11 @@ const char *labi_fk0_sym_at(int k, int i) {
       return "std_env_args_iter";
     if (i == 10)
       return "std_env_args_iter_count";
+    /* PLATFORM: SHARED — leftover may T-emit std_env_args_iter_* while U args_iter_*_c. */
+    if (i == 11)
+      return "args_iter_count_c";
+    if (i == 12)
+      return "args_iter_at_c";
     return NULL;
   }
   if (k == 13) {

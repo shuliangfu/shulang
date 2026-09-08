@@ -2437,6 +2437,9 @@ export function labi_std_append_formal_ensure_for_rel(link_argv0: *u8, rel: *u8,
           unsafe {
             _pe = link_abi_asm_ld_push_obj(env_p, link_argv0, "compiler/runtime_env_os.o", lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
           }
+          // PLATFORM: SHARED — formal env.o U process_xlang_* under args_iter / process_* weak chain.
+          // G.7 complete existing env companion; reuse process_argv append leaf (no second path).
+          labi_std_append_process_argv_if(1, link_argv0, lib_roots, n_lib_roots, bank, argv, la, max_la);
         }
       }
     }
@@ -3091,12 +3094,17 @@ export function labi_std_append_primary_for_op(op: i32, link_argv0: *u8, user_o:
     return;
   }
   // op 6: PRIMARY_ENV_OS
+  // PLATFORM: SHARED — leftover asm: reusing `let need` across op4/op5/op6 made op6's
+  // if read a stale zero slot (needs() wrote a different slot), so runtime_env_os.o
+  // never pushed (Ubuntu UNDEF). Use a uniquely named gate local (need_env).
+  // Caller (append_std_objs) parks+restores `bank` around this leaf — op6 push path
+  // otherwise smashes the plan-loop bank slot (Darwin bank_push SEGV on next env.o).
   if (op == 6) {
-    let need: i32 = 0;
+    let need_env: i32 = 0;
     unsafe {
-      need = labi_user_needs_runtime_env_os(user_o);
+      need_env = labi_user_needs_runtime_env_os(user_o);
     }
-    if (need == 0) {
+    if (need_env == 0) {
       return;
     }
     if (rel_ok == 0) {
@@ -3710,7 +3718,12 @@ export function xlang_asm_ld_append_std_objs_for_user(link_argv0: *u8, user_o: *
         labi_std_append_primary_for_op(op, link_argv0, user_o, rel, lib_roots, n_lib_roots, bank, argv, la, max_la);
       }
       if (op == 6) {
+        // PLATFORM: SHARED — leftover asm: primary op6 push path smashes this frame's
+        // `bank` slot (next OP_STD env.o then bank_push SEGV on Darwin). Park+restore.
+        // Ubuntu also needs op6 gate to actually push runtime_env_os.o (see need_env below).
+        let bank_save: *u8 = bank;
         labi_std_append_primary_for_op(op, link_argv0, user_o, rel, lib_roots, n_lib_roots, bank, argv, la, max_la);
+        bank = bank_save;
       }
       // OP_STD=1 → wave195 pure leaf.
       if (op == 1) {
