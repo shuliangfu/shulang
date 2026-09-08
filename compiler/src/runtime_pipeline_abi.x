@@ -34491,11 +34491,46 @@ export function pipeline_asm_index_elem_byte_sz_c(arena: *u8, expr_ref: i32): i3
     // sizeof(u8)=1 instead of pointer width 8 (argv[i] pure-asm scale1+ldrb
     // SEGV). PLATFORM: SHARED freestanding · pure-asm INDEX stride authority.
     if (tr > 0 && tr_kind == 9) {
+      // PLATFORM: SHARED — `.data` of a TYPE_SLICE base resolves to a bare
+      // PTR (no pointee) for the deref decision; recover the stride from the
+      // slice's element type so []u8 indexes with scale 1 (parse-only dep
+      // previously defaulted to 4 → OOB read, run-slice FAIL). Checked BEFORE
+      // the generic peel (a bare PTR defaults to 4 there).
+      if (base_kind == 44) {
+        let d_vb2: i32 = pipeline_expr_field_access_base_ref(arena, base_ref);
+        if (d_vb2 > 0 && pipeline_expr_kind_ord_at(arena, d_vb2) == 3) {
+          let d_sty2: i32 = glue_var_expr_type_ref_with_decl_fallback_c(arena, d_vb2);
+          if (d_sty2 > 0 && pipeline_type_kind_ord_at(arena, d_sty2) == 11) {
+            let d_elem2: i32 = pipeline_type_elem_ref_at(arena, d_sty2);
+            if (d_elem2 > 0) {
+              let d_esz2: i32 = glue_index_elem_byte_sz_from_type_ref_c(arena, d_elem2);
+              if (d_esz2 > 0 && d_esz2 < 8) {
+                return d_esz2;
+              }
+            }
+          }
+        }
+      }
       unsafe {
         esz_base = glue_index_elem_byte_sz_from_type_ref_c(arena, tr);
       }
       if (esz_base > 0 && esz_base < 8) {
         return esz_base;
+      }
+      if (esz_base <= 0 && base_kind == 44) {
+        let d_vb: i32 = pipeline_expr_field_access_base_ref(arena, base_ref);
+        if (d_vb > 0 && pipeline_expr_kind_ord_at(arena, d_vb) == 3) {
+          let d_sty: i32 = glue_var_expr_type_ref_with_decl_fallback_c(arena, d_vb);
+          if (d_sty > 0 && pipeline_type_kind_ord_at(arena, d_sty) == 11) {
+            let d_elem: i32 = pipeline_type_elem_ref_at(arena, d_sty);
+            if (d_elem > 0) {
+              let d_esz: i32 = glue_index_elem_byte_sz_from_type_ref_c(arena, d_elem);
+              if (d_esz > 0 && d_esz < 8) {
+                return d_esz;
+              }
+            }
+          }
+        }
       }
       // esz_base == 8 (pointer / i64 element): fall through so INDEX result
       // TYPE_PTR arm returns 8; do not early-return here.
@@ -73166,6 +73201,29 @@ export function glue_field_access_field_type_ref_c(arena: *u8, mod: *u8, fa_ref:
         } else {
           kord = 0;
         }
+      }
+      // TYPE_SLICE = 11 — builtin fat fields (no layout table):
+      // `.data` behaves as a pointer field (kind 9) so INDEX base helpers
+      // like glue_index_deref_ptr_field_slot_rax emit the fat deref;
+      // `.length` is usize (kind 6). Parse-only deps previously missed
+      // both (resolver returned 0 → slice param `.data` indexed through
+      // the slot raw → OOB read, run-slice FAIL).
+      if (kord == 11) {
+        if (flen == 4
+            && field_name[0] == 100 && field_name[1] == 97
+            && field_name[2] == 116 && field_name[3] == 97) {
+          unsafe {
+            return pipeline_type_ensure_by_kind_ord(arena, 9);
+          }
+        }
+        if (flen == 6
+            && field_name[0] == 108 && field_name[1] == 101 && field_name[2] == 110
+            && field_name[3] == 103 && field_name[4] == 116 && field_name[5] == 104) {
+          unsafe {
+            return pipeline_type_ensure_by_kind_ord(arena, 6);
+          }
+        }
+        return 0;
       }
       // TYPE_NAMED = 8
       if (kord == 8) {
