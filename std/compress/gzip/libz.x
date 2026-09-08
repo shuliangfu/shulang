@@ -146,7 +146,12 @@ export function compress_gzip_compress_c(in: *u8, in_len: i32, out: *u8, out_cap
   let strm: ZStream;
   gzip_zstream_clear_alloc(&strm);
   let init_ret: i32 = 0;
-  unsafe { init_ret = deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, GZIP_WBITS, 8, Z_DEFAULT_STRATEGY); }
+  // Level -1 is Z_DEFAULT_COMPRESSION. Use 0-1 (not the named const):
+  // x86_64 product emit of export const -1 as a call arg leaves an unread
+  // stack slot (Ubuntu Init2 then Z_STREAM_ERROR). compress2 already passes
+  // a -1 literal; match that. Named const stays for the public API.
+  // PLATFORM: SHARED — Darwin AAPCS64 folds the named const; Linux x86_64 does not.
+  unsafe { init_ret = deflateInit2(&strm, 0 - 1, Z_DEFLATED, GZIP_WBITS, 8, Z_DEFAULT_STRATEGY); }
   if (init_ret != Z_OK) {
     return -1;
   }
@@ -214,7 +219,9 @@ export function compress_gzip_stream_init_compress_c(state: *u8, state_cap: i32)
   s.hdr.mode = 0;
   gzip_zstream_clear_alloc(&s.strm);
   let init_ret: i32 = 0;
-  unsafe { init_ret = deflateInit2(&s.strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, GZIP_WBITS, 8, Z_DEFAULT_STRATEGY); }
+  // Same 0-1 as compress_gzip_compress_c (x86_64 named-const -1 call-arg).
+  // PLATFORM: SHARED
+  unsafe { init_ret = deflateInit2(&s.strm, 0 - 1, Z_DEFLATED, GZIP_WBITS, 8, Z_DEFAULT_STRATEGY); }
   if (init_ret != Z_OK) {
     return -1;
   }
