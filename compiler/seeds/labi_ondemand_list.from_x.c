@@ -1712,9 +1712,13 @@ int link_abi_user_o_needs_std_queue(const char *user_o) {
   return 0;
 }
 
-/* wave122: product test UNDEF/prefix table + needs_std_test pure orch.
- * PLATFORM: SHARED — prefixes (test_runner_ etc.) use Cap residual strstr in undef_sym. */
-int labi_od_test_sym_count(void) { return 7; }
+/* wave122: product test UNDEF table + needs_std_test pure orch.
+ * PLATFORM: SHARED — matcher is exact xlang_undef_cache_has (rest==len).
+ * Prefixes (test_expect_ etc.) never fire. Product asm -o co-emits std_test_*
+ * wrappers as T, so inner test_*_c are the live UNDEF needles (≡ json/channel/heap
+ * leftover exact-needle class). Count 28 = 7 historical prefix/bare + 5 std_test_*
+ * faces + 16 mod.x inner *_c. G.7 complete existing table (no second list). */
+int labi_od_test_sym_count(void) { return 28; }
 const char *labi_od_test_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -1732,6 +1736,48 @@ const char *labi_od_test_sym_at(int i) {
     return "test_io_";
   if (i == 6)
     return "test_fuzz_";
+  if (i == 7)
+    return "std_test_expect";
+  if (i == 8)
+    return "std_test_expect_eq_i32";
+  if (i == 9)
+    return "std_test_expect_ne_i32";
+  if (i == 10)
+    return "std_test_assert";
+  if (i == 11)
+    return "std_test_runner_case";
+  if (i == 12)
+    return "test_expect_c";
+  if (i == 13)
+    return "test_expect_eq_i32_c";
+  if (i == 14)
+    return "test_expect_eq_u32_c";
+  if (i == 15)
+    return "test_expect_ne_i32_c";
+  if (i == 16)
+    return "test_run_c";
+  if (i == 17)
+    return "test_bench_run_c";
+  if (i == 18)
+    return "test_bench_report_c";
+  if (i == 19)
+    return "test_fuzz_seed_c";
+  if (i == 20)
+    return "test_fuzz_next_c";
+  if (i == 21)
+    return "test_fuzz_run_c";
+  if (i == 22)
+    return "test_bench_run_noop_c";
+  if (i == 23)
+    return "test_fuzz_run_noop_c";
+  if (i == 24)
+    return "test_runner_reset_c";
+  if (i == 25)
+    return "test_runner_report_case_c";
+  if (i == 26)
+    return "test_runner_report_skip_c";
+  if (i == 27)
+    return "test_runner_finish_c";
   return NULL;
 }
 

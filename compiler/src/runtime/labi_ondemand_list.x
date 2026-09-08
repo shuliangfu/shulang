@@ -3381,27 +3381,27 @@ export function link_abi_user_o_needs_std_queue(user_o: *u8): i32 {
 
 /**
  * Count of std.test on_demand UNDEF probes (product test.o gate).
- * Prefix-style entries (test_runner_ etc.) rely on Cap residual strstr
- * fallback inside xlang_link_obj_needs_undef_sym (exact + substring).
- * @return i32 — 7
- * PLATFORM: SHARED — must match formal test.o / runner export prefixes
+ * Matcher is exact `xlang_undef_cache_has` (rest==len). Prefix rows never fire.
+ * @return i32 — 28
+ * PLATFORM: SHARED — leftover L8b is the live table; keep seed/.x/.surface twins
  */
 #[no_mangle]
 export function labi_od_test_sym_count(): i32 {
-  // PLATFORM: SHARED — 7 bare/prefix + 5 pure-asm std_test_* exact faces.
-  return 12;
+  // PLATFORM: SHARED — 7 historical prefix/bare + 5 std_test_* + 16 mod.x inner *_c.
+  return 28;
 }
 
 /**
- * Product test on_demand UNDEF symbol or prefix at index (needs_std_test probe table).
+ * Product test on_demand UNDEF symbol at index (needs_std_test probe table).
  * @param i i32 — index in [0, labi_od_test_sym_count())
- * @return *u8 — static C string symbol/prefix, or null if out of range
+ * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete needs_std_test authority (no second hard-coded list)
  *
- * Pure-asm import METHOD mangle emits std_test_* (not bare test_*). Historical
- * table only had bare prefixes; exact-match UNDEF scan never hit std_test_expect
- * → need_test=0 → never push formal test.o (run-stdtest residual).
- * Complete: keep bare prefixes for C-path co-emit + add exact std_test_* faces.
+ * Product asm -o co-emits imported mod.x wrappers as T (`std_test_expect` etc.),
+ * so exact needles on those public faces never open the gate. Live UNDEF is the
+ * inner `test_*_c` face (mod.x extern → test.x T in formal test.o). Complete the
+ * existing table: keep historical prefixes + std_test_* faces, add every mod.x
+ * inner `*_c` so leftover exact-match fires and leftover PUSH pushes test.o.
  */
 #[no_mangle]
 export function labi_od_test_sym_at(i: i32): *u8 {
@@ -3436,7 +3436,7 @@ export function labi_od_test_sym_at(i: i32): *u8 {
     let p: *u8 = "test_fuzz_";
     return p;
   }
-  // PLATFORM: SHARED — pure-asm product faces (exact match; Darwin nm -u).
+  // PLATFORM: SHARED — public std_test_* faces (T under product -o co-emit).
   if (i == 7) {
     let p: *u8 = "std_test_expect";
     return p;
@@ -3457,18 +3457,85 @@ export function labi_od_test_sym_at(i: i32): *u8 {
     let p: *u8 = "std_test_runner_case";
     return p;
   }
+  // PLATFORM: SHARED — mod.x inner *_c (live UNDEF after wrapper co-emit as T).
+  if (i == 12) {
+    let p: *u8 = "test_expect_c";
+    return p;
+  }
+  if (i == 13) {
+    let p: *u8 = "test_expect_eq_i32_c";
+    return p;
+  }
+  if (i == 14) {
+    let p: *u8 = "test_expect_eq_u32_c";
+    return p;
+  }
+  if (i == 15) {
+    let p: *u8 = "test_expect_ne_i32_c";
+    return p;
+  }
+  if (i == 16) {
+    let p: *u8 = "test_run_c";
+    return p;
+  }
+  if (i == 17) {
+    let p: *u8 = "test_bench_run_c";
+    return p;
+  }
+  if (i == 18) {
+    let p: *u8 = "test_bench_report_c";
+    return p;
+  }
+  if (i == 19) {
+    let p: *u8 = "test_fuzz_seed_c";
+    return p;
+  }
+  if (i == 20) {
+    let p: *u8 = "test_fuzz_next_c";
+    return p;
+  }
+  if (i == 21) {
+    let p: *u8 = "test_fuzz_run_c";
+    return p;
+  }
+  if (i == 22) {
+    let p: *u8 = "test_bench_run_noop_c";
+    return p;
+  }
+  if (i == 23) {
+    let p: *u8 = "test_fuzz_run_noop_c";
+    return p;
+  }
+  if (i == 24) {
+    let p: *u8 = "test_runner_reset_c";
+    return p;
+  }
+  if (i == 25) {
+    let p: *u8 = "test_runner_report_case_c";
+    return p;
+  }
+  if (i == 26) {
+    let p: *u8 = "test_runner_report_skip_c";
+    return p;
+  }
+  if (i == 27) {
+    let p: *u8 = "test_runner_finish_c";
+    return p;
+  }
   return 0 as *u8;
 }
 
 /**
  * Whether user .o references std.test API (on-demand chain test.o).
- * Pure orch: fixed test UNDEF/prefix table; Cap residual xlang_link_obj_needs_undef_sym.
+ * Pure orch: fixed test UNDEF table; Cap residual xlang_link_obj_needs_undef_sym
+ * (exact cache; prefixes in the table never fire).
  * Avoids unconditional test.o on hello-class minimal links (ld duplicate risk).
  * @param user_o *u8 — path to user .o; null/empty → 0
  * @return i32 — 1 if any UNDEF hits, else 0
  * Why (wave122): hybrid still had needs_std_test body always mega C with hard-coded strings.
- * Keep single product table+orch in L8b; prefixes intentionally retained (strstr Cap).
- * PLATFORM: SHARED — hybrid L8b pure; mega cold twin under #ifndef ONDEMAND_LIST_FROM_X.
+ * Keep single product table+orch in L8b. Live needles = inner test_*_c (product -o
+ * co-emits std_test_* wrappers as T).
+ * PLATFORM: SHARED — hybrid L8b leftover is live; mega cold twin under #ifndef ONDEMAND_LIST_FROM_X.
  */
 #[no_mangle]
 export function link_abi_user_o_needs_std_test(user_o: *u8): i32 {

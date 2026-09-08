@@ -1208,7 +1208,7 @@ int32_t link_abi_user_o_needs_std_queue(uint8_t * user_o) {
   return 0;
 }
 int32_t labi_od_test_sym_count(void) {
-  return 12;
+  return 28;
 }
 uint8_t * labi_od_test_sym_at(int32_t i) {
   if ((i < 0)) {
@@ -1247,6 +1247,22 @@ uint8_t * labi_od_test_sym_at(int32_t i) {
   if ((i ==9)) { uint8_t * p = ((uint8_t *)"std_test_expect_ne_i32"); return p; }
   if ((i ==10)) { uint8_t * p = ((uint8_t *)"std_test_assert"); return p; }
   if ((i ==11)) { uint8_t * p = ((uint8_t *)"std_test_runner_case"); return p; }
+  if ((i ==12)) { uint8_t * p = ((uint8_t *)"test_expect_c"); return p; }
+  if ((i ==13)) { uint8_t * p = ((uint8_t *)"test_expect_eq_i32_c"); return p; }
+  if ((i ==14)) { uint8_t * p = ((uint8_t *)"test_expect_eq_u32_c"); return p; }
+  if ((i ==15)) { uint8_t * p = ((uint8_t *)"test_expect_ne_i32_c"); return p; }
+  if ((i ==16)) { uint8_t * p = ((uint8_t *)"test_run_c"); return p; }
+  if ((i ==17)) { uint8_t * p = ((uint8_t *)"test_bench_run_c"); return p; }
+  if ((i ==18)) { uint8_t * p = ((uint8_t *)"test_bench_report_c"); return p; }
+  if ((i ==19)) { uint8_t * p = ((uint8_t *)"test_fuzz_seed_c"); return p; }
+  if ((i ==20)) { uint8_t * p = ((uint8_t *)"test_fuzz_next_c"); return p; }
+  if ((i ==21)) { uint8_t * p = ((uint8_t *)"test_fuzz_run_c"); return p; }
+  if ((i ==22)) { uint8_t * p = ((uint8_t *)"test_bench_run_noop_c"); return p; }
+  if ((i ==23)) { uint8_t * p = ((uint8_t *)"test_fuzz_run_noop_c"); return p; }
+  if ((i ==24)) { uint8_t * p = ((uint8_t *)"test_runner_reset_c"); return p; }
+  if ((i ==25)) { uint8_t * p = ((uint8_t *)"test_runner_report_case_c"); return p; }
+  if ((i ==26)) { uint8_t * p = ((uint8_t *)"test_runner_report_skip_c"); return p; }
+  if ((i ==27)) { uint8_t * p = ((uint8_t *)"test_runner_finish_c"); return p; }
   return ((uint8_t *)(0));
 }
 int32_t link_abi_user_o_needs_std_test(uint8_t * user_o) {
