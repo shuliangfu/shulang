@@ -1283,6 +1283,37 @@ XLANG_WEAK size_t std_io_backend_handle_from_fd(int32_t fd, int32_t unused) {
   return (size_t)fd;
 }
 
+/*
+ * PLATFORM: SHARED — leftover unique asm -o skips co-emit of std.io
+ * (pipeline_codegen_dep_skip_asm_user_std_io) so std.net.read_fixed /
+ * write_fixed leave U std_io_read_fixed_fd / std_io_write_fixed_fd.
+ * Ubuntu ld has no -dead_strip: unused co-emitted net wrappers still UNDEF
+ * (mac run-net was false-green). Always-on IO_STUBS is the existing weak
+ * vehicle; do not host on io.o (ctx/error U-imports).
+ * Authority body ≡ std/io/mod.x read_fixed_fd / write_fixed_fd:
+ *   return xlang_io_read_fixed/write_fixed(from_fd(fd), ...).
+ * from_fd ≡ fd as usize (std/io/mod.x). xlang_io_*_fixed already weak in
+ * this TU (return -1 unless a strong io.o / co-emit wins).
+ * Also provide _impl: C-path preamble externs std_io_*_fixed_fd_impl.
+ * G.7 complete this stubs family — no second .o, no g==19 needle.
+ */
+XLANG_WEAK int32_t std_io_read_fixed_fd(int32_t fd, uint32_t buf_index, size_t offset,
+                                        size_t len, uint32_t timeout_ms) {
+  return xlang_io_read_fixed((size_t)fd, buf_index, offset, len, timeout_ms);
+}
+XLANG_WEAK int32_t std_io_write_fixed_fd(int32_t fd, uint32_t buf_index, size_t offset,
+                                         size_t len, uint32_t timeout_ms) {
+  return xlang_io_write_fixed((size_t)fd, buf_index, offset, len, timeout_ms);
+}
+XLANG_WEAK int32_t std_io_read_fixed_fd_impl(int32_t fd, uint32_t buf_index, size_t offset,
+                                             size_t len, uint32_t timeout_ms) {
+  return std_io_read_fixed_fd(fd, buf_index, offset, len, timeout_ms);
+}
+XLANG_WEAK int32_t std_io_write_fixed_fd_impl(int32_t fd, uint32_t buf_index, size_t offset,
+                                              size_t len, uint32_t timeout_ms) {
+  return std_io_write_fixed_fd(fd, buf_index, offset, len, timeout_ms);
+}
+
 /* page_mmap / freestanding heap 引用 xlang_sys_mmap；std/sys 未绿时 weak 回退到 libc mmap */
 #if defined(__unix__) || defined(__APPLE__)
 #ifndef _WIN32
