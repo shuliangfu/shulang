@@ -76039,9 +76039,9 @@ export function pipeline_asm_push_sysv_memory_by_value_elf_c(
           return 0 - 1;
         }
       } else {
-        if (ko == 44 || ko == 47) {
+        if (ko == 44 || ko == 47 || ko == 52) {
           /*
-           * 4) FIELD_ACCESS / INDEX: copy aggregate from lvalue address into temp.
+           * 4) FIELD_ACCESS / INDEX / DEREF: copy aggregate from lvalue address into temp.
            * INDEX lvalue_eff_addr is scaled lea (same pointer emit_index leaves
            * for esz>16). G.7: one copy loop — do not add a second INDEX matcher.
            * PLATFORM: SHARED freestanding · LINUX+MACOS x86_64 SysV.
@@ -76110,7 +76110,7 @@ export function pipeline_asm_push_sysv_memory_by_value_elf_c(
 /**
  * Store a MEMORY-class (>16B) by-value aggregate to SP+offset for AAPCS64.
  * Materializes arg from VAR / nested CALL sret (x8) / STRUCT_LIT / FIELD_ACCESS /
- * INDEX into a low-end frame temp, then copies qwords to SP+sp_off. Nested
+ * INDEX / DEREF into a low-end frame temp, then copies qwords to SP+sp_off. Nested
  * CALL saves/restores incoming x8 (outer sret dest) around the inner lea so
  * id32(id32(x)) still writes the outer slot. INDEX shares the FIELD
  * lvalue_eff_addr copy loop.
@@ -76234,7 +76234,7 @@ export function pipeline_asm_store_memory_by_value_to_sp_elf_c(
           return 0 - 1;
         }
       } else {
-        if (ko == 44 || ko == 47) {
+        if (ko == 44 || ko == 47 || ko == 52) {
           /*
            * 4) FIELD_ACCESS / INDEX: copy aggregate from lvalue address into temp.
            * INDEX lvalue_eff_addr is scaled lea. G.7: same loop as x86 push.
