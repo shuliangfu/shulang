@@ -98,7 +98,7 @@ export function log_get_min_level_c(): i32 {
 /** Emit bytes with null/len validation (convenience bridge). */
 #[no_mangle]
 export function log_emit_bytes_c(buf: *u8, len: i32): i32 {
-  if buf == null or len <= 0 { return -1; }
+  if (buf == null or len <= 0) { return -1; }
   return log_emit_bytes(buf, len as usize);
 }
 

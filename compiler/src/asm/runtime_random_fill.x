@@ -73,10 +73,10 @@ export function random_get_alg(): *u8 {
  */
 #[no_mangle]
 export function random_fill_bytes_c(buf: *u8, len: i32): i32 {
-  if buf == 0 || len < 0 {
+  if (buf == 0 || len < 0) {
     return -1;
   }
-  if len == 0 {
+  if (len == 0) {
     return 0;
   }
   unsafe {

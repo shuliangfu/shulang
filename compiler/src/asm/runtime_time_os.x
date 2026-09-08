@@ -98,7 +98,7 @@ export function time_now_wall_ns_c(): i64 {
  */
 #[no_mangle]
 export function time_sleep_ns_c(ns: i64): void {
-  if ns <= 0 {
+  if (ns <= 0) {
     return;
   }
   unsafe {
@@ -116,7 +116,7 @@ export function time_sleep_ns_c(ns: i64): void {
  */
 #[no_mangle]
 export function time_format_wall_rfc3339_c(buf: *u8, cap: i32): i32 {
-  if buf == 0 || cap <= 0 {
+  if (buf == 0 || cap <= 0) {
     return -1;
   }
   unsafe {

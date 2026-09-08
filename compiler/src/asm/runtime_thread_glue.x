@@ -245,7 +245,7 @@ export function thread_join_c(thread_id: i64): i32 {
  */
 #[no_mangle]
 export function thread_set_affinity_self_c(cpu_index: i32): i32 {
-  if cpu_index < 0 {
+  if (cpu_index < 0) {
     return -1;
   }
   unsafe {
@@ -262,7 +262,7 @@ export function thread_set_affinity_self_c(cpu_index: i32): i32 {
  */
 #[no_mangle]
 export function thread_set_affinity_c(thread_id: i64, cpu_index: i32): i32 {
-  if thread_id == 0 || cpu_index < 0 {
+  if (thread_id == 0 || cpu_index < 0) {
     return -1;
   }
   unsafe {
@@ -278,7 +278,7 @@ export function thread_set_affinity_c(thread_id: i64, cpu_index: i32): i32 {
  */
 #[no_mangle]
 export function thread_set_qos_class_self_c(qos_class: i32): i32 {
-  if qos_class < 0 || qos_class > 4 {
+  if (qos_class < 0 || qos_class > 4) {
     return -1;
   }
   unsafe {
@@ -295,7 +295,7 @@ export function thread_set_qos_class_self_c(qos_class: i32): i32 {
  */
 #[no_mangle]
 export function thread_set_name_self_c(name: *u8, len: i32): i32 {
-  if name == 0 || len < 0 {
+  if (name == 0 || len < 0) {
     return -1;
   }
   unsafe {
@@ -323,7 +323,7 @@ export function thread_dummy_entry_ptr_c(): u64 {
  */
 #[no_mangle]
 export function thread_pool_start_c(workers: i32): i32 {
-  if workers < 1 || workers > 8 {
+  if (workers < 1 || workers > 8) {
     return -1;
   }
   unsafe {
@@ -341,7 +341,7 @@ export function thread_pool_start_c(workers: i32): i32 {
  */
 #[no_mangle]
 export function thread_pool_submit_c(entry: u64, arg: u64): i32 {
-  if entry == 0 {
+  if (entry == 0) {
     return -1;
   }
   unsafe {
