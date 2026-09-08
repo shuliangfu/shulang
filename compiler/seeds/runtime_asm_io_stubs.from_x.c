@@ -1270,6 +1270,19 @@ XLANG_WEAK ptrdiff_t std_io_sync_io_write_fixed(int32_t fd, uint32_t buf_index, 
 }
 XLANG_WEAK int32_t std_io_backend_io_read_ptr_backend(void) { return g_io_read_ptr_backend; }
 
+/*
+ * PLATFORM: SHARED — leftover unique asm -o leaves U std_io_backend_handle_from_fd
+ * (skip_asm_dep_codegen does not co-emit backend.x). Always-on IO_STUBS plan
+ * (labi_std_plan_step_at i==0) is the existing weak vehicle for skipped io
+ * faces. Authority body ≡ std/io/backend.x handle_from_fd: return fd as usize.
+ * Do not host this on std/io/io.o: that c_face also U-imports std.context /
+ * std.error and Ubuntu ld has no dead_strip. G.7 complete this stubs family.
+ */
+XLANG_WEAK size_t std_io_backend_handle_from_fd(int32_t fd, int32_t unused) {
+  (void)unused;
+  return (size_t)fd;
+}
+
 /* page_mmap / freestanding heap 引用 xlang_sys_mmap；std/sys 未绿时 weak 回退到 libc mmap */
 #if defined(__unix__) || defined(__APPLE__)
 #ifndef _WIN32
