@@ -6177,6 +6177,15 @@ ctx: *PipelineDepCtx): void {
         di = di + 1;
         continue;
       }
+      /* PLATFORM: SHARED — dep co-emit calls the merge for every module,
+       * including each dep itself (backend entry). Self-merge would
+       * reset_slot the dep's own layout then "copy" from the already-reset
+       * slot, wiping field type_refs and offsets to 0 (std.set abort 134 /
+       * std.string exit 3 three-face layout divergence). Skip self. */
+      if (dm == mod) {
+        di = di + 1;
+        continue;
+      }
       /* Sync dep offsets against the dep arena BEFORE copy. Skip-typeck
        * import leaves field_offset=0; caller-arena recompute then misses
        * remapped type_refs (gzip ZStream zalloc → next_in).
