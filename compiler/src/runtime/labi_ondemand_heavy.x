@@ -2338,9 +2338,10 @@ export function labi_std_fk_gate_sym_count(fk: i32): i32 {
   // PLATFORM: SHARED — cookbook sqlite_available unique UNDEF (is_available).
   // Was 3 needles std_db_sqlite / sqlite3_open / db_sqlite_open. Matcher exact
   // so prefix never fires for std_db_sqlite_is_available. G.7 complete: 29 unique
-  // import faces + keep legacy 3. Glue companion already OP 18 (have_sqlite).
+  // import faces + keep legacy 3 + db_open_c (user-TU wrapper UNDEF when
+  // mod.x is compiled into the probe; Linux gold). Glue companion OP 18.
   if (fk == 10) {
-    return 32;
+    return 33;
   }
   if (fk == 11) {
     return 2;
@@ -3051,6 +3052,13 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
       }
       if (i == 31) {
         let p: *u8 = "db_sqlite_open";
+        return p;
+      }
+      // Product -o that co-emits mod.x wrappers into the user TU UNDEFs
+      // bare db_*_c (not std_db_sqlite_*). Exact matcher; one hit opens fk10.
+      // PLATFORM: SHARED — Ubuntu gold first observed this UNDEF set.
+      if (i == 32) {
+        let p: *u8 = "db_open_c";
         return p;
       }
       return 0 as *u8;

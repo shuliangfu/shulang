@@ -3741,8 +3741,8 @@ int labi_std_fk_gate_sym_count(int fk) {
   if (fk == 9) return 60;
   /* PLATFORM: SHARED — cookbook sqlite_available unique UNDEF (is_available).
    * Was 3 needles; matcher exact so prefix std_db_sqlite never fires.
-   * Twin of labi_ondemand_heavy.x. 29 unique import faces + legacy 3. */
-  if (fk == 10) return 32;
+   * Twin of labi_ondemand_heavy.x. 29 unique import faces + legacy 3 + db_open_c. */
+  if (fk == 10) return 33;
   if (fk == 11) return 2;
   if (fk == 12) return 4;
   if (fk == 13) return 4;
@@ -3976,6 +3976,8 @@ const char *labi_std_fk_gate_sym_at(int fk, int i) {
     if (i == 29) return "std_db_sqlite";
     if (i == 30) return "sqlite3_open";
     if (i == 31) return "db_sqlite_open";
+    /* Product -o co-emitting mod.x wrappers UNDEFs bare db_*_c. Exact matcher. */
+    if (i == 32) return "db_open_c";
     return NULL;
   }
   if (fk == 11) {
