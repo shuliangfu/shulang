@@ -27,7 +27,7 @@
 | Mega 去 pin M4（阶段 7） | 🟡 | 冷链关 pin 5/5；**7.4.6–7.4.9** pin 孪生已落盘；双端 L4＠`b5be5ed97` bstrict **129**；parser seed 物理删／CI 漂移闸 ⬜ |
 | Pinned gen 退役（阶段 8） | ✅ | 30/30 FULLY CLOSED |
 | 非 gen 产品 C／8.3（glue／ast／BC） | 🟡 | 结构 leave 多 ✅；`pipeline_x` 整 TU 仍 host-cc；from_x 全表策略 ⬜ |
-| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／**9.2.1／9.3 全系列**／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`；9.2.1 ＠`2a9f3dcae`；9.3.3 ＠`c5b2178a0`；9.3.1/2/4/5 勘正桥已立）；余 9.2.4–6 勘正大域＋9.2.2 并 9.3.2，逐条立波 |
+| Cap residual 消灭（阶段 9） | 🟡 | 9.1 全系列／9.4.2–3／9.4.4–6／9.5.1–5／**9.2.1／9.2.4–6／9.3 全系列**／9.6.0–9.6.3／**9.7 全系列** ✅（9.7.1–7 ＠`75e074199`→`a7749a54d`；9.4.2 ＠`fb4019d32`；9.4.3 ＠`7c70d81c3`；9.5.4 ＠`af4c479c1`；9.5.5 ＠`47b3fd349`；9.2.1 ＠`2a9f3dcae`；9.2.6 ＠`d0085c04d`；9.3.3 ＠`c5b2178a0`；9.3.1/2/4/5 勘正桥已立）；余 **9.2.2** 并 9.3.2，逐条立波 |
 | 语言能力 L2（阶段 10） | 🟡 | **10.1.1–2** ✅ · **10.1.4** slice1–2 ✅（Ubuntu＋Darwin） · **10.3.*** ✅（Ubuntu＋Darwin 42） · **10.4.1–2** ✅＠`a2277e5e3` · **10.2.1 ✅**＋**10.2.2 slice0–3**＋**10.2.3 slice0–1**（r11／pause／int3 COFF）· 残：qemu／10.1.3 NT |
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
@@ -272,7 +272,7 @@
 - ✅ **9.2.3** ed25519 ref10（.inc 宏）— 勘正：即 9.3.1 域（宏重命名桥已落地），并条见 9.3.1 ✅
 - 🟡 **9.2.4** libm `math_*_impl`（32 桥）— 勘正：fdlibm 级算法移植（大域，独立立波）。**已收（双端 L2＠`7c1b71306`，不升钉）**：探针链 Fix A–F＋arm64 f64 AAPCS64；**exact-7**；**exp/log**（`698221e66`）；**sqrt/cbrt**（`865256289`）；**expm1/log1p**（`151a5dab3`）；**三角 sin/cos/tan**（`108a51b39`）；**pow**（`1314c61f4`）；**asin／acos／atan**（`a9bfb3f53`）；**atan2**（`ea468f05e`）；**erf／erfc**（`runtime_math_libm.x` `math_erf_c`／`math_erfc_c`）。验收＝wave924 九探针双端 rc=0＋g5 hang-fix 双端 rc=0＋双端 L2 5/5。Ubuntu 真冷随 Wave A 收口。运维＝stale product `.o` 陷阱立卡＋L4 序列 xbuild 化＋Darwin phase1 io 桩（`f635c82dd`）
 - 🟡 **9.2.5** arrow SIMD kernels — **勘正：即 9.3.5 域（standing C 桥）**：四 kernel `_impl` 需 C target attributes；thin `.x` wrapper；列胶仍 rest。**产品探针双端 L2＠`b5cf55fd0`**：mac／Ubuntu `arrow_kernel_rc` rc=0（前 Ubuntu `free(): invalid pointer`＝SysV 8B INTEGER ABI，已根修，非 SIMD `_impl`）。kernels 仍 standing C 桥。
-- ⬜ **9.2.6** sqlite3 C API — 勘正：extern 系统库绑定＋独立大域
+- 🟡 **9.2.6** sqlite3 C API — **勘正：extern 系统库绑定（standing C rest）**。不迁 sqlite3；`runtime_sqlite_glue` rest 因 `sqlite3.h`／`SQLITE_TRANSIENT`（同 9.3.2 zlib 宏类）。**产品探针双端 L2＠`d0085c04d`**：`tests/probes/wave926/sqlite3_rc.x` mac／Ubuntu rc=0（open／exec／query／bind／close）。根修三件：①库 TU `g_db_last_err=&bytes[0]` BSS 0 → `db_err_slot` 运行时 ADDR_OF（G.7＝`db_stmt_cache_slot`；asm bake 无 reloc）；②fk10 exact 表补 `db_open_c`（Linux 用户 TU 嵌 mod.x wrapper）；③LINUX ld `-l:libsqlite3.so.0`（金标有 runtime 无 -dev）。thin `.x` 仅 TU 锚。
 
 ### 9.3 宏展开（P2）
 
