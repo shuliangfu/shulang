@@ -3819,7 +3819,7 @@ int labi_std_fk_gate_sym_count(int fk) {
   if (fk == 10) return 33;
   if (fk == 11) return 2;
   if (fk == 12) return 4;
-  if (fk == 13) return 4;
+  if (fk == 13) return 5;
   return 0;
 }
 
@@ -4071,6 +4071,8 @@ const char *labi_std_fk_gate_sym_at(int fk, int i) {
     if (i == 1) return "std_http_request";
     if (i == 2) return "std_http_client_new";
     if (i == 3) return "std_http_request_timeout_ms_for_ctx";
+    /* PLATFORM: SHARED — plan fk==13 live http gate; asm co-emit T std_http_get. */
+    if (i == 4) return "http_get_c";
     return NULL;
   }
   return NULL;

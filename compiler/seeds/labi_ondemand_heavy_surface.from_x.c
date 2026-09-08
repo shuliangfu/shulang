@@ -1301,7 +1301,7 @@ int32_t labi_std_fk_gate_sym_count(int32_t fk) {
     return 4;
   }
   if ((fk ==13)) {
-    return 4;
+    return 5;
   }
   return 0;
 }
@@ -1772,6 +1772,10 @@ uint8_t * labi_std_fk_gate_sym_at(int32_t fk, int32_t i) {
     }
     if ((i ==3)) {
       uint8_t * p = ((uint8_t *)"\x73\x74\x64\x5f\x68\x74\x74\x70\x5f\x72\x65\x71\x75\x65\x73\x74\x5f\x74\x69\x6d\x65\x6f\x75\x74\x5f\x6d\x73\x5f\x66\x6f\x72\x5f\x63\x74\x78");
+      return p;
+    }
+    if ((i ==4)) {
+      uint8_t * p = ((uint8_t *)"http_get_c");
       return p;
     }
     return ((uint8_t *)(0));

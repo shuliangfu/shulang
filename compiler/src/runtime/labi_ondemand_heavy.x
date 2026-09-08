@@ -2403,7 +2403,7 @@ export function labi_std_fk_gate_sym_count(fk: i32): i32 {
     return 4;
   }
   if (fk == 13) {
-    return 4;
+    return 5;
   }
   return 0;
 }
@@ -3161,6 +3161,12 @@ export function labi_std_fk_gate_sym_at(fk: i32, i: i32): *u8 {
       }
       if (i == 3) {
         let p: *u8 = "std_http_request_timeout_ms_for_ctx";
+        return p;
+      }
+      // PLATFORM: SHARED — plan fk==13 is the live http gate (not fk0 k==3).
+      // Asm co-emit T std_http_get; sole UNDEF http_get_c (run-http Ubuntu).
+      if (i == 4) {
+        let p: *u8 = "http_get_c";
         return p;
       }
       return 0 as *u8;
