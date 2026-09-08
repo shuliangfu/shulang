@@ -2103,7 +2103,7 @@ int link_abi_user_o_needs_std_sys(const char *user_o) {
 
 /* wave128: product std.heap formal API exact UNDEF table + needs_std_heap_api pure orch.
  * PLATFORM: SHARED — exact symbols only (no prefix/strstr probes). */
-int labi_od_heap_api_sym_count(void) { return 30; }
+int labi_od_heap_api_sym_count(void) { return 32; }
 const char *labi_od_heap_api_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2182,6 +2182,18 @@ const char *labi_od_heap_api_sym_at(int i) {
     return "std_heap_arena64_init";
   if (i == 29)
     return "std_heap_arena64_deinit";
+  /*
+   * heap ops wrappers (mod.x mem_set / mem_compare). Matcher is exact: table
+   * had map_find / libc copy but never mem_set, so user.o U std_heap_mem_set
+   * never fired needs_std_heap_api → heap.o not pushed (run-heap / run-set).
+   * heap.o catalog already compiles mod.x+ops.x (T mem_set + heap_mem_set_c).
+   * G.7: complete this single heap probe table. Twin of labi_ondemand_list.x.
+   * PLATFORM: SHARED.
+   */
+  if (i == 30)
+    return "std_heap_mem_set";
+  if (i == 31)
+    return "std_heap_mem_compare";
   return NULL;
 }
 

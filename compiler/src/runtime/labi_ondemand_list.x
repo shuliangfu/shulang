@@ -4283,17 +4283,17 @@ export function link_abi_user_o_needs_std_sys(user_o: *u8): i32 {
 /**
  * Count of std.heap formal API on_demand UNDEF probes (product heap.o gate).
  * Exact symbol names only (no prefix/strstr probes).
- * @return i32 — 30
+ * @return i32 — 32
  * PLATFORM: SHARED — must match formal std/heap export surface (incl. Allocator/libc family)
  */
 #[no_mangle]
 export function labi_od_heap_api_sym_count(): i32 {
-  return 30;
+  return 32;
 }
 
 /**
  * Product std.heap on_demand UNDEF symbol at index (needs_std_heap_api probe table).
- * @param i i32 — index in [0, 30)
+ * @param i i32 — index in [0, 32)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete needs_std_heap_api authority (no second hard-coded list)
  */
@@ -4436,6 +4436,22 @@ export function labi_od_heap_api_sym_at(i: i32): *u8 {
   }
   if (i == 29) {
     let p: *u8 = "std_heap_arena64_deinit";
+    return p;
+  }
+  /*
+   * heap ops wrappers (mod.x mem_set / mem_compare). Matcher is exact: table
+   * had map_find / libc copy but never mem_set, so user.o U std_heap_mem_set
+   * never fired needs_std_heap_api → heap.o not pushed (run-heap / run-set).
+   * heap.o catalog already compiles mod.x+ops.x (T mem_set + heap_mem_set_c).
+   * G.7: complete this single heap probe table. Do not add a second group.
+   * PLATFORM: SHARED.
+   */
+  if (i == 30) {
+    let p: *u8 = "std_heap_mem_set";
+    return p;
+  }
+  if (i == 31) {
+    let p: *u8 = "std_heap_mem_compare";
     return p;
   }
   return 0 as *u8;
