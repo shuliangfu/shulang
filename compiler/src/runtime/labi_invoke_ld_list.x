@@ -454,12 +454,24 @@ export function labi_ld_flag_lm(): *u8 {
   return p;
 }
 
-/** Exported function `labi_ld_flag_lsqlite3`.
- * Implements `labi_ld_flag_lsqlite3`.
- * @return *u8
+/**
+ * ld flag that pulls libsqlite3.
+ * PLATFORM: LINUX — Ubuntu gold ships libsqlite3-0 (SONAME .so.0) without
+ * libsqlite3-dev, so raw `ld -lsqlite3` fails (`libsqlite3.so` missing).
+ * `-l:libsqlite3.so.0` is the exact filename in the default search dir.
+ * PLATFORM: MACOS|DARWIN / WINDOWS — `-lsqlite3` (SDK / MinGW name).
+ * @return *u8 — static flag string; never null
  */
 #[no_mangle]
 export function labi_ld_flag_lsqlite3(): *u8 {
+  let linux: i32 = 0;
+  unsafe {
+    linux = xlang_host_is_linux();
+  }
+  if (linux != 0) {
+    let p: *u8 = "-l:libsqlite3.so.0";
+    return p;
+  }
   let p: *u8 = "-lsqlite3";
   return p;
 }
@@ -858,8 +870,7 @@ export function labi_ld_common_tail_flag_at(i: i32): *u8 {
     return p;
   }
   if (i == 1) {
-    let p: *u8 = "-lsqlite3";
-    return p;
+    return labi_ld_flag_lsqlite3();
   }
   if (i == 2) {
     let p: *u8 = "-pthread";

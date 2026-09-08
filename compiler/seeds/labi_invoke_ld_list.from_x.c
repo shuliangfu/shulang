@@ -243,7 +243,15 @@ const char *labi_ld_compress_flag_at(int i) {
 }
 
 const char *labi_ld_flag_lm(void) { return "-lm"; }
-const char *labi_ld_flag_lsqlite3(void) { return "-lsqlite3"; }
+const char *labi_ld_flag_lsqlite3(void) {
+  /* PLATFORM: LINUX — SONAME; no libsqlite3-dev on Ubuntu gold.
+   * PLATFORM: MACOS|WINDOWS — -lsqlite3. Twin of labi_invoke_ld_list.x. */
+#if defined(__linux__)
+  return "-l:libsqlite3.so.0";
+#else
+  return "-lsqlite3";
+#endif
+}
 const char *labi_ld_flag_pthread(void) { return "-pthread"; }
 const char *labi_ld_flag_lpthread(void) { return "-lpthread"; }
 const char *labi_ld_flag_ldl(void) { return "-ldl"; }
@@ -307,7 +315,7 @@ const char *labi_ld_common_tail_flag_at(int i) {
   if (i == 0)
     return "-lm";
   if (i == 1)
-    return "-lsqlite3";
+    return labi_ld_flag_lsqlite3();
   if (i == 2)
     return "-pthread";
   if (i == 3)
