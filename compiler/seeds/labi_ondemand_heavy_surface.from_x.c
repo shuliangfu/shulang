@@ -2362,12 +2362,9 @@ void xlang_asm_ld_append_on_demand_user_objs(uint8_t * link_argv0, uint8_t * use
         int32_t _m = link_abi_asm_ld_push_obj(0, link_argv0, rm, lib_roots, n_lib_roots, bank, argv, la, max_la, 0);
       }
     }
-    int32_t prov_h = link_abi_user_o_provides_std_heap(user_o);
-    if ((prov_h ==0)) {
-      uint8_t * rh = labi_od_rel_heap();
-      {
-        int32_t _h = link_abi_asm_ld_push_obj(0, link_argv0, rh, lib_roots, n_lib_roots, bank, argv, la, max_la, 0);
-      }
+    uint8_t * rh = labi_od_rel_heap();
+    {
+      int32_t _h = link_abi_asm_ld_push_obj(0, link_argv0, rh, lib_roots, n_lib_roots, bank, argv, la, max_la, 0);
     }
   }
   int32_t need_set = link_abi_user_o_needs_std_set(user_o);

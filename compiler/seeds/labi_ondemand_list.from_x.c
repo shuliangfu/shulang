@@ -4409,13 +4409,20 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                                     "../core/mem/mem.o");
             }
         }
-        /* heap.o → core.mem：user 已 co-emit 提供 T 时勿链 mem/heap（duplicate）。 */
+        /* heap.o → core.mem: skip mem.o when user already T-defines core.mem. */
         if (!link_abi_user_o_provides_core_mem(user_o)) {
             link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_core_mem(), lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
         }
-        if (!link_abi_user_o_provides_std_heap(user_o)) {
-            link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_heap(), lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
-        }
+        /*
+         * Always push heap.o when needs_std_heap_api fired.
+         * Product asm -o co-emits libc/alloc wrappers as T (provides_std_heap
+         * hits std_heap_libc_heap_alloc_c) while still U std_heap_mem_set
+         * (core_mem_mem_zero call). Two-probe provides is too coarse and
+         * swallowed the mem_set needle. Product ld uses
+         * --allow-multiple-definition (first-wins user T).
+         * G.7: complete this single heap push. PLATFORM: SHARED.
+         */
+        link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_heap(), lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
     }
     /*
      * PLATFORM: SHARED — set/map product asm: formal .o + heap/core_mem/(hash for set).

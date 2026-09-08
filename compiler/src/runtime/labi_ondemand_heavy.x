@@ -4407,12 +4407,15 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
           let _m: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, rm, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
         }
       }
-      let prov_h: i32 = link_abi_user_o_provides_std_heap(user_o);
-      if (prov_h == 0) {
-        let rh: *u8 = labi_od_rel_heap();
-        unsafe {
-          let _h: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, rh, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
-        }
+      // Always push heap.o when needs_std_heap_api fired.
+      // Product asm -o co-emits libc/alloc wrappers as T (provides_std_heap
+      // hits std_heap_libc_heap_alloc_c) while still U std_heap_mem_set
+      // (core_mem_mem_zero call). Two-probe provides is too coarse.
+      // Product ld --allow-multiple-definition (first-wins user T).
+      // G.7: complete this single heap push. PLATFORM: SHARED.
+      let rh: *u8 = labi_od_rel_heap();
+      unsafe {
+        let _h: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, rh, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
       }
     }
 
