@@ -5,11 +5,12 @@
  *
  * libm：floor/ceil/trunc/round/sin/cos/tan/asin/acos/atan/atan2/
  *        sqrt/cbrt/pow/exp/log/fabs/signum/fmin/fmax/erf/erfc/log1p/expm1
+ *        — all math_*_c (exact-7 bit-level + fdlibm); no host <math.h>
  * fenv：mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke/capability_smoke
+ *        (standing C bridge, fenv.h)
  */
 #include <xlang_weak.h>
 #include <stdint.h>
-#include <math.h>
 #include <stdio.h>
 #include "diag.h"
 
@@ -46,21 +47,21 @@ double math_expm1_c(double x);
 int32_t math_fenv_available_c(void);
 #endif
 
-/* === libm _impl functions (called by thin .x wrappers) === */
-
-double math_floor_impl(double x) { return floor(x); }
-double math_ceil_impl(double x) { return ceil(x); }
-double math_trunc_impl(double x) { return trunc(x); }
-double math_round_impl(double x) { return round(x); }
+/* === libm _impl functions ===
+ * 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax): host-libm splices
+ * removed. Thin (.x) provides bit-level math_*_c on the product path;
+ * same-semantics C cold twins live in the guarded block below. rem_pio2
+ * twins call math_floor_c / math_fabs_c (G.7, same as .x). No <math.h>.
+ */
+/* math_floor_impl / math_ceil_impl / math_trunc_impl / math_round_impl /
+ * math_fabs_impl / math_fmin_impl / math_fmax_impl host-libm splices
+ * removed (9.2.4 exact-7). */
 /* math_sin_impl / math_cos_impl / math_tan_impl / math_asin_impl /
  * math_acos_impl / math_atan_impl / math_atan2_impl libm splices
  * removed (9.2.4). */
 /* 9.2.4 sqrt/cbrt/exp/log/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2/erf/erfc:
  * fdlibm .x ports on the product path; matching math_*_impl libm splices
  * removed (same-semantics C cold twins live in the guarded block). */
-double math_fabs_impl(double x) { return fabs(x); }
-double math_fmin_impl(double a, double b) { return fmin(a, b); }
-double math_fmax_impl(double a, double b) { return fmax(a, b); }
 
 /* === libm thin wrappers (only when NOT in R2 from_x mode) ===
  * 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax) removed from this
@@ -737,7 +738,7 @@ static double twin_scalbn(double x, int n) {
   }
 }
 
-static double twin_floor(double x) { return floor(x); }
+/* G.7: rem_pio2 uses math_floor_c (bit-level exact-7 twin), not host floor. */
 
 /* ---- two_over_pi 24-bit chunks (all fit in positive i32) ---- */
 static const int32_t two_over_pi[66] = {
@@ -833,7 +834,7 @@ static double kernel_tan(double x, double y, int iy) {
   int32_t ix = hx & 0x7fffffff;
   if (ix < 0x3e300000) {
     if ((int)x == 0) {
-      if (((ix | lo_of(x)) | (iy + 1)) == 0) return one / fabs(x);
+      if (((ix | lo_of(x)) | (iy + 1)) == 0) return one / math_fabs_c(x);
       else {
         if (iy == 1) return x;
         else {
@@ -921,7 +922,7 @@ recompute:
     z = q[j - 1] + fw;
   }
   z = twin_scalbn(z, q0);
-  z -= 8.0 * twin_floor(z * 0.125);
+  z -= 8.0 * math_floor_c(z * 0.125);
   n = (int)z;
   z -= (double)n;
   ih = 0;
@@ -1035,7 +1036,7 @@ static int rem_pio2(double x, double *y) {
     }
   }
   if (ix <= 0x413921fb) {
-    t = fabs(x);
+    t = math_fabs_c(x);
     n = (int)(t * invpio2 + half);
     fn = (double)n;
     r = t - fn * pio2_1;

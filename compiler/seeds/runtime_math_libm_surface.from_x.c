@@ -2,26 +2,24 @@
  * G-02f runtime_math_libm R2 mixed surface - isomorphic with src/asm/runtime_math_libm.x
  * Product PREFER_X_O: xlang-c -E(.x) -> thin.o + ld -r with rest (seeds/runtime_math_libm.from_x.c)
  * Prove: full.x vs this surface -> nm IDENTICAL (34 #[no_mangle])
- * Mode: mixed - 2 DIRECT compute + thin+rest forwards to _impl
- *   + 16 full implementations (9.2.4: math_exp_c / math_log_c / math_sqrt_c /
- *   math_cbrt_c / math_expm1_c / math_log1p_c / math_sin_c / math_cos_c /
- *   math_tan_c / math_pow_c / math_asin_c / math_acos_c / math_atan_c /
- *   math_atan2_c / math_erf_c / math_erfc_c fdlibm ports, isomorphic with
- *   the .x authority; matching math_*_impl bridges for those sixteen are
- *   gone).
- * Cap residual: remaining extern bridges (math_*_impl) for exact-7
- *   floor/ceil/trunc/round/fabs/fmin/fmax surface wrappers (product .x
- *   already full bit-level; surface lag is not this knife).
+ * Mode: mixed - 2 DIRECT compute + 7 exact-7 bit-level twins
+ *   (floor/ceil/trunc/round/fabs/fmin/fmax; isomorphic with .x; host-libm
+ *   math_*_impl splices removed 9.2.4) + 16 fdlibm ports (math_exp_c /
+ *   math_log_c / math_sqrt_c / math_cbrt_c / math_expm1_c / math_log1p_c /
+ *   math_sin_c / math_cos_c / math_tan_c / math_pow_c / math_asin_c /
+ *   math_acos_c / math_atan_c / math_atan2_c / math_erf_c / math_erfc_c;
+ *   isomorphic with the .x authority; matching math_*_impl bridges gone).
+ * rem_pio2 reuses math_floor_c / math_fabs_c (G.7). No <math.h>.
  * No doc_anchor (runtime_math_libm.x has none).
  * Note: math_ prefix not trigger ast_ (confirmed wave545+).
  * Logic: 34 functions = 2 DIRECT (math_signum_c + math_special_near)
- *   + thin+rest forwards to math_*_impl + 16 full impls
- *   (exp/log/sqrt/cbrt/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2/erf/erfc).
+ *   + 7 exact-7 bit-level + 16 fdlibm impls
+ *   (exp/log/sqrt/cbrt/expm1/log1p/sin/cos/tan/pow/asin/acos/atan/atan2/erf/erfc)
+ *   + fenv standing C bridges.
  * Regen: ./xlang-c -E ... runtime_math_libm.x | filter DBG + polish prologue
  */
 #include <stdint.h>
 #include <stddef.h>
-#include <math.h>
 extern double math_signum_c(double x);
 extern int32_t math_special_near(double a, double b, double eps);
 extern double math_floor_c(double x);
@@ -56,21 +54,17 @@ extern int32_t math_fenv_clear_c(int32_t mask);
 extern int32_t math_fenv_raise_c(int32_t mask);
 extern int32_t math_fenv_smoke_c(void);
 extern int32_t math_fenv_capability_smoke_c(void);
-extern double math_floor_impl(double x);
-extern double math_ceil_impl(double x);
-extern double math_trunc_impl(double x);
-extern double math_round_impl(double x);
-/* math_sin_impl / math_cos_impl / math_tan_impl / math_asin_impl /
+/* math_floor_impl / math_ceil_impl / math_trunc_impl / math_round_impl /
+ * math_fabs_impl / math_fmin_impl / math_fmax_impl host-libm splices
+ * removed (9.2.4 exact-7): bit-level math_*_c twins below.
+ * math_sin_impl / math_cos_impl / math_tan_impl / math_asin_impl /
  * math_acos_impl / math_atan_impl / math_atan2_impl bridges removed
- * (9.2.4). */
-/* math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl /
+ * (9.2.4).
+ * math_sqrt_impl / math_cbrt_impl / math_exp_impl / math_log_impl /
  * math_log1p_impl / math_expm1_impl / math_pow_impl / math_asin_impl /
  * math_acos_impl / math_atan_impl / math_atan2_impl / math_erf_impl /
  * math_erfc_impl bridges removed (9.2.4): those sixteen are full fdlibm
  * implementations on both ends. */
-extern double math_fabs_impl(double x);
-extern double math_fmin_impl(double a, double b);
-extern double math_fmax_impl(double a, double b);
 extern int32_t math_fenv_mask_to_fe_impl(int32_t mask);
 extern int32_t math_fenv_fe_to_mask_impl(int32_t fe);
 extern void math_fenv_emit_cap_report_impl(int32_t avail);
@@ -93,17 +87,66 @@ int32_t math_special_near(double a, double b, double eps) {
   }
   return 0;
 }
+/* 9.2.4 exact-7 bit-level twins — isomorphic with math_*_c in
+ * src/asm/runtime_math_libm.x and the guarded seed block.
+ * PLATFORM: SHARED — no host libm; rem_pio2 reuses these (G.7). */
 double math_floor_c(double x) {
-  return math_floor_impl(x);
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) {
+    if (v.u == 0 || v.u == sign_bit) return v.d;
+    if (v.u & sign_bit) return -1.0;
+    return 0.0;
+  }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  if ((v.u & frac_mask) == 0) return v.d;
+  v.u -= v.u & frac_mask;
+  if (x < 0.0) return v.d - 1.0;
+  return v.d;
 }
 double math_ceil_c(double x) {
-  return math_ceil_impl(x);
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) {
+    if (v.u == 0 || v.u == sign_bit) return v.d;
+    if (v.u & sign_bit) { v.u = sign_bit; return v.d; }
+    return 1.0;
+  }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  if ((v.u & frac_mask) == 0) return v.d;
+  v.u -= v.u & frac_mask;
+  if (x > 0.0) return v.d + 1.0;
+  return v.d;
 }
 double math_trunc_c(double x) {
-  return math_trunc_impl(x);
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  uint64_t sign_bit = one << 63;
+  int e = (int)((v.u >> 52) & 2047);
+  if (e == 2047) return v.d;
+  if (e < 1023) { v.u = v.u & sign_bit; return v.d; }
+  if (e >= 1075) return v.d;
+  int frac_bits = 1075 - e;
+  uint64_t frac_mask = (one << frac_bits) - 1;
+  v.u -= v.u & frac_mask;
+  return v.d;
 }
 double math_round_c(double x) {
-  return math_round_impl(x);
+  double t = math_trunc_c(x);
+  double frac = x - t;
+  if (frac >= 0.5) return t + 1.0;
+  if (frac <= -0.5) return t - 1.0;
+  return t;
 }
 /* 9.2.4 sin/cos/tan full fdlibm ports (isomorphic with .x).
  * PLATFORM: SHARED — FP contraction OFF here too: this block sits above
@@ -173,7 +216,7 @@ static double twin_scalbn(double x, int n) {
   }
 }
 
-static double twin_floor(double x) { return floor(x); }
+/* G.7: rem_pio2 uses math_floor_c (bit-level exact-7 twin), not host floor. */
 
 /* ---- two_over_pi 24-bit chunks (all fit in positive i32) ---- */
 static const int32_t two_over_pi[66] = {
@@ -269,7 +312,7 @@ static double kernel_tan(double x, double y, int iy) {
   int32_t ix = hx & 0x7fffffff;
   if (ix < 0x3e300000) {
     if ((int)x == 0) {
-      if (((ix | lo_of(x)) | (iy + 1)) == 0) return one / fabs(x);
+      if (((ix | lo_of(x)) | (iy + 1)) == 0) return one / math_fabs_c(x);
       else {
         if (iy == 1) return x;
         else {
@@ -357,7 +400,7 @@ recompute:
     z = q[j - 1] + fw;
   }
   z = twin_scalbn(z, q0);
-  z -= 8.0 * twin_floor(z * 0.125);
+  z -= 8.0 * math_floor_c(z * 0.125);
   n = (int)z;
   z -= (double)n;
   ih = 0;
@@ -471,7 +514,7 @@ static int rem_pio2(double x, double *y) {
     }
   }
   if (ix <= 0x413921fb) {
-    t = fabs(x);
+    t = math_fabs_c(x);
     n = (int)(t * invpio2 + half);
     fn = (double)n;
     r = t - fn * pio2_1;
@@ -1360,13 +1403,24 @@ double math_log_c(double x) {
   return ((dk * ln2hi) - (((s * (f - rr)) - (dk * ln2lo)) - f));
 }
 double math_fabs_c(double x) {
-  return math_fabs_impl(x);
+  union { double d; uint64_t u; } v; v.d = x;
+  uint64_t one = 1;
+  v.u &= (one << 63) - 1;
+  return v.d;
 }
+/* fmin/fmax zero-pair convention pinned to glibc x86_64 (Ubuntu gold):
+ * equal operands (incl. +-0 pairs) return the SECOND operand. */
 double math_fmin_c(double a, double b) {
-  return math_fmin_impl(a, b);
+  if (a != a) return b;
+  if (b != b) return a;
+  if (a < b) return a;
+  return b;
 }
 double math_fmax_c(double a, double b) {
-  return math_fmax_impl(a, b);
+  if (a != a) return b;
+  if (b != b) return a;
+  if (a > b) return a;
+  return b;
 }
 /* fdlibm s_erf.c / s_erfc.c surface twins — isomorphic with math_erf_c /
  * math_erfc_c in src/asm/runtime_math_libm.x. Shared static rationals

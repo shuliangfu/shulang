@@ -7,14 +7,19 @@
 // This module provides libm (math library) glue functions for Xlang.
 // All functions use f64 (C double) as the primary floating-point type.
 //
-// Bridge declarations: libm _impl functions implemented in C seed (seeds/runtime_math_libm.from_x.c)
-// Public APIs: #[no_mangle] wrappers that call _impl via unsafe extern blocks
+// Public APIs: #[no_mangle] math_*_c (exact-7 bit-level + fdlibm ports).
+// Host-libm math_*_impl splices removed (9.2.4). fenv still bridges to
+// C rest (fenv.h; standing, language-limit like 9.3.4).
+// C cold twins: seeds/runtime_math_libm.from_x.c under
+// #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X.
 //
 // libm functions: floor/ceil/trunc/round/sin/cos/tan/asin/acos/atan/atan2/
 //   sqrt/cbrt/pow/exp/log/fabs/signum/fmin/fmax/erf/erfc/log1p/expm1
 // 9.2.4 exact-7 (floor/ceil/trunc/round/fabs/fmin/fmax): full .x bit-level
-//   implementations on the product path (no libm); the seed keeps
-//   same-semantics C cold twins guarded by #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X
+//   implementations on the product path (no libm); host-libm math_*_impl
+//   splices removed. The seed keeps same-semantics C cold twins guarded
+//   by #ifndef XLANG_RUNTIME_MATH_LIBM_FROM_X; rem_pio2 reuses
+//   math_floor_c / math_fabs_c (G.7).
 // 9.2.4 exp/log (2026-09-08): fdlibm e_exp.c / e_log.c full .x ports (no
 //   libm); seed keeps same-semantics fdlibm C cold twins under the same guard
 // 9.2.4 sqrt/cbrt (2026-09-08): fdlibm e_sqrt.c / s_cbrt.c full .x ports (no
@@ -39,12 +44,12 @@
 // fenv functions: mask_to_fe/fe_to_mask/emit_cap_report/available/test/clear/raise/smoke
 // special: special_near (full .x impl), special_smoke_c (seed test)
 
-// === libm bridge declarations (extern "C" _impl functions) ===
+// === libm: host-libm math_*_impl splices removed (9.2.4) ===
 
-export extern "C" function math_floor_impl(x: f64): f64;
-export extern "C" function math_ceil_impl(x: f64): f64;
-export extern "C" function math_trunc_impl(x: f64): f64;
-export extern "C" function math_round_impl(x: f64): f64;
+/* 9.2.4 exact-7 (2026-09-08): bit-level math_floor_c / math_ceil_c /
+ * math_trunc_c / math_round_c / math_fabs_c / math_fmin_c / math_fmax_c
+ * on the product path; math_*_impl host-libm splices removed
+ * (same-semantics C cold twins live in the guarded seed block). */
 /* 9.2.4 sin/cos/tan (2026-09-08): fdlibm s_sin.c / s_cos.c / s_tan.c full
  * .x ports on the product path; math_sin_impl / math_cos_impl /
  * math_tan_impl libm splices removed (same-semantics C cold twins live
@@ -69,9 +74,6 @@ export extern "C" function math_round_impl(x: f64): f64;
 /* 9.2.4 exp/log (2026-09-08): fdlibm e_exp.c / e_log.c full .x ports on the
  * product path; math_exp_impl / math_log_impl libm splices removed (their
  * same-semantics C cold twins live in the guarded seed block). */
-export extern "C" function math_fabs_impl(x: f64): f64;
-export extern "C" function math_fmin_impl(a: f64, b: f64): f64;
-export extern "C" function math_fmax_impl(a: f64, b: f64): f64;
 /* 9.2.4 expm1/log1p (2026-09-08): fdlibm s_expm1.c / s_log1p.c full .x ports
  * on the product path; math_log1p_impl / math_expm1_impl libm splices
  * removed (same-semantics C cold twins live in the guarded seed block). */
