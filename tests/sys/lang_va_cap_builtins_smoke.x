@@ -75,12 +75,12 @@ export function lang_va_cap_probe(n: i32, ...): i32 {
   let p: *u8 = va_arg<*u8>(ap);
   let xf: f32 = va_arg<f32>(ap);
   let xd: f64 = va_arg<f64>(ap);
-  /* Extra GP slots use the typed helper (not a second va_arg<i32> body).
-   * host-C monomorphizes va_arg<i32> per call site into the same symbol. */
-  let e0: i32 = va_arg_i32(ap);
-  let e1: i32 = va_arg_i32(ap);
-  let e2: i32 = va_arg_i32(ap);
-  let e3: i32 = va_arg_i32(ap);
+  /* Extra GP slots: same T as `a` (five va_arg<i32> in one TU). host-C must
+   * emit one va_arg__VaList_i32 (combo dedup via type_refs_same_for_mono). */
+  let e0: i32 = va_arg<i32>(ap);
+  let e1: i32 = va_arg<i32>(ap);
+  let e2: i32 = va_arg<i32>(ap);
+  let e3: i32 = va_arg<i32>(ap);
   va_end(ap);
   if (a != 42) {
     return 1;

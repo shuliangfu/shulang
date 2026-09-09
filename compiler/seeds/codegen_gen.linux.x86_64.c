@@ -19024,35 +19024,10 @@ int32_t codegen_call_mono_type_at(struct ast_ASTArena * arena, int32_t ei, int32
 }
 int32_t codegen_mono_combo_slot_equal(struct ast_ASTArena * arena, int32_t a, int32_t b) {
   {
-    if ((a ==b)) {
-      return 1;
-    }
-    if ((((a <=0) || (b <=0)) || (arena ==0))) {
-      return 0;
-    }
-    int32_t ka = pipeline_type_kind_ord_at(arena, a);
-    int32_t kb = pipeline_type_kind_ord_at(arena, b);
-    if ((ka !=kb)) {
-      return 0;
-    }
-    if ((ka ==8)) {
-      uint8_t na[128] = {};
-      uint8_t nb[128] = {};
-      int32_t la = pipeline_type_named_name_into(arena, a, &((na)[0]));
-      int32_t lb = pipeline_type_named_name_into(arena, b, &((nb)[0]));
-      if (((la <=0) || (la !=lb))) {
-        return 0;
-      }
-      int32_t i = 0;
-      while ((i < la)) {
-        if (((na)[i] !=(nb)[i])) {
-          return 0;
-        }
-        (void)((i = (i + 1)));
-      }
-      return 1;
-    }
-    return 0;
+    /* PLATFORM: SHARED — G.7 complete: builtin i32/f64 and PTR *u8 must
+     * dedup like TYPE_NAMED. Authority = codegen_type_refs_same_for_mono
+     * (distinct type_ref nodes, same mangle → va_arg__VaList_i32 twice). */
+    return codegen_type_refs_same_for_mono(arena, a, b);
   }
 }
 int32_t codegen_func_ret_type_param_extra(struct ast_ASTArena * arena, struct ast_Module * module, int32_t fi) {

@@ -4,8 +4,8 @@
  * SysV: 6 named i32 fill rdi..r9; 8 named f64 fill xmm0..7; trailing
  * i32/f64/i32/f64 sit at [rbp+16] and must share one overflow cursor.
  * Independent GP-ov/FP-ov copies (slice17) would reread the same cells.
- * Asm-only: host-C of a second va_arg<f64> in the builtins TU redefines
- * va_arg__VaList_f64 (monomorph residual). This file is product `-o`.
+ * Two va_arg<f64> in this TU: host-C must emit one va_arg__VaList_f64
+ * (combo dedup; same residual as multi va_arg<i32>). Product `-o` + host-C.
  * PLATFORM: SHARED — L2 gate; Ubuntu gold (x86_64 SysV).
  */
 

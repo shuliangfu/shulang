@@ -21458,44 +21458,20 @@ function codegen_call_mono_type_at(arena: *ASTArena, ei: i32, arg_idx: i32, num_
  * PLATFORM: SHARED
  */
 /**
- * wave458: mono combo slot equality (type_ref id or TYPE_NAMED same name).
- * Turbofish / fixup allocate distinct TYPE_NAMED nodes for the same A; raw
- * type_ref equality then fails dedup and emits mk__A four times → redefinition.
- * @return i32 — 1 equal, 0 unequal
- * PLATFORM: SHARED
+ * Mono combo slot equality for generic-function collect.
+ * G.7: forwards to codegen_type_refs_same_for_mono (struct-layout authority).
+ * TYPE_NAMED-only missed builtin i32/f64 and TYPE_PTR (*u8): distinct type_ref
+ * nodes share one mangle (va_arg__VaList_i32 twice → host-C redefinition).
+ * @param arena *ASTArena — type_ref table; null → 0 via callee
+ * @param a i32 — combo slot type_ref
+ * @param b i32 — other slot type_ref
+ * @return i32 — 1 equal mono key, 0 unequal
+ * PLATFORM: SHARED host-C (one definition per mangled name; MSVC same rule)
  */
 function codegen_mono_combo_slot_equal(arena: *ASTArena, a: i32, b: i32): i32 {
   // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
   unsafe {
-    if (a == b) {
-      return 1;
-    }
-    if (a <= 0 || b <= 0 || arena == 0 as *ASTArena) {
-      return 0;
-    }
-    let ka: i32 = pipeline_type_kind_ord_at(arena, a);
-    let kb: i32 = pipeline_type_kind_ord_at(arena, b);
-    if (ka != kb) {
-      return 0;
-    }
-    if (ka == TypeKind.TYPE_NAMED as i32) {
-      let na: u8[128] = [];
-      let nb: u8[128] = [];
-      let la: i32 = pipeline_type_named_name_into(arena, a, &na[0]);
-      let lb: i32 = pipeline_type_named_name_into(arena, b, &nb[0]);
-      if (la <= 0 || la != lb) {
-        return 0;
-      }
-      let i: i32 = 0;
-      while (i < la) {
-        if (na[i] != nb[i]) {
-          return 0;
-        }
-        i = i + 1;
-      }
-      return 1;
-    }
-    return 0;
+    return codegen_type_refs_same_for_mono(arena, a, b);
   }
 }
 

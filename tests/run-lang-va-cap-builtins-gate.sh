@@ -5,7 +5,7 @@
 # slice14: typed turbofish va_arg<T>(ap); slice15: aarch64 asm Cap cross-emit;
 # slice16: va_arg<f32>/va_arg<f64> (XMM/NEON + C float→double promote).
 # slice17: GP stack extras beyond 6 SysV GP (11/22 in r8/r9, 33/44 at [rbp+16]).
-# slice18: mixed GP+FP overflow on the shared stack (asm -o of mixed smoke).
+# slice18: mixed GP+FP overflow on the shared stack (asm -o + host-C of mixed).
 # PLATFORM: SHARED — L2 probe; Ubuntu gold. Does not run xlang check.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -94,6 +94,13 @@ fi
 if ! grep -F 'double)(xlang_va_arg(ap, double)' "$OUT_C" >/dev/null 2>&1; then
   echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=no_va_arg_f64" >&2
   grep -n 'va_arg\|xlang_va_arg' "$OUT_C" | head -30 >&2 || true
+  exit 1
+fi
+# Five va_arg<i32> in one TU must share one host-C definition (combo dedup).
+n_va_i32="$(grep -c 'int32_t va_arg__VaList_i32(' "$OUT_C" || true)"
+if [[ "${n_va_i32}" -ne 1 ]]; then
+  echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=dup_va_arg_i32 n=${n_va_i32} want=1" >&2
+  grep -n 'va_arg__VaList_i32' "$OUT_C" | head -20 >&2 || true
   exit 1
 fi
 
@@ -206,11 +213,13 @@ if [[ "$a64_ok" -lt 2 ]]; then
   exit 1
 fi
 
-# Cap 10.7.1 slice18: mixed GP+FP overflow — product asm -o (not host-C:
-# a second va_arg<f64> in the builtins TU redefines va_arg__VaList_f64).
+# Cap 10.7.1 slice18: mixed GP+FP overflow — product asm -o + host-C of two
+# va_arg<f64> (one va_arg__VaList_f64; combo dedup).
 SRC_MIX="$ROOT/tests/sys/lang_va_cap_mixed_overflow_smoke.x"
 OUT_MIX="/tmp/xlang_lang_va_cap_mixed_$$"
-trap 'rm -f "$OUT_C" "$OUT_BIN" "$OUT_PROD" "$OUT_ASM" "$OUT_A64" "$OUT_MIX"' EXIT
+OUT_MIX_C="/tmp/xlang_lang_va_cap_mixed_$$.c"
+OUT_MIX_HOST="/tmp/xlang_lang_va_cap_mixed_host_$$"
+trap 'rm -f "$OUT_C" "$OUT_BIN" "$OUT_PROD" "$OUT_ASM" "$OUT_A64" "$OUT_MIX" "$OUT_MIX_C" "$OUT_MIX_HOST"' EXIT
 rm -f "$OUT_MIX"
 set +e
 "$XLANG" -o "$OUT_MIX" "$SRC_MIX" >/tmp/xlang_lang_va_cap_mixed.$$ 2>&1
@@ -229,6 +238,35 @@ mix_run=$?
 set -e
 if [[ "$mix_run" -ne 42 ]]; then
   echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=mixed_run_rc rc=$mix_run want=42" >&2
+  exit 1
+fi
+if ! "$XLANG" -E "$SRC_MIX" >"$OUT_MIX_C" 2>/tmp/xlang_lang_va_cap_mixed_e.$$; then
+  echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=mixed_emit" >&2
+  tail -40 /tmp/xlang_lang_va_cap_mixed_e.$$ >&2 || true
+  rm -f /tmp/xlang_lang_va_cap_mixed_e.$$
+  exit 1
+fi
+rm -f /tmp/xlang_lang_va_cap_mixed_e.$$
+n_va_f64="$(grep -c 'double va_arg__VaList_f64(' "$OUT_MIX_C" || true)"
+if [[ "${n_va_f64}" -ne 1 ]]; then
+  echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=dup_va_arg_f64 n=${n_va_f64} want=1" >&2
+  grep -n 'va_arg__VaList_f64' "$OUT_MIX_C" | head -20 >&2 || true
+  exit 1
+fi
+if ! "$CC_BIN" -std=gnu11 -O0 -Wall -I"$ROOT/compiler/include" -o "$OUT_MIX_HOST" "$OUT_MIX_C" \
+  2>/tmp/xlang_lang_va_cap_mixed_cc.$$; then
+  echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=mixed_host_cc" >&2
+  cat /tmp/xlang_lang_va_cap_mixed_cc.$$ >&2 || true
+  rm -f /tmp/xlang_lang_va_cap_mixed_cc.$$
+  exit 1
+fi
+rm -f /tmp/xlang_lang_va_cap_mixed_cc.$$
+set +e
+"$OUT_MIX_HOST"
+mix_host_run=$?
+set -e
+if [[ "$mix_host_run" -ne 42 ]]; then
+  echo "xlang: [XLANG_LANG_VA_CAP_BUILTINS] status=fail run=0 obs=0 skip=0 reason=mixed_host_run_rc rc=$mix_host_run want=42" >&2
   exit 1
 fi
 
