@@ -36,6 +36,30 @@ if ! nm "$WORKDIR/bridge.o" 2>/dev/null | grep -E ' [Uu] (_)?asm_codegen_ast$'; 
   exit 1
 fi
 
+# Same-class PREFIX -1 leftovers (this knife): x_stubs (experimental
+# xlang_x) and verify-selfhost generated _x_stubs.c. G.7 complete
+# this probe — do not add a second scanner. A STRONG PREFIX
+# asm_asm_codegen_ast -1 is a multiply_defined first-wins override
+# of user_asm_seed_bridge. strict_glue is grepped too so the
+# produce-point cannot come back. experimental_symbol_bridge WEAK
+# PREFIX forwarder stays (unprefixed product authority is
+# rt_asm_stub; that alias is not a leftover).
+leftover_re='^(XLANG_WEAK[[:space:]]+)?int(32_t)?[[:space:]]+asm_asm_codegen_ast[[:space:]]*\('
+leftover_n=0
+for src in \
+  "$ROOT/compiler/seeds/runtime_driver_strict_glue_stubs.from_x.c" \
+  "$ROOT/compiler/seeds/x_stubs.from_x.c" \
+  "$ROOT/compiler/verify-selfhost.sh"
+do
+  if grep -nE "$leftover_re" "$src"; then
+    echo "FAIL: $src still defines PREFIX asm_asm_codegen_ast" >&2
+    leftover_n=$((leftover_n + 1))
+  fi
+done
+if [ "$leftover_n" -ne 0 ]; then
+  exit 1
+fi
+
 link_run() {
   local tag="$1"
   shift
@@ -55,4 +79,4 @@ link_run() {
 # Hazard order: bridge before provider (ELF/Mach-O first weak used to win).
 link_run bridge_first "$WORKDIR/bridge.o" "$WORKDIR/provider.o" "$WORKDIR/caller.o"
 link_run provider_first "$WORKDIR/provider.o" "$WORKDIR/bridge.o" "$WORKDIR/caller.o"
-echo "bridge_asm_codegen_ast probe OK"
+echo "bridge_asm_codegen_ast probe OK leftover_prefix=0"

@@ -122,14 +122,13 @@ cc $CFLAGS -c src/std_fs_shim.c -o std_fs_shim_c.o
 
 # 编译桩文件
 echo "  编译桩文件..."
-# PLATFORM: SHARED — do not emit PREFIX asm_asm_codegen_elf_o -1.
-# Product emit is strong user_asm_seed_bridge; a second PREFIX def
-# is first-wins / CG002. Missing provider → link UNDEF, not silent -1.
-# Neighbor leftover: PREFIX asm_asm_codegen_ast -1 stays (not this knife).
+# PLATFORM: SHARED — do not emit PREFIX asm_asm_codegen_elf_o
+# or PREFIX asm_asm_codegen_ast -1. Product PREFIX emit/ast is
+# strong user_asm_seed_bridge; a second PREFIX def is first-wins
+# / CG002. Missing provider → link UNDEF, not silent -1.
 cat > _x_stubs.c << 'STUBEOF'
 #include <stdint.h>
 #include <stddef.h>
-int asm_asm_codegen_ast(void *a, void *b, void *c, void *d) { return -1; }
 int io_read_batch_buf(void) { return -1; }
 int io_write_batch_buf(void) { return -1; }
 int typeck_lsp_main(void) { return -1; }

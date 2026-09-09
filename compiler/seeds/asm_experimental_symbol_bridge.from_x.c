@@ -259,7 +259,11 @@ XLANG_WEAK int32_t backend_asm_codegen_ast(void *module, void *arena, void *out,
   return asm_codegen_ast(module, arena, out, ctx);
 }
 
-/** pipeline/orchestration expects asm_asm_codegen_ast; strong pipeline_x wins. */
+/** pipeline/orchestration expects asm_asm_codegen_ast; strong pipeline_x / user_asm_seed_bridge wins.
+ * Same-class PREFIX -1 leftovers in x_stubs / verify-selfhost were
+ * deleted (not a second ast path). This WEAK forwarder stays: product
+ * unprefixed authority is rt_asm_stub, matching typeck_typeck_x_ast.
+ * PLATFORM: SHARED — first-weak-wins is ELF + Mach-O. */
 XLANG_WEAK int32_t asm_asm_codegen_ast(void *module, void *arena, void *out_buf, void *ctx) {
   return asm_codegen_ast(module, arena, out_buf, ctx);
 }
