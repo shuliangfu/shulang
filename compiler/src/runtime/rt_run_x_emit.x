@@ -1123,8 +1123,14 @@ export function rt_xe_step_finish(): i32 {
 }
 
 /** Public entry: run -x -E emit pipeline via work slots and five steps. Resets work, seeds path/lib, then read_pp, parse, load_deps, prerun, finish.
+ * Leftover !XLANG_NO_C_FRONTEND -E-extern cparser call lived only in the
+ * cold seed twin (rt_run_x_emit.from_x.c). This product body always
+ * refuses -E-extern via driver_x_emit_try_extern_via_cparser (BLD001).
+ * @return i32 — 0 on success, 1 on failure or -E-extern refuse
  * Track-L: #[no_mangle] keeps surface short name (not rt_run_x_emit_driver_run_x_emit_c).
- * PLATFORM: SHARED — link-name contract; dual-host prove. */
+ * PLATFORM: SHARED — product authority; leftover consume site retired in
+ * the cold seed twin (this knife). Mega via_cparser wrapper not deleted.
+ */
 #[no_mangle]
 export function driver_run_x_emit_c(): i32 {
   let path: *u8 = 0 as *u8;
@@ -1152,6 +1158,7 @@ export function driver_run_x_emit_c(): i32 {
     want = driver_x_emit_take_want_extern();
   }
   if (want != 0) {
+    // Always refuse -E-extern. Do not re-add driver_run_x_emit_c_extern_via_cparser.
     unsafe {
       rc = driver_x_emit_try_extern_via_cparser(path);
       typeck_set_allow_legacy_extern_calls(old_legacy);

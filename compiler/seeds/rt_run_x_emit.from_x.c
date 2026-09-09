@@ -8,6 +8,11 @@
  * 冷启动/无 PREFER 时仍编译完整 C 体。
  *
  * Scope: driver_run_x_emit_c（读源 → pipeline → stdout）。
+ * Leftover !XLANG_NO_C_FRONTEND -E-extern cparser branch retired
+ * (this knife). Product PREFER already refuses via
+ * driver_x_emit_try_extern_via_cparser (always BLD001). Mega wrapper
+ * of driver_run_x_emit_c_extern_via_cparser stays (never-defined
+ * _impl; different class).
  * run_asm_backend / run_compiler_parsed 仍 mega rest。
  */
 #include <limits.h>
@@ -86,7 +91,6 @@ extern void pipeline_set_dep_slots(void **arenas, void **modules);
 extern void driver_dep_seed_slots(void **arenas, void **modules, int n);
 extern void codegen_set_dep_slots_for_x_pipeline(struct ASTModule **mods, const char **paths, int n);
 extern int runtime_report_precise_parse_failure_if_known(const char *input_path, const char *src, size_t src_len);
-extern int driver_run_x_emit_c_extern_via_cparser(const char *input_path);
 extern void pipeline_dep_ctx_heap_destroy(struct ast_PipelineDepCtx *ctx);
 extern int typeck_set_allow_legacy_extern_calls(int allow);
 /**
@@ -100,7 +104,13 @@ extern int typeck_set_allow_legacy_extern_calls(int allow);
 extern void ast_pool_arena_release(void *arena);
 extern void ast_pool_module_release(void *module);
 
-/** 执行刚解析的 -x -E（读文件、.x pipeline、写 stdout）；成功 0，失败 1。无 XLANG_USE_X_PIPELINE 时返回 1。 */
+/** Run parsed -x -E (read file, .x pipeline, write stdout); 0 ok, 1 fail.
+ * Leftover !XLANG_NO_C_FRONTEND -E-extern cparser branch retired (this knife).
+ * Product PREFER rt_run_x_emit.x already refuses via
+ * driver_x_emit_try_extern_via_cparser (always BLD001).
+ * PLATFORM: SHARED — consume-site hygiene; product PREFER rest is FROM_X
+ * marker (H=0); this body compiles only on cold/no-PREFER.
+ */
 int driver_run_x_emit_c(void) {
     const char *input_path = driver_x_emit_c_path;
     int old_allow_legacy_extern = 0;
@@ -117,19 +127,22 @@ int driver_run_x_emit_c(void) {
             const int want_extern = driver_x_emit_c_want_extern;
             driver_x_emit_c_want_extern = 0;
             if (want_extern) {
-#if !defined(XLANG_NO_C_FRONTEND)
-                {
-                    int r = driver_run_x_emit_c_extern_via_cparser(input_path);
-                    typeck_set_allow_legacy_extern_calls(old_allow_legacy_extern);
-                    return r;
-                }
-#else
-                diag_report_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001,
-                            "-x -E -E-extern requires C parser/codegen (rebuild without -DXLANG_NO_C_FRONTEND)",
-                            NULL);
+                /*
+                 * Retired leftover !XLANG_NO_C_FRONTEND -E-extern cparser
+                 * branch (this knife): used to call
+                 * driver_run_x_emit_c_extern_via_cparser. Product PREFER
+                 * rt_run_x_emit.x always refuses via
+                 * driver_x_emit_try_extern_via_cparser (BLD001). Mega
+                 * wrapper of via_cparser stays (never-defined _impl;
+                 * different class). Dropping XLANG_NO_C_FRONTEND now
+                 * matches that refuse; it does not resurrect a C frontend.
+                 * PLATFORM: SHARED — consume-site hygiene; product PREFER
+                 * rest is FROM_X marker (H=0); this body compiles only on
+                 * cold/no-PREFER.
+                 */
+                int r = (int)driver_x_emit_try_extern_via_cparser((uint8_t *)input_path);
                 typeck_set_allow_legacy_extern_calls(old_allow_legacy_extern);
-                return 1;
-#endif
+                return r;
             }
         }
 #endif

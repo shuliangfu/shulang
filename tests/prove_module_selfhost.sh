@@ -517,6 +517,10 @@ MODULES=(
   #    !XLANG_NO_C_FRONTEND driver_try_compile_via_shu_c_sibling consume
   #    site → driver_dispatch_run_compiler_parsed (spawn body stays in
   #    rt_dispatch_thin; HAS a real fork/exec body, different class);
+  #    9.7.6 residual 7 retired rt_run_x_emit leftover
+  #    !XLANG_NO_C_FRONTEND -E-extern cparser consume site →
+  #    driver_x_emit_try_extern_via_cparser always BLD001 (mega
+  #    via_cparser wrapper stays; never-defined _impl, different class);
   #    T still 101, mega unchanged);
   #   rest 含 86 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
   #   prove 锁 mixed surface IDENTICAL (101 nm T · no doc_anchor)
@@ -604,6 +608,9 @@ MODULES=(
   # rt_run_x_emit R2 full：.x 吃满 driver_run_x_emit_c（step 拆分 + work 槽）；
   # 产品 rest 在 FROM_X 下业务 H=0（仅 marker）；Cap residual 在 driver_abi（OutBuf/stdout/work 槽）
   # 冷/无 PREFER 仍可走 seeds/rt_run_x_emit.from_x.c 全 C 体
+  # 9.7.6 residual 7: leftover !XLANG_NO_C_FRONTEND -E-extern cparser
+  # consume site retired; cold seed now also refuses via
+  # driver_x_emit_try_extern_via_cparser (always BLD001)
   "rt_run_x_emit|src/runtime/rt_run_x_emit.x|seeds/rt_run_x_emit_surface.from_x.c||"
   # rt_parse_diag R2 full：.x 吃满 precise parse failure P001；产品 rest 在 FROM_X 下业务符号 H=0
   # prove 锁 full surface IDENTICAL（1 公共符号）；冷/无 PREFER 仍可走 seeds/rt_parse_diag.from_x.c 全 C 体

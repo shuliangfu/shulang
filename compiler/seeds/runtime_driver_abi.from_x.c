@@ -2883,9 +2883,14 @@ void driver_x_emit_work_cleanup(void) {
 #ifndef XLANG_L2_RDABI_THIN_FROM_X
 int32_t driver_x_emit_try_extern_via_cparser(uint8_t *input_path) {
     /*
-     * 产品 runtime_driver_no_c 为 XLANG_NO_C_FRONTEND；driver_abi 本层不带该宏编译，
-     * 故固定走 no-C 诊断（与产品 NO_C 语义一致）。
-     * 冷启动全 C 体（seeds/rt_run_x_emit.from_x.c 无 FROM_X）仍可走 cparser 分支。
+     * Product runtime_driver_no_c is XLANG_NO_C_FRONTEND; this TU is not
+     * compiled with that macro, so the body is the fixed no-C refuse
+     * (same as product NO_C). Leftover !XLANG_NO_C_FRONTEND cparser
+     * consume site in rt_run_x_emit.from_x.c retired (this knife); the
+     * cold seed now also calls this refuse instead of
+     * driver_run_x_emit_c_extern_via_cparser.
+     * PLATFORM: SHARED — consume-site hygiene; mega via_cparser wrapper
+     * stays (never-defined _impl; different class).
      */
     (void)input_path;
     diag_report_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001,
