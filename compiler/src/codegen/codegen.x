@@ -136,6 +136,16 @@ export extern function pipeline_typeck_type_refs_equal_c(arena: *ASTArena, a: i3
  * bypassing the concrete→dyn impl-lookup gate. @param rhs_type_ref reserved
  * (unused; kept for API symmetry with typeck). PLATFORM: SHARED. */
 export extern function typeck_dyn_rhs_is_null_sentinel(arena: *ASTArena, rhs_type_ref: i32, rhs_expr_ref: i32): i32;
+/**
+ * Cap 10.7.1 name table (typeck.x). Host-C must not emit `extern void va_start`
+ * / `va_end` / `va_copy` / `va_arg*` — those are typeck faces rewritten to
+ * xlang_va_* macros; clang treats va_start/va_end as builtins (redeclare hard-error).
+ * @param name *u8 — bare identifier
+ * @param name_len i32 — byte length
+ * @return i32 — 1 Cap va builtin, 0 otherwise
+ * PLATFORM: SHARED — G.7 single name table; skip-emit calls this, does not copy names.
+ */
+export extern function typeck_is_cap_va_builtin_name(name: *u8, name_len: i32): i32;
 /*
  * F3 TYPE_DYN(17) vtable-dispatch authority — G.7 accessors over the trait
  * registry `g_xlang_skip_trait_reg[]`. Method declaration order in the trait
@@ -21128,10 +21138,18 @@ export function emit_func(arena: *ASTArena, out: *CodegenOutBuf, module: *Module
  * undeclared getcwd (L0 labi_path_pure.x host-cc).
  * sendfile leftover: LINUX 4-arg prototype via fs_formal `<sys/sendfile.h>`;
  * MACOS 6-arg already in `<sys/socket.h>` (Darwin net Cap).
+ * Cap 10.7.1: also skip language va_* faces (typeck_is_cap_va_builtin_name) —
+ * call sites rewrite to xlang_va_*; emitting `extern void va_start(...)`
+ * redeclares the clang builtin (Darwin host-cc hard-error).
  */
 export function codegen_is_libc_conflicting_extern_name(name: *u8, name_len: i32): i32 {
   if (name == 0 as *u8 || name_len <= 0) {
     return 0;
+  }
+  /* Cap 10.7.1: va_start/va_end/va_copy/va_arg* are macros, not C functions.
+   * PLATFORM: SHARED skip; MACOS|DARWIN clang redeclare is the live face. */
+  if (typeck_is_cap_va_builtin_name(name, name_len) != 0) {
+    return 1;
   }
   /* read 4 */
   if (name_len == 4 && name[0] == 114 && name[1] == 101 && name[2] == 97 && name[3] == 100) {

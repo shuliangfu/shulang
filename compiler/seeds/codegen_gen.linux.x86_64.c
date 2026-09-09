@@ -1645,6 +1645,8 @@ extern int32_t pipeline_expr_call_num_args_at(struct ast_ASTArena * arena, int32
 extern int32_t pipeline_typeck_type_refs_equal_c(struct ast_ASTArena * arena, int32_t a, int32_t b);
 /* F2: TYPE_DYN null-sentinel test reused from typeck.x (G.7 single authority). */
 extern int32_t typeck_dyn_rhs_is_null_sentinel(struct ast_ASTArena * arena, int32_t rhs_type_ref, int32_t rhs_expr_ref);
+/* Cap 10.7.1: G.7 name table in typeck.x — skip-emit, do not copy names. */
+extern int32_t typeck_is_cap_va_builtin_name(uint8_t * name, int32_t name_len);
 /*
  * F3 TYPE_DYN(17) vtable-dispatch authority — G.7 accessors over the trait
  * registry g_xlang_skip_trait_reg[]. Method declaration order in the trait
@@ -18814,6 +18816,11 @@ int32_t codegen_emit_func(struct ast_ASTArena * arena, struct codegen_CodegenOut
 int32_t codegen_is_libc_conflicting_extern_name(uint8_t * name, int32_t name_len) {
   if (((name ==0) || (name_len <=0))) {
     return 0;
+  }
+  /* Cap 10.7.1: va_* typeck faces → xlang_va_* macros; clang builtin redeclare.
+   * PLATFORM: SHARED skip; MACOS|DARWIN host-cc is the live face. Twin codegen.x. */
+  if ((typeck_is_cap_va_builtin_name(name, name_len) !=0)) {
+    return 1;
   }
   if ((((((name_len ==4) && ((name)[0] ==114)) && ((name)[1] ==101)) && ((name)[2] ==97)) && ((name)[3] ==100))) {
     return 1;

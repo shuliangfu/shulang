@@ -1014,7 +1014,9 @@ export function glue_sysv_x86_call_arg_slot_c(
     let units: i32 = glue_sysv_arg_gp_units_from_size_c(sz);
     let words: i32 = glue_sysv_arg_stack_words_c(sz, units);
     if (j == arg_index) {
-      if (glue_call_param_is_f32_c(arena, pty) != 0) {
+      /* G.7: extras without formals (variadic) still SSE via resolved type /
+       * FLOAT_LIT. Twin of seed glue_call_arg_is_sse_float_c. */
+      if (glue_arg_ref_is_sse_float_c(arena, arg_ref, pty) != 0) {
         if (xmm < 8) {
           out_kind[0] = 1;
           out_reg_k[0] = xmm;
@@ -1043,7 +1045,7 @@ export function glue_sysv_x86_call_arg_slot_c(
       }
       return;
     }
-    if (glue_call_param_is_f32_c(arena, pty) != 0) {
+    if (glue_arg_ref_is_sse_float_c(arena, arg_ref, pty) != 0) {
       if (xmm < 8) { xmm = xmm + 1; }
       else { stk = stk + 1; }
     } else {
@@ -1180,7 +1182,8 @@ export function glue_emit_call_args_elf_sysv_f32_xmm_c(arena: *u8, elf: *u8, er:
     while (i < nargs) {
       let ar_f: i32 = pipeline_expr_call_arg_ref(arena, er, i);
       let pty_f: i32 = glue_call_param_type_ref_at(arena, er, i);
-      is_sse_f[i] = glue_call_param_is_f32_c(arena, pty_f);
+      /* G.7: variadic extras have no formal; classify via expr (seed twin). */
+      is_sse_f[i] = glue_arg_ref_is_sse_float_c(arena, ar_f, pty_f);
       // Width twin of seed spill_is_f64: formal f64 wins, then the expr
       // classifier (FLOAT_LIT default / stamp / structural fallback).
       is_f64_f[i] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_f, pty_f);
@@ -2298,42 +2301,9 @@ export function pipeline_asm_emit_call_args_elf_c(
         }
       }
     } else if (ta == 1) {
-      /* wave603: AAPCS64 stack words include MEMORY multi-word (≡ x86 wave601),
-       * not nargs-reg_max alone. Align 16 for arm64 SP.
-       * wave9xx AAPCS64 FP class: f64 scalars consume v0-v7 (d regs) which are
-       * independent of the GP cursor, so they take neither GP units nor stack
-       * words while a v-slot is free; only FP overflow spills to the stack.
-       * Must mirror the main classification pass below exactly.
+      /* G.7: same n_stack as post-call cleanup (glue_aapcs64_call_n_stack_c).
        * PLATFORM: MACOS|ARM64 AAPCS64. */
-      let nw_a: i32 = 0;
-      let gp_tmp: i32 = 0;
-      let fp_tmp: i32 = 0;
-      let j_a: i32 = 0;
-      while (j_a < nargs) {
-        let ar_j: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, j_a);
-        let pty_j: i32 = glue_call_param_type_ref_at(arena, expr_ref, j_a);
-        let sz_j: i32 = glue_sysv_arg_byte_size_c(arena, ctx, pty_j, ar_j);
-        let u_j: i32 = glue_sysv_arg_gp_units_from_size_c(sz_j);
-        let w_j: i32 = glue_sysv_arg_stack_words_c(sz_j, u_j);
-        if (glue_sysv_arg_is_memory_by_value_c(sz_j) != 0) {
-          nw_a = nw_a + w_j;
-        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j) != 0) {
-          if (fp_tmp < 8) {
-            fp_tmp = fp_tmp + 1;
-          } else {
-            nw_a = nw_a + 1;
-          }
-        } else if (u_j > 0 && gp_tmp + u_j <= reg_max) {
-          gp_tmp = gp_tmp + u_j;
-        } else {
-          if (w_j > 0) {
-            nw_a = nw_a + w_j;
-          } else {
-            nw_a = nw_a + 1;
-          }
-        }
-        j_a = j_a + 1;
-      }
+      let nw_a: i32 = glue_aapcs64_call_n_stack_c(arena, ctx, expr_ref, nargs);
       stack_reserve = nw_a * 8;
       if (stack_reserve > 0) {
         stack_reserve = (stack_reserve + 15) & (0 - 16);
@@ -2413,12 +2383,13 @@ export function pipeline_asm_emit_call_args_elf_c(
         if (is_mem_a[i] != 0) {
           gp_start[i] = 0 - 1;
           gp_units[i] = 0;
-        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i) != 0) {
+        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i) != 0
+            || (pty_i <= 0 && glue_arg_ref_is_sse_float_c(arena, ar_i, pty_i) != 0)) {
           /* AAPCS64 FP class: f64 scalars pass in v0-v7 (fmov dK of the rax
-           * bits at reload), independent of the GP cursor (x0-x7). They keep
-           * one spill word (gp_units=1) but consume no GP slot; overflow
-           * falls through to the stack-slot pass below as an 8-byte word.
-           * f32 stays GP-bits this wave (callee param home is f64-only).
+           * bits at reload), independent of the GP cursor (x0-x7). Variadic
+           * f32 extras (no formal, pty<=0) also take a v-slot so Cap va_arg<f32>
+           * walking the FP save sees them. Named f32 stays GP this wave
+           * (callee param home is f64-only).
            * PLATFORM: MACOS|ARM64 AAPCS64. */
           gp_units[i] = 1;
           gp_start[i] = 0 - 1;
@@ -2527,7 +2498,8 @@ export function pipeline_asm_emit_call_args_elf_c(
       while (i < nargs) {
         let ar_i: i32 = pipeline_expr_call_arg_ref(arena, expr_ref, i);
         let pty_i: i32 = glue_call_param_type_ref_at(arena, expr_ref, i);
-        is_sse[i] = glue_call_param_is_f32_c(arena, pty_i);
+        /* G.7: variadic extras have no formal; classify via expr (seed twin). */
+        is_sse[i] = glue_arg_ref_is_sse_float_c(arena, ar_i, pty_i);
         // Width twin of seed spill_is_f64: formal f64 wins, then the expr
         // classifier (FLOAT_LIT default / stamp / structural fallback).
         is_f64[i] = glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i);
@@ -2751,7 +2723,23 @@ export function glue_asm_emit_call_with_cleanup(
     if (glue_asm_enc_call_redirected(elf_ctx, cname, clen, ta) != 0) {
       return 0 - 1;
     }
-    cleanup = glue_asm_call_stack_cleanup_bytes(ta, nargs);
+    /* G.7: cleanup bytes must match emit_call_args reserve (FP class).
+     * Naive nargs-reg_max smashed Darwin mixed-va x30 (PC=0). */
+    if (ta == 0) {
+      let nw_c: i32 = glue_sysv_x86_call_n_stack_c(arena, expr_ref, nargs);
+      cleanup = nw_c * 8;
+      if (nw_c > 0) {
+        if ((nw_c & 1) != 0) { cleanup = cleanup + 8; }
+      }
+    } else if (ta == 1) {
+      let nw_c: i32 = glue_aapcs64_call_n_stack_c(arena, ctx, expr_ref, nargs);
+      cleanup = nw_c * 8;
+      if (cleanup > 0) {
+        cleanup = (cleanup + 15) & (0 - 16);
+      }
+    } else {
+      cleanup = glue_asm_call_stack_cleanup_bytes(ta, nargs);
+    }
     if (cleanup < 0) {
       return 0 - 1;
     }
@@ -4461,9 +4449,10 @@ function try_emit_raw_syscall_call_elf_c(
  * rcx/x3 = class_cell. Post: rax = slot pointer; rcx/x3 = writeback cell
  * (class_cell or ov_cell). Unique labels via pipeline_asm_emit_next_label_c.
  *
- * class_end = header_addr - (24 + gp_n*8 [+ fp_n*8 if FP]). rbp-negative
- * layout means a cursor address <= class_end is past the save (overflow).
- * Signed LE (cc=3) is valid: both pointers live in the same user stack.
+ * class_end: x86 rbp-negative header - (24 + gp_n*8 [+ fp_n*8 if FP]),
+ * overflow = cursor <= class_end (cc=3 LE). aarch64 x29-positive header +
+ * the same delta, overflow = cursor >= class_end (cc=5 GE).
+ * Signed compare is valid: both pointers live in the same user stack.
  *
  * @param elf_ctx *u8 — ELF codegen ctx
  * @param ctx *u8 — AsmFuncCtx (label counter)
@@ -4478,12 +4467,20 @@ function try_emit_va_cap_ov_select_elf_c(
 ): i32 {
   unsafe {
     let end_delta: i32 = 0;
+    let step: i32 = 0 - 1;
+    let cc: i32 = 3;
     let lbl_sv: u8[64] = [];
     let lbl_dn: u8[64] = [];
     let n_sv: i32 = 0;
     let n_dn: i32 = 0;
     if (elf_ctx == 0 as *u8 || ctx == 0 as *u8) { return 0 - 1; }
     if (gp_n < 6) { gp_n = 6; }
+    /* PLATFORM: LINUX|x86_64 rbp-off walks down (step=-1, LE).
+     * PLATFORM: LINUX|aarch64 / MACOS|ARM64 x29+off walks up (step=+1, GE). */
+    if (ta == 1) {
+      step = 1;
+      cc = 5;
+    }
     /* header(24) + GP save; FP class_end is past FP save too. */
     end_delta = 24 + gp_n * 8;
     if (is_fp != 0) { end_delta = end_delta + 64; }
@@ -4498,22 +4495,22 @@ function try_emit_va_cap_ov_select_elf_c(
     } else {
       if (arch_x86_64_enc_enc_mov_r10_to_rax(elf_ctx) != 0) { return 0 - 1; }
     }
-    if (backend_enc_add_imm_to_rax_arch(elf_ctx, 0 - end_delta, ta) != 0) {
+    if (backend_enc_add_imm_to_rax_arch(elf_ctx, step * end_delta, ta) != 0) {
       return 0 - 1;
     }
     /* rax = class_end, rbx = class_cursor. cmp cursor, end. */
     if (backend_enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0) { return 0 - 1; }
-    /* cc=3 LE: overflow = (cursor <= class_end). */
-    if (backend_enc_cmp_setcc_movzbl_arch(elf_ctx, 3, ta) != 0) { return 0 - 1; }
+    /* x86 cc=3 LE; aarch64 cc=5 GE. */
+    if (backend_enc_cmp_setcc_movzbl_arch(elf_ctx, cc, ta) != 0) { return 0 - 1; }
     if (backend_enc_test_eax_eax_arch(elf_ctx, ta) != 0) { return 0 - 1; }
     if (backend_enc_jz_arch(elf_ctx, &lbl_sv[0], n_sv, ta) != 0) { return 0 - 1; }
-    /* overflow: ov_cell = header - 16; load *ov_cell as slot. */
+    /* overflow: ov_cell = header + step*16 (x86 -16, aarch64 +16). */
     if (ta == 1) {
       if (arch_arm64_enc_enc_mov_x8_to_rax(elf_ctx) != 0) { return 0 - 1; }
     } else {
       if (arch_x86_64_enc_enc_mov_r10_to_rax(elf_ctx) != 0) { return 0 - 1; }
     }
-    if (backend_enc_add_imm_to_rax_arch(elf_ctx, 0 - 16, ta) != 0) { return 0 - 1; }
+    if (backend_enc_add_imm_to_rax_arch(elf_ctx, step * 16, ta) != 0) { return 0 - 1; }
     if (ta == 1) {
       if (arch_arm64_enc_enc_mov_x0_to_x3(elf_ctx) != 0) { return 0 - 1; }
       if (arch_arm64_enc_enc_ldr_x0_x3(elf_ctx) != 0) { return 0 - 1; }
@@ -4880,8 +4877,8 @@ function try_emit_va_cap_builtin_call_elf_c(
       if (arch_arm64_enc_enc_ldr_x0_x3(elf_ctx) != 0) { return 0 - 1; }
       if (arch_arm64_enc_enc_mov_rax_to_x8(elf_ctx) != 0) { return 0 - 1; }
       if (is_fp != 0) {
-        /* header+8 rbp-off = lower addr = pointer-8 (same -8 as slot walk). */
-        if (backend_enc_add_imm_to_rax_arch(elf_ctx, 0 - 8, ta) != 0) { return 0 - 1; }
+        /* PLATFORM: MACOS|ARM64 / LINUX|aarch64 — x29+off; header[8] is +8. */
+        if (backend_enc_add_imm_to_rax_arch(elf_ctx, 8, ta) != 0) { return 0 - 1; }
       }
       if (arch_arm64_enc_enc_mov_x0_to_x3(elf_ctx) != 0) { return 0 - 1; }
       if (arch_arm64_enc_enc_ldr_x0_x3(elf_ctx) != 0) { return 0 - 1; }
@@ -4892,7 +4889,8 @@ function try_emit_va_cap_builtin_call_elf_c(
       if (backend_enc_ldr_xreg_xreg_imm_arch(elf_ctx, 0, 1, 0, ta) != 0) { return 0 - 1; }
       if (arch_arm64_enc_enc_mov_x0_to_x4(elf_ctx) != 0) { return 0 - 1; }
       if (backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta) != 0) { return 0 - 1; }
-      if (backend_enc_add_imm_to_rax_arch(elf_ctx, 0 - 8, ta) != 0) { return 0 - 1; }
+      /* Next slot is higher x29-off → +8. PLATFORM: MACOS|ARM64 / LINUX|aarch64. */
+      if (backend_enc_add_imm_to_rax_arch(elf_ctx, 8, ta) != 0) { return 0 - 1; }
       if (arch_arm64_enc_enc_str_x0_x3(elf_ctx) != 0) { return 0 - 1; }
       if (backend_enc_mov_arg_reg_to_rax_arch(elf_ctx, 4, ta) != 0) { return 0 - 1; }
       return 1;
@@ -7797,7 +7795,7 @@ export function glue_sysv_x86_call_n_stack_c(arena: *u8, call: i32, nargs: i32):
     let sz: i32 = glue_sysv_arg_byte_size_c(arena, 0 as *u8, pty, arg_ref);
     let units: i32 = glue_sysv_arg_gp_units_from_size_c(sz);
     let words: i32 = glue_sysv_arg_stack_words_c(sz, units);
-    if (glue_call_param_is_f32_c(arena, pty) != 0) {
+    if (glue_arg_ref_is_sse_float_c(arena, arg_ref, pty) != 0) {
       if (xmm < 8) { xmm = xmm + 1; }
       else { stk = stk + 1; }
     } else {
@@ -7815,6 +7813,53 @@ export function glue_sysv_x86_call_n_stack_c(arena: *u8, call: i32, nargs: i32):
     j = j + 1;
   }
   return stk;
+}
+
+/**
+ * Count AAPCS64 outgoing stack words (MEMORY + FP overflow + GP overflow).
+ * Mirrors the ARM64 classification pass in pipeline_asm_emit_call_args_elf_c
+ * so reserve and post-call cleanup stay matched (mismatch smashed x30 → PC=0
+ * on Darwin mixed va overflow). f64 named/extras take v0–v7; variadic f32
+ * extras (pty<=0) also take a v-slot. PLATFORM: MACOS|ARM64 AAPCS64.
+ * @param arena *u8 — AST arena
+ * @param ctx *u8 — AsmFuncCtx (size helper; may be 0)
+ * @param call i32 — CALL expr
+ * @param nargs i32 — argument count
+ * @return i32 — stack word count (not yet 16-aligned)
+ */
+function glue_aapcs64_call_n_stack_c(arena: *u8, ctx: *u8, call: i32, nargs: i32): i32 {
+  let nw: i32 = 0;
+  let gp: i32 = 0;
+  let fp: i32 = 0;
+  let j: i32 = 0;
+  let reg_max: i32 = glue_asm_call_reg_max(1);
+  while (j < nargs) {
+    let ar: i32 = pipeline_expr_call_arg_ref(arena, call, j);
+    let pty: i32 = glue_call_param_type_ref_at(arena, call, j);
+    let sz: i32 = glue_sysv_arg_byte_size_c(arena, ctx, pty, ar);
+    let u: i32 = glue_sysv_arg_gp_units_from_size_c(sz);
+    let w: i32 = glue_sysv_arg_stack_words_c(sz, u);
+    if (glue_sysv_arg_is_memory_by_value_c(sz) != 0) {
+      nw = nw + w;
+    } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar, pty) != 0
+        || (pty <= 0 && glue_arg_ref_is_sse_float_c(arena, ar, pty) != 0)) {
+      if (fp < 8) {
+        fp = fp + 1;
+      } else {
+        nw = nw + 1;
+      }
+    } else if (u > 0 && gp + u <= reg_max) {
+      gp = gp + u;
+    } else {
+      if (w > 0) {
+        nw = nw + w;
+      } else {
+        nw = nw + 1;
+      }
+    }
+    j = j + 1;
+  }
+  return nw;
 }
 
 // See implementation.

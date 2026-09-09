@@ -2876,9 +2876,9 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
           } else {
             nw += w_j;
           }
-        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j)) {
-          /* AAPCS64 f64: first 8 take v-slots (no stack words); overflow
-           * spills one stack word. Twin of the .x authority pre-pass.
+        } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j)
+                   || (pty_j <= 0 && glue_arg_ref_is_sse_float_c(arena, ar_j, pty_j))) {
+          /* AAPCS64 f64 + variadic f32 extras take v-slots. Twin .x.
            * PLATFORM: MACOS|ARM64 AAPCS64. */
           if (fp_tmp < 8)
             fp_tmp += 1;
@@ -3008,10 +3008,11 @@ int32_t pipeline_asm_emit_call_args_elf_c_impl(struct ast_ASTArena *arena, struc
           }
           continue;
         }
-        if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i)) {
-          /* AAPCS64 f64: v-slot when the FP cursor has room; overflow falls
-           * to one stack word below. GP start stays -1 so the GP place /
-           * load stages skip it. Twin of the .x authority classifier.
+        if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_i, pty_i)
+            || (pty_i <= 0 && glue_arg_ref_is_sse_float_c(arena, ar_i, pty_i))) {
+          /* AAPCS64 f64 + variadic f32 extras (pty<=0) take a v-slot so Cap
+           * va_arg<f32> walking the FP save sees them. Named f32 stays GP
+           * (callee param home is f64-only). Twin of the .x classifier.
            * PLATFORM: MACOS|ARM64 AAPCS64. */
           gp_start_a64[i] = -1;
           gp_units_a64[i] = 1;
@@ -4136,6 +4137,7 @@ int32_t glue_asm_emit_call_with_cleanup_impl(struct ast_ASTArena *arena, struct 
      * Host-export: MEMORY is GP lea — omit MEMORY stack words. */
     int32_t nw = 0;
     int32_t gp_tmp = 0;
+    int32_t fp_tmp = 0;
     int32_t j;
     int32_t reg_max_a = glue_asm_call_reg_max(1);
     for (j = 0; j < nargs; j++) {
@@ -4151,6 +4153,12 @@ int32_t glue_asm_emit_call_with_cleanup_impl(struct ast_ASTArena *arena, struct 
         } else {
           nw += w_j;
         }
+      } else if (glue_arg_ref_is_f64_width_c(arena, ctx, ar_j, pty_j)
+                 || (pty_j <= 0 && glue_arg_ref_is_sse_float_c(arena, ar_j, pty_j))) {
+        if (fp_tmp < 8)
+          fp_tmp += 1;
+        else
+          nw += 1;
       } else if (u_j > 0 && gp_tmp + u_j <= reg_max_a)
         gp_tmp += u_j;
       else
@@ -4496,6 +4504,8 @@ static int32_t try_emit_va_cap_ov_select_elf_c(struct platform_elf_ElfCodegenCtx
                                               struct backend_AsmFuncCtx *ctx, int32_t ta,
                                               int32_t is_fp, int32_t gp_n) {
   int32_t end_delta;
+  int32_t step;
+  int32_t cc;
   uint8_t lbl_sv[64];
   uint8_t lbl_dn[64];
   int32_t n_sv;
@@ -4513,6 +4523,14 @@ static int32_t try_emit_va_cap_ov_select_elf_c(struct platform_elf_ElfCodegenCtx
     return -1;
   if (gp_n < 6)
     gp_n = 6;
+  /* PLATFORM: LINUX|x86_64 rbp-off walks down (step=-1, LE).
+   * PLATFORM: LINUX|aarch64 / MACOS|ARM64 x29+off walks up (step=+1, GE). Twin .x. */
+  step = -1;
+  cc = 3;
+  if (ta == 1) {
+    step = 1;
+    cc = 5;
+  }
   end_delta = 24 + gp_n * 8;
   if (is_fp)
     end_delta += 64;
@@ -4530,11 +4548,11 @@ static int32_t try_emit_va_cap_ov_select_elf_c(struct platform_elf_ElfCodegenCtx
   } else if (arch_x86_64_enc_enc_mov_r10_to_rax(elf_ctx) != 0) {
     return -1;
   }
-  if (backend_enc_add_imm_to_rax_arch(elf_ctx, -end_delta, ta) != 0)
+  if (backend_enc_add_imm_to_rax_arch(elf_ctx, step * end_delta, ta) != 0)
     return -1;
   if (backend_enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0)
     return -1;
-  if (backend_enc_cmp_setcc_movzbl_arch(elf_ctx, 3, ta) != 0)
+  if (backend_enc_cmp_setcc_movzbl_arch(elf_ctx, cc, ta) != 0)
     return -1;
   if (backend_enc_test_eax_eax_arch(elf_ctx, ta) != 0)
     return -1;
@@ -4546,7 +4564,7 @@ static int32_t try_emit_va_cap_ov_select_elf_c(struct platform_elf_ElfCodegenCtx
   } else if (arch_x86_64_enc_enc_mov_r10_to_rax(elf_ctx) != 0) {
     return -1;
   }
-  if (backend_enc_add_imm_to_rax_arch(elf_ctx, -16, ta) != 0)
+  if (backend_enc_add_imm_to_rax_arch(elf_ctx, step * 16, ta) != 0)
     return -1;
   if (ta == 1) {
     if (arch_arm64_enc_enc_mov_x0_to_x3(elf_ctx) != 0)
@@ -4873,8 +4891,8 @@ static int32_t try_emit_va_cap_builtin_call_elf_c(struct ast_ASTArena *arena,
       return -1;
     if (arch_arm64_enc_enc_mov_rax_to_x8(elf_ctx) != 0)
       return -1;
-    /* header+8 rbp-off = lower addr = pointer-8. Twin .x. */
-    if (is_fp && backend_enc_add_imm_to_rax_arch(elf_ctx, -8, ta) != 0)
+    /* PLATFORM: MACOS|ARM64 / LINUX|aarch64 — x29+off; header[8] is +8. Twin .x. */
+    if (is_fp && backend_enc_add_imm_to_rax_arch(elf_ctx, 8, ta) != 0)
       return -1;
     if (arch_arm64_enc_enc_mov_x0_to_x3(elf_ctx) != 0)
       return -1;
@@ -4890,7 +4908,8 @@ static int32_t try_emit_va_cap_builtin_call_elf_c(struct ast_ASTArena *arena,
       return -1;
     if (backend_enc_mov_rbx_to_rax_arch(elf_ctx, ta) != 0)
       return -1;
-    if (backend_enc_add_imm_to_rax_arch(elf_ctx, -8, ta) != 0)
+    /* Next slot is higher x29-off → +8. PLATFORM: MACOS|ARM64 / LINUX|aarch64. Twin .x. */
+    if (backend_enc_add_imm_to_rax_arch(elf_ctx, 8, ta) != 0)
       return -1;
     if (arch_arm64_enc_enc_str_x0_x3(elf_ctx) != 0)
       return -1;
