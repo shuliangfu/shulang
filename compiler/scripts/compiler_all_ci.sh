@@ -189,4 +189,16 @@ else
   _cm_all_shell
 fi
 
+# 7.4.4 v2 CI wiring (2026-09-10): pin↔gen T-symbol freshness gate after the
+# product link — catches "pin edited in git, worktree gen stale" drift before
+# it ships. Non-fatal for now (advisory in the all/CI flow; the standalone
+# ./xbuild drift-gate exits 1 on drift). G.7 body = pin_gen_drift_gate.sh.
+# PLATFORM: SHARED.
+if [ -f scripts/pin_gen_drift_gate.sh ]; then
+  note "CI → pin_gen_drift_gate (advisory)"
+  bash scripts/pin_gen_drift_gate.sh || note "WARN: drift-gate reported drift — run ./xbuild drift-gate"
+else
+  note "WARN: pin_gen_drift_gate.sh missing (7.4.4 v2)"
+fi
+
 note "done (xlang product g05 link · xlang-c seed; wave944 0-make)"
