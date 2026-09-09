@@ -5,6 +5,10 @@
 # 用法：cd compiler && ./scripts/relink_xlang_asm_experimental_bootstrap.sh
 #   (companions via migrate/try-heat/driver_leaf — 0-make post phys-del; twin of build_xlang_asm wave931)
 # Escape: XLANG_EXPERIMENTAL_BOOTSTRAP_VIA_MAKE=1 + Makefile → historic make leaves.
+# PLATFORM: SHARED — product of this script is xlang_asm.experimental only.
+# Product xlang_asm is owned by g05 / build_xlang_asm strict / L4.
+# Escape: XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1 copies onto xlang_asm
+# (explicit promote; WPO ARTIFACTS_ONLY / ensure_experimental MUST NOT set this).
 set -e
 cd "$(dirname "$0")/.."
 BUILD_DIR="build_asm"
@@ -636,6 +640,16 @@ else
   fi
 fi
 
-cp -f xlang_asm.experimental xlang_asm
-experimental_bootstrap_info "OK (copied to xlang_asm)"
+# PLATFORM: SHARED — do not silently promote experimental onto product xlang_asm.
+# Produce-point of "experimental promote 链污染": WPO ensure /
+# ensure_experimental_ast_pool_for_wpo called this script and the copy
+# overwrote Ubuntu gold xlang_asm. G.7: complete this existing relink;
+# do not invent a second WPO/promote path. Darwin strict-fail keep and
+# postlink smoke fallback remain separate documented recovery (not here).
+if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ]; then
+  cp -f xlang_asm.experimental xlang_asm
+  experimental_bootstrap_info "OK (promoted to xlang_asm; XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1)"
+else
+  experimental_bootstrap_info "OK (xlang_asm.experimental only; product xlang_asm untouched)"
+fi
 experimental_bootstrap_info "verify: XLANG_S2_FAIL_ON_EMIT_HEAVY=1 ../tests/run-s2-typeck-emit-heavy.sh"

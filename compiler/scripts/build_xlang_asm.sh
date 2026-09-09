@@ -1162,11 +1162,14 @@ ensure_experimental_ast_pool_for_wpo() {
   return 1
   fi
   # Relink experimental when missing or abi / pipeline_x newer (fallback candidate).
+  # PLATFORM: SHARED — experimental relink writes xlang_asm.experimental only
+  # (no silent cp onto product xlang_asm). Do not export
+  # XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT from this ensure / ARTIFACTS_ONLY.
   if [ ! -x ./xlang_asm.experimental ] \
   || { [ -f "$abi_x" ] && [ "$abi_x" -nt ./xlang_asm.experimental ]; } \
   || { [ -f "$abi_seed" ] && [ "$abi_seed" -nt ./xlang_asm.experimental ]; } \
   || [ pipeline_x.o -nt ./xlang_asm.experimental ] 2>/dev/null; then
-  build_xlang_asm_info "relink xlang_asm.experimental (abi WPO source / pipeline_x.o)"
+  build_xlang_asm_info "relink xlang_asm.experimental (abi WPO source / pipeline_x.o; product xlang_asm untouched)"
   ./scripts/relink_xlang_asm_experimental_bootstrap.sh || return 1
   fi
   return 0
@@ -1453,6 +1456,8 @@ if [ "${XLANG_WPO_REBUILD_ARTIFACTS_ONLY:-}" = "1" ]; then
   # experimental from abi freshness (deleted ast_pool.c never fired). ARTIFACTS
   # dogfood prefers tip ./xlang_asm — only relink strict_glue when pipeline_x.o
   # itself is newer (avoid abi-mtime → full strict relink every dogfood).
+  # experimental relink does not overwrite product xlang_asm (promote escape
+  # must stay unset here).
   ensure_experimental_ast_pool_for_wpo || \
   build_xlang_asm_warn "ensure_experimental_ast_pool_for_wpo failed (WPO rebuild may use stale experimental)"
   if [ -x ./scripts/relink_xlang_asm_strict_glue.sh ] \
