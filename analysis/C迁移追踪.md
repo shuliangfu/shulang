@@ -106,7 +106,7 @@
 
 - ⬜ **7.2.1** 关闭 parser pinned seed — `seeds/parser_asm_thin_c.from_x.c`（~21,935 LOC）仍在；目标从 `pthin_*.x` 重建  
 - 🟡 **7.2.2** parser_gen 去 pin — **产品冷权威 pin-first**（`XLANG_PARSER_FROM_X=0` 默认；tip assemble 仅显式 `=1`）；手术改须 seed+`.x` 同 commit  
-- 🟡 **7.4.4** 双权威禁令验收 — touch `*.x` 须同 commit 禁「只改 seed」；**v1 pin↔gen 漂移闸已落（`34a87530d`）**：`./xbuild drift-gate` 对每对 `seeds/<stem>.linux.x86_64.c` ↔ 工作树 `<stem>.c` 做 cc+nm T 符号集对照（缺 gen／考古退役 skip），双端 15 PASS／5 SKIP 绿＋负样本红验证；直捕 2026-09-10 driver_gen 陈旧坑类。**v2 未做**：`.x`↔pin 语义漂移（须产品 -E）、CI 接线、staged-diff「只改 seed」禁令闸  
+- 🟡 **7.4.4** 双权威禁令验收 — touch `*.x` 须同 commit 禁「只改 seed」；**v1 pin↔gen 漂移闸已落（`34a87530d`）**：`./xbuild drift-gate` 对每对 `seeds/<stem>.linux.x86_64.c` ↔ 工作树 `<stem>.c` 做 cc+nm T 符号集对照（缺 gen／考古退役 skip），双端 15 PASS／5 SKIP 绿＋负样本红验证；直捕 2026-09-10 driver_gen 陈旧坑类。**v2 产生点根修已落（`28315bed2`）**：driver_gen／preprocess／archaeology／lsp 四族 ensure 的 pinned 判定纳入 pin mtime（pin 更新→自动恢复 seed 拷贝；migrate 族本就正确）——陷阱在产生点死掉，双端复演验证（touch pin→无 FORCE→fallback seed 恢复）。**仍未做**：`.x`↔pin 语义漂移闸（被 §3.1 `-E-extern` 发射缺口阻塞——产品 `-E-extern` rc=1/0 行，须先补该缺口）、CI 接线、staged-diff 禁令闸  
 - ✅ **7.4.5** typeck pin 缺体漂移 — pin twin 已补 `typeck_{get,set}_allow_legacy_extern_calls` 体（`7c67cafa2`；与 assemble 注入／glue 边界 allow=0 同语义）
 - ✅ **7.4.6** typeck pin extra-paren — L4 Track L `cc` 硬失败：size/align `ko==18` 与 Cap va 名字链 if 条件多一个 `)`；权威仍 `typeck.x`，pin 孪生去多余 `)`（9 处）。日常 L2 prefer `.x` 藏此债
 - ✅ **7.4.7** typeck archaeology patch 幂等 — L4 g05 `cc typeck_gen.c` 重复定义 `g_typeck_allow_legacy_extern_calls`：7.4.5 pin 已有体、patcher 只认 `XLANG_ALLOW_LEGACY_EXTERN` 注释。G.7 补全既有 patcher（符号已在则 skip）＋pin 补标记。证：Darwin patch skip · `cc -c` 0
