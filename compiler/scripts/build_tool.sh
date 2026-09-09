@@ -189,7 +189,14 @@ sh scripts/cc_inc_tu.sh seeds/build_tool_libc_bridge.from_x.c build_tool_libc_br
 $CC $CFLAGS -Wno-unused -c build_runner_gen.c -o build_runner.o
 # shellcheck disable=SC2086
 $CC $CFLAGS -Wno-unused -c build_runtime_x_gen.c -o build_runtime_x.o
-sh scripts/cc_inc_tu.sh seeds/build_tool_main.from_x.c build_tool_main.o
+# 7.2.1 first knife: .x authority (src/build_tool_main.x) via the cc_inc_tu
+# --auto lane (product -x -E + char** main fixup); seed fallback when no
+# product binary exists (cold bootstrap).
+if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+  sh scripts/cc_inc_tu.sh --auto build_tool_main.o
+else
+  sh scripts/cc_inc_tu.sh seeds/build_tool_main.from_x.c build_tool_main.o
+fi
 # shellcheck disable=SC2086
 $CC $CFLAGS -o build_tool \
   build_tool_main.o build_runner.o build_tool.o build_runtime_x.o build_tool_libc_bridge.o -lc

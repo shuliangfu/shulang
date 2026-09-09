@@ -28,6 +28,31 @@ cd "$(dirname "$0")/.."
 #            authoritative for all other callers (72+ call sites unchanged).
 # PLATFORM: SHARED.
 cc_inc_tu_seed_for_out() {
+  # 7.2.1 first knife (2026-09-10): build_tool_main.o now regenerates from
+  # the .x authority (src/build_tool_main.x) via the product -x -E; the
+  # emitted main signature is fixed to char** (C main requirement — .x has
+  # no char type). Falls back to the seed when no product binary exists.
+  # Prints nothing on fallback so --auto proceeds to the seed table below.
+  if [ "$(basename "$1")" = "build_tool_main.o" ]; then
+    local _btm_prod=""
+    for _b in ./xlang_asm ./xlang ./xlang-c; do
+      [ -x "$_b" ] && _btm_prod="$_b" && break
+    done
+    if [ -n "$_btm_prod" ] && [ -f src/build_tool_main.x ]; then
+      # Stable worktree gen (driver_gen.c lifecycle): regenerated on each
+      # ensure, untracked, compiled in place below.
+      local _btm_gen=build_tool_main_gen.c
+      if "$_btm_prod" -x -E -L .. src/build_tool_main.x >"$_btm_gen" 2>/dev/null \
+         && grep -q '^int32_t main(' "$_btm_gen"; then
+        perl -i -pe 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen" 2>/dev/null || \
+          sed -i.bak 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen"
+        rm -f "${_btm_gen}.bak"
+        printf '%s\n' "$_btm_gen"
+        return 0
+      fi
+      rm -f "$_btm_gen"
+    fi
+  fi
   case "$(basename "$1")" in
     asm_experimental_symbol_bridge.o) printf '%s\n' seeds/asm_experimental_symbol_bridge.from_x.c ;;
     lsp_diag_pipeline_sizes.o) printf '%s\n' seeds/lsp_diag_pipeline_sizes_weak.from_x.c ;;
