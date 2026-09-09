@@ -17978,8 +17978,12 @@ int32_t pipeline_asm_compute_frame_size_c(int32_t num_params, void *arena, int32
   if (size > 0 && size % 16 != 0)
     size += 16 - (size % 16);
   scratch = call_spill;
-  if (scratch < 512)
-    scratch = 512;
+  /* PLATFORM: SHARED — min scratch 2048 (was 512). Darwin -backend c -o
+   * SEGV: invoke_cc_append_argv_head_flags wrote x29+0x898 past a 0x6d0
+   * frame and smashed caller xlang_invoke_cc_impl c_paths. Twin of
+   * pipeline_asm_compute_frame_size_c in runtime_pipeline_abi.x. */
+  if (scratch < 2048)
+    scratch = 2048;
   size += scratch;
   return size + 64;
 }
@@ -19444,7 +19448,8 @@ static void w157_sum_expr_call_spill_bytes(void *arena, int32_t expr_ref) {
       arg_ref = pipeline_expr_call_arg_ref(arena, expr_ref, i);
       w157_sum_expr_call_spill_bytes(arena, arg_ref);
     }
-    g_w157_spill_total += n * 32;
+    /* Extra 32B: emit uses n+1 homes (4-arg CALL → 5×32B on ARM64). */
+    g_w157_spill_total += (n + 1) * 32;
     return;
   }
   if (ko == 49) { /* EXPR_METHOD_CALL */
@@ -19467,7 +19472,8 @@ static void w157_sum_expr_call_spill_bytes(void *arena, int32_t expr_ref) {
     w157_sum_expr_call_spill_bytes(arena, op);
     return;
   }
-  if (ko == 22 || ko == 23 || ko == 24 || ko == 41) {
+  if (ko == 22 || ko == 23 || ko == 24 || ko == 41 || ko == 51) {
+    /* 51 = EXPR_ADDR_OF; walk `&buf[i]` CALL args / INDEX temps. */
     op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
     w157_sum_expr_call_spill_bytes(arena, op);
     return;

@@ -35459,6 +35459,8 @@ export function pipeline_asm_var_is_emit_func_param_ptr_c(arena: *u8, mod: *u8, 
  * @param mod *u8 - Module* (may be null)
  * @param func_index i32 - function index
  * @return i32 - 16-aligned frame + scratch + 64 pad (min 64)
+ * Scratch floor 2048 (was 512): emit next_offset can exceed the w157
+ * sum; undersize smashes caller (Darwin invoke_cc_impl c_paths NULL).
  * wave141 pure: G.7 authority (was pipeline_asm_compute_frame_size_c).
  * Cap residual: storage + local_reset/fill tree + home width + return size +
  *   hoist/top-level lets + array/wa/reent/call_spill temps + host_is_arm64.
@@ -35554,8 +35556,16 @@ export function pipeline_asm_compute_frame_size_c(num_params: i32, arena: *u8, b
     }
   }
   scratch = call_spill;
-  if (scratch < 512) {
-    scratch = 512;
+  /* Min scratch is a safety net when the expr walker under-counts emit
+   * next_offset (void CALL expr_stmts, ADDR_OF/INDEX temps, extra 32B
+   * slot per CALL). wave157 used 512; Darwin `-backend c -o` SEGV showed
+   * invoke_cc_append_argv_head_flags storing at x29+0x898 past a 0x6d0
+   * frame (512 scratch) and smashing caller xlang_invoke_cc_impl's
+   * c_paths context. 2048 covers the observed ~1032B high-water.
+   * PLATFORM: SHARED — ARM64 AAPCS64 smash is the first reporter; x86
+   * SysV has the same under-size, often hidden by red zone / padding. */
+  if (scratch < 2048) {
+    scratch = 2048;
   }
   size = size + scratch;
   return size + 64;
@@ -63985,8 +63995,11 @@ function w157_sum_expr_call_spill_bytes(arena: *u8, expr_ref: i32): void {
       w157_sum_expr_call_spill_bytes(arena, arg_ref);
       i = i + 1;
     }
-    // 32B per reg-class arg (GLUE_ASM_CALL_SPILL_SLOT_BYTES).
-    g_w157_spill_total = g_w157_spill_total + n * 32;
+    // 32B per reg-class arg (GLUE_ASM_CALL_SPILL_SLOT_BYTES) plus one
+    // extra 32B slot: ARM64 emit uses 5 homes for a 4-arg CALL
+    // (glue_sysv_spill_rax_rdx_to_frame_c stride 32, plus ADDR_OF/INDEX
+    // temp). METHOD already counted receiver as +1.
+    g_w157_spill_total = g_w157_spill_total + (n + 1) * 32;
     return;
   }
   // EXPR_METHOD_CALL = 49
@@ -64032,8 +64045,11 @@ function w157_sum_expr_call_spill_bytes(arena: *u8, expr_ref: i32): void {
     w157_sum_expr_call_spill_bytes(arena, op);
     return;
   }
-  // unary / LOGNOT / RETURN-style operand (22..24, 41)
-  if (ko == 22 || ko == 23 || ko == 24 || ko == 41) {
+  // unary / LOGNOT / RETURN-style operand (22..24, 41) + ADDR_OF (51).
+  // ADDR_OF of INDEX (`&buf[0]` as a CALL arg) must be walked so nested
+  // calls inside the operand count; emit also parks INDEX temps on
+  // next_offset which the CALL n*32 term does not cover alone.
+  if (ko == 22 || ko == 23 || ko == 24 || ko == 41 || ko == 51) {
     unsafe {
       op = pipeline_expr_unary_operand_ref_at(arena, expr_ref);
     }
