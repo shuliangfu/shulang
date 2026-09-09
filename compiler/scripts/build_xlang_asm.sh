@@ -2223,6 +2223,16 @@ ensure_pipeline_wpo_strict_link_alias_obj() {
   if [ "${STRICT_LINK_BUILD_ASM_WPO:-0}" -ne 1 ] || ! asm_pipeline_wpo_strict_reach_ok; then
   return 0
   fi
+  # 7.2.1 seventh knife: .x authority via cc_inc_tu --auto prefer lane;
+  # seed fallback when no product binary (cold start).
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$ALIAS_O" ] || [ src/pipeline_wpo_strict_link_alias.x -nt "$ALIAS_O" ] \
+       || { [ -f "$ALIAS_SRC" ] && [ "$ALIAS_SRC" -nt "$ALIAS_O" ]; }; then
+      echo " cc_inc_tu --auto (src/pipeline_wpo_strict_link_alias.x) -> $ALIAS_O (WPO strict link alias)"
+      sh scripts/cc_inc_tu.sh --auto "$ALIAS_O" || return 1
+    fi
+    return 0
+  fi
   if [ ! -f "$ALIAS_SRC" ]; then
   return 1
   fi

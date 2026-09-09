@@ -34,7 +34,7 @@ cc_inc_tu_seed_for_out() {
   # no product binary exists. Prints nothing on fallback so --auto proceeds
   # to the seed table below.
   case "$(basename "$1")" in
-  build_tool_main.o|crt0_mingw.o|pipeline_glue_link.o|pipeline_wpo_typecheck_emit_bridge.o|typeck_lsp_io_stub.o)
+  build_tool_main.o|crt0_mingw.o|pipeline_glue_link.o|pipeline_wpo_typecheck_emit_bridge.o|typeck_lsp_io_stub.o|pipeline_wpo_strict_link_alias.o)
     local _btm_prod=""
     for _b in ./xlang_asm ./xlang ./xlang-c; do
       [ -x "$_b" ] && _btm_prod="$_b" && break
@@ -44,6 +44,7 @@ cc_inc_tu_seed_for_out() {
     [ "$(basename "$1")" = "pipeline_glue_link.o" ] && _btm_src=src/pipeline_glue_link.x
     [ "$(basename "$1")" = "pipeline_wpo_typecheck_emit_bridge.o" ] && _btm_src=src/pipeline_wpo_typecheck_emit_bridge.x
     [ "$(basename "$1")" = "typeck_lsp_io_stub.o" ] && _btm_src=src/typeck_lsp_io_stub.x
+    [ "$(basename "$1")" = "pipeline_wpo_strict_link_alias.o" ] && _btm_src=src/pipeline_wpo_strict_link_alias.x
     if [ -n "$_btm_prod" ] && [ -f "$_btm_src" ]; then
       # Stable worktree gen (driver_gen.c lifecycle): regenerated on each
       # ensure, untracked, compiled in place below.
@@ -55,6 +56,7 @@ cc_inc_tu_seed_for_out() {
       [ "$(basename "$1")" = "pipeline_glue_link.o" ] && _btm_need='^int32_t pipeline_run_x_pipeline('
       [ "$(basename "$1")" = "pipeline_wpo_typecheck_emit_bridge.o" ] && _btm_need='^int32_t run_x_pipeline_typecheck_entry_emit('
       [ "$(basename "$1")" = "typeck_lsp_io_stub.o" ] && _btm_need='^ssize_t typeck_read_message('
+      [ "$(basename "$1")" = "pipeline_wpo_strict_link_alias.o" ] && _btm_need='^int32_t pipeline_run_x_pipeline_impl('
       if "$_btm_prod" -x -E -L .. "$_btm_src" >"$_btm_gen" 2>/dev/null \
          && grep -q "$_btm_need" "$_btm_gen"; then
         # char** fixup applies to entry leaves only (bridge keeps uint8_t* ABI).
