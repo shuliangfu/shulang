@@ -8,7 +8,6 @@
  *
  * G.7: one authority per symbol (bodies only here, not duplicated in L8b).
  * Cap residual: undef_sym / has_defined / push/ensure / nm host _impl (mega).
- * Prove surface: seeds/labi_ondemand_heavy_surface.from_x.c (or combined prove).
  */
 
 

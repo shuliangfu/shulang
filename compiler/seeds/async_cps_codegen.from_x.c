@@ -15,7 +15,6 @@
  * 冷启动/无 PREFER：完整 pure C 体 + 原生 FILE* fputs；-c 本文件（无宏）。
  * 产品 PREFER（2026-07-21）：g05/Makefile full .x + rest (-DXLANG_ASYNC_CPS_CODEGEN_FROM_X)
  *   ld -r → src/async/async_cps_codegen.o（独立 TU，非 pipeline_glue #include）。
- * Prove：seeds/async_cps_codegen_surface.from_x.c nm IDENTICAL（pure surface）。
  * PLATFORM: SHARED — pure helper 面跨平台；Ubuntu 金标 prove。
  */
 /**

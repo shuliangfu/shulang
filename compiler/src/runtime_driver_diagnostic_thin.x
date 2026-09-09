@@ -7,7 +7,6 @@
 // runtime_driver_diagnostic R2 thin.
 // Product PREFER_X_O: g05_try_x_to_o -> thin.o + seeds/runtime_driver_diagnostic.from_x.c rest
 //   (-DXLANG_L2_RDD_THIN_FROM_X) ld -r -> src/runtime_driver_diagnostic.o
-// prove IDENTICAL: thin.x <-> seeds/runtime_driver_diagnostic_thin_surface.from_x.c
 // Pure bodies: fixed-msg typeck + pipe orch + assemble pure + append_* + env pure
 //   + parse_fail (XP001) + codegen_fail note + typeck_func_fail (XT001)
 //   + typeck_ptr_field / typeck_ret_fail debug notes (getenv gate + append+note)

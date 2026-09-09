@@ -1,7 +1,6 @@
 /* seeds/backend_arch_emit_dispatch_thin.from_x.c
  * G-02f backend_arch_emit_dispatch R2 thin full surface (legacy name) — isomorphic with src/asm/backend_arch_emit_dispatch_thin.x
  * Product PREFER_X_O: g05_try_x_to_o(thin.x) + full seed rest (-DXLANG_L2_ARCH_EMIT_THIN_FROM_X) ld -r
- * Prove: prefer seeds/backend_arch_emit_dispatch_thin_surface.from_x.c (same body; R2 lock name)
  * Cap residual: arch_*_emit_* C 尾 outside thin (asm_backend_partial / cold full seed shells)
  * Regen: ./xlang -E ... src/asm/backend_arch_emit_dispatch_thin.x | filter DBG + polish externs
  */

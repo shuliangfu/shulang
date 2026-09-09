@@ -35,7 +35,6 @@ int32_t driver_asm_output_want_exe(uint8_t *path) {
 /**
  * asm 后端 C 桩：-backend asm 时由 pipeline 调用，写出最小 GAS（main return 42）。
  * 9.7.3 G.7：行表与 append 唯一权威在 wave14 访问器，本 cold twin 与
- * rt_asm_stub.x / rt_asm_stub_surface.from_x.c 三方同构（同循环同边界检查）。
  * 实验 asm-only 链并入 build_asm/backend.o 时须为 weak，避免与 backend.x 重复定义。
  */
 XLANG_WEAK int32_t asm_codegen_ast(void *module, void *arena, void *out) {

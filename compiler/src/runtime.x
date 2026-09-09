@@ -863,8 +863,7 @@ export function driver_c_mod_imports_are_core_only(mod: *u8): i32 {
  * here would first-wins the same class as the deleted
  * smoke_lex_dump / c_typeck_entry / esc_gate stubs. Missing
  * provider → link UNDEF, not a silent _impl -1.
- * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
- * isomorphic; product g05 does not link this mega.
+ * PLATFORM: SHARED — product g05 does not link this mega.
  */
 
 /** Exported function `driver_lib_root_default`.
@@ -1006,8 +1005,7 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  * the same class as the deleted esc_gate / typeck / parser /
  * asm_codegen_ast stubs. Missing provider → link UNDEF, not a
  * silent _impl -1.
- * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
- * isomorphic; product g05 does not link this mega.
+ * PLATFORM: SHARED — product g05 does not link this mega.
  */
 
 /*
@@ -1019,8 +1017,7 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  * export names here would
  * first-wins the same class. Missing provider → link UNDEF, not a
  * silent _impl -1.
- * PLATFORM: SHARED — prove surface isomorphic; product g05 does
- * not link this mega.
+ * PLATFORM: SHARED — product g05 does not link this mega.
  */
 
 /*
@@ -1030,7 +1027,6 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  * Re-adding these export names here would duplicate rt_stack (ELF/Mach-O
  * first-wins) the same class as the deleted typeck/parser/asm_codegen_ast
  * weak stubs. Missing provider → link UNDEF, not a silent _impl -1.
- * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is isomorphic;
  * product g05 links rt_stack.o, not this mega.
  */
 
@@ -1086,8 +1082,7 @@ export function driver_run_x_emit_c_from_compile_state(state: *u8, argc: i32, ar
  * body — same class as the deleted smoke / c_typeck / esc_gate /
  * via_cparser stubs. Missing provider → link UNDEF, not a silent
  * _impl -1. Do not delete the spawn body itself.
- * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
- * isomorphic; product g05 does not link this mega.
+ * PLATFORM: SHARED — product g05 does not link this mega.
  */
 
 /*
@@ -1180,8 +1175,7 @@ export function driver_run_compiler_parsed(p: *u8, argc: i32, argv: *u8): i32 { 
  * (always BLD001). Re-adding this export here would first-wins the
  * same class as the deleted smoke / c_typeck / esc_gate stubs.
  * Missing provider → link UNDEF, not a silent _impl -1.
- * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
- * isomorphic; product g05 does not link this mega.
+ * PLATFORM: SHARED — product g05 does not link this mega.
  */
 
 // See implementation.

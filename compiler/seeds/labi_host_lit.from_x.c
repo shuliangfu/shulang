@@ -10,7 +10,6 @@
  * FROM_X 下本文件仅前向声明 + slice marker（产品 rest 业务 H=0）。
  * 冷启动/无 PREFER 时仍编译完整 C thin 体（可与 mega _impl 并存）。
  *
- * Prove：seeds/labi_host_lit_surface.from_x.c（-E 同构）nm IDENTICAL。
  */
 
 /* Host #if bodies provided by runtime_link_abi.from_x.c rest (always). */

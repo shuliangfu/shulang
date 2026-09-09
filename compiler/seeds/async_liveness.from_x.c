@@ -9,7 +9,6 @@
  * 冷启动/无 PREFER：完整 pure C 体 + FILE* emit 用原生 fputs；-c 本文件。
  * 产品 PREFER（2026-07-21）：g05/Makefile full .x + rest (-DXLANG_ASYNC_LIVENESS_FROM_X)
  *   ld -r → src/async/async_liveness.o（独立 TU，非 pipeline_glue #include）。
- * Prove：seeds/async_liveness_surface.from_x.c nm IDENTICAL（pure surface）。
  * PLATFORM: SHARED — pure helper 面跨平台；Ubuntu 金标 prove。
  */
 /**

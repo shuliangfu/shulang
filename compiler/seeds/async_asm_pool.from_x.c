@@ -12,7 +12,6 @@
  *   DRIVER_SEED_SUPPORT_EXTRA / g05_relink_env（所有模式）。
  * 冷启动/无 PREFER：完整 C 体 → src/async/async_asm_pool.o。
  * PREFER：src/asm/async_asm_pool.x + 本 rest (-DXLANG_ASYNC_ASM_POOL_FROM_X) ld -r。
- * Prove：seeds/async_asm_pool_surface.from_x.c（-E 同构）nm IDENTICAL。
  * PLATFORM: SHARED — pool API 跨平台一致。
  */
 /**

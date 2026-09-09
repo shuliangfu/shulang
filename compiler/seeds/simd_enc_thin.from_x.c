@@ -1,7 +1,6 @@
 /* seeds/simd_enc_thin.from_x.c
  * G-02f simd_enc R2 thin full surface (legacy name) — isomorphic with src/asm/simd_enc_thin.x
  * Product PREFER_X_O: g05_try_x_to_o(thin.x) + full seed rest (-DXLANG_L2_SIMD_ENC_THIN_FROM_X) ld -r
- * Prove: prefer seeds/simd_enc_thin_surface.from_x.c (same body; R2 lock name)
  * Cap residual: *_impl / encode C 尾 in seeds/simd_enc.from_x.c rest
  * Regen: ./xlang -E ... src/asm/simd_enc_thin.x | filter DBG + polish externs
  */

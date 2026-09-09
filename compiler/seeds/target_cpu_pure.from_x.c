@@ -24,7 +24,6 @@
  * FROM_X 下本文件业务 H=0（仅 extern 声明 + slice marker）。
  * 冷启动/无 PREFER 时仍编译完整 C 体（可与 mega 并存）。
  *
- * Prove：seeds/target_cpu_pure_surface.from_x.c（-E 同构）nm IDENTICAL。
  *
  * Exports: pending, resolve, simd spelling, print.
  * G-02f-6: also embeds OS detect_host / generic_for_host (#if/sysctl/proc).

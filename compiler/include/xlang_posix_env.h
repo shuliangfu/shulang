@@ -2,7 +2,7 @@
  * Why: MinGW <stdlib.h> declares _putenv_s but not setenv/unsetenv.
  *      driver_gen.c:559 (generated from src/driver.x main_cmd_run) calls
  *      setenv("XLANG_RUN_QUIET", "1", 1). Multiple seed files (runtime_env_os,
- *      runtime_link_abi, rt_compile, lsp_diag_pipeline_ctx, rt_compile_surface)
+ *      runtime_link_abi, rt_compile, lsp_diag_pipeline_ctx)
  *      also call setenv/unsetenv. On macOS/Linux libc provides these; on MinGW
  *      we provide static inline wrappers calling _putenv_s.
  *

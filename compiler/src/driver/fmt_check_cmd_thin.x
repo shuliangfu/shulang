@@ -59,7 +59,6 @@
 // See implementation.
 // PREFER_X_O：thin.o + seed-rest（-DXLANG_L2_FMT_CHECK_THIN_FROM_X）ld -r
 //   → fmt_check_cmd_driver.o
-// Prove IDENTICAL：seeds/fmt_check_cmd_thin_surface.from_x.c
 // Cap residual pure：fmt_check ALWAYS residual 0 + path_bss pure（hybrid rest T=0）
 // See implementation.
 //   set_current_file / print / cwd_fallback / try_walk / path_resolve_abs /
