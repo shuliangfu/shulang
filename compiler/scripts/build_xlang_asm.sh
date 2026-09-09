@@ -2196,6 +2196,16 @@ EOF
 ensure_pipeline_wpo_typecheck_emit_bridge_obj() {
   local BR_O="$BUILD_DIR/pipeline_wpo_typecheck_emit_bridge.o"
   local BR_SRC="seeds/pipeline_wpo_typecheck_emit_bridge.from_x.c"
+  # 7.2.1 fifth knife: .x authority (src/pipeline_wpo_typecheck_emit_bridge.x)
+  # via cc_inc_tu --auto prefer lane; seed fallback when no product binary.
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$BR_O" ] || [ src/pipeline_wpo_typecheck_emit_bridge.x -nt "$BR_O" ] \
+       || { [ -f "$BR_SRC" ] && [ "$BR_SRC" -nt "$BR_O" ]; }; then
+      echo " cc_inc_tu --auto (src/pipeline_wpo_typecheck_emit_bridge.x) -> $BR_O (WPO typecheck emit bridge)"
+      sh scripts/cc_inc_tu.sh --auto "$BR_O" || return 1
+    fi
+    return 0
+  fi
   if [ ! -f "$BR_SRC" ]; then
   return 1
   fi
