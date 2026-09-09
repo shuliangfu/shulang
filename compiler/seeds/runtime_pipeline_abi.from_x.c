@@ -63076,8 +63076,16 @@ int32_t pipeline_asm_user_deps_need_coemit(char **dep_paths, int32_t n) {
     return 0;
   for (i = 0; i < n; i++) {
     uint8_t *p = (uint8_t *)(dep_paths[i] ? dep_paths[i] : "");
-    /* Hosted std.* still skip co-emit (prebuilt .o / on-demand). */
+    /* Hosted std.* / std/ still skip co-emit (prebuilt .o / on-demand).
+     * File paths (std/compress/mod.x, ../std/...) must not co-emit: Ubuntu
+     * then emits s.hdr.inited as movq to offset 0, wiping gzip magic so
+     * stream process returns -1. Darwin c_face + gzip.o stores str w #0xc.
+     * PLATFORM: SHARED */
     if (memcmp(p, "std.", 4) == 0)
+      continue;
+    if (memcmp(p, "std/", 4) == 0)
+      continue;
+    if (strstr((const char *)p, "/std/") != NULL)
       continue;
     /* Only in-tree core/ — scratch core.m6 etc. must co-emit (UN _core_*). */
     if (pipeline_asm_user_dep_is_in_tree_core(p) != 0)
