@@ -90,7 +90,6 @@ export extern "C" function drv_path_ends_x_impl(buf: *u8, len: i32): i32;
 
 export extern "C" function driver_deps_are_std_core_closure_only_impl(dep_paths: *u8, n_deps: i32): i32;
 export extern "C" function driver_c_mod_imports_are_core_only_impl(mod: *u8): i32;
-export extern "C" function driver_check_only_c_typeck_impl(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32): i32;
 export extern "C" function driver_lib_root_default_impl(root_buf: *u8): void;
 export extern "C" function runtime_test_status_to_rc_impl(script: *u8, st: i32): i32;
 
@@ -105,7 +104,6 @@ export extern "C" function driver_lib_roots_from_key_impl(lib_key: *u8, out_arr:
 export extern "C" function runtime_prepare_dce_ctx_impl(mod: *u8, all_dep_mods: *u8, n_all: i32, used_funcs: *u8, n_used: *i32, used_mono: *u8, used_type_names: *u8, n_used_types: *i32, wpo_reach: *u8, dce: *u8, dce_ready: *i32): void;
 export extern "C" function driver_run_x_emit_c_from_compile_state_impl(state: *u8, argc: i32, argv: *u8): i32;
 
-export extern "C" function driver_c_frontend_smoke_impl(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32): i32;
 export extern "C" function driver_try_compile_via_shu_c_sibling_impl(argc: i32, argv: *u8): i32;
 
 export extern "C" function write_fs_path_map_error_abi_inline_impl(cf: *u8): i32;
@@ -858,23 +856,19 @@ export function driver_c_mod_imports_are_core_only(mod: *u8): i32 {
   return 0;
 }
 
-// driver_check_only_c_typeck: see function docblock below.
-
-/** Exported function `driver_check_only_c_typeck`.
- * Implements `driver_check_only_c_typeck`.
- * @param input_path *u8
- * @param src *u8
- * @param lib_roots_arr *u8
- * @param n_lib_roots i32
- * @return i32
+/*
+ * Retired mega wrapper: driver_check_only_c_typeck forwarded to
+ * never-defined driver_check_only_c_typeck_impl. C frontend was
+ * physically deleted; product typeck authority is
+ * pipeline_typeck_entry_module / pipeline_typeck_entry_module_c.
+ * Call sites in rt_run_compiler_parsed are behind
+ * !XLANG_NO_C_FRONTEND (product defines it). Re-adding this export
+ * here would first-wins the same class as the deleted
+ * smoke_lex_dump / c_typeck_entry / esc_gate stubs. Missing
+ * provider → link UNDEF, not a silent _impl -1.
+ * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
+ * isomorphic; product g05 does not link this mega.
  */
-#[no_mangle]
-export function driver_check_only_c_typeck(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32): i32 {
-  unsafe {
-    return driver_check_only_c_typeck_impl(input_path, src, lib_roots_arr, n_lib_roots);
-  }
-  return 0;
-}
 
 /** Exported function `driver_lib_root_default`.
  * Implements `driver_lib_root_default`.
@@ -1021,6 +1015,19 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  */
 
 /*
+ * Retired mega wrappers: driver_c_frontend_smoke /
+ * driver_check_only_c_typeck forwarded to never-defined *_impl.
+ * Same class as smoke_lex_dump / c_typeck_entry above (C frontend
+ * gone; product typeck = pipeline_typeck_entry_module). Call sites
+ * in rt_run_asm_backend / rt_run_compiler_parsed remain behind
+ * !XLANG_NO_C_FRONTEND. Re-adding these export names here would
+ * first-wins the same class. Missing provider → link UNDEF, not a
+ * silent _impl -1.
+ * PLATFORM: SHARED — prove surface isomorphic; product g05 does
+ * not link this mega.
+ */
+
+/*
  * Retired mega wrappers: driver_stack_esc_gate_thread_fn / large_stack
  * forwarded to never-defined *_impl. Product authority is
  * src/runtime/rt_stack.x (+ seeds/rt_stack.from_x.c cold twin).
@@ -1068,15 +1075,11 @@ export function driver_run_x_emit_c_from_compile_state(state: *u8, argc: i32, ar
   return 0 - 1;
 }
 
-/* See implementation. */
-
-#[no_mangle]
-export function driver_c_frontend_smoke(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32): i32 {
-  unsafe {
-    return driver_c_frontend_smoke_impl(input_path, src, lib_roots_arr, n_lib_roots);
-  }
-  return 0 - 1;
-}
+/*
+ * Retired mega wrapper: driver_c_frontend_smoke (see
+ * driver_c_frontend_smoke / driver_check_only_c_typeck retirement
+ * above). PLATFORM: SHARED — do not re-add.
+ */
 
 /** Exported function `driver_try_compile_via_shu_c_sibling`.
  * Implements `driver_try_compile_via_shu_c_sibling`.
