@@ -121,7 +121,12 @@ run_smoke() {
     if [ "$_rc" -ne 0 ]; then
       return 1
     fi
-    ${CC:-cc} -O2 -o "$SMOKE_OUT" "${SMOKE_OUT%.exe}.c" 2>>"$_log"
+    # PLATFORM: SHARED — generated C always `#include <xlang_va_cap.h>`
+    # (codegen emit_header). Bare `cc -O2 file.c` misses compiler/include
+    # (Darwin -backend c -o SEGV in invoke_cc_impl then this fallback
+    # died on fatal error: xlang_va_cap.h file not found). Match product
+    # host-cc -I. -Iinclude -Isrc. cwd is compiler/.
+    ${CC:-cc} -O2 -I. -Iinclude -Isrc -o "$SMOKE_OUT" "${SMOKE_OUT%.exe}.c" 2>>"$_log"
     _rc=$?
     rm -f "${SMOKE_OUT%.exe}.c"
     if [ "$_rc" -ne 0 ]; then
