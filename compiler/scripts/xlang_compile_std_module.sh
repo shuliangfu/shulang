@@ -937,6 +937,36 @@ for x_path in "$@"; do
       rm -f "${gen_c}.bak" 2>/dev/null || true
     fi
   fi
+  # §3.3 (2026-09-10): std/compress impl prefix injection.
+  # Root cause: compress-family mod.x calls its sibling lib via QUALIFIED import
+  # (libz.compress_gzip_compress_c) which mangles to std_compress_<fam>_libz_*,
+  # but the impl .x C emission is BARE on both lanes (-lib-name "" and no flag),
+  # and 7e2fef61b stopped co-emitting std/ dep bodies with mod.x (link_only
+  # std.compress), so nothing prefixes the impl faces anymore → mod.o U
+  # std_compress_gzip_libz_* vs bare T (run-compress UNDEF, dual-end L4 red).
+  # G.7 completes the vehicle's own documented contract ("impl .x without
+  # -lib-name uses the path-derived prefix"): for impl sources under
+  # std/compress/, prefix their export-function names in gen_c (defs, decls and
+  # intra-file calls alike) with the path-derived module prefix. The name list
+  # is scraped from the source's `^export function` lines — no second symbol
+  # table to drift; FFI extern "C" names are not in the list and stay bare.
+  # Word-boundary replacement cannot re-match already-prefixed ids.
+  # PLATFORM: SHARED.
+  # mod.x already emits its own entry path prefix (mod segment skipped) — only
+  # impl files (libz.x / lib.x) need the injection.
+  case "$x_path" in
+    ../std/compress/*)
+      if [ "$base_name" != "mod.x" ]; then
+      _impl_pref=$(printf '%s' "$x_path" | sed -e 's|^\.\./||' -e 's|\.x$||' -e 's|/|_|g')
+      if [ -n "$_impl_pref" ] && [ -f "$gen_c" ] && [ -s "$gen_c" ]; then
+        _exp_names=$(sed -n 's/^export function \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$x_path" | sort -u)
+        for _en in $_exp_names; do
+          perl -i -pe "s/\\b${_en}\\b/${_impl_pref}_${_en}/g" "$gen_c" 2>/dev/null || true
+        done
+      fi
+      fi
+      ;;
+  esac
   # 已有直接 .o：跳过 gen_c 后处理与二次 cc
   if [ "$use_direct_o" = "1" ]; then
     if [ -z "$obj_files" ]; then
