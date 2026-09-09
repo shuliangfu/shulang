@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 路径／验收／为何开）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端 `/tmp` 日志、「证：…」长叙事。波次流水只写 `[自举进度.md](自举进度.md)` §6。  
 > **考古副本**（本波重写前全文）：`[archive/C迁移追踪-流水账归档-20260825.md](archive/C迁移追踪-流水账归档-20260825.md)`  
-> **刷新**：2026-09-09 · tip **`213ca9ec5`**（代码：modlet 表 64→256＋注册高声拒）· 钉盘 **`e194cd294`**（不随微步升钉）
+> **刷新**：2026-09-09 · tip **`2eb6aaa83`**（代码：删 bridge 4 参 weak `asm_codegen_ast` -1 桩）· 钉盘 **`e194cd294`**（不随微步升钉）
 
 ### 维护约定
 
@@ -311,7 +311,8 @@
 
 - ✅ **9.7.1** FILE／pctx／host／defines／work 槽 — **全平台闭环 ✅（`75e074199`）**：opaque `FILE*` 脸一次换 fd 句柄面，新权威 `include/xlang_driver_stream_cap.h`；落点 diag 微 ABI／rt_preamble／runtime_driver_abi／rt_run_* 全链 fopen/fdopen/fwrite→Cap io＋runtime_pipeline_abi 47 处 fprintf→`pabi_trace`；fmt 权威补 `%-`／`%s` 宽度／`%x` 零填充。验收＝双端全量 .o nm stdio 裸脸=0＋4 产品 stdio-face UNDEF=0＋双端矩阵 5/5。残：9.7.2–7 槽位另刀；va gate 红＝10.7.1 域既有债。
 - ✅ **9.7.2** lib_roots 槽 + Parsed 填表 — **双端闭环 ✅（`b93d1a9e4`）**：`xlang_target_cpu_print` 脸 `FILE*`→`uint8_t*`；rt_dispatch_impl/rt_run_exec 冷体 `stdout`→`driver_stdio_stdout()`＋opt 默认→wave35 BSS（G.7 单权威）。验收＝冷编 nm stdio=0＋`--print-target-cpu` 输出双端不变＋双端矩阵 5/5＋13 gate OK。
-- ✅ **9.7.3** GAS 行表 + OutBuf append — **双端闭环 ✅（`b38a3beac`）**：rt_asm_stub 冷体删第三份 GAS 表副本＋内联 append，改 wave14 访问器同构（表/append 单权威）。验收＝输出与旧体逐字节一致＋双端矩阵 5/5＋13 gate OK。立卡：4 参 weak `asm_codegen_ast` 同名桩先序隐患（symbol-bridge 域）。
+- ✅ **9.7.3** GAS 行表 + OutBuf append — **双端闭环 ✅（`b38a3beac`）**：rt_asm_stub 冷体删第三份 GAS 表副本＋内联 append，改 wave14 访问器同构（表/append 单权威）。验收＝输出与旧体逐字节一致＋双端矩阵 5/5＋13 gate OK。
+- ✅ **9.7.3 residual** bridge 4 参 weak 桩先序 — **双端闭环 ✅（`2eb6aaa83`）**：权威 `seeds/asm_experimental_symbol_bridge.from_x.c` 4 参 weak `asm_codegen_ast` return -1 与 rt_asm_stub 3 参 GAS 同名；ELF／Mach-O 先到先得（Darwin 产品 nm＝weak `mov w0,#-1`，3 参强体被 dead-strip）。修＝G.7 删该 -1 桩（与同文件 typeck_x_ast／parser_parse_into_buf 同构）；`backend_asm_codegen_ast`／`asm_asm_codegen_ast` 仍弱转发；缺真体→UNDEF。禁第二套桩；`asm_codegen_elf_o` 5 参 -1 与 nest 冻 64 不动。验收＝双端探针 bridge_first／provider_first direct=42 alias=42＋矩阵 5/5；Darwin 产品 `asm_codegen_ast` 现为强 3 参 GAS。残＝9.7.6 退役 mega `src/runtime.x` stale 委托块。
 - ✅ **9.7.4** driver_stdio_* + driver_entry_*_slot — **双端闭环 ✅（`37f402db7`）**：rt_entry 冷体 stale FILE* extern 换 `uint8_t*` fd 句柄脸＋`fputs`/`printf`→Cap fd 写＋argv 旁路改 wave21 槽。验收＝smoke 字节全等＋句柄编码正确＋stdio 脸=0＋双端矩阵 5/5。
 - ✅ **9.7.5** usage_write + compiled_body — **双端闭环 ✅（`d9ec90593`）**：rt_run_exec 冷体 spawn 内联体改薄委托 wave42 body（fork 单权威）＋九处 doc 脸漂移修正。验收＝探针委托透传/守卫全绿＋.o 零 fork UNDEF＋双端矩阵 5/5。
 - ✅ **9.7.6** driver_run_stack_esc_gate（pthread）— **双端闭环 ✅（`b2870a5e7`）**：rt_stack 冷体旁路 wave37 编排改三方同构＋thread_fn 补 null 守卫。验收＝esc_gate 符号面 4/4＋探针三路绿＋双端矩阵 5/5。立卡：退役 mega `src/runtime.x` stale 委托块。
