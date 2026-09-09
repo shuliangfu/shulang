@@ -16453,9 +16453,11 @@ static int32_t pipeline_asm_modlet_cell_is_data_cold(int32_t csz) {
 }
 
 static pipeline_asm_modlet_table_t g_pipeline_asm_modlet_cold;
+static int32_t g_pipe_modlet_strpool_seq_cold = 0;
 
 static void pipeline_asm_modlet_reset_cold(void) {
   g_pipeline_asm_modlet_cold.n = 0;
+  g_pipe_modlet_strpool_seq_cold = 0;
 }
 
 int32_t pipeline_asm_modlet_name_is_shared(uint8_t *name, int32_t name_len) {
@@ -16509,6 +16511,10 @@ extern int32_t pipeline_elf_ctx_data_poke_u8(uint8_t *ctx_bytes, int32_t off, in
 extern void pipeline_elf_ctx_set_shndx_override(uint8_t *ctx_bytes, int32_t shndx);
 extern int32_t pipeline_elf_ctx_add_label(uint8_t *ctx_bytes, uint8_t *name, int32_t name_len, int32_t offset);
 extern int32_t pipeline_elf_ctx_add_sym(uint8_t *ctx_bytes, uint8_t *name, int32_t name_len, int32_t offset);
+extern int32_t pipeline_elf_ctx_append_reloc_absolute64(uint8_t *ctx_bytes, int32_t offset, uint8_t *name,
+                                                       int32_t name_len);
+extern int32_t glue_asm_string_lit_len(void *arena, int32_t expr_ref);
+extern void pipeline_expr_var_name_into(void *arena, int32_t expr_ref, uint8_t *out64);
 extern int32_t pipeline_expr_array_lit_num_elems_at(void *arena, int32_t expr_ref);
 extern int32_t pipeline_expr_array_lit_elem_ref(void *arena, int32_t expr_ref, int32_t idx);
 extern int32_t pipeline_type_elem_ref_at(void *arena, int32_t type_ref);
@@ -16779,9 +16785,9 @@ static void pipe_modlet_assign_unique_label_cold(int idx, uint32_t module_fp) {
 }
 
 /* Report whether an ARRAY_LIT contains STRING_LIT elements (recursively).
- * String elements are ADDRESSES — cells holding them must stay COMMON and
- * seed at hoist-target entry; the .data bake pokes raw bytes and cannot
- * express pointers (no relocations). Twin of runtime_pipeline_abi.x
+ * Prepare's use_data gate now allows string-bearing arrays through bake
+ * when the interned pool fits; this predicate remains for the seeder
+ * COMMON fallback. Twin of runtime_pipeline_abi.x
  * pipe_modlet_array_lit_has_string_elem.
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
 static int32_t pipe_modlet_array_lit_has_string_elem_cold(void *arena, int32_t init_ref) {
@@ -16799,6 +16805,91 @@ static int32_t pipe_modlet_array_lit_has_string_elem_cold(void *arena, int32_t i
     if (ek == 46 && pipe_modlet_array_lit_has_string_elem_cold(arena, eref) != 0)
       return 1;
   }
+  return 0;
+}
+
+/* Sum interned-pool bytes for every STRING_LIT elem (recursively).
+ * Each STRING_LIT contributes slen+1 (payload + NUL). slen>127 → -1 so
+ * prepare keeps the cell COMMON. Twin of runtime_pipeline_abi.x
+ * pipe_modlet_array_lit_string_pool_bytes.
+ * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
+static int32_t pipe_modlet_array_lit_string_pool_bytes_cold(void *arena, int32_t init_ref) {
+  int32_t ne = 0, ei = 0, eref = 0, ek = 0, slen = 0, sub = 0, total = 0;
+  if (!arena || init_ref <= 0)
+    return 0;
+  ne = pipeline_expr_array_lit_num_elems_at(arena, init_ref);
+  for (ei = 0; ei < ne; ei++) {
+    eref = pipeline_expr_array_lit_elem_ref(arena, init_ref, ei);
+    if (eref <= 0)
+      continue;
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+    if (ek == 59) {
+      slen = glue_asm_string_lit_len(arena, eref);
+      if (slen < 0 || slen > 127)
+        return -1;
+      total += slen + 1;
+    }
+    if (ek == 46) {
+      sub = pipe_modlet_array_lit_string_pool_bytes_cold(arena, eref);
+      if (sub < 0)
+        return -1;
+      total += sub;
+    }
+  }
+  return total;
+}
+
+/* Intern one STRING_LIT into the F7 .data string pool and record an
+ * absolute64 reloc on the already-reserved pointer slot.
+ * Label form (22 bytes, TU-unique): Lxmls_ + hex8(seq) + hex8(module_fp).
+ * Twin of runtime_pipeline_abi.x pipe_modlet_bake_string_lit_elem_to_data.
+ * G.7: reloc authority is pipeline_elf_ctx_append_reloc_absolute64.
+ * PLATFORM: SHARED freestanding · ELF .data RELA · Mach-O __DATA unsigned64. */
+static int32_t pipe_modlet_bake_string_lit_elem_to_data_cold(void *arena, uint8_t *elf_ctx,
+                                                            int32_t eref, int32_t slot_off) {
+  int32_t slen = 0, pool_off = 0, bi = 0, seq = 0, i = 0, nib = 0;
+  uint32_t fp = 0;
+  uint8_t lab[24];
+  uint8_t sbuf[128];
+  if (!arena || !elf_ctx || eref <= 0 || slot_off < 0)
+    return -1;
+  slen = glue_asm_string_lit_len(arena, eref);
+  if (slen < 0 || slen > 127)
+    return -1;
+  memset(sbuf, 0, sizeof(sbuf));
+  pipeline_expr_var_name_into(arena, eref, sbuf);
+  pool_off = pipeline_elf_ctx_emit_data_len(elf_ctx);
+  if (pool_off < 0)
+    return -1;
+  if (pipeline_elf_ctx_append_data_zeros(elf_ctx, slen + 1) != 0)
+    return -1;
+  for (bi = 0; bi < slen; bi++) {
+    if (pipeline_elf_ctx_data_poke_u8(elf_ctx, pool_off + bi, (int32_t)sbuf[bi]) != 0)
+      return -1;
+  }
+  g_pipe_modlet_strpool_seq_cold += 1;
+  seq = g_pipe_modlet_strpool_seq_cold;
+  fp = pipe_modlet_module_fp_cold();
+  lab[0] = (uint8_t)'L';
+  lab[1] = (uint8_t)'x';
+  lab[2] = (uint8_t)'m';
+  lab[3] = (uint8_t)'l';
+  lab[4] = (uint8_t)'s';
+  lab[5] = (uint8_t)'_';
+  for (i = 0; i < 8; i++) {
+    nib = (seq >> ((7 - i) * 4)) & 15;
+    lab[6 + i] = (uint8_t)(nib >= 10 ? (87 + nib) : (48 + nib));
+  }
+  for (i = 0; i < 8; i++) {
+    nib = (int32_t)((fp >> ((7 - i) * 4)) & 15u);
+    lab[14 + i] = (uint8_t)(nib >= 10 ? (87 + nib) : (48 + nib));
+  }
+  if (pipeline_elf_ctx_add_label(elf_ctx, lab, 22, pool_off) != 0)
+    return -1;
+  if (pipeline_elf_ctx_add_sym(elf_ctx, lab, 22, pool_off) != 0)
+    return -1;
+  if (pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, lab, 22) != 0)
+    return -1;
   return 0;
 }
 
@@ -17010,9 +17101,10 @@ static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t
  * Bake ARRAY_LIT constant elems into an already-reserved .data cell.
  * Elem contract: EXPR_LIT and EXPR_NEG-over-LIT fold via
  * pipe_modlet_array_lit_elem_const_val_cold; anything else loud-fails
- * (the historic silent drop baked zeros for `[-1, 2]`); STRING_LIT here
- * means prepare's has-string predicate missed the cell (pointers are not
- * bytes): loud-fail. span_bytes bounds the literal (cell size at top call,
+ * (the historic silent drop baked zeros for `[-1, 2]`); STRING_LIT elems
+ * intern into the .data string pool and record an absolute64 reloc on
+ * the pointer slot (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64).
+ * slen>127 loud-fails. span_bytes bounds the literal (cell size at top call,
  * row size for rows); exceeding span is a loud fail, never silent zero.
  * Negative elems peel little-endian via uint32_t (the historic signed
  * `cur / 256` peel corrupted bytes 1..3 of negative elems).
@@ -17071,8 +17163,12 @@ static int32_t pipe_modlet_bake_array_lit_elems_to_data_cold(void *arena, uint8_
     if (eref <= 0)
       continue;
     ek = pipeline_expr_kind_ord_at(arena, eref);
-    if (ek == 59)
-      return -1;
+    if (ek == 59) {
+      if (pipe_modlet_bake_string_lit_elem_to_data_cold(arena, elf_ctx, eref,
+                                                         data_base + base_off + ei * esz) != 0)
+        return -1;
+      continue;
+    }
     if (!pipe_modlet_array_lit_elem_const_val_cold(arena, eref, &ev))
       return -1;
     uw = (uint32_t)ev;
@@ -17173,9 +17269,9 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
     else if (csz >= 16)
       calign = 16;
     /* Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when it fits (library TU).
-     * Cells holding STRING_LIT elems stay COMMON (bake pokes bytes, cannot
-     * express pointers) — they seed at hoist-target entry instead.
-     * Empty `[]` stays COMMON. Oversized non-empty → COMMON + hoist seed.
+     * STRING_LIT elems intern into a .data string pool with absolute64
+     * RELA on each pointer slot. 9.4.2 ptr/fn ADDR_OF tables stay COMMON.
+     * Empty `[]` stays COMMON. Oversized (cell + pool) → COMMON + hoist seed.
      * PLATFORM: SHARED — twin of runtime_pipeline_abi.x prepare emit. */
     if (pipeline_asm_modlet_cell_is_array_cold(csz_raw)) {
       for (tl2 = 0; tl2 < n; tl2++) {
@@ -17200,22 +17296,25 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
           tk2 = pipeline_type_kind_ord_at(a, type_ref2);
           ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
           if (ik2 == 46 && tk2 == 10 && ne2 > 0 &&
-              !pipe_modlet_array_lit_has_string_elem_cold(a, init_ref2) &&
               /* 9.4.2: ptr/fn-typed tables with address elems stay COMMON
-               * (bake cannot express relocations; entry seeder resolves).
+               * (bake cannot express those relocs; entry seeder resolves).
+               * STRING_LIT elems now bake via intern + absolute64 RELA.
                * Unwrap the ARRAY type to its elem type first — the
                * predicate walk mirrors the entry seeder, which receives
                * the already-unwrapped elem type (et) from its caller. */
               !pipe_modlet_array_lit_has_ptr_addr_elem_cold(
                   a, init_ref2, pipeline_type_elem_ref_at(a, type_ref2))) {
-            data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
-            if (data_len_now < 0)
-              data_len_now = 0;
-            pad = 0;
-            if (calign > 1)
-              pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
-            if (data_len_now + pad + csz <= 65536)
-              use_data = 1;
+            int32_t pool_bytes = pipe_modlet_array_lit_string_pool_bytes_cold(a, init_ref2);
+            if (pool_bytes >= 0) {
+              data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
+              if (data_len_now < 0)
+                data_len_now = 0;
+              pad = 0;
+              if (calign > 1)
+                pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
+              if (data_len_now + pad + csz + pool_bytes <= 65536)
+                use_data = 1;
+            }
           }
         }
       }
