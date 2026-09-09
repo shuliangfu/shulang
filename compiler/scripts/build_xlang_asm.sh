@@ -1707,9 +1707,16 @@ EOF
 ensure_pipeline_asm_typecheck_alias_obj() {
   local ALIAS_O
   ALIAS_O="$BUILD_DIR/pipeline_asm_typecheck_alias.o"
-  if [ ! -f "$ALIAS_O" ] || [ "seeds/pipeline_asm_typecheck_alias.from_x.c" -nt "$ALIAS_O" ]; then
-  echo " cc -c seeds/pipeline_asm_typecheck_alias.from_x.c -> $ALIAS_O"
-  sh scripts/cc_inc_tu.sh seeds/pipeline_asm_typecheck_alias.from_x.c "$ALIAS_O"
+  # 7.2.1 eleventh knife: .x authority via cc_inc_tu --auto prefer lane.
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$ALIAS_O" ] || [ src/pipeline_asm_typecheck_alias.x -nt "$ALIAS_O" ] \
+       || { [ -f seeds/pipeline_asm_typecheck_alias.from_x.c ] && [ seeds/pipeline_asm_typecheck_alias.from_x.c -nt "$ALIAS_O" ]; }; then
+      echo " cc_inc_tu --auto (src/pipeline_asm_typecheck_alias.x) -> $ALIAS_O"
+      sh scripts/cc_inc_tu.sh --auto "$ALIAS_O"
+    fi
+  elif [ ! -f "$ALIAS_O" ] || [ "seeds/pipeline_asm_typecheck_alias.from_x.c" -nt "$ALIAS_O" ]; then
+    echo " cc -c seeds/pipeline_asm_typecheck_alias.from_x.c -> $ALIAS_O"
+    sh scripts/cc_inc_tu.sh seeds/pipeline_asm_typecheck_alias.from_x.c "$ALIAS_O"
   fi
 }
 
