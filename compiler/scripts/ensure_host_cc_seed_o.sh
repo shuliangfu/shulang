@@ -5535,6 +5535,10 @@ ensure_std_core_prefer_one() {
          [ seeds/runtime_process_import_alias.from_x.c -nt "$o" ]; then
         stale=1
       fi
+      # 7.2.1: .x authority staleness (prefer lane).
+      if [ -f src/runtime_process_import_alias.x ] && [ src/runtime_process_import_alias.x -nt "$o" ]; then
+        stale=1
+      fi
     fi
     # wave796: net multi-merge source mtime (FORCE thin; G.7 single body).
     # Mirrors historic Makefile prereqs + net_merge body inputs.
@@ -5631,6 +5635,17 @@ ensure_std_core_prefer_one() {
           || return 1
       fi
       _proc_alias_c="seeds/runtime_process_import_alias.from_x.c"
+      # 7.2.1 twelfth knife: .x authority (src/runtime_process_import_alias.x)
+      # via product -x -E into a stable gen; seed fallback (cold start).
+      if [ -x ./xlang_asm ] && [ -f src/runtime_process_import_alias.x ]; then
+        if ! ./xlang_asm -x -E -L .. src/runtime_process_import_alias.x >runtime_process_import_alias_gen.c 2>/dev/null \
+           || ! grep -q '^int32_t std_process_exit(' runtime_process_import_alias_gen.c \
+           || ! grep -q '^int32_t std_process_args_count(' runtime_process_import_alias_gen.c; then
+          echo "ensure_host_cc_seed_o: import_alias .x regen failed; cold seed needed" >&2
+          return 1
+        fi
+        _proc_alias_c="runtime_process_import_alias_gen.c"
+      fi
       if [ ! -f "$_proc_alias_c" ]; then
         echo "ensure_host_cc_seed_o try-std-core-prefer: missing $_proc_alias_c for $o" >&2
         return 1
