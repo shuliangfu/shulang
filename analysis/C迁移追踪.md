@@ -32,7 +32,7 @@
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
 | 终局 MG+BC+PC+v2==v3（阶段 13） | 🟡 | MG 文件层 ✅；BC／PC／v2==v3 未终 |
-| 产品 L4 钉盘 | ✅ | **`b5be5ed97`**；bstrict 129；Ubuntu L4 17m47s；Darwin JOBS=1 137m25s；pin 蛋自本波 `xlang_asm`；L4 Darwin 默认 JOBS=1＋GATE_CASE_JOBS=1 |
+| 产品 L4 钉盘 | ✅ | **`d583f61f5`**（2026-09-09 升钉；双端 L4＋bstrict 129/129 零红首次）；前 `b5be5ed97` |
 | BC（自举编译层零 host-cc） | 🟡 | inventory 冻；`pipeline_x` 仍 host-cc mega |
 | PC（产品默认 asm／禁默 host-cc） | 🟡 | 去 import→C／FORBID／ALLOW／ld-only ✅；invoke_cc 未删 |
 | `pipeline_abi` mega pure-asm | ⬜ 硬禁 | 须点名；产品 thin-first／inject |
@@ -444,6 +444,7 @@
 
 | 项 | 状态 | 备注 |
 |----|------|------|
+| L8b g15 seed count 孪生＋c_face T（24 vs 28 航道非确定性） | ✅ | seed `labi_od_simple_group_sym_count(g==15)` 24→28（L8c 失败＝full-seed 胜者）；c_face 补 4 stream T；`.so` 从 slice 块挪回 compress 伴块；heavy.x 不动＠`51327d07b`／`e6c8d28f2` |
 | g15 stream 针＋系统 .so 推送（run-compress 绿＝bstrict 129/129 零红首次） | ✅ | 双活航道：L8b `.x` 切片表 24→28＋seed 伴块 libzstd/libbrotli* 推送；heavy.x 不动（-E 清了翻 split 雷区）＠`d583f61f5` |
 | u64 slice 步长＋core_slice ensure＋xlang_sys 针/fio 推送（run-slice/run-process 双端绿） | ✅ | ①elem ≤8；②L4 wipe 自愈 ensure；③sys 针表 34→38＋freestanding_io_x86_64.o 推送＠`f7e9a16a7`；bstrict 单红 run-compress（zstd/brotli 未建） |
 | load_byte_sz TYPE_PTR 剥壳（thin 切片权威＋mega/seed 孪生同 commit） | ✅ | 指针参数基（`s: *S`）剥到 elem 再布局匹配；**上链谜底＝`field_load_sz_thin.x` 注入切片才是链上胜者**（inject first-wins T）；run-string 门禁绿＝std 红簇全闭＠`16745b87e` |
