@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 路径／验收／为何开）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端 `/tmp` 日志、「证：…」长叙事。波次流水只写 `[自举进度.md](自举进度.md)` §6。  
 > **考古副本**（本波重写前全文）：`[archive/C迁移追踪-流水账归档-20260825.md](archive/C迁移追踪-流水账归档-20260825.md)`  
-> **刷新**：2026-09-09 · tip **`d3f0a2feb`** · 钉盘 **`e194cd294`**（不随微步升钉）
+> **刷新**：2026-09-09 · tip **`e0b5013b4`** · 钉盘 **`e194cd294`**（不随微步升钉）
 
 ### 维护约定
 
@@ -446,7 +446,8 @@
 |----|------|------|
 | Darwin fmt 收集 FMT001（挡 `./xbuild l4`） | ✅ | Darwin `xlang_dir_open` 补 `O_DIRECTORY`＠`e194cd294`；双端 L4 129/129；本波 fmt 邻域仍 0 |
 | Darwin `-backend c` invoke_cc SEGV | ✅ | `pipeline_asm_compute_frame_size_c` min scratch 512→2048＋w157 CALL (n+1)*32／ADDR_OF 51（.x＋seed）；Darwin／Ubuntu `-backend c -o` hello42＠`8281d5777`；不升钉 |
-| `xlang build` on-demand gzip 推送面（c_face 桩假绿） | ✅ | c_face 转发 `std_compress_gzip_gzip_*`；heavy.x sg15 伴推 zlib.o/gzip.o；L8b/seed facade 针开火 `-lz`＠`189eb9b08`；双端 gzip 真往返 probe=0＋L2 5/5；不升钉；残＝zstd/brotli catalog |
+| zstd/brotli 子模块 catalog＋伴推（c_face 桩假绿） | ✅ | catalog `zstd.o`／`brotli.o`（mod+lib）；c_face 转发 `std_compress_{zstd_zstd,brotli_brotli}_*`；heavy.x sg15 伴推；L8b/seed facade 针 2→10 开火 `-lzstd`／`-lbrotli*`＠`e0b5013b4`；双端 zs/br probe=0＋L2 5/5；不升钉；残＝stream init/process/end 仍 `-1` |
+| `xlang build` on-demand gzip 推送面（c_face 桩假绿） | ✅ | c_face 转发 `std_compress_gzip_gzip_*`；heavy.x sg15 伴推 zlib.o/gzip.o；L8b/seed facade 针开火 `-lz`＠`189eb9b08`；双端 gzip 真往返 probe=0＋L2 5/5；不升钉；残＝zstd/brotli catalog（已闭＠`e0b5013b4`） |
 | mac scratch 点分 dep 不共发射（UN `_core_*`） | ✅ | `pipeline_asm_user_deps_need_coemit` 不再把一切 `core.*` 当 hosted；仅 in-tree `core/` 12 名跳共发射；scratch `core.m6` 共发射；seed_bridge 混编仍跳 hosted core＠`8236ed6d8`；不升钉 |
 | L8c heavy.x fn typeck／-E 发射缺口 | ✅ | L8c 头补 5 个 L8b extern（`needs_std_{thread,vec,http}`＋`labi_od_rel_{vec,http}`）；on_demand 函数体不动；`-E` typeck OK 且发射 T；g05 `L8b+L8c` `.x` split＠`d3f0a2feb`；不升钉 |
 | L8b g15 seed count 孪生＋c_face T（24 vs 28 航道非确定性） | ✅ | seed `labi_od_simple_group_sym_count(g==15)` 24→28（L8c 失败＝full-seed 胜者）；c_face 补 4 stream T；`.so` 从 slice 块挪回 compress 伴块；heavy.x 不动＠`51327d07b`／`e6c8d28f2` |
