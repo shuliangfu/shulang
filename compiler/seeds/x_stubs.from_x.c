@@ -33,14 +33,24 @@ int asm_asm_codegen_ast(void *a, void *b, void *c, void *d) {
   (void)d;
   return -1;
 }
-int asm_asm_codegen_elf_o(void *a, void *b, void *c, void *d, void *e) {
-  (void)a;
-  (void)b;
-  (void)c;
-  (void)d;
-  (void)e;
-  return -1;
-}
+/*
+ * The STRONG PREFIX asm_asm_codegen_elf_o that returned -1 was
+ * deleted. Product emit is PREFIX asm_asm_codegen_elf_o from
+ * strong user_asm_seed_bridge. This TU is not on product g05
+ * (experimental build_and_test_x / build_runtime xlang_x only),
+ * but a STRONG -1 on any link that also has the real body is a
+ * multiply_defined first-wins override — worse than XLANG_WEAK.
+ *
+ * Invariant: missing provider → link UNDEF, not a silent -1.
+ * Same class as the strict_glue PREFIX leftover in this knife
+ * and experimental_symbol_bridge at 81b2a6f98.
+ *
+ * Neighbor leftover (not this knife): STRONG PREFIX
+ * asm_asm_codegen_ast -1 above. Product PREFIX ast authority is
+ * also user_asm_seed_bridge (GAS+peephole).
+ *
+ * PLATFORM: SHARED — product g05 does not link this TU today.
+ */
 
 /* IO batch — not implemented on X path */
 int io_read_batch_buf(void) { return -1; }

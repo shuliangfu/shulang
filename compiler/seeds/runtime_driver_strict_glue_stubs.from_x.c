@@ -418,15 +418,35 @@ struct ast_Module;
 struct ast_ASTArena;
 struct ast_PipelineDepCtx;
 
-/** asm 后端 ELF 生成桩；冷启动 xlang-c 不走 asm 分支。 */
-XLANG_WEAK int32_t asm_asm_codegen_elf_o(void *module, void *arena, void *ctx, void *elf_ctx, void *out_buf) {
-    (void)module;
-    (void)arena;
-    (void)ctx;
-    (void)elf_ctx;
-    (void)out_buf;
-    return -1;
-}
+/*
+ * The PREFIX XLANG_WEAK asm_asm_codegen_elf_o that returned -1 was
+ * deleted (G-02e-12 xlang-c cold stub).
+ *
+ * Why: ELF and Mach-O pick the first weak definition of a name.
+ * Product g05 links this TU at _GLUE_SUFFIX (link END). Product emit
+ * is PREFIX asm_asm_codegen_elf_o from strong user_asm_seed_bridge.
+ * A second PREFIX def here is the first-wins / archive-presatisfy
+ * hazard (Darwin Stage2 historically had to filter_o_export omit
+ * this name so the real bridge member was extracted; without the
+ * omit, weak -1 pre-satisfied U → CG002 code_len=0).
+ *
+ * PLATFORM: WINDOWS — XLANG_WEAK is empty, so this was a STRONG -1
+ * and PE --allow-multiple-definition FIRST-wins. Stubs at END was
+ * the only reason the real body won; a reordered link line would
+ * silently emit -1.
+ *
+ * Invariant: every product/strict/experimental link that needs
+ * asm_asm_codegen_elf_o must provide a real body
+ * (user_asm_seed_bridge). Missing provider → link UNDEF, not a
+ * silent -1. Same class as the experimental_symbol_bridge 5-arg
+ * leftover deleted at 81b2a6f98.
+ *
+ * Darwin Stage2 filter_o_export --omit-sym stays as defense-in-depth
+ * against a stale .o; the produce-point body is gone.
+ *
+ * PLATFORM: SHARED — first-weak-wins is ELF + Mach-O; PE first-wins
+ * via allow-multiple-definition.
+ */
 
 /** driver 模块查询桩。 */
 XLANG_WEAK int32_t driver_get_module_num_funcs(void *module) {

@@ -42,6 +42,27 @@ if nm "$WORKDIR/bridge.o" 2>/dev/null | grep -E ' [Uu] (_)?asm_codegen_elf_o$'; 
   exit 1
 fi
 
+# Same-class PREFIX -1 leftovers (this knife): strict_glue (product
+# g05 _GLUE_SUFFIX), x_stubs (experimental xlang_x), verify-selfhost
+# generated _x_stubs.c. G.7 complete this probe — do not add a second
+# scanner. A definition of PREFIX asm_asm_codegen_elf_o in any of
+# these is the first-wins / archive-presatisfy hazard.
+leftover_re='^(XLANG_WEAK[[:space:]]+)?int(32_t)?[[:space:]]+asm_asm_codegen_elf_o[[:space:]]*\('
+leftover_n=0
+for src in \
+  "$ROOT/compiler/seeds/runtime_driver_strict_glue_stubs.from_x.c" \
+  "$ROOT/compiler/seeds/x_stubs.from_x.c" \
+  "$ROOT/compiler/verify-selfhost.sh"
+do
+  if grep -nE "$leftover_re" "$src"; then
+    echo "FAIL: $src still defines PREFIX asm_asm_codegen_elf_o" >&2
+    leftover_n=$((leftover_n + 1))
+  fi
+done
+if [ "$leftover_n" -ne 0 ]; then
+  exit 1
+fi
+
 link_run() {
   local tag="$1"
   shift
@@ -61,4 +82,4 @@ link_run() {
 # Hazard order: bridge before provider (ELF/Mach-O first weak used to win).
 link_run bridge_first "$WORKDIR/bridge.o" "$WORKDIR/provider.o" "$WORKDIR/caller.o"
 link_run provider_first "$WORKDIR/provider.o" "$WORKDIR/bridge.o" "$WORKDIR/caller.o"
-echo "bridge_asm_codegen_elf_o probe OK"
+echo "bridge_asm_codegen_elf_o probe OK leftover_prefix=0"

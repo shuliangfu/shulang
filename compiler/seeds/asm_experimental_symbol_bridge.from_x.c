@@ -125,6 +125,11 @@ XLANG_WEAK int32_t main_run_compiler_c(int32_t argc, uint8_t *argv) {
  * (user_asm_seed_bridge). Missing provider → link UNDEF, not a
  * silent -1.
  *
+ * Same-class PREFIX -1 leftovers in strict_glue / x_stubs /
+ * verify-selfhost were deleted with this invariant (not a second
+ * emit path). Darwin Stage2 filter_o_export omit stays as
+ * defense-in-depth against a stale .o.
+ *
  * PLATFORM: SHARED — first-weak-wins is ELF + Mach-O. Darwin
  * product g05 links this bridge in USER_ASM_LINK; Linux product
  * USER_ASM_LINK does not (experimental/strict_glue still do).
