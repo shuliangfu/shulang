@@ -644,8 +644,9 @@ fi
 # Produce-point of "experimental promote 链污染": WPO ensure /
 # ensure_experimental_ast_pool_for_wpo called this script and the copy
 # overwrote Ubuntu gold xlang_asm. G.7: complete this existing relink;
-# do not invent a second WPO/promote path. Darwin strict-fail keep and
-# postlink smoke fallback remain separate documented recovery (not here).
+# do not invent a second WPO/promote path. Darwin strict-fail keep /
+# smoke fallback / postlink experimental fallback consult the same flag
+# (not a second promote path).
 if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ]; then
   cp -f xlang_asm.experimental xlang_asm
   experimental_bootstrap_info "OK (promoted to xlang_asm; XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1)"

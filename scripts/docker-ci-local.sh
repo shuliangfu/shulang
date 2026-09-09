@@ -124,7 +124,11 @@ run_ubuntu_wpo_s3_full() {
     '
 }
 
-# WPO-S3 asm disasm 快速门禁（需已有 Linux xlang_asm；不重建 bootstrap）
+# WPO-S3 asm disasm 快速门禁（需已有 Linux 产品 xlang_asm；不重建 bootstrap）
+# PLATFORM: LINUX — require product xlang_asm. Do not silently cp
+# experimental onto product (same XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT
+# authority as relink @ ddf74296e). Missing product → fail; run
+# ubuntu-wpo-s3-full first.
 run_ubuntu_wpo_s3() {
   echo "===== Docker CI: ubuntu-wpo-s3 (asm disasm gate only, linux/amd64) ====="
   docker run --rm --platform linux/amd64 -e CI=1 \
@@ -133,8 +137,7 @@ run_ubuntu_wpo_s3() {
     sh -c '
       apt-get update -qq && apt-get install -y -qq build-essential binutils liburing-dev >/dev/null &&
       chmod +x ./xbuild ./xlang-build.sh &&
-      test -x ./compiler/xlang_asm || test -x ./compiler/xlang_asm.experimental || { echo "missing xlang_asm; run ubuntu-wpo-s3-full first" >&2; exit 1; } &&
-      if [ ! -x ./compiler/xlang_asm ] && [ -x ./compiler/xlang_asm.experimental ]; then cp ./compiler/xlang_asm.experimental ./compiler/xlang_asm; fi &&
+      test -x ./compiler/xlang_asm || { echo "missing product xlang_asm; run ubuntu-wpo-s3-full first (experimental is not product; XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1 to copy)" >&2; exit 1; } &&
       ./xbuild compiler-make -q ../std/async/scheduler.o 2>/dev/null || ./xbuild compiler-make ../std/async/scheduler.o &&
       chmod +x tests/run-wpo-s3-gate.sh tests/lib/wpo-s3-disasm.sh tests/lib/wpo-main-disasm.sh tests/run-wpo-s3-cross-bisect.sh &&
       XLANG=./compiler/xlang_asm ./tests/run-wpo-s3-gate.sh &&

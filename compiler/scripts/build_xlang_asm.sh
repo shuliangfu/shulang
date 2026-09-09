@@ -6467,9 +6467,18 @@ if [ -f "$BUILD_DIR/main.o" ] && [ -s "$BUILD_DIR/main.o" ] && [ -f "$BUILD_DIR/
   # --allow-multiple-definition. Experimental bootstrap already linked and is enough
   # for Stage2 gen2 + behavior parity; product rail remains g05/L4.
   # PLATFORM: LINUX — keep hard fail (gold standard requires asm_only_strict).
+  # PLATFORM: SHARED — do not silently promote experimental onto product
+  # xlang_asm. G.7 complete existing XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT
+  # (relink authority @ ddf74296e). Darwin Stage2 continues with
+  # LINK_MODE=asm_only_experimental either way; product binary is untouched
+  # unless the escape is set.
   if [ "$(uname -s 2>/dev/null)" = "Darwin" ] && [ -x ./xlang_asm.experimental ]; then
-  build_xlang_asm_warn "strict re-link failed on Darwin; keeping xlang_asm.experimental as xlang_asm"
+  if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ]; then
+  build_xlang_asm_warn "strict re-link failed on Darwin; promoted xlang_asm.experimental onto xlang_asm (XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1)"
   cp -f ./xlang_asm.experimental ./xlang_asm
+  else
+  build_xlang_asm_warn "strict re-link failed on Darwin; keeping xlang_asm.experimental (product xlang_asm untouched)"
+  fi
   LINK_OK=1
   LINK_MODE=asm_only_experimental
   ST_RC=0
@@ -6493,15 +6502,23 @@ if [ -f "$BUILD_DIR/main.o" ] && [ -s "$BUILD_DIR/main.o" ] && [ -f "$BUILD_DIR/
   LINK_MODE=asm_only_strict
   if [ -z "${XLANG_ASM_SKIP_STRICT_SMOKE:-}" ]; then
   if ! XLANG_ASM_SMOKE_SKIP_GATE=1 ./scripts/run_xlang_asm_smoke.sh >"$BUILD_DIR/.asm_strict_smoke.log" 2>&1; then
-  # strict 重链产物 compile 失败时：本地可 XLANG_ASM_ALLOW_EXPERIMENTAL_FALLBACK=1 回退；B-strict CI 须 FAIL。
-  if [ -x ./xlang_asm.experimental ] && cp -f ./xlang_asm "$BUILD_DIR/xlang_asm.strict_failed" 2>/dev/null; then
+  # PLATFORM: SHARED — do not silently promote experimental onto product.
+  # G.7 complete existing XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT (relink
+  # authority @ ddf74296e). Smoke-local XLANG_ASM_ALLOW_EXPERIMENTAL_FALLBACK
+  # is the same opt-in (not a second promote path). Default / B-strict
+  # (SKIP_GEN, ALLOW unset) fail without overwriting product — old path
+  # copied first then died, which still polluted xlang_asm.
+  _exp_promote=0
+  if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ] \
+  || [ -n "${XLANG_ASM_ALLOW_EXPERIMENTAL_FALLBACK:-}" ]; then
+  _exp_promote=1
+  fi
+  if [ "$_exp_promote" = "1" ] && [ -x ./xlang_asm.experimental ] \
+  && cp -f ./xlang_asm "$BUILD_DIR/xlang_asm.strict_failed" 2>/dev/null; then
   cp -f ./xlang_asm.experimental ./xlang_asm
   if XLANG_ASM_SMOKE_SKIP_GATE=1 ./scripts/run_xlang_asm_smoke.sh >"$BUILD_DIR/.asm_strict_smoke_fallback.log" 2>&1; then
   build_xlang_asm_warn "strict smoke failed; installed xlang_asm.experimental as xlang_asm (fallback OK)"
   touch "$BUILD_DIR/.strict_smoke_experimental_fallback"
-  if [ -n "${XLANG_ASM_EXPERIMENTAL_SKIP_GEN:-}" ] && [ -z "${XLANG_ASM_ALLOW_EXPERIMENTAL_FALLBACK:-}" ]; then
-  xlang_asm_bstrict_fail "strict xlang_asm smoke failed (experimental fallback disabled for B-strict)"
-  fi
   tail -n 5 "$BUILD_DIR/.asm_strict_smoke.log" 2>/dev/null | sed 's/^/ strict: /' || true
   else
   cp -f "$BUILD_DIR/xlang_asm.strict_failed" ./xlang_asm 2>/dev/null || true
@@ -6515,7 +6532,7 @@ if [ -f "$BUILD_DIR/main.o" ] && [ -s "$BUILD_DIR/main.o" ] && [ -f "$BUILD_DIR/
   elif [ -n "${XLANG_ASM_EXPERIMENTAL_SKIP_GEN:-}" ]; then
   xlang_asm_bstrict_fail "strict xlang_asm smoke failed"
   else
-  build_xlang_asm_error "strict xlang_asm smoke failed"
+  build_xlang_asm_error "strict xlang_asm smoke failed (set XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1 to install experimental)"
   tail -n 8 "$BUILD_DIR/.asm_strict_smoke.log" 2>/dev/null | sed 's/^/ /' || true
   fi
   else
