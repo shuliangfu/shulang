@@ -33221,6 +33221,10 @@ function pipe_modlet_assign_unique_label(idx: i32, module_fp: i64): void {
  *         ELF .data / Mach-O __DATA baked at prepare time
  *         (library TUs have no hoist-target entry; COMMON+seed stays zero)
  *       · non-empty lit that does not fit → COMMON + hoist seed_nonzero (historic)
+ *   (3) scalar ADDR_OF / fn-ptr (tk 9/18, pipe_modlet_scalar_init_is_ptr_addr):
+ *       `let p: *i32 = &g` / `let h: *u8 = inc` / `inc as *u8` → 8-byte
+ *       .data + absolute64 RELA (same reloc authority as (2) elems).
+ *       Hoist skip uses the same predicate (9.6.0 dual-home class).
  * Without (2), pure-asm stacked every module array into each function frame
  * (~sum of all g_labi_* buffers per call) → stack overflow / dangling path
  * returns (labi_path_pure hybrid SEGV on opt/si/hello).
@@ -33310,7 +33314,19 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       // const scalar / nested `[K][N]T` arrays. Const `[N][]T` (elem
       // TYPE_SLICE) stays skipped — payload is fat rows, seed writes LIT
       // only; hoist + durable dest_elem_ty is that home (cmns na).
-      // PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64.
+      // Scalar ADDR_OF / fn-ptr (tk 9/18): 8-byte .data cell, baked
+      // below via pipe_modlet_bake_ptr_addr_elem_to_data. Predicate
+      // matches hoist skip (9.6.0 dual-home). PLATFORM: SHARED.
+      if (tk == 9 || tk == 18) {
+        let is_pa: i32 = 0;
+        is_pa = pipe_modlet_scalar_init_is_ptr_addr(a, m, init_ref);
+        if (is_pa == 0) {
+          tl = tl + 1;
+          continue;
+        }
+        cell_sz = 8;
+        imm = 0;
+      } else {
       if (tk != 10 || init_kind != 46) {
         tl = tl + 1;
         continue;
@@ -33351,6 +33367,7 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       // Mark array decay so payload==8 (u8[8]) is not treated as scalar load.
       cell_sz = cell_sz | pipe_modlet_cell_array_bit();
       imm = 0;
+      }
     }
     // PLATFORM: SHARED — table is a fixed BSS (pipe_modlet_max).
     // Silent `break` at 64 used to drop extras: load/store then missed the
@@ -33426,62 +33443,72 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
         }
       }
     }
-    // Non-empty TYPE_ARRAY ARRAY_LIT → bake into F7 .data when it fits.
-    // STRING_LIT elems intern into a .data string pool with absolute64
-    // RELA on each pointer slot (library TUs have no hoist-target seed).
-    // 9.4.2 ptr/fn ADDR_OF / bare-fn tables now bake the same way: the
-    // pointer slot stays zero and pipeline_elf_ctx_append_reloc_absolute64
-    // names the fn symbol or modlet cell label. Empty `u8[N]=[]` stays
-    // COMMON (BSS). Oversized (cell + string pool) falls back to COMMON
-    // + hoist seed (historic). PLATFORM: SHARED library-TU .data.
-    if (pipe_modlet_cell_is_array(csz_raw) != 0) {
-      nlen2 = pipe_load_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_name_len(i));
-      nbase2 = pipe_modlet_off_name(i);
-      match_tl = 0 - 1;
-      tl2 = 0;
-      while (tl2 < nlets) {
-        let tln: i32 = 0;
-        unsafe {
-          tln = pipeline_module_top_level_let_name_len(m, tl2);
-        }
-        if (tln == nlen2 && tln > 0) {
-          k2 = 0;
-          while (k2 < tln) {
-            let mb: i32 = 0;
-            unsafe {
-              b2 = pipeline_module_top_level_let_name_byte_at(m, tl2, k2);
-              mb = g_pipeline_asm_modlet[nbase2 + k2] as i32;
-            }
-            if (b2 != mb) {
-              break;
-            }
-            k2 = k2 + 1;
+    // Resolve the originating top-level let by name (array bake AND
+    // scalar ptr-addr). Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when
+    // cell+pool fits. Scalar ADDR_OF / fn-ptr → 8-byte .data + absolute64
+    // RELA (library TUs have no hoist-target seed). Empty `u8[N]=[]`
+    // stays COMMON. Oversized falls back to COMMON + hoist seed.
+    // PLATFORM: SHARED library-TU .data.
+    nlen2 = pipe_load_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_name_len(i));
+    nbase2 = pipe_modlet_off_name(i);
+    match_tl = 0 - 1;
+    tl2 = 0;
+    while (tl2 < nlets) {
+      let tln: i32 = 0;
+      unsafe {
+        tln = pipeline_module_top_level_let_name_len(m, tl2);
+      }
+      if (tln == nlen2 && tln > 0) {
+        k2 = 0;
+        while (k2 < tln) {
+          let mb: i32 = 0;
+          unsafe {
+            b2 = pipeline_module_top_level_let_name_byte_at(m, tl2, k2);
+            mb = g_pipeline_asm_modlet[nbase2 + k2] as i32;
           }
-          if (k2 == tln) {
-            match_tl = tl2;
+          if (b2 != mb) {
             break;
           }
+          k2 = k2 + 1;
         }
-        tl2 = tl2 + 1;
+        if (k2 == tln) {
+          match_tl = tl2;
+          break;
+        }
       }
-      if (match_tl >= 0) {
+      tl2 = tl2 + 1;
+    }
+    if (match_tl >= 0) {
+      unsafe {
+        init_ref2 = pipeline_module_top_level_let_init_ref(m, match_tl);
+        type_ref2 = pipeline_module_top_level_let_type_ref(m, match_tl);
+      }
+      if (init_ref2 > 0 && init_ref2 <= nexprs && type_ref2 > 0) {
         unsafe {
-          init_ref2 = pipeline_module_top_level_let_init_ref(m, match_tl);
-          type_ref2 = pipeline_module_top_level_let_type_ref(m, match_tl);
+          ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
+          tk2 = pipeline_type_kind_ord_at(a, type_ref2);
+          ne2 = pipeline_expr_array_lit_num_elems_at(a, init_ref2);
         }
-        if (init_ref2 > 0 && init_ref2 <= nexprs && type_ref2 > 0) {
-          unsafe {
-            ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
-            tk2 = pipeline_type_kind_ord_at(a, type_ref2);
-            ne2 = pipeline_expr_array_lit_num_elems_at(a, init_ref2);
+        if (pipe_modlet_cell_is_array(csz_raw) != 0 && ik2 == 46 && tk2 == 10 && ne2 > 0) {
+          pool_bytes = pipe_modlet_array_lit_string_pool_bytes(a, init_ref2);
+          if (pool_bytes >= 0) {
+            unsafe {
+              data_len_now = pipeline_elf_ctx_emit_data_len(elf_ctx);
+            }
+            if (data_len_now < 0) {
+              data_len_now = 0;
+            }
+            pad = 0;
+            if (calign > 1) {
+              pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
+            }
+            if (data_len_now + pad + csz2 + pool_bytes <= 65536) {
+              use_data = 1;
+            }
           }
-          // STRING_LIT elems intern into the .data pool + absolute64
-          // RELA on the pointer slot. 9.4.2 ptr/fn ADDR_OF / bare-fn
-          // tables bake the same reloc (G.7 complete of F7 vtable
-          // absolute64); they no longer veto use_data.
-          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
-            pool_bytes = pipe_modlet_array_lit_string_pool_bytes(a, init_ref2);
-            if (pool_bytes >= 0) {
+        } else {
+          if (pipe_modlet_cell_is_array(csz_raw) == 0 && (tk2 == 9 || tk2 == 18)) {
+            if (pipe_modlet_scalar_init_is_ptr_addr(a, m, init_ref2) != 0) {
               unsafe {
                 data_len_now = pipeline_elf_ctx_emit_data_len(elf_ctx);
               }
@@ -33492,7 +33519,7 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
               if (calign > 1) {
                 pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
               }
-              if (data_len_now + pad + csz2 + pool_bytes <= 65536) {
+              if (data_len_now + pad + csz2 <= 65536) {
                 use_data = 1;
               }
             }
@@ -33538,11 +33565,19 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
         }
         return 0 - 1;
       }
-      unsafe {
-        et2 = pipeline_type_elem_ref_at(a, type_ref2);
-        rc = pipe_modlet_bake_array_lit_elems_to_data(
-          a, elf_ctx, init_ref2, et2, data_off, 0, csz2, m);
-        pipeline_elf_ctx_set_shndx_override(elf_ctx, 0);
+      if (pipe_modlet_cell_is_array(csz_raw) != 0) {
+        unsafe {
+          et2 = pipeline_type_elem_ref_at(a, type_ref2);
+          rc = pipe_modlet_bake_array_lit_elems_to_data(
+            a, elf_ctx, init_ref2, et2, data_off, 0, csz2, m);
+          pipeline_elf_ctx_set_shndx_override(elf_ctx, 0);
+        }
+      } else {
+        unsafe {
+          rc = pipe_modlet_bake_ptr_addr_elem_to_data(
+            a, elf_ctx, m, init_ref2, 8, data_off);
+          pipeline_elf_ctx_set_shndx_override(elf_ctx, 0);
+        }
       }
       if (rc != 0) {
         return 0 - 1;
@@ -34186,6 +34221,153 @@ function pipe_modlet_array_lit_elem_const_val(
       out_val[0] = 0 - v;
     }
     return 1;
+  }
+  return 0;
+}
+
+/**
+ * True when a scalar module-let init is a compile-time address that
+ * prepare can bake as an 8-byte .data cell + absolute64 reloc.
+ *
+ * Completes 9.4.2 ARRAY_LIT table bake for the scalar leftover:
+ *   `let p: *i32 = &g` (ADDR_OF 51 over a pass-1 modlet cell or fn)
+ *   `let h: *u8 = inc` (VAR 3 naming a same-module fn)
+ *   TYPE_FN init `inc as ...` (AS 54 over a fn)
+ *
+ * Pass-1 cells (independently knowable at hoist time, before the
+ * modlet table exists): mutable scalar LIT/BOOL (init 0/2,
+ * is_const==0) and TYPE_ARRAY + ARRAY_LIT (tk 10, ik 46).
+ *
+ * Rejects VAR copies of another pointer/fn-ptr let (`let g = f`) so
+ * those keep historic hoist. Rejects ADDR_OF of const scalars
+ * (prepare does not give them a cell).
+ *
+ * Hoist skip and prepare register MUST agree (9.6.0 dual-home class).
+ * @param arena *u8 - ASTArena
+ * @param m *u8 - Module* (fn lookup + top-level let scan; null → 0)
+ * @param init_ref i32 - scalar let init expr
+ * @return i32 - 1 bake-able address init; 0 keep hoist
+ * PLATFORM: SHARED freestanding · ELF .data RELA · Mach-O __DATA unsigned64.
+ */
+function pipe_modlet_scalar_init_is_ptr_addr(
+  arena: *u8, m: *u8, init_ref: i32
+): i32 {
+  let ek: i32 = 0;
+  let is_addr_of: i32 = 0;
+  let nref: i32 = 0;
+  let vlen: i32 = 0;
+  let name: u8[128] = [];
+  let fi: i32 = 0;
+  let nlets: i32 = 0;
+  let tl: i32 = 0;
+  let nlen: i32 = 0;
+  let k: i32 = 0;
+  let b: i32 = 0;
+  let same: i32 = 0;
+  let t_init: i32 = 0;
+  let t_ik: i32 = 0;
+  let t_tr: i32 = 0;
+  let t_tk: i32 = 0;
+  let t_const: i32 = 0;
+  let nexprs: i32 = 0;
+  if (arena == (0 as *u8) || m == (0 as *u8) || init_ref <= 0) {
+    return 0;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, init_ref);
+  }
+  if (ek == 54) {
+    unsafe {
+      nref = pipeline_expr_as_operand_ref_at(arena, init_ref);
+    }
+  } else {
+    if (ek == 51) {
+      is_addr_of = 1;
+      unsafe {
+        nref = pipeline_expr_unary_operand_ref_at(arena, init_ref);
+      }
+    } else {
+      if (ek != 3) {
+        return 0;
+      }
+      nref = init_ref;
+    }
+  }
+  if (nref <= 0) {
+    return 0;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, nref);
+  }
+  if (ek != 3) {
+    return 0;
+  }
+  unsafe {
+    vlen = pipeline_expr_var_name_len(arena, nref);
+  }
+  if (vlen <= 0 || vlen > 127) {
+    return 0;
+  }
+  unsafe {
+    pipeline_expr_var_name_into(arena, nref, &name[0]);
+    fi = glue_module_func_index_by_name_c(m, &name[0], vlen);
+  }
+  if (fi >= 0) {
+    return 1;
+  }
+  if (is_addr_of == 0) {
+    return 0;
+  }
+  // ADDR_OF of a pass-1 modlet cell. Walk the module lets (not the
+  // live table) so hoist — which runs before prepare — agrees.
+  nlets = pipe_mod_get_num_top_level_lets(m);
+  nexprs = pipe_load_i32_le(arena, pipe_arena_off_num_exprs());
+  tl = 0;
+  while (tl < nlets) {
+    unsafe {
+      nlen = pipeline_module_top_level_let_name_len(m, tl);
+    }
+    if (nlen == vlen) {
+      same = 1;
+      k = 0;
+      while (k < nlen) {
+        unsafe {
+          b = pipeline_module_top_level_let_name_byte_at(m, tl, k);
+        }
+        if (b != (name[k] as i32)) {
+          same = 0;
+          break;
+        }
+        k = k + 1;
+      }
+      if (same != 0) {
+        unsafe {
+          t_const = pipeline_module_top_level_let_is_const(m, tl);
+          t_init = pipeline_module_top_level_let_init_ref(m, tl);
+          t_tr = pipeline_module_top_level_let_type_ref(m, tl);
+        }
+        t_ik = 0;
+        t_tk = 0;
+        if (t_init > 0 && t_init <= nexprs) {
+          unsafe {
+            t_ik = pipeline_expr_kind_ord_at(arena, t_init);
+          }
+        }
+        if (t_tr > 0) {
+          unsafe {
+            t_tk = pipeline_type_kind_ord_at(arena, t_tr);
+          }
+        }
+        if (t_const == 0 && (t_ik == 0 || t_ik == 2)) {
+          return 1;
+        }
+        if (t_tk == 10 && t_ik == 46) {
+          return 1;
+        }
+        return 0;
+      }
+    }
+    tl = tl + 1;
   }
   return 0;
 }
@@ -84840,6 +85022,12 @@ export function pipeline_asm_hoist_target_func_index(module: *u8): i32 {
  * init_ref is in range — an un-initialized let must still hoist (prepare
  * skips it too, so no COMMON cell exists for it).
  *
+ * Scalar ADDR_OF / fn-ptr (tk 9/18, pipe_modlet_scalar_init_is_ptr_addr)
+ * also stay un-hoisted: prepare bakes an 8-byte .data cell + absolute64
+ * RELA so non-hoist functions / library TUs see the pointer. Dual-home
+ * would leave other() reading an unseeded slot (q4-shaped main-only was
+ * the historic hoist green).
+ *
  * prepend_lets count must equal the number actually appended (not raw n), else
  * skipped COMMON arrays would desync stmt_order vs block lets.
  *
@@ -84975,6 +85163,13 @@ export function pipeline_module_hoist_top_level_lets_into_main(module: *u8, aren
                   skip_common_arr = 1;
                 }
               }
+            }
+          }
+          // Scalar ADDR_OF / fn-ptr: same predicate as prepare register.
+          // PLATFORM: SHARED — 9.6.0 dual-home class.
+          if (skip_common_arr == 0 && (tk_h == 9 || tk_h == 18) && init_ref > 0 && init_ref <= nexprs) {
+            if (pipe_modlet_scalar_init_is_ptr_addr(arena, module, init_ref) != 0) {
+              skip_common_arr = 1;
             }
           }
         }

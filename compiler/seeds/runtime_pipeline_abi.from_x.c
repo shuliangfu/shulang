@@ -16751,6 +16751,15 @@ extern int32_t pipeline_module_top_level_let_type_ref(void *m, int32_t tl);
 extern int32_t pipeline_type_kind_ord_at(void *a, int32_t type_ref);
 extern int32_t glue_fixed_array_total_bytes_c(void *arena, int32_t ty_ref, int32_t depth);
 extern int32_t backend_enc_mov_rbx_to_rax_arch(void *elf_ctx, int32_t ta);
+extern int32_t pipeline_expr_as_operand_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_unary_operand_ref_at(void *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_var_name_len(void *arena, int32_t expr_ref);
+extern void pipeline_expr_var_name_into(void *arena, int32_t expr_ref, uint8_t *out);
+extern int32_t glue_module_func_index_by_name_c(void *mod, uint8_t *name, int32_t name_len);
+extern int32_t pipeline_module_top_level_let_is_const(void *m, int32_t tl);
+extern int32_t pipeline_module_top_level_let_init_ref(void *m, int32_t tl);
+extern int32_t pipeline_module_top_level_let_name_len(void *m, int32_t tl);
+extern int32_t pipeline_module_top_level_let_name_byte_at(void *m, int32_t tl, int32_t k);
 
 /* PLATFORM: SHARED — SHN_COMMON / Mach-O __common merge by name.
  * Historic Lxlang_ml_<idx> aliased every TU's N-th module let (Ubuntu
@@ -16992,6 +17001,71 @@ static int32_t pipe_modlet_bake_ptr_addr_elem_to_data_cold(void *arena, uint8_t 
     return -1;
   if (pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, sym, slen) != 0)
     return -1;
+  return 0;
+}
+
+/* True when a scalar module-let init is a compile-time address that
+ * prepare can bake as an 8-byte .data cell + absolute64 reloc.
+ * Twin of runtime_pipeline_abi.x pipe_modlet_scalar_init_is_ptr_addr.
+ * Hoist skip and prepare register MUST agree (9.6.0 dual-home).
+ * PLATFORM: SHARED freestanding · ELF .data RELA · Mach-O __DATA unsigned64. */
+static int32_t pipe_modlet_scalar_init_is_ptr_addr_cold(void *arena, void *m, int32_t init_ref) {
+  int32_t ek = 0, is_addr_of = 0, nref = 0, vlen = 0, fi = 0;
+  int32_t nlets, tl, nlen, k, nexprs;
+  uint8_t name[128];
+  if (!arena || !m || init_ref <= 0)
+    return 0;
+  ek = pipeline_expr_kind_ord_at(arena, init_ref);
+  if (ek == 54) {
+    nref = pipeline_expr_as_operand_ref_at(arena, init_ref);
+  } else if (ek == 51) {
+    is_addr_of = 1;
+    nref = pipeline_expr_unary_operand_ref_at(arena, init_ref);
+  } else if (ek != 3) {
+    return 0;
+  } else {
+    nref = init_ref;
+  }
+  if (nref <= 0)
+    return 0;
+  ek = pipeline_expr_kind_ord_at(arena, nref);
+  if (ek != 3)
+    return 0;
+  vlen = pipeline_expr_var_name_len(arena, nref);
+  if (vlen <= 0 || vlen > 127)
+    return 0;
+  pipeline_expr_var_name_into(arena, nref, name);
+  fi = glue_module_func_index_by_name_c(m, name, vlen);
+  if (fi >= 0)
+    return 1;
+  if (!is_addr_of)
+    return 0;
+  nlets = cold_mod_num_top_level_lets(m);
+  nexprs = cold_arena_num_exprs(arena);
+  for (tl = 0; tl < nlets; tl++) {
+    nlen = pipeline_module_top_level_let_name_len(m, tl);
+    if (nlen != vlen)
+      continue;
+    for (k = 0; k < nlen; k++) {
+      if ((int32_t)pipeline_module_top_level_let_name_byte_at(m, tl, k) != (int32_t)name[k])
+        break;
+    }
+    if (k == nlen) {
+      int32_t t_const = pipeline_module_top_level_let_is_const(m, tl);
+      int32_t t_init = pipeline_module_top_level_let_init_ref(m, tl);
+      int32_t t_tr = pipeline_module_top_level_let_type_ref(m, tl);
+      int32_t t_ik = 0, t_tk = 0;
+      if (t_init > 0 && t_init <= nexprs)
+        t_ik = pipeline_expr_kind_ord_at(arena, t_init);
+      if (t_tr > 0)
+        t_tk = pipeline_type_kind_ord_at(arena, t_tr);
+      if (t_const == 0 && (t_ik == 0 || t_ik == 2))
+        return 1;
+      if (t_tk == 10 && t_ik == 46)
+        return 1;
+      return 0;
+    }
+  }
   return 0;
 }
 
@@ -17340,6 +17414,13 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
         continue;
       cell_sz |= XLANG_ASM_MODLET_CELL_ARRAY_BIT;
       imm = 0;
+    } else if ((tk == 9 || tk == 18) &&
+               pipe_modlet_scalar_init_is_ptr_addr_cold(a, m, init_ref) != 0) {
+      /* Scalar ADDR_OF / fn-ptr → 8-byte .data + absolute64 RELA.
+       * Twin of runtime_pipeline_abi.x prepare register arm (3).
+       * PLATFORM: SHARED. */
+      cell_sz = 8;
+      imm = 0;
     } else {
       continue;
     }
@@ -17380,49 +17461,54 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
       calign = 4;
     else if (csz >= 16)
       calign = 16;
-    /* Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when it fits (library TU).
-     * STRING_LIT elems intern into a .data string pool with absolute64
-     * RELA on each pointer slot. 9.4.2 ptr/fn ADDR_OF / bare-fn tables
-     * bake the same reloc (no longer veto use_data). Empty `[]` stays
-     * COMMON. Oversized (cell + pool) → COMMON + hoist seed.
+    /* Resolve originating top-level let by name (array bake AND scalar
+     * ptr-addr). Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when cell+pool
+     * fits. Scalar ADDR_OF / fn-ptr → 8-byte .data + absolute64 RELA.
+     * Empty `[]` stays COMMON. Oversized → COMMON + hoist seed.
      * PLATFORM: SHARED — twin of runtime_pipeline_abi.x prepare emit. */
-    if (pipeline_asm_modlet_cell_is_array_cold(csz_raw)) {
-      for (tl2 = 0; tl2 < n; tl2++) {
-        int32_t tln = pipeline_module_top_level_let_name_len(m, tl2);
-        if (tln != nlen2 || tln <= 0)
-          continue;
-        for (k2 = 0; k2 < tln; k2++) {
-          if ((int32_t)pipeline_module_top_level_let_name_byte_at(m, tl2, k2) !=
-              (int32_t)g_pipeline_asm_modlet_cold.name[i][k2])
-            break;
-        }
-        if (k2 == tln) {
-          match_tl = tl2;
+    for (tl2 = 0; tl2 < n; tl2++) {
+      int32_t tln = pipeline_module_top_level_let_name_len(m, tl2);
+      if (tln != nlen2 || tln <= 0)
+        continue;
+      for (k2 = 0; k2 < tln; k2++) {
+        if ((int32_t)pipeline_module_top_level_let_name_byte_at(m, tl2, k2) !=
+            (int32_t)g_pipeline_asm_modlet_cold.name[i][k2])
           break;
-        }
       }
-      if (match_tl >= 0) {
-        init_ref2 = pipeline_module_top_level_let_init_ref(m, match_tl);
-        type_ref2 = pipeline_module_top_level_let_type_ref(m, match_tl);
-        if (init_ref2 > 0 && init_ref2 <= cold_arena_num_exprs(a) && type_ref2 > 0) {
-          ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
-          tk2 = pipeline_type_kind_ord_at(a, type_ref2);
-          ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
-          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
-              /* STRING_LIT intern + 9.4.2 named-symbol ADDR_OF / fn-ptr
-               * absolute64 RELA. Address elems no longer veto use_data. */
-            int32_t pool_bytes = pipe_modlet_array_lit_string_pool_bytes_cold(a, init_ref2);
-            if (pool_bytes >= 0) {
-              data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
-              if (data_len_now < 0)
-                data_len_now = 0;
-              pad = 0;
-              if (calign > 1)
-                pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
-              if (data_len_now + pad + csz + pool_bytes <= 65536)
-                use_data = 1;
-            }
+      if (k2 == tln) {
+        match_tl = tl2;
+        break;
+      }
+    }
+    if (match_tl >= 0) {
+      init_ref2 = pipeline_module_top_level_let_init_ref(m, match_tl);
+      type_ref2 = pipeline_module_top_level_let_type_ref(m, match_tl);
+      if (init_ref2 > 0 && init_ref2 <= cold_arena_num_exprs(a) && type_ref2 > 0) {
+        ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
+        tk2 = pipeline_type_kind_ord_at(a, type_ref2);
+        ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
+        if (pipeline_asm_modlet_cell_is_array_cold(csz_raw) && ik2 == 46 && tk2 == 10 && ne2 > 0) {
+          int32_t pool_bytes = pipe_modlet_array_lit_string_pool_bytes_cold(a, init_ref2);
+          if (pool_bytes >= 0) {
+            data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
+            if (data_len_now < 0)
+              data_len_now = 0;
+            pad = 0;
+            if (calign > 1)
+              pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
+            if (data_len_now + pad + csz + pool_bytes <= 65536)
+              use_data = 1;
           }
+        } else if (!pipeline_asm_modlet_cell_is_array_cold(csz_raw) && (tk2 == 9 || tk2 == 18) &&
+                   pipe_modlet_scalar_init_is_ptr_addr_cold(a, m, init_ref2) != 0) {
+          data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
+          if (data_len_now < 0)
+            data_len_now = 0;
+          pad = 0;
+          if (calign > 1)
+            pad = (calign - (data_len_now & (calign - 1))) & (calign - 1);
+          if (data_len_now + pad + csz <= 65536)
+            use_data = 1;
         }
       }
     }
@@ -17445,9 +17531,15 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
         pipeline_elf_ctx_set_shndx_override((uint8_t *)elf_ctx, 0);
         return -1;
       }
-      et2 = pipeline_type_elem_ref_at(a, type_ref2);
-      if (pipe_modlet_bake_array_lit_elems_to_data_cold(a, (uint8_t *)elf_ctx, init_ref2, et2, data_off,
-                                                         0, csz, m) != 0) {
+      if (pipeline_asm_modlet_cell_is_array_cold(csz_raw)) {
+        et2 = pipeline_type_elem_ref_at(a, type_ref2);
+        if (pipe_modlet_bake_array_lit_elems_to_data_cold(a, (uint8_t *)elf_ctx, init_ref2, et2, data_off,
+                                                           0, csz, m) != 0) {
+          pipeline_elf_ctx_set_shndx_override((uint8_t *)elf_ctx, 0);
+          return -1;
+        }
+      } else if (pipe_modlet_bake_ptr_addr_elem_to_data_cold(a, (uint8_t *)elf_ctx, m, init_ref2, 8,
+                                                              data_off) != 0) {
         pipeline_elf_ctx_set_shndx_override((uint8_t *)elf_ctx, 0);
         return -1;
       }
@@ -47343,6 +47435,11 @@ void pipeline_module_hoist_top_level_lets_into_main(void *module, void *arena) {
        * runtime_pipeline_abi.x hoist guard. PLATFORM: SHARED. */
       if ((ik == 0 || ik == 2) && init_ref > 0 && init_ref <= nexprs &&
           pipeline_module_top_level_let_is_const(module, tl) == 0)
+        continue;
+      /* Scalar ADDR_OF / fn-ptr: same predicate as prepare register.
+       * PLATFORM: SHARED — 9.6.0 dual-home class. */
+      if ((tk == 9 || tk == 18) && init_ref > 0 && init_ref <= nexprs &&
+          pipe_modlet_scalar_init_is_ptr_addr_cold(arena, module, init_ref) != 0)
         continue;
     }
     for (k = 0; k < name_len; k++)
