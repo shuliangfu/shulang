@@ -3872,8 +3872,9 @@ pipeline_abi_inject_unused_hints_thin() {
   pipeline_abi_inject_thin_leaf "$1" "src/runtime_pipeline_abi_unused_hints_thin.x" "unusedhints-thin"
 }
 
-# Cap-fn-ptr (10.3.2 slice0): EXPR_AS same-module fn as *u8 → LEA.
-# G.7: thin body matches pipeline_asm_emit_as_elf_impl / _c in mega .x.
+# Cap-fn-ptr (10.3.2): EXPR_AS same-module fn as *u8 / TYPE_FN → LEA.
+# G.7: thin body matches pipeline_asm_emit_as_elf_impl / _c in mega .x;
+# Cap-fn-ptr LEA spell is pipe_modlet_lea_fn_sym_to_rax (not inlined here).
 # PLATFORM: SHARED shell · LINUX gold + MACOS.
 pipeline_abi_inject_fnptr_as_thin() {
   local o="$1"

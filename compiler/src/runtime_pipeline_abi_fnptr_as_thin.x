@@ -1,5 +1,7 @@
-// Thin pure override: Cap-fn-ptr EXPR_AS (same-module #[no_mangle] fn as *u8 / TYPE_FN).
+// Thin pure override: Cap-fn-ptr EXPR_AS (same-module fn as *u8 / TYPE_FN).
 // G.7: bodies MUST match pipeline_asm_emit_as_elf_impl / _c in runtime_pipeline_abi.x.
+// Cap-fn-ptr LEA spell is pipe_modlet_lea_fn_sym_to_rax (mega authority);
+// this thin must not keep a second Mach-O '_' / ELF bare copy.
 // ensure injects via first-wins ld -r so product need not full mega -E
 // (Darwin mega -E hang-prone / memory).
 // PLATFORM: SHARED freestanding cast emit · LINUX gold · MACOS underscore.
@@ -32,9 +34,7 @@ export extern function pipeline_expr_var_name_len(arena: *u8, expr_ref: i32): i3
 export extern function pipeline_expr_var_name_into(arena: *u8, expr_ref: i32, out64: *u8): void;
 export extern function glue_emit_module_from_ctx(ctx: *u8): *u8;
 export extern function glue_module_func_index_by_name_c(mod: *u8, name: *u8, name_len: i32): i32;
-export extern function pipeline_module_func_is_no_mangle_at(module: *u8, fi: i32): i32;
-export extern function pipeline_elf_ctx_macho_leading_underscore(ctx_bytes: *u8): i32;
-export extern function backend_enc_lea_sym_to_reg_arch(elf_ctx: *u8, reg: i32, name: *u8, name_len: i32, ta: i32): i32;
+export extern function pipe_modlet_lea_fn_sym_to_rax(elf_ctx: *u8, name: *u8, name_len: i32, ta: i32): i32;
 
 /**
  * Product-mega freestanding EXPR_AS ELF face (int/float cast family).
@@ -48,8 +48,9 @@ export extern function backend_enc_lea_sym_to_reg_arch(elf_ctx: *u8, reg: i32, n
  * wave138 pure: G.7 authority (was pipeline_asm_emit_as_elf_impl).
  * Cap residual: emit_expr_elf_c + cast encoders + f32/f64 classifiers +
  *   float_lit face + elf append (u32 zext mov eax,eax).
- * Cap-fn-ptr (10.3.2 slice0 / 10.3.1): bare fn as *u8 or TYPE_FN → LEA link
- *   symbol into rax/x0 (#[no_mangle] only; locals win over same-named funcs).
+ * Cap-fn-ptr (10.3.2 / 10.3.1): bare fn as *u8 or TYPE_FN → LEA link
+ *   symbol into rax/x0 via pipe_modlet_lea_fn_sym_to_rax (any same-module
+ *   fn; locals win over same-named funcs). No second spell in this thin.
  * PLATFORM: SHARED freestanding cast emit · LINUX gold · MACOS underscore.
  */
 #[no_mangle]
@@ -64,17 +65,13 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
   let src_is_f64: i32 = 0;
   let rc: i32 = 0;
   let mov_eax: u8[2] = [];
-  // Cap-fn-ptr scratch (slice0 #[no_mangle] LEA); kept at top for .x let discipline.
+  // Cap-fn-ptr scratch; kept at top for .x let discipline.
+  // 9.4.2: the Mach-O '_' / ELF bare spell lives in pipe_modlet_lea_fn_sym_to_rax.
   let fnptr_off: i32 = 0;
   let fnptr_vlen: i32 = 0;
   let fnptr_fi: i32 = 0;
-  let fnptr_nm: i32 = 0;
-  let fnptr_macho: i32 = 0;
-  let fnptr_k: i32 = 0;
-  let fnptr_sym_len: i32 = 0;
   let fnptr_mod: *u8 = 0 as *u8;
   let fnptr_vname: u8[128] = [];
-  let fnptr_sym: u8[130] = [];
   if (glue_expr_is_await_at_c(arena, expr_ref) != 0) {
     return pipeline_asm_emit_await_sync_elf_impl(arena, elf_ctx, expr_ref, ctx, ta);
   }
@@ -347,8 +344,9 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
   }
   // Cap-fn-ptr: (same_module_fn as *u8|TYPE_FN) → LEA of link symbol (rax/x0).
   // Complements wave100 typeck Cap-fn-ptr + C codegen_try_emit_fn_as_value.
-  // Locals (stack slot) win over same-named funcs. slice0: #[no_mangle] only.
-  // PLATFORM: SHARED · MACOS Mach-O leading '_' · LINUX ELF bare name.
+  // Locals (stack slot) win over same-named funcs.
+  // PLATFORM: SHARED · MACOS Mach-O leading '_' · LINUX ELF bare name
+  // (spell is pipe_modlet_lea_fn_sym_to_rax; this thin does not copy it).
   if (tgt > 0) {
     unsafe {
       tgt_kind = pipeline_type_kind_ord_at(arena, tgt);
@@ -374,29 +372,10 @@ export function pipeline_asm_emit_as_elf_impl(arena: *u8, elf_ctx: *u8, expr_ref
             }
             if (fnptr_fi >= 0) {
               // Cap-fn-ptr: load effective address of any same-module function into rax/x0.
-              // Both #[no_mangle] and standard functions use source-level symbol names
-              // (prefixed with leading underscore on Mach-O).
+              // 9.4.2: symbol spell (Mach-O '_' / ELF bare) is the
+              // pipe_modlet_lea_fn_sym_to_rax authority.
               unsafe {
-                fnptr_macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
-              }
-              if (fnptr_macho != 0) {
-                fnptr_sym[0] = 95 as u8;
-                fnptr_k = 0;
-                while (fnptr_k < fnptr_vlen) {
-                  fnptr_sym[fnptr_k + 1] = fnptr_vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = fnptr_vlen + 1;
-              } else {
-                fnptr_k = 0;
-                while (fnptr_k < fnptr_vlen) {
-                  fnptr_sym[fnptr_k] = fnptr_vname[fnptr_k];
-                  fnptr_k = fnptr_k + 1;
-                }
-                fnptr_sym_len = fnptr_vlen;
-              }
-              unsafe {
-                rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &fnptr_sym[0], fnptr_sym_len, ta);
+                rc = pipe_modlet_lea_fn_sym_to_rax(elf_ctx, &fnptr_vname[0], fnptr_vlen, ta);
               }
               return rc;
             }
