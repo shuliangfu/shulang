@@ -56,6 +56,16 @@ export extern function link_abi_user_o_needs_std_sys(user_o: *u8): i32;
 export extern function link_abi_user_o_needs_std_sys_linux(user_o: *u8): i32;
 export extern function link_abi_user_o_needs_std_sys_macos(user_o: *u8): i32;
 export extern function link_abi_user_o_needs_std_test(user_o: *u8): i32;
+/* L8c face for L8b helpers the on_demand shell calls (wave956 thread /
+ * wave958 vec+http). Missing externs made check_block fail on fn
+ * xlang_asm_ld_append_on_demand_user_objs (silent unresolved CALL).
+ * G.7: complete this existing extern list; do not duplicate L8b bodies.
+ * PLATFORM: SHARED — product L8c -E+cc prefer. */
+export extern function link_abi_user_o_needs_std_thread(user_o: *u8): i32;
+export extern function link_abi_user_o_needs_std_vec(user_o: *u8): i32;
+export extern function link_abi_user_o_needs_std_http(user_o: *u8): i32;
+export extern function labi_od_rel_vec(): *u8;
+export extern function labi_od_rel_http(): *u8;
 export extern function xlang_asm_ld_try_under_lib_roots(rel: *u8, lib_roots: **u8, n_lib_roots: i32, bank: *u8): *u8;
 export extern function xlang_ensure_formal_std_make_o(repo_root: *u8, rel_from_repo: *u8, make_target: *u8): i32;
 export extern function labi_std_append_queue_monofile_companions(link_argv0: *u8, lib_roots: **u8, n_lib_roots: i32, bank: *u8, argv: **u8, la: *i32, max_la: i32, flags: *u8): void;
