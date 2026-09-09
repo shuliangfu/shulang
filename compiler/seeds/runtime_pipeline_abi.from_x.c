@@ -16687,22 +16687,36 @@ int32_t pipeline_asm_modlet_store_from_rax_elf_c(void *elf_ctx, uint8_t *name, i
  * fn-symbol spell, and the non-local named-binding address resolver
  * (modlet COMMON cell first, then same-module fn). PLATFORM: SHARED ·
  * MACOS Mach-O '_' · LINUX ELF bare name. */
+/* Spell a same-module function's link name into dst.
+ * Mach-O leading '_' on Darwin, bare ELF name on Linux. Twin of
+ * runtime_pipeline_abi.x pipe_modlet_fn_sym_spell_into so LEA and
+ * .data absolute64 relocs share one authority.
+ * PLATFORM: SHARED · MACOS Mach-O '_' · LINUX ELF bare name. */
+static int32_t pipe_modlet_fn_sym_spell_into_cold(uint8_t *elf_ctx, uint8_t *name, int32_t name_len,
+                                                   uint8_t *dst) {
+  int32_t macho = 0, k = 0;
+  if (!elf_ctx || !name || !dst || name_len <= 0 || name_len > 127)
+    return -1;
+  macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
+  if (macho != 0) {
+    dst[0] = (uint8_t)'_';
+    for (k = 0; k < name_len; k++)
+      dst[k + 1] = name[k];
+    return name_len + 1;
+  }
+  for (k = 0; k < name_len; k++)
+    dst[k] = name[k];
+  return name_len;
+}
+
 static int32_t pipe_modlet_lea_fn_sym_to_rax_cold(void *elf_ctx, uint8_t *name, int32_t name_len, int32_t ta) {
   uint8_t sym[130];
-  int32_t len = 0, k = 0, macho = 0, rc = 0;
+  int32_t len = 0, rc = 0;
   if (!elf_ctx || !name || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1))
     return -1;
-  macho = pipeline_elf_ctx_macho_leading_underscore((uint8_t *)elf_ctx);
-  if (macho != 0) {
-    sym[0] = (uint8_t)'_';
-    for (k = 0; k < name_len; k++)
-      sym[k + 1] = name[k];
-    len = name_len + 1;
-  } else {
-    for (k = 0; k < name_len; k++)
-      sym[k] = name[k];
-    len = name_len;
-  }
+  len = pipe_modlet_fn_sym_spell_into_cold((uint8_t *)elf_ctx, name, name_len, sym);
+  if (len <= 0)
+    return -1;
   rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, sym, len, ta);
   return rc;
 }
@@ -16908,6 +16922,79 @@ static int32_t pipe_modlet_bake_string_lit_elem_to_data_cold(void *arena, uint8_
   return 0;
 }
 
+/* Bake one address-valued ARRAY_LIT elem as an absolute64 reloc on an
+ * already-reserved .data pointer slot (9.4.2). Twin of
+ * runtime_pipeline_abi.x pipe_modlet_bake_ptr_addr_elem_to_data.
+ * G.7: reloc authority is pipeline_elf_ctx_append_reloc_absolute64;
+ * spelling is pipe_modlet_fn_sym_spell_into_cold.
+ * Returns 0 recorded reloc, 1 not-an-address-elem, -1 loud fail.
+ * PLATFORM: SHARED freestanding · ELF .data RELA · Mach-O __DATA unsigned64. */
+static int32_t pipe_modlet_bake_ptr_addr_elem_to_data_cold(void *arena, uint8_t *elf_ctx, void *m,
+                                                            int32_t eref, int32_t esz, int32_t slot_off) {
+  int32_t ek = 0, is_addr_of = 0, nref = 0, vlen = 0, fi = 0, idx = 0, slen = 0;
+  uint8_t name[128];
+  uint8_t sym[130];
+  if (!arena || !elf_ctx || eref <= 0 || slot_off < 0)
+    return 1;
+  ek = pipeline_expr_kind_ord_at(arena, eref);
+  if (ek == 54) {
+    nref = pipeline_expr_as_operand_ref_at(arena, eref);
+  } else if (ek == 51) {
+    is_addr_of = 1;
+    nref = pipeline_expr_unary_operand_ref_at(arena, eref);
+  } else if (ek != 3) {
+    return 1;
+  } else {
+    nref = eref;
+  }
+  if (nref <= 0)
+    return 1;
+  ek = pipeline_expr_kind_ord_at(arena, nref);
+  if (ek != 3)
+    return 1;
+  vlen = pipeline_expr_var_name_len(arena, nref);
+  if (vlen <= 0 || vlen > 127)
+    return -1;
+  pipeline_expr_var_name_into(arena, nref, name);
+  if (esz != 8)
+    return -1;
+  if (is_addr_of) {
+    idx = pipeline_asm_modlet_find_cold(name, vlen);
+    if (idx >= 0) {
+      if (g_pipeline_asm_modlet_cold.label_len[idx] <= 0 ||
+          g_pipeline_asm_modlet_cold.label_len[idx] > 24)
+        return -1;
+      if (pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off,
+                                                   g_pipeline_asm_modlet_cold.label[idx],
+                                                   g_pipeline_asm_modlet_cold.label_len[idx]) != 0)
+        return -1;
+      return 0;
+    }
+    if (!m)
+      return -1;
+    fi = glue_module_func_index_by_name_c(m, name, vlen);
+    if (fi < 0)
+      return -1;
+    slen = pipe_modlet_fn_sym_spell_into_cold(elf_ctx, name, vlen, sym);
+    if (slen <= 0)
+      return -1;
+    if (pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, sym, slen) != 0)
+      return -1;
+    return 0;
+  }
+  if (!m)
+    return 1;
+  fi = glue_module_func_index_by_name_c(m, name, vlen);
+  if (fi < 0)
+    return 1;
+  slen = pipe_modlet_fn_sym_spell_into_cold(elf_ctx, name, vlen, sym);
+  if (slen <= 0)
+    return -1;
+  if (pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, sym, slen) != 0)
+    return -1;
+  return 0;
+}
+
 /* Fold one ARRAY_LIT element to its constant i32 value. Accepts
  * EXPR_LIT (ek 0) and EXPR_NEG over EXPR_LIT (ek 22) — the parser's
  * compound-reparse normal form for negative literals, e.g. `[-600, 2]`
@@ -16948,9 +17035,9 @@ static int32_t pipe_modlet_array_lit_elem_const_val_cold(void *arena, int32_t er
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64. */
 /* 9.4.2 cold twin: detect ARRAY_LIT elems holding compile-time addresses
  * (dest elem ptr 9 / fn 18 with elem VAR 3 / AS 54 / ADDR_OF 51),
- * recursive over nested TYPE_ARRAY rows. Such arrays stay COMMON — the
- * .data bake cannot express relocations; seed_nonzero_inits materializes
- * each address at hoist-target entry. PLATFORM: SHARED. */
+ * recursive over nested TYPE_ARRAY rows. Prepare now bakes such arrays
+ * via absolute64 RELA when the cell fits; this predicate remains for the
+ * COMMON+seeder fallback (budget miss). PLATFORM: SHARED. */
 static int32_t pipe_modlet_array_lit_has_ptr_addr_elem_cold(void *arena, int32_t init_ref, int32_t elem_ty) {
   int32_t ne = 0, ei = 0, eref = 0, ek = 0, etk = 0;
   if (!arena || init_ref <= 0 || elem_ty <= 0)
@@ -17118,9 +17205,11 @@ static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t
  * pipe_modlet_array_lit_elem_const_val_cold; anything else loud-fails
  * (the historic silent drop baked zeros for `[-1, 2]`); STRING_LIT elems
  * intern into the .data string pool and record an absolute64 reloc on
- * the pointer slot (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64).
- * slen>127 loud-fails. span_bytes bounds the literal (cell size at top call,
- * row size for rows); exceeding span is a loud fail, never silent zero.
+ * the pointer slot. 9.4.2 ptr/fn ADDR_OF / bare-fn elems record an
+ * absolute64 reloc on the named symbol (G.7 complete of
+ * pipeline_elf_ctx_append_reloc_absolute64). slen>4095 loud-fails.
+ * span_bytes bounds the literal (cell size at top call, row size for
+ * rows); exceeding span is a loud fail, never silent zero.
  * Negative elems peel little-endian via uint32_t (the historic signed
  * `cur / 256` peel corrupted bytes 1..3 of negative elems).
  * Twin of runtime_pipeline_abi.x pipe_modlet_bake_array_lit_elems_to_data.
@@ -17129,7 +17218,7 @@ static int32_t pipe_modlet_seed_array_lit_elems_to_rbx_cold(void *arena, uint8_t
 static int32_t pipe_modlet_bake_array_lit_elems_to_data_cold(void *arena, uint8_t *elf_ctx,
                                                             int32_t init_ref, int32_t elem_ty,
                                                             int32_t data_base, int32_t base_off,
-                                                            int32_t span_bytes) {
+                                                            int32_t span_bytes, void *m) {
   int32_t ne = 0, ei = 0, eref = 0, ek = 0, ev = 0, esz = 4, etk = 0;
   int32_t inner_et = 0, row_sz = 0, bi = 0;
   uint32_t uw = 0;
@@ -17157,7 +17246,7 @@ static int32_t pipe_modlet_bake_array_lit_elems_to_data_cold(void *arena, uint8_
       ek = pipeline_expr_kind_ord_at(arena, eref);
       if (ek == 46) {
         if (pipe_modlet_bake_array_lit_elems_to_data_cold(arena, elf_ctx, eref, inner_et, data_base,
-                                                           base_off + ei * row_sz, row_sz) != 0)
+                                                           base_off + ei * row_sz, row_sz, m) != 0)
           return -1;
       }
     }
@@ -17183,6 +17272,14 @@ static int32_t pipe_modlet_bake_array_lit_elems_to_data_cold(void *arena, uint8_
                                                          data_base + base_off + ei * esz) != 0)
         return -1;
       continue;
+    }
+    if ((etk == 9 || etk == 18) && m) {
+      int32_t sa = pipe_modlet_bake_ptr_addr_elem_to_data_cold(arena, elf_ctx, m, eref, esz,
+                                                               data_base + base_off + ei * esz);
+      if (sa < 0)
+        return -1;
+      if (sa == 0)
+        continue;
     }
     if (!pipe_modlet_array_lit_elem_const_val_cold(arena, eref, &ev))
       return -1;
@@ -17285,8 +17382,9 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
       calign = 16;
     /* Non-empty TYPE_ARRAY ARRAY_LIT → F7 .data when it fits (library TU).
      * STRING_LIT elems intern into a .data string pool with absolute64
-     * RELA on each pointer slot. 9.4.2 ptr/fn ADDR_OF tables stay COMMON.
-     * Empty `[]` stays COMMON. Oversized (cell + pool) → COMMON + hoist seed.
+     * RELA on each pointer slot. 9.4.2 ptr/fn ADDR_OF / bare-fn tables
+     * bake the same reloc (no longer veto use_data). Empty `[]` stays
+     * COMMON. Oversized (cell + pool) → COMMON + hoist seed.
      * PLATFORM: SHARED — twin of runtime_pipeline_abi.x prepare emit. */
     if (pipeline_asm_modlet_cell_is_array_cold(csz_raw)) {
       for (tl2 = 0; tl2 < n; tl2++) {
@@ -17310,15 +17408,9 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
           ik2 = pipeline_expr_kind_ord_at(a, init_ref2);
           tk2 = pipeline_type_kind_ord_at(a, type_ref2);
           ne2 = (ik2 == 46) ? pipeline_expr_array_lit_num_elems_at(a, init_ref2) : 0;
-          if (ik2 == 46 && tk2 == 10 && ne2 > 0 &&
-              /* 9.4.2: ptr/fn-typed tables with address elems stay COMMON
-               * (bake cannot express those relocs; entry seeder resolves).
-               * STRING_LIT elems now bake via intern + absolute64 RELA.
-               * Unwrap the ARRAY type to its elem type first — the
-               * predicate walk mirrors the entry seeder, which receives
-               * the already-unwrapped elem type (et) from its caller. */
-              !pipe_modlet_array_lit_has_ptr_addr_elem_cold(
-                  a, init_ref2, pipeline_type_elem_ref_at(a, type_ref2))) {
+          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
+              /* STRING_LIT intern + 9.4.2 named-symbol ADDR_OF / fn-ptr
+               * absolute64 RELA. Address elems no longer veto use_data. */
             int32_t pool_bytes = pipe_modlet_array_lit_string_pool_bytes_cold(a, init_ref2);
             if (pool_bytes >= 0) {
               data_len_now = pipeline_elf_ctx_emit_data_len((uint8_t *)elf_ctx);
@@ -17355,7 +17447,7 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
       }
       et2 = pipeline_type_elem_ref_at(a, type_ref2);
       if (pipe_modlet_bake_array_lit_elems_to_data_cold(a, (uint8_t *)elf_ctx, init_ref2, et2, data_off,
-                                                         0, csz) != 0) {
+                                                         0, csz, m) != 0) {
         pipeline_elf_ctx_set_shndx_override((uint8_t *)elf_ctx, 0);
         return -1;
       }

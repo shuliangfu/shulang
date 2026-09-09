@@ -32984,13 +32984,59 @@ export function pipeline_asm_modlet_store_from_rax_elf_c(elf_ctx: *u8, name: *u8
 }
 
 /**
+ * Spell a same-module function's link name into dst.
+ * Mach-O leading '_' on Darwin, bare ELF name on Linux. Completes the
+ * spelling previously inlined in pipe_modlet_lea_fn_sym_to_rax so LEA
+ * and .data absolute64 relocs share one authority.
+ * @param elf_ctx *u8 - ElfCodegenCtx (reads macho_leading_underscore)
+ * @param name *u8 - source-level function name
+ * @param name_len i32 - 1..127
+ * @param dst *u8 - caller buffer; capacity >= name_len+1 (typically 130)
+ * @return i32 - spelled length; -1 bad args
+ * PLATFORM: SHARED · MACOS Mach-O '_' · LINUX ELF bare name.
+ */
+function pipe_modlet_fn_sym_spell_into(
+  elf_ctx: *u8, name: *u8, name_len: i32, dst: *u8
+): i32 {
+  let macho: i32 = 0;
+  let k: i32 = 0;
+  if (elf_ctx == (0 as *u8) || name == (0 as *u8) || dst == (0 as *u8) || name_len <= 0 || name_len > 127) {
+    return 0 - 1;
+  }
+  unsafe {
+    macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
+  }
+  if (macho != 0) {
+    unsafe {
+      dst[0] = 95 as u8;
+    }
+    k = 0;
+    while (k < name_len) {
+      unsafe {
+        dst[k + 1] = name[k];
+      }
+      k = k + 1;
+    }
+    return name_len + 1;
+  }
+  k = 0;
+  while (k < name_len) {
+    unsafe {
+      dst[k] = name[k];
+    }
+    k = k + 1;
+  }
+  return name_len;
+}
+
+/**
  * LEA a same-module function's link symbol into rax/x0.
  * 9.4.2 single authority for the Cap-fn-ptr symbol spell (was inlined in
  * pipeline_asm_emit_as_elf_impl, the VAR fast face, and their twins):
  * source-level name; Mach-O leading '_' on Darwin, bare ELF symbol on
  * Linux. Callers must have confirmed the name resolves to a same-module
  * function (glue_module_func_index_by_name_c >= 0); this face re-checks
- * bounds only.
+ * bounds only. Spelling is pipe_modlet_fn_sym_spell_into.
  * @param elf_ctx *u8 - ElfCodegenCtx*
  * @param name *u8 - source-level function name
  * @param name_len i32 - name length (1..127)
@@ -33003,34 +33049,13 @@ export function pipeline_asm_modlet_store_from_rax_elf_c(elf_ctx: *u8, name: *u8
 export function pipe_modlet_lea_fn_sym_to_rax(elf_ctx: *u8, name: *u8, name_len: i32, ta: i32): i32 {
   let sym: u8[130] = [];
   let len: i32 = 0;
-  let k: i32 = 0;
-  let macho: i32 = 0;
   let rc: i32 = 0;
   if (elf_ctx == (0 as *u8) || name == (0 as *u8) || name_len <= 0 || name_len > 127 || (ta != 0 && ta != 1)) {
     return 0 - 1;
   }
-  unsafe {
-    macho = pipeline_elf_ctx_macho_leading_underscore(elf_ctx);
-  }
-  if (macho != 0) {
-    sym[0] = 95 as u8;
-    k = 0;
-    while (k < name_len) {
-      unsafe {
-        sym[k + 1] = name[k];
-      }
-      k = k + 1;
-    }
-    len = name_len + 1;
-  } else {
-    k = 0;
-    while (k < name_len) {
-      unsafe {
-        sym[k] = name[k];
-      }
-      k = k + 1;
-    }
-    len = name_len;
+  len = pipe_modlet_fn_sym_spell_into(elf_ctx, name, name_len, &sym[0]);
+  if (len <= 0) {
+    return 0 - 1;
   }
   unsafe {
     rc = backend_enc_lea_sym_to_reg_arch(elf_ctx, 0, &sym[0], len, ta);
@@ -33191,8 +33216,9 @@ function pipe_modlet_assign_unique_label(idx: i32, module_fp: i64): void {
  *       and `const A:[2]i32=[10,32]`:
  *       · empty lit `[]` → SHN_COMMON / Mach-O __common (BSS zero; correct)
  *       · non-empty lit that fits in the F7 .data buf (64 KiB, including
- *         interned STRING_LIT pool + absolute64 RELA on pointer slots) →
- *         ELF .data / Mach-O __DATA,__const baked at prepare time
+ *         interned STRING_LIT pool + absolute64 RELA on pointer slots,
+ *         including 9.4.2 named-symbol ADDR_OF / fn-ptr elems) →
+ *         ELF .data / Mach-O __DATA baked at prepare time
  *         (library TUs have no hoist-target entry; COMMON+seed stays zero)
  *       · non-empty lit that does not fit → COMMON + hoist seed_nonzero (historic)
  * Without (2), pure-asm stacked every module array into each function frame
@@ -33403,10 +33429,11 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
     // Non-empty TYPE_ARRAY ARRAY_LIT → bake into F7 .data when it fits.
     // STRING_LIT elems intern into a .data string pool with absolute64
     // RELA on each pointer slot (library TUs have no hoist-target seed).
-    // 9.4.2 ptr/fn ADDR_OF tables stay COMMON (bake still cannot express
-    // those relocs; entry seeder resolves). Empty `u8[N]=[]` stays COMMON
-    // (BSS). Oversized (cell + string pool) falls back to COMMON + hoist
-    // seed (historic). PLATFORM: SHARED library-TU .data.
+    // 9.4.2 ptr/fn ADDR_OF / bare-fn tables now bake the same way: the
+    // pointer slot stays zero and pipeline_elf_ctx_append_reloc_absolute64
+    // names the fn symbol or modlet cell label. Empty `u8[N]=[]` stays
+    // COMMON (BSS). Oversized (cell + string pool) falls back to COMMON
+    // + hoist seed (historic). PLATFORM: SHARED library-TU .data.
     if (pipe_modlet_cell_is_array(csz_raw) != 0) {
       nlen2 = pipe_load_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_name_len(i));
       nbase2 = pipe_modlet_off_name(i);
@@ -33448,17 +33475,11 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
             tk2 = pipeline_type_kind_ord_at(a, type_ref2);
             ne2 = pipeline_expr_array_lit_num_elems_at(a, init_ref2);
           }
-          // 9.4.2: ptr/fn-typed tables with address elems (bare fn /
-          // `fn as *u8` / `&global`) stay COMMON — the bake cannot
-          // express those relocs; the entry seeder materializes each
-          // address (lea sym/cell → store). STRING_LIT elems now bake:
-          // intern bytes into the .data pool + absolute64 RELA on the
-          // pointer slot (G.7 complete of F7 vtable absolute64).
-          if (
-            ik2 == 46 && tk2 == 10 && ne2 > 0 &&
-            pipe_modlet_array_lit_has_ptr_addr_elem(
-              a, init_ref2, pipeline_type_elem_ref_at(a, type_ref2)) == 0
-          ) {
+          // STRING_LIT elems intern into the .data pool + absolute64
+          // RELA on the pointer slot. 9.4.2 ptr/fn ADDR_OF / bare-fn
+          // tables bake the same reloc (G.7 complete of F7 vtable
+          // absolute64); they no longer veto use_data.
+          if (ik2 == 46 && tk2 == 10 && ne2 > 0) {
             pool_bytes = pipe_modlet_array_lit_string_pool_bytes(a, init_ref2);
             if (pool_bytes >= 0) {
               unsafe {
@@ -33520,7 +33541,7 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       unsafe {
         et2 = pipeline_type_elem_ref_at(a, type_ref2);
         rc = pipe_modlet_bake_array_lit_elems_to_data(
-          a, elf_ctx, init_ref2, et2, data_off, 0, csz2);
+          a, elf_ctx, init_ref2, et2, data_off, 0, csz2, m);
         pipeline_elf_ctx_set_shndx_override(elf_ctx, 0);
       }
       if (rc != 0) {
@@ -33553,9 +33574,10 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
  * EXPR_NEG-over-LIT fold via pipe_modlet_array_lit_elem_const_val;
  * anything else (FLOAT_LIT, binop, VAR, ...) loud-fails — the historic
  * silent drop baked zeros for `[-1, 2]`. STRING_LIT elems intern into the
- * .data string pool and record an absolute64 reloc on the pointer slot
- * (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64). slen>4095
- * loud-fails (parser STRING_LIT overflow cap / L011).
+ * .data string pool and record an absolute64 reloc on the pointer slot.
+ * 9.4.2 ptr/fn ADDR_OF / bare-fn elems record an absolute64 reloc on the
+ * named symbol (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64).
+ * slen>4095 loud-fails (parser STRING_LIT overflow cap / L011).
  * @param arena *u8 - ASTArena
  * @param elf_ctx *u8 - ElfCodegenCtx
  * @param init_ref i32 - ARRAY_LIT expr
@@ -33564,12 +33586,13 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
  * @param base_off i32 - byte offset within the cell
  * @param span_bytes i32 - bytes this literal may occupy (cell size at top
  *     call, row size for nested rows); literal exceeding span = loud fail
+ * @param m *u8 - Module* (fn lookup for address elems; may be null)
  * @return i32 - 0 ok; -1 poke fail / non-constant elem / span overflow
  * PLATFORM: SHARED freestanding · LINUX gold · MACOS|ARM64 · ELF .data.
  */
 function pipe_modlet_bake_array_lit_elems_to_data(
   arena: *u8, elf_ctx: *u8, init_ref: i32, elem_ty: i32, data_base: i32, base_off: i32,
-  span_bytes: i32
+  span_bytes: i32, m: *u8
 ): i32 {
   let ne: i32 = 0;
   let ei: i32 = 0;
@@ -33619,7 +33642,7 @@ function pipe_modlet_bake_array_lit_elems_to_data(
         }
         if (ek == 46) {
           rc = pipe_modlet_bake_array_lit_elems_to_data(
-            arena, elf_ctx, eref, inner_et, data_base, base_off + ei * row_sz, row_sz);
+            arena, elf_ctx, eref, inner_et, data_base, base_off + ei * row_sz, row_sz, m);
           if (rc != 0) {
             return rc;
           }
@@ -33664,6 +33687,20 @@ function pipe_modlet_bake_array_lit_elems_to_data(
         }
         ei = ei + 1;
         continue;
+      }
+      // 9.4.2 address-valued elem (bare fn / `fn as *u8` / `&global`):
+      // record an absolute64 reloc on this pointer slot. rc==1 → not an
+      // address literal, fall through to the const fold (loud-fail).
+      if ((etk == 9 || etk == 18) && m != (0 as *u8)) {
+        rc = pipe_modlet_bake_ptr_addr_elem_to_data(
+          arena, elf_ctx, m, eref, esz, data_base + base_off + ei * esz);
+        if (rc < 0) {
+          return 0 - 1;
+        }
+        if (rc == 0) {
+          ei = ei + 1;
+          continue;
+        }
       }
       // LIT / EXPR_NEG-over-LIT: fold, then peel two's-complement bytes
       // little-endian via u32 (unsigned division). The historic signed
@@ -33949,6 +33986,152 @@ function pipe_modlet_bake_string_lit_elem_to_data(
 }
 
 /**
+ * Bake one address-valued ARRAY_LIT elem as an absolute64 reloc on an
+ * already-reserved .data pointer slot (9.4.2).
+ *
+ * Completes the STRING_LIT intern path: named-symbol addresses (bare
+ * same-module fn, `fn as *u8`, `&global`) cannot be poked as immediates,
+ * so prepare used to keep those tables COMMON and rely on the hoist-target
+ * seeder. Library TUs never seed, leaving the slots NULL. G.7: reloc
+ * authority is pipeline_elf_ctx_append_reloc_absolute64 (F7 vtable +
+ * STRING_LIT intern). Symbol spelling is pipe_modlet_fn_sym_spell_into
+ * (same Mach-O '_' / ELF bare as pipe_modlet_lea_fn_sym_to_rax).
+ *
+ * ADDR_OF prefers the modlet unique label (COMMON or .data cell), then
+ * the same-module function link symbol. A bare VAR that is not a
+ * same-module fn is a VALUE copy, not an address literal: return 1 so
+ * the caller falls through to the const fold (which loud-fails).
+ *
+ * Called with shndx_override already 4 (prepare's bake window).
+ * @param arena *u8 - ASTArena
+ * @param elf_ctx *u8 - ElfCodegenCtx
+ * @param m *u8 - Module* (fn lookup; null → not-an-address-elem)
+ * @param eref i32 - element expr ref
+ * @param esz i32 - dest elem byte size (must be 8)
+ * @param slot_off i32 - absolute .data offset of the 8-byte pointer slot
+ * @return i32 - 0 recorded reloc; 1 not an address elem; -1 loud fail
+ * PLATFORM: SHARED freestanding · ELF .data RELA · Mach-O __DATA unsigned64.
+ */
+function pipe_modlet_bake_ptr_addr_elem_to_data(
+  arena: *u8, elf_ctx: *u8, m: *u8, eref: i32, esz: i32, slot_off: i32
+): i32 {
+  let ek: i32 = 0;
+  let is_addr_of: i32 = 0;
+  let nref: i32 = 0;
+  let vlen: i32 = 0;
+  let name: u8[128] = [];
+  let sym: u8[130] = [];
+  let slen: i32 = 0;
+  let fi: i32 = 0;
+  let idx: i32 = 0;
+  let llen: i32 = 0;
+  let lbase: i32 = 0;
+  let rc: i32 = 0;
+  if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || eref <= 0 || slot_off < 0) {
+    return 1;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, eref);
+  }
+  if (ek == 54) {
+    unsafe {
+      nref = pipeline_expr_as_operand_ref_at(arena, eref);
+    }
+  } else {
+    if (ek == 51) {
+      is_addr_of = 1;
+      unsafe {
+        nref = pipeline_expr_unary_operand_ref_at(arena, eref);
+      }
+    } else {
+      if (ek != 3) {
+        return 1;
+      }
+      nref = eref;
+    }
+  }
+  if (nref <= 0) {
+    return 1;
+  }
+  unsafe {
+    ek = pipeline_expr_kind_ord_at(arena, nref);
+  }
+  if (ek != 3) {
+    return 1;
+  }
+  unsafe {
+    vlen = pipeline_expr_var_name_len(arena, nref);
+  }
+  if (vlen <= 0 || vlen > 127) {
+    return 0 - 1;
+  }
+  unsafe {
+    pipeline_expr_var_name_into(arena, nref, &name[0]);
+  }
+  if (esz != 8) {
+    return 0 - 1;
+  }
+  if (is_addr_of != 0) {
+    idx = pipeline_asm_modlet_find(&name[0], vlen);
+    if (idx >= 0) {
+      llen = pipe_load_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_label_len(idx));
+      lbase = pipe_modlet_off_label(idx);
+      if (llen <= 0 || llen > 24) {
+        return 0 - 1;
+      }
+      unsafe {
+        rc = pipeline_elf_ctx_append_reloc_absolute64(
+          elf_ctx, slot_off, &g_pipeline_asm_modlet[lbase], llen);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      return 0;
+    }
+    if (m == (0 as *u8)) {
+      return 0 - 1;
+    }
+    unsafe {
+      fi = glue_module_func_index_by_name_c(m, &name[0], vlen);
+    }
+    if (fi < 0) {
+      return 0 - 1;
+    }
+    slen = pipe_modlet_fn_sym_spell_into(elf_ctx, &name[0], vlen, &sym[0]);
+    if (slen <= 0) {
+      return 0 - 1;
+    }
+    unsafe {
+      rc = pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, &sym[0], slen);
+    }
+    if (rc != 0) {
+      return 0 - 1;
+    }
+    return 0;
+  }
+  if (m == (0 as *u8)) {
+    return 1;
+  }
+  unsafe {
+    fi = glue_module_func_index_by_name_c(m, &name[0], vlen);
+  }
+  if (fi < 0) {
+    return 1;
+  }
+  slen = pipe_modlet_fn_sym_spell_into(elf_ctx, &name[0], vlen, &sym[0]);
+  if (slen <= 0) {
+    return 0 - 1;
+  }
+  unsafe {
+    rc = pipeline_elf_ctx_append_reloc_absolute64(elf_ctx, slot_off, &sym[0], slen);
+  }
+  if (rc != 0) {
+    return 0 - 1;
+  }
+  return 0;
+}
+
+/**
  * Fold one ARRAY_LIT element to its constant i32 value.
  * Accepts EXPR_LIT (ek 0) and EXPR_NEG over EXPR_LIT (ek 22) — the parser's
  * compound-reparse normal form for negative literals, e.g. `[-600, 2]`
@@ -34012,10 +34195,10 @@ function pipe_modlet_array_lit_elem_const_val(
  * elem type ptr (9) / fn (18) with elem VAR (3, bare same-module fn),
  * AS (54, `fn as *u8`), or ADDR_OF (51, `&global` / `&fn`). Recursive
  * over nested TYPE_ARRAY rows, mirroring the entry seeder walk. Prepare
- * keeps such arrays COMMON: the .data bake cannot express link-time
- * relocations, and seed_nonzero_inits materializes each address at
- * hoist-target entry (lea sym/cell → store). Ptr-typed dest only — a
- * bare global in an i32 table is a value copy and keeps the fold path.
+ * now bakes such arrays via absolute64 RELA when the cell fits; this
+ * predicate remains for the COMMON+seeder fallback (budget miss) and
+ * documents the address-elem shape. Ptr-typed dest only — a bare global
+ * in an i32 table is a value copy and keeps the fold path.
  * @param arena *u8 - ASTArena
  * @param init_ref i32 - ARRAY_LIT expr
  * @param elem_ty i32 - dest elem type_ref at this nesting level
@@ -68662,7 +68845,10 @@ export function glue_index_deref_ptr_field_slot_rbx_elf_c(arena: *u8, elf_ctx: *
 
 /**
  * Total payload bytes of a fixed TYPE_ARRAY, recursive for multi-dim
- * (`[2][3]i32` → 24). Element TYPE_PTR=9 is pointer width 8 (`*i32[2]` → 16).
+ * (`[2][3]i32` → 24). Element TYPE_PTR=9 / TYPE_FN=18 is pointer width 8
+ * (`*i32[2]` → 16; `[2]function(i32):i32` → 16). G.7 complete of the
+ * 10.3.1 TYPE_FN 8B ABI (force_esz already had kind 18; this size face
+ * missed it and baked `[2]TYPE_FN` as 8 bytes → span overflow CG002).
  * @param arena *u8 - ASTArena*; null → 0
  * @param ty_ref i32 - type pool ref; must be TYPE_ARRAY (ord 10)
  * @param depth i32 - recursion depth; depth > 8 → 0 (cycle/depth guard)
@@ -68707,7 +68893,8 @@ export function glue_fixed_array_total_bytes_c(arena: *u8, ty_ref: i32, depth: i
     esz = 1;
   } else if (ek == 0 || ek == 3 || ek == 13 || ek == 14) {
     esz = 4;
-  } else if (ek == 15 || ek == 4 || ek == 5 || ek == 6 || ek == 7 || ek == 9) {
+  } else if (ek == 15 || ek == 4 || ek == 5 || ek == 6 || ek == 7 || ek == 9 || ek == 18) {
+    // TYPE_FN=18 is Cap opaque fn-ptr ABI (8B), twin of force_esz / seed C.
     esz = 8;
   } else if (ek == 8) {
     unsafe {
