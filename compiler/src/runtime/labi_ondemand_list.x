@@ -4906,25 +4906,28 @@ export function link_abi_user_o_needs_async_scheduler(user_o: *u8): i32 {
  * Count of zlib UNDEF needles for link_abi_obj_needs_zlib (exact libz symbols).
  * Product complete set (G.7): one-shot compress2/uncompress plus gzip Init2
  * and Darwin/ELF gzip product mangles.
- * @return i32 — 20
+ * @return i32 — 22
  * PLATFORM: SHARED — Darwin gzip-only import must pull glue/-lz.
  * 16..19: facade names (`std_compress_gzip_compress`) so `xlang build`
  * user.o UNDEF fires needs_zlib while asm ld passes compress_o=NULL.
+ * 20..21: stream facade (`std_compress_compress_init`) so cookbook
+ * compress_stream_br_zs fires -lz (c_face dispatch U gzip stream T).
  */
 #[no_mangle]
 export function labi_od_zlib_undef_sym_count(): i32 {
-  return 20;
+  return 22;
 }
 
 /**
  * zlib UNDEF needle at index (needs_zlib probe table; exact symbols).
- * @param i i32 — index in [0, 20)
+ * @param i i32 — index in [0, 22)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete zlib undef authority
  * 0..3 Mach-O one-shot; 4..7 ELF one-shot; 8..11 Mach-O Init2 + gzip
  * product mangle; 12..15 ELF Init2 + gzip product mangle;
  * 16..19 Mach-O/ELF facade (`std_compress_gzip_compress`) for `xlang build`
  * user.o (asm ld compress_o is NULL; tail libs scan user.o only).
+ * 20..21 Mach-O/ELF stream facade (`std_compress_compress_init`).
  * gzip-only import has UNDEF _std_compress_gzip_gzip_compress (no
  * _compress2); without those needles Darwin -dead_strip omits glue/-lz.
  */
@@ -5013,6 +5016,14 @@ export function labi_od_zlib_undef_sym_at(i: i32): *u8 {
     let p: *u8 = "std_compress_gzip_decompress";
     return p;
   }
+  if (i == 20) {
+    let p: *u8 = "_std_compress_compress_init";
+    return p;
+  }
+  if (i == 21) {
+    let p: *u8 = "std_compress_compress_init";
+    return p;
+  }
   return 0 as *u8;
 }
 
@@ -5033,21 +5044,22 @@ export function labi_od_compress_zlib_marker(): *u8 {
  * (Cap residual has_undef_sym does substring match on UNDEF lines) plus
  * facade / submodule mangles so `xlang build` user.o fires needs_zstd while
  * asm ld passes compress_o=NULL.
- * @return i32 — 10
+ * @return i32 — 12
  * PLATFORM: SHARED — must match zstd C API surface used by product compress gate
  */
 #[no_mangle]
 export function labi_od_zstd_undef_sym_count(): i32 {
-  return 10;
+  return 12;
 }
 
 /**
  * zstd UNDEF/prefix needle at index (needs_zstd probe table).
- * @param i i32 — index in [0, 10)
+ * @param i i32 — index in [0, 12)
  * @return *u8 — static C string needle, or null if out of range
  * PLATFORM: SHARED — G.7 complete zstd undef/prefix authority
  * 0..1 C API prefix; 2..5 Mach-O/ELF facade (`std_compress_zstd_compress`);
- * 6..9 Mach-O/ELF submodule (`std_compress_zstd_zstd_compress`).
+ * 6..9 Mach-O/ELF submodule (`std_compress_zstd_zstd_compress`);
+ * 10..11 Mach-O/ELF stream facade (`std_compress_compress_init`).
  */
 #[no_mangle]
 export function labi_od_zstd_undef_sym_at(i: i32): *u8 {
@@ -5094,6 +5106,14 @@ export function labi_od_zstd_undef_sym_at(i: i32): *u8 {
     let p: *u8 = "std_compress_zstd_zstd_decompress";
     return p;
   }
+  if (i == 10) {
+    let p: *u8 = "_std_compress_compress_init";
+    return p;
+  }
+  if (i == 11) {
+    let p: *u8 = "std_compress_compress_init";
+    return p;
+  }
   return 0 as *u8;
 }
 
@@ -5113,21 +5133,22 @@ export function labi_od_compress_zstd_marker(): *u8 {
  * Product complete set (G.7): seed authority BrotliEncoderCompress + BrotliDecoderDecompress
  * plus facade / submodule mangles so `xlang build` user.o fires needs_brotli while
  * asm ld passes compress_o=NULL.
- * @return i32 — 10
+ * @return i32 — 12
  * PLATFORM: SHARED — must match brotli C API surface used by product compress gate
  */
 #[no_mangle]
 export function labi_od_brotli_undef_sym_count(): i32 {
-  return 10;
+  return 12;
 }
 
 /**
  * brotli UNDEF needle at index (needs_brotli probe table; exact symbols).
- * @param i i32 — index in [0, 10)
+ * @param i i32 — index in [0, 12)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete brotli undef authority
  * 0..1 C API; 2..5 Mach-O/ELF facade (`std_compress_brotli_compress`);
- * 6..9 Mach-O/ELF submodule (`std_compress_brotli_brotli_compress`).
+ * 6..9 Mach-O/ELF submodule (`std_compress_brotli_brotli_compress`);
+ * 10..11 Mach-O/ELF stream facade (`std_compress_compress_init`).
  */
 #[no_mangle]
 export function labi_od_brotli_undef_sym_at(i: i32): *u8 {
@@ -5172,6 +5193,14 @@ export function labi_od_brotli_undef_sym_at(i: i32): *u8 {
   }
   if (i == 9) {
     let p: *u8 = "std_compress_brotli_brotli_decompress";
+    return p;
+  }
+  if (i == 10) {
+    let p: *u8 = "_std_compress_compress_init";
+    return p;
+  }
+  if (i == 11) {
+    let p: *u8 = "std_compress_compress_init";
     return p;
   }
   return 0 as *u8;

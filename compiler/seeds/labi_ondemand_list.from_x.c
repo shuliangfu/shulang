@@ -2420,7 +2420,7 @@ int link_abi_user_o_needs_async_scheduler(const char *user_o) {
 
 /* wave131: product compress family marker + UNDEF/prefix tables + pure orch.
  * PLATFORM: SHARED — Cap residual exports_marker + has_undef_sym (popen/nm). */
-int labi_od_zlib_undef_sym_count(void) { return 20; }
+int labi_od_zlib_undef_sym_count(void) { return 22; }
 const char *labi_od_zlib_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2467,11 +2467,16 @@ const char *labi_od_zlib_undef_sym_at(int i) {
     return "std_compress_gzip_compress";
   if (i == 19)
     return "std_compress_gzip_decompress";
+  /* PLATFORM: SHARED — stream facade for `xlang build` user.o (compress_o=NULL). */
+  if (i == 20)
+    return "_std_compress_compress_init";
+  if (i == 21)
+    return "std_compress_compress_init";
   return NULL;
 }
 const char *labi_od_compress_zlib_marker(void) { return "xlang_compress_zlib_marker"; }
 
-int labi_od_zstd_undef_sym_count(void) { return 10; }
+int labi_od_zstd_undef_sym_count(void) { return 12; }
 const char *labi_od_zstd_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2496,11 +2501,16 @@ const char *labi_od_zstd_undef_sym_at(int i) {
     return "std_compress_zstd_zstd_compress";
   if (i == 9)
     return "std_compress_zstd_zstd_decompress";
+  /* PLATFORM: SHARED — stream facade for cookbook compress_stream_br_zs. */
+  if (i == 10)
+    return "_std_compress_compress_init";
+  if (i == 11)
+    return "std_compress_compress_init";
   return NULL;
 }
 const char *labi_od_compress_zstd_marker(void) { return "xlang_compress_zstd_marker"; }
 
-int labi_od_brotli_undef_sym_count(void) { return 10; }
+int labi_od_brotli_undef_sym_count(void) { return 12; }
 const char *labi_od_brotli_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2525,6 +2535,11 @@ const char *labi_od_brotli_undef_sym_at(int i) {
     return "std_compress_brotli_brotli_compress";
   if (i == 9)
     return "std_compress_brotli_brotli_decompress";
+  /* PLATFORM: SHARED — stream facade for cookbook compress_stream_br_zs. */
+  if (i == 10)
+    return "_std_compress_compress_init";
+  if (i == 11)
+    return "std_compress_compress_init";
   return NULL;
 }
 const char *labi_od_compress_brotli_marker(void) { return "xlang_compress_brotli_marker"; }
