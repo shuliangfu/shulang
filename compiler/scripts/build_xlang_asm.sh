@@ -4999,7 +4999,15 @@ ensure_asm_xlang_lsp_diag_stub_obj() {
   STUB_O="$BUILD_DIR/asm_xlang_lsp_diag_stub.o"
   LSP_IO_STUB="seeds/typeck_lsp_io_stub.from_x.c"
   LSP_IO_O="$BUILD_DIR/typeck_lsp_io_stub.o"
-  if [ ! -f "$LSP_IO_O" ] || [ "$LSP_IO_STUB" -nt "$LSP_IO_O" ]; then
+  # 7.2.1 sixth knife: .x authority (src/typeck_lsp_io_stub.x) via cc_inc_tu
+  # --auto prefer lane; seed fallback when no product binary (cold start).
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$LSP_IO_O" ] || [ src/typeck_lsp_io_stub.x -nt "$LSP_IO_O" ] \
+       || { [ -f "$LSP_IO_STUB" ] && [ "$LSP_IO_STUB" -nt "$LSP_IO_O" ]; }; then
+      echo " cc_inc_tu --auto (src/typeck_lsp_io_stub.x) -> $LSP_IO_O"
+      sh scripts/cc_inc_tu.sh --auto "$LSP_IO_O"
+    fi
+  elif [ ! -f "$LSP_IO_O" ] || [ "$LSP_IO_STUB" -nt "$LSP_IO_O" ]; then
   echo " cc_inc_tu $LSP_IO_O <- $LSP_IO_STUB"
   sh scripts/cc_inc_tu.sh "$LSP_IO_STUB" "$LSP_IO_O"
   fi
