@@ -254,6 +254,151 @@ static int32_t parser_asm_wrap_block_ref_as_expr_primary_c(void *arena, int32_t 
   return ref;
 }
 
+/*
+ * STRING_LIT payload beyond Expr.var_name[128]: overflow chunks are extra
+ * STRING_LIT exprs chained via int_val (next-ref). Head.var_name_len is the
+ * total semantic length; overflow nodes store chunk size in var_name_len.
+ * Identifier name slots stay 127 (4.2.8 leave-off). L011 still honest-fails
+ * past PARSER_ASM_STRING_LIT_MAX. PLATFORM: SHARED.
+ */
+#define PARSER_ASM_STRING_LIT_MAX 4095
+#define PARSER_ASM_STRING_LIT_CHUNK 127
+
+static int32_t parser_asm_string_lit_append_byte_c(void *arena, int32_t head_ref, uint8_t b,
+                                                   int32_t line, int32_t col) {
+  struct parser_asm_ast_expr e;
+  struct parser_asm_ast_expr ch;
+  int32_t total;
+  int32_t cur;
+  int32_t next;
+  int32_t ov;
+  int32_t off;
+  if (!arena || head_ref <= 0)
+    return -1;
+  e = parser_asm_arena_expr_get_c(arena, head_ref);
+  total = e.var_name_len;
+  if (total < 0)
+    total = 0;
+  if (total >= PARSER_ASM_STRING_LIT_MAX) {
+    lexer_note_string_lit_overflow(line, col);
+    return -1;
+  }
+  if (total < PARSER_ASM_STRING_LIT_CHUNK) {
+    e.var_name[total] = b;
+    e.var_name_len = total + 1;
+    parser_asm_arena_expr_set_c(arena, head_ref, e);
+    return 0;
+  }
+  cur = (int32_t)e.int_val;
+  off = total - PARSER_ASM_STRING_LIT_CHUNK;
+  if (cur <= 0) {
+    ov = ast_ast_arena_expr_alloc(arena);
+    if (ov == 0)
+      return -1;
+    ch = parser_asm_arena_expr_get_c(arena, ov);
+    parser_asm_expr_set_common_zeros_c(&ch);
+    ch.kind = PARSER_ASM_EXPR_STRING_LIT;
+    ch.line = e.line;
+    ch.col = e.col;
+    ch.int_val = 0;
+    ch.var_name_len = 0;
+    parser_asm_arena_expr_set_c(arena, ov, ch);
+    e.int_val = (int64_t)ov;
+    parser_asm_arena_expr_set_c(arena, head_ref, e);
+    cur = ov;
+  }
+  while (off >= PARSER_ASM_STRING_LIT_CHUNK) {
+    ch = parser_asm_arena_expr_get_c(arena, cur);
+    next = (int32_t)ch.int_val;
+    if (next <= 0) {
+      ov = ast_ast_arena_expr_alloc(arena);
+      if (ov == 0)
+        return -1;
+      ch.int_val = (int64_t)ov;
+      parser_asm_arena_expr_set_c(arena, cur, ch);
+      ch = parser_asm_arena_expr_get_c(arena, ov);
+      parser_asm_expr_set_common_zeros_c(&ch);
+      ch.kind = PARSER_ASM_EXPR_STRING_LIT;
+      ch.line = e.line;
+      ch.col = e.col;
+      ch.int_val = 0;
+      ch.var_name_len = 0;
+      parser_asm_arena_expr_set_c(arena, ov, ch);
+      next = ov;
+    }
+    off -= PARSER_ASM_STRING_LIT_CHUNK;
+    cur = next;
+  }
+  ch = parser_asm_arena_expr_get_c(arena, cur);
+  ch.var_name[off] = b;
+  if (ch.var_name_len < off + 1)
+    ch.var_name_len = off + 1;
+  parser_asm_arena_expr_set_c(arena, cur, ch);
+  e = parser_asm_arena_expr_get_c(arena, head_ref);
+  e.var_name_len = total + 1;
+  parser_asm_arena_expr_set_c(arena, head_ref, e);
+  return 0;
+}
+
+/* Decode one TOKEN_STRING span (escapes already product-set) onto head_ref. */
+static int32_t parser_asm_string_lit_decode_span_c(void *arena, int32_t head_ref,
+    struct parser_asm_slice_u8 *source, size_t q0, int32_t nlen, int32_t line, int32_t col) {
+  int32_t ri;
+  if (!arena || !source || head_ref <= 0)
+    return -1;
+  if (nlen < 0)
+    nlen = 0;
+  ri = 0;
+  while (ri < nlen) {
+    uint8_t c = 0;
+    uint8_t b;
+    int32_t consumed = 1;
+    if (q0 + (size_t)ri < source->length)
+      c = source->data[q0 + (size_t)ri];
+    b = c;
+    if (c == 92 && (ri + 1) < nlen) {
+      uint8_t n = 0;
+      if (q0 + (size_t)(ri + 1) < source->length)
+        n = source->data[q0 + (size_t)(ri + 1)];
+      if (n == 110) { b = 10; consumed = 2; }
+      else if (n == 116) { b = 9; consumed = 2; }
+      else if (n == 114) { b = 13; consumed = 2; }
+      else if (n == 48) { b = 0; consumed = 2; }
+      else if (n == 92 || n == 34) { b = n; consumed = 2; }
+      else if (n == 120 && (ri + 3) < nlen) {
+        uint8_t h1 = 0;
+        uint8_t h2 = 0;
+        int32_t v1 = -1;
+        int32_t v2 = -1;
+        if (q0 + (size_t)(ri + 2) < source->length)
+          h1 = source->data[q0 + (size_t)(ri + 2)];
+        if (q0 + (size_t)(ri + 3) < source->length)
+          h2 = source->data[q0 + (size_t)(ri + 3)];
+        if (h1 >= 48 && h1 <= 57) v1 = (int32_t)h1 - 48;
+        if (h1 >= 97 && h1 <= 102) v1 = (int32_t)h1 - 97 + 10;
+        if (h1 >= 65 && h1 <= 70) v1 = (int32_t)h1 - 65 + 10;
+        if (h2 >= 48 && h2 <= 57) v2 = (int32_t)h2 - 48;
+        if (h2 >= 97 && h2 <= 102) v2 = (int32_t)h2 - 97 + 10;
+        if (h2 >= 65 && h2 <= 70) v2 = (int32_t)h2 - 65 + 10;
+        if (v1 >= 0 && v2 >= 0) {
+          b = (uint8_t)((v1 * 16) + v2);
+          consumed = 4;
+        } else {
+          b = n;
+          consumed = 2;
+        }
+      } else {
+        b = n;
+        consumed = 2;
+      }
+    }
+    if (parser_asm_string_lit_append_byte_c(arena, head_ref, b, line, col) != 0)
+      return -1;
+    ri += consumed;
+  }
+  return 0;
+}
+
 static int32_t parser_asm_primary_ident_is_unsafe_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                     int32_t ident_len) {
   if (!source || !source->data || ident_len != 6)
@@ -2498,70 +2643,15 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
     e.kind = PARSER_ASM_EXPR_STRING_LIT;
     e.line = r.tok.line;
     e.col = r.tok.col;
+    e.var_name_len = 0;
+    e.int_val = 0;
     /* lexer.x：TOKEN_STRING 的 token_start 已指向开引号后首字节。
      * wave281: decode escapes into AST semantic bytes (G.7 ≡ parser.x let-init STRING path).
-     * Product set: \n \t \r \0 \\ \" \xHH. Lexer sticky L010 rejects others. */
-    q0 = r.token_start;
-    {
-      int32_t nlen = r.tok.ident_len;
-      int32_t ri = 0;
-      int32_t wi = 0;
-      /* wave283: full span; L011 if semantic bytes would exceed 127 (not silent truncate).
-       * wave1222: cap 63→127 to match Expr.var_name[128] capacity. */
-      if (nlen < 0)
-        nlen = 0;
-      while (ri < nlen) {
-        if (wi >= 127) {
-          lexer_note_string_lit_overflow(e.line, e.col);
-          break;
-        }
-        uint8_t c = 0;
-        if (q0 + (size_t)ri < source->length)
-          c = source->data[q0 + (size_t)ri];
-        if (c == 92 && (ri + 1) < nlen) {
-          uint8_t n = 0;
-          if (q0 + (size_t)(ri + 1) < source->length)
-            n = source->data[q0 + (size_t)(ri + 1)];
-          if (n == 110) { e.var_name[wi++] = 10; ri += 2; continue; }
-          if (n == 116) { e.var_name[wi++] = 9; ri += 2; continue; }
-          if (n == 114) { e.var_name[wi++] = 13; ri += 2; continue; }
-          if (n == 48) { e.var_name[wi++] = 0; ri += 2; continue; }
-          if (n == 92 || n == 34) { e.var_name[wi++] = n; ri += 2; continue; }
-          if (n == 120 && (ri + 3) < nlen) {
-            uint8_t h1 = 0;
-            uint8_t h2 = 0;
-            int32_t v1 = -1;
-            int32_t v2 = -1;
-            if (q0 + (size_t)(ri + 2) < source->length)
-              h1 = source->data[q0 + (size_t)(ri + 2)];
-            if (q0 + (size_t)(ri + 3) < source->length)
-              h2 = source->data[q0 + (size_t)(ri + 3)];
-            if (h1 >= 48 && h1 <= 57) v1 = (int32_t)h1 - 48;
-            if (h1 >= 97 && h1 <= 102) v1 = (int32_t)h1 - 97 + 10;
-            if (h1 >= 65 && h1 <= 70) v1 = (int32_t)h1 - 65 + 10;
-            if (h2 >= 48 && h2 <= 57) v2 = (int32_t)h2 - 48;
-            if (h2 >= 97 && h2 <= 102) v2 = (int32_t)h2 - 97 + 10;
-            if (h2 >= 65 && h2 <= 70) v2 = (int32_t)h2 - 65 + 10;
-            if (v1 >= 0 && v2 >= 0) {
-              e.var_name[wi++] = (uint8_t)((v1 * 16) + v2);
-              ri += 4;
-              continue;
-            }
-          }
-          e.var_name[wi++] = n;
-          ri += 2;
-          continue;
-        }
-        e.var_name[wi++] = c;
-        ri++;
-      }
-      e.var_name_len = wi;
-      while (wi < 128) {
-        e.var_name[wi] = 0;
-        wi++;
-      }
-    }
+     * Product set: \n \t \r \0 \\ \" \xHH. Lexer sticky L010 rejects others.
+     * slen>127: overflow chunks chained via int_val (same store, not a second pool). */
     parser_asm_arena_expr_set_c(arena, ref, e);
+    q0 = r.token_start;
+    (void)parser_asm_string_lit_decode_span_c(arena, ref, source, q0, r.tok.ident_len, e.line, e.col);
     /* wave282: C-style adjacent string-literal concat (G.7 ≡ parser.x / parser_gen).
      * Soft residual: 2nd+ TOKEN_STRING after primary STRING was left unconsumed or
      * dropped as bare expr-stmt; only first literal entered the AST.
@@ -2573,75 +2663,12 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
       out->expr_ref = ref;
       out->next_lex = r.next_lex;
       for (;;) {
-        int32_t wi_adj;
-        int32_t nlen_adj;
-        size_t q0_adj;
-        int32_t ri_adj;
         lexer_next_into(&nr, nlex, source);
         if (nr.tok.kind != (int32_t)TOKEN_STRING)
           break;
         e = parser_asm_arena_expr_get_c(arena, ref);
-        wi_adj = e.var_name_len;
-        if (wi_adj < 0)
-          wi_adj = 0;
-        if (wi_adj > 127)
-          wi_adj = 127;
-        nlen_adj = nr.tok.ident_len;
-        if (nlen_adj < 0)
-          nlen_adj = 0;
-        q0_adj = nr.token_start;
-        ri_adj = 0;
-        while (ri_adj < nlen_adj) {
-          if (wi_adj >= 127) {
-            lexer_note_string_lit_overflow(e.line, e.col);
-            break;
-          }
-          uint8_t c2 = 0;
-          if (q0_adj + (size_t)ri_adj < source->length)
-            c2 = source->data[q0_adj + (size_t)ri_adj];
-          if (c2 == 92 && (ri_adj + 1) < nlen_adj) {
-            uint8_t n2 = 0;
-            if (q0_adj + (size_t)(ri_adj + 1) < source->length)
-              n2 = source->data[q0_adj + (size_t)(ri_adj + 1)];
-            if (n2 == 110) { e.var_name[wi_adj++] = 10; ri_adj += 2; continue; }
-            if (n2 == 116) { e.var_name[wi_adj++] = 9; ri_adj += 2; continue; }
-            if (n2 == 114) { e.var_name[wi_adj++] = 13; ri_adj += 2; continue; }
-            if (n2 == 48) { e.var_name[wi_adj++] = 0; ri_adj += 2; continue; }
-            if (n2 == 92 || n2 == 34) { e.var_name[wi_adj++] = n2; ri_adj += 2; continue; }
-            if (n2 == 120 && (ri_adj + 3) < nlen_adj) {
-              uint8_t h1b = 0;
-              uint8_t h2b = 0;
-              int32_t v1b = -1;
-              int32_t v2b = -1;
-              if (q0_adj + (size_t)(ri_adj + 2) < source->length)
-                h1b = source->data[q0_adj + (size_t)(ri_adj + 2)];
-              if (q0_adj + (size_t)(ri_adj + 3) < source->length)
-                h2b = source->data[q0_adj + (size_t)(ri_adj + 3)];
-              if (h1b >= 48 && h1b <= 57) v1b = (int32_t)h1b - 48;
-              if (h1b >= 97 && h1b <= 102) v1b = (int32_t)h1b - 97 + 10;
-              if (h1b >= 65 && h1b <= 70) v1b = (int32_t)h1b - 65 + 10;
-              if (h2b >= 48 && h2b <= 57) v2b = (int32_t)h2b - 48;
-              if (h2b >= 97 && h2b <= 102) v2b = (int32_t)h2b - 97 + 10;
-              if (h2b >= 65 && h2b <= 70) v2b = (int32_t)h2b - 65 + 10;
-              if (v1b >= 0 && v2b >= 0) {
-                e.var_name[wi_adj++] = (uint8_t)((v1b * 16) + v2b);
-                ri_adj += 4;
-                continue;
-              }
-            }
-            e.var_name[wi_adj++] = n2;
-            ri_adj += 2;
-            continue;
-          }
-          e.var_name[wi_adj++] = c2;
-          ri_adj++;
-        }
-        e.var_name_len = wi_adj;
-        while (wi_adj < 128) {
-          e.var_name[wi_adj] = 0;
-          wi_adj++;
-        }
-        parser_asm_arena_expr_set_c(arena, ref, e);
+        (void)parser_asm_string_lit_decode_span_c(arena, ref, source, nr.token_start, nr.tok.ident_len,
+                                                 e.line, e.col);
         nlex = nr.next_lex;
         out->next_lex = nlex;
       }

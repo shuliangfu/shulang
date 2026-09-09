@@ -2036,6 +2036,129 @@ extern void parser_expr_set_common_zeros_glue(struct ast_Expr * e);
 void parser_expr_set_common_zeros(struct ast_Expr * e) {
   (void)(parser_expr_set_common_zeros_glue(e));
 }
+/* STRING_LIT overflow: head.var_name[127] + int_val-chained chunks. Cap 4095.
+ * G.7 twin of parser.x parser_string_lit_append_byte / decode_span.
+ * PLATFORM: SHARED — ident slots stay 127 (4.2.8 leave-off). */
+#define PARSER_STRING_LIT_MAX 4095
+#define PARSER_STRING_LIT_CHUNK 127
+static int32_t parser_string_lit_append_byte(struct ast_ASTArena *arena, int32_t head_ref, uint8_t b,
+                                            int32_t line, int32_t col) {
+  struct ast_Expr e;
+  struct ast_Expr ch;
+  int32_t total, cur, next, ov, off;
+  if (!arena || head_ref <= 0)
+    return -1;
+  e = ast_ast_arena_expr_get(arena, head_ref);
+  total = e.var_name_len;
+  if (total < 0)
+    total = 0;
+  if (total >= PARSER_STRING_LIT_MAX) {
+    lexer_note_string_lit_overflow(line, col);
+    return -1;
+  }
+  if (total < PARSER_STRING_LIT_CHUNK) {
+    e.var_name[total] = b;
+    e.var_name_len = total + 1;
+    ast_ast_arena_expr_set(arena, head_ref, e);
+    return 0;
+  }
+  cur = (int32_t)e.int_val;
+  off = total - PARSER_STRING_LIT_CHUNK;
+  if (cur <= 0) {
+    ov = ast_ast_arena_expr_alloc(arena);
+    if (ov == 0)
+      return -1;
+    ch = ast_ast_arena_expr_get(arena, ov);
+    parser_expr_set_common_zeros(&ch);
+    ch.kind = 59;
+    ch.line = e.line;
+    ch.col = e.col;
+    ch.int_val = 0;
+    ch.var_name_len = 0;
+    ast_ast_arena_expr_set(arena, ov, ch);
+    e.int_val = (int64_t)ov;
+    ast_ast_arena_expr_set(arena, head_ref, e);
+    cur = ov;
+  }
+  while (off >= PARSER_STRING_LIT_CHUNK) {
+    ch = ast_ast_arena_expr_get(arena, cur);
+    next = (int32_t)ch.int_val;
+    if (next <= 0) {
+      ov = ast_ast_arena_expr_alloc(arena);
+      if (ov == 0)
+        return -1;
+      ch.int_val = (int64_t)ov;
+      ast_ast_arena_expr_set(arena, cur, ch);
+      ch = ast_ast_arena_expr_get(arena, ov);
+      parser_expr_set_common_zeros(&ch);
+      ch.kind = 59;
+      ch.line = e.line;
+      ch.col = e.col;
+      ch.int_val = 0;
+      ch.var_name_len = 0;
+      ast_ast_arena_expr_set(arena, ov, ch);
+      next = ov;
+    }
+    off -= PARSER_STRING_LIT_CHUNK;
+    cur = next;
+  }
+  ch = ast_ast_arena_expr_get(arena, cur);
+  ch.var_name[off] = b;
+  if (ch.var_name_len < off + 1)
+    ch.var_name_len = off + 1;
+  ast_ast_arena_expr_set(arena, cur, ch);
+  e = ast_ast_arena_expr_get(arena, head_ref);
+  e.var_name_len = total + 1;
+  ast_ast_arena_expr_set(arena, head_ref, e);
+  return 0;
+}
+static int32_t parser_string_lit_decode_span(struct ast_ASTArena *arena, int32_t head_ref,
+    struct xlang_slice_uint8_t *source, size_t q0, int32_t nlen, int32_t line, int32_t col) {
+  int32_t ri;
+  if (!arena || !source || head_ref <= 0)
+    return -1;
+  if (nlen < 0)
+    nlen = 0;
+  ri = 0;
+  while (ri < nlen) {
+    uint8_t c = 0;
+    uint8_t b;
+    int32_t consumed = 1;
+    if (q0 + (size_t)ri < source->length)
+      c = source->data[q0 + (size_t)ri];
+    b = c;
+    if (c == 92 && (ri + 1) < nlen) {
+      uint8_t n = 0;
+      if (q0 + (size_t)(ri + 1) < source->length)
+        n = source->data[q0 + (size_t)(ri + 1)];
+      if (n == 110) { b = 10; consumed = 2; }
+      else if (n == 116) { b = 9; consumed = 2; }
+      else if (n == 114) { b = 13; consumed = 2; }
+      else if (n == 48) { b = 0; consumed = 2; }
+      else if (n == 92 || n == 34) { b = n; consumed = 2; }
+      else if (n == 120 && (ri + 3) < nlen) {
+        uint8_t h1 = 0, h2 = 0;
+        int32_t v1 = -1, v2 = -1;
+        if (q0 + (size_t)(ri + 2) < source->length)
+          h1 = source->data[q0 + (size_t)(ri + 2)];
+        if (q0 + (size_t)(ri + 3) < source->length)
+          h2 = source->data[q0 + (size_t)(ri + 3)];
+        if (h1 >= 48 && h1 <= 57) v1 = (int32_t)h1 - 48;
+        if (h1 >= 97 && h1 <= 102) v1 = (int32_t)h1 - 97 + 10;
+        if (h1 >= 65 && h1 <= 70) v1 = (int32_t)h1 - 65 + 10;
+        if (h2 >= 48 && h2 <= 57) v2 = (int32_t)h2 - 48;
+        if (h2 >= 97 && h2 <= 102) v2 = (int32_t)h2 - 97 + 10;
+        if (h2 >= 65 && h2 <= 70) v2 = (int32_t)h2 - 65 + 10;
+        if (v1 >= 0 && v2 >= 0) { b = (uint8_t)((v1 * 16) + v2); consumed = 4; }
+        else { b = n; consumed = 2; }
+      } else { b = n; consumed = 2; }
+    }
+    if (parser_string_lit_append_byte(arena, head_ref, b, line, col) != 0)
+      return -1;
+    ri += consumed;
+  }
+  return 0;
+}
 int32_t parser_alloc_true_bool_lit(struct ast_ASTArena * arena) {
   {
     int32_t ref = ast_ast_arena_expr_alloc(arena);
@@ -3969,227 +4092,20 @@ int parser_parse_body_lets_into(struct ast_ASTArena * arena, struct lexer_Lexer 
             (void)(((se.line) = ((r.tok).line)));
             (void)(((se.col) = ((r.tok).col)));
             (void)(parser_expr_set_common_zeros(&(se)));
-            int32_t nlen = ((r.tok).ident_len);
-            /* wave283: full span; L011 on overflow (not silent truncate).
-             * wave1222: cap 63→127 to match Expr.var_name[128] capacity. */
-            if ((nlen < 0)) {
-              (void)((nlen = 0));
-            }
-            size_t q0 = (r.token_start);
-            int32_t ri = 0;
-            int32_t wi = 0;
-            while ((ri < nlen)) {
-              if ((wi >= 127)) {
-                lexer_note_string_lit_overflow((se.line), (se.col));
-                break;
-              }
-              uint8_t c = 0;
-              if (((q0 + ((size_t)(ri))) < (source->length))) {
-                (void)((c = (source)->data[(q0 + ((size_t)(ri)))]));
-              }
-              if (((c ==92) && ((ri + 1) < nlen))) {
-                uint8_t n = 0;
-                if (((q0 + ((size_t)((ri + 1)))) < (source->length))) {
-                  (void)((n = (source)->data[(q0 + ((size_t)((ri + 1))))]));
-                }
-                if ((n ==110)) {
-                  (void)((((se.var_name))[wi] = 10));
-                  (void)((wi = (wi + 1)));
-                  (void)((ri = (ri + 2)));
-                  continue;
-                }
-                if ((n ==116)) {
-                  (void)((((se.var_name))[wi] = 9));
-                  (void)((wi = (wi + 1)));
-                  (void)((ri = (ri + 2)));
-                  continue;
-                }
-                if ((n ==114)) {
-                  (void)((((se.var_name))[wi] = 13));
-                  (void)((wi = (wi + 1)));
-                  (void)((ri = (ri + 2)));
-                  continue;
-                }
-                if ((n ==48)) {
-                  (void)((((se.var_name))[wi] = 0));
-                  (void)((wi = (wi + 1)));
-                  (void)((ri = (ri + 2)));
-                  continue;
-                }
-                if (((n ==92) || (n ==34))) {
-                  (void)((((se.var_name))[wi] = n));
-                  (void)((wi = (wi + 1)));
-                  (void)((ri = (ri + 2)));
-                  continue;
-                }
-                /* wave281: \xHH → one semantic byte (G.7 ≡ parser.x / primary_slice). */
-                if (((n ==120) && ((ri + 3) < nlen))) {
-                  uint8_t h1 = 0;
-                  uint8_t h2 = 0;
-                  int32_t v1 = -1;
-                  int32_t v2 = -1;
-                  if (((q0 + ((size_t)((ri + 2)))) < (source->length))) {
-                    (void)((h1 = (source)->data[(q0 + ((size_t)((ri + 2))))]));
-                  }
-                  if (((q0 + ((size_t)((ri + 3)))) < (source->length))) {
-                    (void)((h2 = (source)->data[(q0 + ((size_t)((ri + 3))))]));
-                  }
-                  if (((h1 >= 48) && (h1 <= 57))) {
-                    (void)((v1 = (((int32_t)(h1)) - 48)));
-                  }
-                  if (((h1 >= 97) && (h1 <= 102))) {
-                    (void)((v1 = ((((int32_t)(h1)) - 97) + 10)));
-                  }
-                  if (((h1 >= 65) && (h1 <= 70))) {
-                    (void)((v1 = ((((int32_t)(h1)) - 65) + 10)));
-                  }
-                  if (((h2 >= 48) && (h2 <= 57))) {
-                    (void)((v2 = (((int32_t)(h2)) - 48)));
-                  }
-                  if (((h2 >= 97) && (h2 <= 102))) {
-                    (void)((v2 = ((((int32_t)(h2)) - 97) + 10)));
-                  }
-                  if (((h2 >= 65) && (h2 <= 70))) {
-                    (void)((v2 = ((((int32_t)(h2)) - 65) + 10)));
-                  }
-                  if (((v1 >= 0) && (v2 >= 0))) {
-                    (void)((((se.var_name))[wi] = ((uint8_t)(((v1 * 16) + v2)))));
-                    (void)((wi = (wi + 1)));
-                    (void)((ri = (ri + 4)));
-                    continue;
-                  }
-                }
-                (void)((((se.var_name))[wi] = n));
-                (void)((wi = (wi + 1)));
-                (void)((ri = (ri + 2)));
-                continue;
-              }
-              (void)((((se.var_name))[wi] = c));
-              (void)((wi = (wi + 1)));
-              (void)((ri = (ri + 1)));
-            }
-            (void)(((se.var_name_len) = wi));
-            while ((wi < 128)) {
-              (void)((((se.var_name))[wi] = 0));
-              (void)((wi = (wi + 1)));
-            }
+            (void)(((se.var_name_len) = 0));
+            (void)(((se.int_val) = 0));
             (void)(ast_ast_arena_expr_set(arena, str_ref, se));
+            (void)(parser_string_lit_decode_span(arena, str_ref, source, (r.token_start), ((r.tok).ident_len), (se.line), (se.col)));
             (void)((let_init_ref = str_ref));
           }
           (void)(parser_lex_from_result_ptr_into(&(lex), &(r)));
           (void)(lexer_next_into(&(r), lex, source));
           /* wave282: C-style adjacent string-literal concat (G.7 ≡ parser.x / primary_slice).
-           * Soft residual: 2nd+ TOKEN_STRING after let-init was bare expr-stmt and dropped. */
+           * Soft residual: 2nd+ TOKEN_STRING after let-init was bare expr-stmt and dropped.
+           * Combined length uses overflow chunks; L011 only past 4095. */
           while (((((r.tok).kind) ==130) && (str_ref !=0))) {
             struct ast_Expr se_adj = ast_ast_arena_expr_get(arena, str_ref);
-            int32_t wi_adj = (se_adj.var_name_len);
-            int32_t nlen_adj = ((r.tok).ident_len);
-            size_t q0_adj = (r.token_start);
-            int32_t ri_adj = 0;
-            if ((wi_adj < 0)) {
-              (void)((wi_adj = 0));
-            }
-            if ((wi_adj > 127)) {
-              (void)((wi_adj = 127));
-            }
-            if ((nlen_adj < 0)) {
-              (void)((nlen_adj = 0));
-            }
-            while ((ri_adj < nlen_adj)) {
-              if ((wi_adj >= 127)) {
-                lexer_note_string_lit_overflow((se_adj.line), (se_adj.col));
-                break;
-              }
-              uint8_t c2 = 0;
-              if (((q0_adj + ((size_t)(ri_adj))) < (source->length))) {
-                (void)((c2 = (source)->data[(q0_adj + ((size_t)(ri_adj)))]));
-              }
-              if (((c2 ==92) && ((ri_adj + 1) < nlen_adj))) {
-                uint8_t n2 = 0;
-                if (((q0_adj + ((size_t)((ri_adj + 1)))) < (source->length))) {
-                  (void)((n2 = (source)->data[(q0_adj + ((size_t)((ri_adj + 1))))]));
-                }
-                if ((n2 ==110)) {
-                  (void)((((se_adj.var_name))[wi_adj] = 10));
-                  (void)((wi_adj = (wi_adj + 1)));
-                  (void)((ri_adj = (ri_adj + 2)));
-                  continue;
-                }
-                if ((n2 ==116)) {
-                  (void)((((se_adj.var_name))[wi_adj] = 9));
-                  (void)((wi_adj = (wi_adj + 1)));
-                  (void)((ri_adj = (ri_adj + 2)));
-                  continue;
-                }
-                if ((n2 ==114)) {
-                  (void)((((se_adj.var_name))[wi_adj] = 13));
-                  (void)((wi_adj = (wi_adj + 1)));
-                  (void)((ri_adj = (ri_adj + 2)));
-                  continue;
-                }
-                if ((n2 ==48)) {
-                  (void)((((se_adj.var_name))[wi_adj] = 0));
-                  (void)((wi_adj = (wi_adj + 1)));
-                  (void)((ri_adj = (ri_adj + 2)));
-                  continue;
-                }
-                if (((n2 ==92) || (n2 ==34))) {
-                  (void)((((se_adj.var_name))[wi_adj] = n2));
-                  (void)((wi_adj = (wi_adj + 1)));
-                  (void)((ri_adj = (ri_adj + 2)));
-                  continue;
-                }
-                if (((n2 ==120) && ((ri_adj + 3) < nlen_adj))) {
-                  uint8_t h1b = 0;
-                  uint8_t h2b = 0;
-                  int32_t v1b = -1;
-                  int32_t v2b = -1;
-                  if (((q0_adj + ((size_t)((ri_adj + 2)))) < (source->length))) {
-                    (void)((h1b = (source)->data[(q0_adj + ((size_t)((ri_adj + 2))))]));
-                  }
-                  if (((q0_adj + ((size_t)((ri_adj + 3)))) < (source->length))) {
-                    (void)((h2b = (source)->data[(q0_adj + ((size_t)((ri_adj + 3))))]));
-                  }
-                  if (((h1b >= 48) && (h1b <= 57))) {
-                    (void)((v1b = (((int32_t)(h1b)) - 48)));
-                  }
-                  if (((h1b >= 97) && (h1b <= 102))) {
-                    (void)((v1b = ((((int32_t)(h1b)) - 97) + 10)));
-                  }
-                  if (((h1b >= 65) && (h1b <= 70))) {
-                    (void)((v1b = ((((int32_t)(h1b)) - 65) + 10)));
-                  }
-                  if (((h2b >= 48) && (h2b <= 57))) {
-                    (void)((v2b = (((int32_t)(h2b)) - 48)));
-                  }
-                  if (((h2b >= 97) && (h2b <= 102))) {
-                    (void)((v2b = ((((int32_t)(h2b)) - 97) + 10)));
-                  }
-                  if (((h2b >= 65) && (h2b <= 70))) {
-                    (void)((v2b = ((((int32_t)(h2b)) - 65) + 10)));
-                  }
-                  if (((v1b >= 0) && (v2b >= 0))) {
-                    (void)((((se_adj.var_name))[wi_adj] = ((uint8_t)(((v1b * 16) + v2b)))));
-                    (void)((wi_adj = (wi_adj + 1)));
-                    (void)((ri_adj = (ri_adj + 4)));
-                    continue;
-                  }
-                }
-                (void)((((se_adj.var_name))[wi_adj] = n2));
-                (void)((wi_adj = (wi_adj + 1)));
-                (void)((ri_adj = (ri_adj + 2)));
-                continue;
-              }
-              (void)((((se_adj.var_name))[wi_adj] = c2));
-              (void)((wi_adj = (wi_adj + 1)));
-              (void)((ri_adj = (ri_adj + 1)));
-            }
-            (void)(((se_adj.var_name_len) = wi_adj));
-            while ((wi_adj < 128)) {
-              (void)((((se_adj.var_name))[wi_adj] = 0));
-              (void)((wi_adj = (wi_adj + 1)));
-            }
-            (void)(ast_ast_arena_expr_set(arena, str_ref, se_adj));
+            (void)(parser_string_lit_decode_span(arena, str_ref, source, (r.token_start), ((r.tok).ident_len), (se_adj.line), (se_adj.col)));
             (void)(parser_lex_from_result_ptr_into(&(lex), &(r)));
             (void)(lexer_next_into(&(r), lex, source));
           }

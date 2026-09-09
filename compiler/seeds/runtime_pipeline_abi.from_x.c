@@ -16825,7 +16825,7 @@ static int32_t pipe_modlet_array_lit_string_pool_bytes_cold(void *arena, int32_t
     ek = pipeline_expr_kind_ord_at(arena, eref);
     if (ek == 59) {
       slen = glue_asm_string_lit_len(arena, eref);
-      if (slen < 0 || slen > 127)
+      if (slen < 0 || slen > 4095)
         return -1;
       total += slen + 1;
     }
@@ -16851,21 +16851,36 @@ static int32_t pipe_modlet_bake_string_lit_elem_to_data_cold(void *arena, uint8_
   uint32_t fp = 0;
   uint8_t lab[24];
   uint8_t sbuf[128];
+  int32_t cur = 0, n = 0, copied = 0;
   if (!arena || !elf_ctx || eref <= 0 || slot_off < 0)
     return -1;
   slen = glue_asm_string_lit_len(arena, eref);
-  if (slen < 0 || slen > 127)
+  if (slen < 0 || slen > 4095)
     return -1;
-  memset(sbuf, 0, sizeof(sbuf));
-  pipeline_expr_var_name_into(arena, eref, sbuf);
   pool_off = pipeline_elf_ctx_emit_data_len(elf_ctx);
   if (pool_off < 0)
     return -1;
   if (pipeline_elf_ctx_append_data_zeros(elf_ctx, slen + 1) != 0)
     return -1;
-  for (bi = 0; bi < slen; bi++) {
-    if (pipeline_elf_ctx_data_poke_u8(elf_ctx, pool_off + bi, (int32_t)sbuf[bi]) != 0)
-      return -1;
+  copied = 0;
+  cur = eref;
+  while (copied < slen && cur > 0) {
+    memset(sbuf, 0, sizeof(sbuf));
+    pipeline_expr_var_name_into(arena, cur, sbuf);
+    if (cur == eref)
+      n = slen < 127 ? slen : 127;
+    else
+      n = glue_asm_string_lit_len(arena, cur);
+    if (n < 0)
+      n = 0;
+    if (n > slen - copied)
+      n = slen - copied;
+    for (bi = 0; bi < n; bi++) {
+      if (pipeline_elf_ctx_data_poke_u8(elf_ctx, pool_off + copied + bi, (int32_t)sbuf[bi]) != 0)
+        return -1;
+    }
+    copied += n;
+    cur = pipeline_expr_int_val_at(arena, cur);
   }
   g_pipe_modlet_strpool_seq_cold += 1;
   seq = g_pipe_modlet_strpool_seq_cold;

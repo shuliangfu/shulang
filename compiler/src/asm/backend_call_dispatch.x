@@ -684,7 +684,7 @@ export function glue_asm_call_reg_max(ta: i32): i32 {
  * @param ta i32 — 0=x86_64, 1=aarch64; other → -1
  * @param reg_k i32 — x86: 0→rdi, 1→rax; aarch64: both map to x0
  * @param sbuf *u8 — string bytes (not required NUL-terminated)
- * @param slen i32 — length 0..126 (0 = empty ""; max fits x86 short-jmp + NUL)
+ * @param slen i32 — length 0..4095 (0 = empty ""; x86 EB if slen+1≤127 else E9)
  * @return i32 — 0 ok, -1 fail
  * PLATFORM: SHARED emit shape / x86_64+aarch64 encodings (wave108 Darwin pure-asm).
  * Stage 12.2.5: empty string lit is valid (*u8 to NUL); slen==0 must not CG002.
@@ -694,7 +694,7 @@ export function glue_asm_emit_jmp_skip_string_then_lea(ctx_bytes: *u8, ta: i32, 
   if (ctx_bytes == 0) { return 0 - 1; }
   if (sbuf == 0) { return 0 - 1; }
   if (slen < 0) { return 0 - 1; }
-  if (slen > 126) { return 0 - 1; }
+  if (slen > 4095) { return 0 - 1; }
   if (ta != 0) {
     if (ta != 1) { return 0 - 1; }
   }
@@ -736,12 +736,23 @@ export function glue_asm_emit_jmp_skip_string_then_lea(ctx_bytes: *u8, ta: i32, 
       if (reg_k == 0) { /* x0 */ }
       return pipeline_elf_ctx_append_bytes(ctx_bytes, &adr4[0], 4);
     }
-    // PLATFORM: x86_64 — short jmp + lea [rip].
-    if (slen + 1 > 127) { return 0 - 1; }
-    let jmp2: u8[2] = [];
-    jmp2[0] = 235; // 0xeb
-    jmp2[1] = (slen + 1) as u8;
-    if (pipeline_elf_ctx_append_bytes(ctx_bytes, &jmp2[0], 2) != 0) { return 0 - 1; }
+    // PLATFORM: x86_64 — EB rel8 when payload+NUL fits; E9 rel32 else.
+    // lea disp is from after the 7-byte lea back to payload = -(slen+8).
+    if (slen + 1 <= 127) {
+      let jmp2: u8[2] = [];
+      jmp2[0] = 235; // 0xeb
+      jmp2[1] = (slen + 1) as u8;
+      if (pipeline_elf_ctx_append_bytes(ctx_bytes, &jmp2[0], 2) != 0) { return 0 - 1; }
+    } else {
+      let jmp5: u8[5] = [];
+      let rel32: u32 = (slen + 1) as u32;
+      jmp5[0] = 233; // 0xe9
+      jmp5[1] = (rel32 & 255) as u8;
+      jmp5[2] = ((rel32 / 256) & 255) as u8;
+      jmp5[3] = ((rel32 / 65536) & 255) as u8;
+      jmp5[4] = ((rel32 / 16777216) & 255) as u8;
+      if (pipeline_elf_ctx_append_bytes(ctx_bytes, &jmp5[0], 5) != 0) { return 0 - 1; }
+    }
     if (pipeline_elf_ctx_append_bytes(ctx_bytes, sbuf, slen) != 0) { return 0 - 1; }
     let z0: u8 = 0;
     if (pipeline_elf_ctx_append_bytes(ctx_bytes, &z0, 1) != 0) { return 0 - 1; }
@@ -1797,11 +1808,33 @@ export function glue_asm_try_emit_fmt_string_lit_import_call_elf_c(
     if (arg_ref <= 0) { return 0; }
     if (pipeline_expr_kind_ord_at(arena, arg_ref) != 59) { return 0; }
     let slen: i32 = glue_asm_string_lit_len(arena, arg_ref);
-    // Stage 12.2.5: empty OK; long string lit up to 126.
+    // Empty OK; overflow-chain payload up to parser STRING_LIT max 4095.
     if (slen < 0) { return 0 - 1; }
-    if (slen > 126) { return 0 - 1; }
-    let sbuf: u8[128] = [];
-    glue_asm_string_lit_into(arena, arg_ref, &sbuf[0]);
+    if (slen > 4095) { return 0 - 1; }
+    let sbuf: u8[4096] = [];
+    let copied: i32 = 0;
+    let cur: i32 = arg_ref;
+    while (copied < slen && cur > 0) {
+      let chunk: u8[128] = [];
+      let n: i32 = 0;
+      let i: i32 = 0;
+      pipeline_expr_var_name_into(arena, cur, &chunk[0]);
+      if (cur == arg_ref) {
+        n = slen;
+        if (n > 127) { n = 127; }
+      } else {
+        n = pipeline_expr_var_name_len_for_string_lit_c(arena, cur);
+      }
+      if (n < 0) { n = 0; }
+      if (n > slen - copied) { n = slen - copied; }
+      while (i < n) {
+        sbuf[copied + i] = chunk[i];
+        i = i + 1;
+      }
+      copied = copied + n;
+      cur = pipeline_expr_int_val_at(arena, cur);
+    }
+    if (copied != slen) { return 0 - 1; }
     let sym_flat: u8[128] = [];
     // Bare std_fmt_println — not overload mid println_i32_reti32.
     let sym_len: i32 = glue_asm_build_import_binding_call_sym(pre_buf, pre_len, field_name, field_len, &sym_flat[0]);
@@ -2607,11 +2640,33 @@ export function glue_asm_emit_string_lit_ptr_rax_elf_c(arena: *u8, elf_ctx: *u8,
   unsafe {
     if (pipeline_expr_kind_ord_at(arena, str_expr_ref) != 59) { return 0 - 1; }
     let slen: i32 = glue_asm_string_lit_len(arena, str_expr_ref);
-    // Stage 12.2.5: empty "" OK; long diag strings up to 126.
+    // Empty "" OK; overflow-chain payload up to parser STRING_LIT max 4095.
     if (slen < 0) { return 0 - 1; }
-    if (slen > 126) { return 0 - 1; }
-    let sbuf: u8[128] = [];
-    glue_asm_string_lit_into(arena, str_expr_ref, &sbuf[0]);
+    if (slen > 4095) { return 0 - 1; }
+    let sbuf: u8[4096] = [];
+    let copied: i32 = 0;
+    let cur: i32 = str_expr_ref;
+    while (copied < slen && cur > 0) {
+      let chunk: u8[128] = [];
+      let n: i32 = 0;
+      let i: i32 = 0;
+      pipeline_expr_var_name_into(arena, cur, &chunk[0]);
+      if (cur == str_expr_ref) {
+        n = slen;
+        if (n > 127) { n = 127; }
+      } else {
+        n = pipeline_expr_var_name_len_for_string_lit_c(arena, cur);
+      }
+      if (n < 0) { n = 0; }
+      if (n > slen - copied) { n = slen - copied; }
+      while (i < n) {
+        sbuf[copied + i] = chunk[i];
+        i = i + 1;
+      }
+      copied = copied + n;
+      cur = pipeline_expr_int_val_at(arena, cur);
+    }
+    if (copied != slen) { return 0 - 1; }
     return glue_asm_emit_jmp_skip_string_then_lea(elf_ctx, ta, 1, &sbuf[0], slen);
   }
   return 0 - 1;

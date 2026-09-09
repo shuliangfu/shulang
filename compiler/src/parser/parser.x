@@ -4072,6 +4072,170 @@ function parser_report_untyped_binding_p010(line: i32, col: i32, is_let: i32): v
   }
 }
 
+/**
+ * Append one semantic byte onto a STRING_LIT head. Bytes 0..126 live in
+ * Expr.var_name; further bytes chain extra STRING_LIT exprs via int_val
+ * (next-ref). Head.var_name_len is the total length. Identifier slots stay
+ * 127 (4.2.8 leave-off). L011 honest-fails past 4095.
+ * @param arena *ASTArena — expr arena
+ * @param head_ref i32 — STRING_LIT head
+ * @param b u8 — decoded semantic byte
+ * @param line i32 — overflow diagnostic line
+ * @param col i32 — overflow diagnostic column
+ * @return i32 — 0 ok; -1 L011 / alloc fail
+ * PLATFORM: SHARED — G.7 complete of Expr.var_name STRING_LIT store.
+ */
+function parser_string_lit_append_byte(arena: *ASTArena, head_ref: i32, b: u8, line: i32, col: i32): i32 {
+  let total: i32 = 0;
+  let cur: i32 = 0;
+  let next: i32 = 0;
+  let ov: i32 = 0;
+  let off: i32 = 0;
+  if (ast.ref_is_null(head_ref)) {
+    return 0 - 1;
+  }
+  let e: Expr = ast.ast_arena_expr_get(arena, head_ref);
+  total = e.var_name_len;
+  if (total < 0) {
+    total = 0;
+  }
+  if (total >= 4095) {
+    lexer.lexer_note_string_lit_overflow(line, col);
+    return 0 - 1;
+  }
+  if (total < 127) {
+    e.var_name[total] = b;
+    e.var_name_len = total + 1;
+    ast.ast_arena_expr_set(arena, head_ref, e);
+    return 0;
+  }
+  cur = e.int_val as i32;
+  off = total - 127;
+  if (cur <= 0) {
+    ov = ast.ast_arena_expr_alloc(arena);
+    if (ov == 0) {
+      return 0 - 1;
+    }
+    let ch0: Expr = ast.ast_arena_expr_get(arena, ov);
+    expr_set_common_zeros(&ch0);
+    ch0.kind = ExprKind.EXPR_STRING_LIT;
+    ch0.line = e.line;
+    ch0.col = e.col;
+    ch0.int_val = 0;
+    ch0.var_name_len = 0;
+    ast.ast_arena_expr_set(arena, ov, ch0);
+    e.int_val = ov as i64;
+    ast.ast_arena_expr_set(arena, head_ref, e);
+    cur = ov;
+  }
+  while (off >= 127) {
+    let chw: Expr = ast.ast_arena_expr_get(arena, cur);
+    next = chw.int_val as i32;
+    if (next <= 0) {
+      ov = ast.ast_arena_expr_alloc(arena);
+      if (ov == 0) {
+        return 0 - 1;
+      }
+      chw.int_val = ov as i64;
+      ast.ast_arena_expr_set(arena, cur, chw);
+      let chn: Expr = ast.ast_arena_expr_get(arena, ov);
+      expr_set_common_zeros(&chn);
+      chn.kind = ExprKind.EXPR_STRING_LIT;
+      chn.line = e.line;
+      chn.col = e.col;
+      chn.int_val = 0;
+      chn.var_name_len = 0;
+      ast.ast_arena_expr_set(arena, ov, chn);
+      next = ov;
+    }
+    off = off - 127;
+    cur = next;
+  }
+  let cht: Expr = ast.ast_arena_expr_get(arena, cur);
+  cht.var_name[off] = b;
+  if (cht.var_name_len < off + 1) {
+    cht.var_name_len = off + 1;
+  }
+  ast.ast_arena_expr_set(arena, cur, cht);
+  e = ast.ast_arena_expr_get(arena, head_ref);
+  e.var_name_len = total + 1;
+  ast.ast_arena_expr_set(arena, head_ref, e);
+  return 0;
+}
+
+/**
+ * Decode one TOKEN_STRING span (product escapes) onto an existing STRING_LIT
+ * head, appending (adjacent concat). G.7 ≡ parser_asm_string_lit_decode_span_c.
+ * @param arena *ASTArena
+ * @param head_ref i32 — STRING_LIT head
+ * @param source u8[] — lexer source
+ * @param q0 usize — token_start (first byte after open quote)
+ * @param nlen i32 — token ident_len
+ * @param line i32
+ * @param col i32
+ * @return i32 — 0 ok; -1 L011 / null
+ * PLATFORM: SHARED.
+ */
+function parser_string_lit_decode_span(arena: *ASTArena, head_ref: i32, source: u8[], q0: usize, nlen: i32, line: i32, col: i32): i32 {
+  let ri: i32 = 0;
+  if (nlen < 0) {
+    nlen = 0;
+  }
+  while (ri < nlen) {
+    let c: u8 = 0;
+    let b: u8 = 0;
+    let consumed: i32 = 1;
+    if (q0 + (ri as usize) < source.length) {
+      c = source[q0 + (ri as usize)];
+    }
+    b = c;
+    if (c == 92 && (ri + 1) < nlen) {
+      let n: u8 = 0;
+      if (q0 + ((ri + 1) as usize) < source.length) {
+        n = source[q0 + ((ri + 1) as usize)];
+      }
+      if (n == 110) { b = 10; consumed = 2; }
+      else if (n == 116) { b = 9; consumed = 2; }
+      else if (n == 114) { b = 13; consumed = 2; }
+      else if (n == 48) { b = 0; consumed = 2; }
+      else if (n == 92 || n == 34) { b = n; consumed = 2; }
+      else if (n == 120 && (ri + 3) < nlen) {
+        let h1: u8 = 0;
+        let h2: u8 = 0;
+        let v1: i32 = 0 - 1;
+        let v2: i32 = 0 - 1;
+        if (q0 + ((ri + 2) as usize) < source.length) {
+          h1 = source[q0 + ((ri + 2) as usize)];
+        }
+        if (q0 + ((ri + 3) as usize) < source.length) {
+          h2 = source[q0 + ((ri + 3) as usize)];
+        }
+        if (h1 >= 48 && h1 <= 57) { v1 = (h1 as i32) - 48; }
+        if (h1 >= 97 && h1 <= 102) { v1 = (h1 as i32) - 97 + 10; }
+        if (h1 >= 65 && h1 <= 70) { v1 = (h1 as i32) - 65 + 10; }
+        if (h2 >= 48 && h2 <= 57) { v2 = (h2 as i32) - 48; }
+        if (h2 >= 97 && h2 <= 102) { v2 = (h2 as i32) - 97 + 10; }
+        if (h2 >= 65 && h2 <= 70) { v2 = (h2 as i32) - 65 + 10; }
+        if (v1 >= 0 && v2 >= 0) {
+          b = ((v1 * 16) + v2) as u8;
+          consumed = 4;
+        } else {
+          b = n;
+          consumed = 2;
+        }
+      } else {
+        b = n;
+        consumed = 2;
+      }
+    }
+    if (parser_string_lit_append_byte(arena, head_ref, b, line, col) != 0) {
+      return 0 - 1;
+    }
+    ri = ri + consumed;
+  }
+  return 0;
+}
+
 /** Internal function `parse_body_lets_into`.
  * Implements `parse_body_lets_into`.
  * @param arena *ASTArena
@@ -4423,75 +4587,13 @@ function parse_body_lets_into(arena: *ASTArena, lex: Lexer, source: u8[], out: *
           se.line = r.tok.line;
           se.col = r.tok.col;
           expr_set_common_zeros(&se);
-          /* wave283: use full token span (no silent nlen clamp). Cap is 127 semantic
-           * bytes in Expr.var_name[128] (with trailing NUL); overflow → sticky L011.
-           * wave1222: cap raised 63→127 to match actual var_name[128] capacity. */
-          let nlen: i32 = r.tok.ident_len;
-          if (nlen < 0) {
-            nlen = 0;
-          }
-          /* Decode escapes so AST holds semantic bytes (\n→0x0A, \xHH→byte), not raw source.
+          se.var_name_len = 0;
+          se.int_val = 0;
+          /* Decode escapes so AST holds semantic bytes (\n→0x0A, \xHH→byte).
+           * slen>127: overflow chunks via int_val (G.7 complete of var_name store).
            * wave281: product set `\n \t \r \0 \\ \" \xHH` (lexer L010 rejects others). */
-          let q0: usize = r.token_start;
-          let ri: i32 = 0;
-          let wi: i32 = 0;
-          while (ri < nlen) {
-            if (wi >= 127) {
-              // wave283 Cap residual: hard L011 (silent truncate was soft residual).
-              lexer.lexer_note_string_lit_overflow(se.line, se.col);
-              break;
-            }
-            let c: u8 = 0;
-            if (q0 + (ri as usize) < source.length) {
-              c = source[q0 + (ri as usize)];
-            }
-            if (c == 92 && (ri + 1) < nlen) {
-              let n: u8 = 0;
-              if (q0 + ((ri + 1) as usize) < source.length) {
-                n = source[q0 + ((ri + 1) as usize)];
-              }
-              if (n == 110) { se.var_name[wi] = 10; wi = wi + 1; ri = ri + 2; continue; }
-              if (n == 116) { se.var_name[wi] = 9; wi = wi + 1; ri = ri + 2; continue; }
-              if (n == 114) { se.var_name[wi] = 13; wi = wi + 1; ri = ri + 2; continue; }
-              if (n == 48) { se.var_name[wi] = 0; wi = wi + 1; ri = ri + 2; continue; }
-              if (n == 92 || n == 34) { se.var_name[wi] = n; wi = wi + 1; ri = ri + 2; continue; }
-              // wave281: `\xHH` → one semantic byte (G.7 ≡ primary_slice decode).
-              if (n == 120 && (ri + 3) < nlen) {
-                let h1: u8 = 0;
-                let h2: u8 = 0;
-                if (q0 + ((ri + 2) as usize) < source.length) {
-                  h1 = source[q0 + ((ri + 2) as usize)];
-                }
-                if (q0 + ((ri + 3) as usize) < source.length) {
-                  h2 = source[q0 + ((ri + 3) as usize)];
-                }
-                let v1: i32 = -1;
-                let v2: i32 = -1;
-                if (h1 >= 48 && h1 <= 57) { v1 = (h1 as i32) - 48; }
-                if (h1 >= 97 && h1 <= 102) { v1 = (h1 as i32) - 97 + 10; }
-                if (h1 >= 65 && h1 <= 70) { v1 = (h1 as i32) - 65 + 10; }
-                if (h2 >= 48 && h2 <= 57) { v2 = (h2 as i32) - 48; }
-                if (h2 >= 97 && h2 <= 102) { v2 = (h2 as i32) - 97 + 10; }
-                if (h2 >= 65 && h2 <= 70) { v2 = (h2 as i32) - 65 + 10; }
-                if (v1 >= 0 && v2 >= 0) {
-                  se.var_name[wi] = ((v1 * 16) + v2) as u8;
-                  wi = wi + 1;
-                  ri = ri + 4;
-                  continue;
-                }
-              }
-              se.var_name[wi] = n; wi = wi + 1; ri = ri + 2; continue;
-            }
-            se.var_name[wi] = c;
-            wi = wi + 1;
-            ri = ri + 1;
-          }
-          se.var_name_len = wi;
-          while (wi < 128) {
-            se.var_name[wi] = 0;
-            wi = wi + 1;
-          }
           ast.ast_arena_expr_set(arena, str_ref, se);
+          parser_string_lit_decode_span(arena, str_ref, source, r.token_start, r.tok.ident_len, se.line, se.col);
           let_init_ref = str_ref;
         }
         lex_from_result_ptr_into(&lex, &r);
@@ -4500,79 +4602,12 @@ function parse_body_lets_into(arena: *ASTArena, lex: Lexer, source: u8[], out: *
          * wave282: C-style adjacent string-literal concatenation at parse time.
          * Soft residual closed: 2nd+ TOKEN_STRING after let-init STRING was bare
          * expr-stmt and silently dropped. Append-decode into same EXPR_STRING_LIT.
-         * wave283: combined semantic length must not exceed 63 (L011 hard; not truncate).
+         * Combined length uses overflow chunks; L011 only past 4095.
          * PLATFORM: SHARED — G.7 ≡ parser_gen seed + primary_slice.
          */
         while ((r.tok.kind as i32) == 130 && str_ref != 0) {
           let se_adj: Expr = ast.ast_arena_expr_get(arena, str_ref);
-          let wi_adj: i32 = se_adj.var_name_len;
-          if (wi_adj < 0) {
-            wi_adj = 0;
-          }
-          if (wi_adj > 127) {
-            wi_adj = 127;
-          }
-          let nlen_adj: i32 = r.tok.ident_len;
-          if (nlen_adj < 0) {
-            nlen_adj = 0;
-          }
-          let q0_adj: usize = r.token_start;
-          let ri_adj: i32 = 0;
-          while (ri_adj < nlen_adj) {
-            if (wi_adj >= 127) {
-              lexer.lexer_note_string_lit_overflow(se_adj.line, se_adj.col);
-              break;
-            }
-            let c2: u8 = 0;
-            if (q0_adj + (ri_adj as usize) < source.length) {
-              c2 = source[q0_adj + (ri_adj as usize)];
-            }
-            if (c2 == 92 && (ri_adj + 1) < nlen_adj) {
-              let n2: u8 = 0;
-              if (q0_adj + ((ri_adj + 1) as usize) < source.length) {
-                n2 = source[q0_adj + ((ri_adj + 1) as usize)];
-              }
-              if (n2 == 110) { se_adj.var_name[wi_adj] = 10; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue; }
-              if (n2 == 116) { se_adj.var_name[wi_adj] = 9; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue; }
-              if (n2 == 114) { se_adj.var_name[wi_adj] = 13; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue; }
-              if (n2 == 48) { se_adj.var_name[wi_adj] = 0; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue; }
-              if (n2 == 92 || n2 == 34) { se_adj.var_name[wi_adj] = n2; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue; }
-              if (n2 == 120 && (ri_adj + 3) < nlen_adj) {
-                let h1b: u8 = 0;
-                let h2b: u8 = 0;
-                if (q0_adj + ((ri_adj + 2) as usize) < source.length) {
-                  h1b = source[q0_adj + ((ri_adj + 2) as usize)];
-                }
-                if (q0_adj + ((ri_adj + 3) as usize) < source.length) {
-                  h2b = source[q0_adj + ((ri_adj + 3) as usize)];
-                }
-                let v1b: i32 = -1;
-                let v2b: i32 = -1;
-                if (h1b >= 48 && h1b <= 57) { v1b = (h1b as i32) - 48; }
-                if (h1b >= 97 && h1b <= 102) { v1b = (h1b as i32) - 97 + 10; }
-                if (h1b >= 65 && h1b <= 70) { v1b = (h1b as i32) - 65 + 10; }
-                if (h2b >= 48 && h2b <= 57) { v2b = (h2b as i32) - 48; }
-                if (h2b >= 97 && h2b <= 102) { v2b = (h2b as i32) - 97 + 10; }
-                if (h2b >= 65 && h2b <= 70) { v2b = (h2b as i32) - 65 + 10; }
-                if (v1b >= 0 && v2b >= 0) {
-                  se_adj.var_name[wi_adj] = ((v1b * 16) + v2b) as u8;
-                  wi_adj = wi_adj + 1;
-                  ri_adj = ri_adj + 4;
-                  continue;
-                }
-              }
-              se_adj.var_name[wi_adj] = n2; wi_adj = wi_adj + 1; ri_adj = ri_adj + 2; continue;
-            }
-            se_adj.var_name[wi_adj] = c2;
-            wi_adj = wi_adj + 1;
-            ri_adj = ri_adj + 1;
-          }
-          se_adj.var_name_len = wi_adj;
-          while (wi_adj < 128) {
-            se_adj.var_name[wi_adj] = 0;
-            wi_adj = wi_adj + 1;
-          }
-          ast.ast_arena_expr_set(arena, str_ref, se_adj);
+          parser_string_lit_decode_span(arena, str_ref, source, r.token_start, r.tok.ident_len, se_adj.line, se_adj.col);
           lex_from_result_ptr_into(&lex, &r);
           lexer.lexer_next_into(&r, lex, source);
         }

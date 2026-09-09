@@ -33554,8 +33554,8 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
  * anything else (FLOAT_LIT, binop, VAR, ...) loud-fails — the historic
  * silent drop baked zeros for `[-1, 2]`. STRING_LIT elems intern into the
  * .data string pool and record an absolute64 reloc on the pointer slot
- * (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64). slen>127
- * loud-fails (parser Expr.var_name[128] cap / L011).
+ * (G.7 complete of pipeline_elf_ctx_append_reloc_absolute64). slen>4095
+ * loud-fails (parser STRING_LIT overflow cap / L011).
  * @param arena *u8 - ASTArena
  * @param elf_ctx *u8 - ElfCodegenCtx
  * @param init_ref i32 - ARRAY_LIT expr
@@ -33739,8 +33739,8 @@ function pipe_modlet_array_lit_has_string_elem(
 
 /**
  * Sum interned-pool bytes for every STRING_LIT elem (recursively).
- * Each STRING_LIT contributes slen+1 (payload + NUL). slen>127 is the
- * parser Expr.var_name[128] cap: return -1 so prepare keeps the cell
+ * Each STRING_LIT contributes slen+1 (payload + NUL). slen>4095 is the
+ * parser STRING_LIT overflow cap: return -1 so prepare keeps the cell
  * COMMON rather than silently truncating. Nested ARRAY_LIT rows recurse.
  * @param arena *u8 - ASTArena
  * @param init_ref i32 - ARRAY_LIT expr
@@ -33776,7 +33776,7 @@ function pipe_modlet_array_lit_string_pool_bytes(
         unsafe {
           slen = glue_asm_string_lit_len(arena, eref);
         }
-        if (slen < 0 || slen > 127) {
+        if (slen < 0 || slen > 4095) {
           return 0 - 1;
         }
         total = total + slen + 1;
@@ -33801,8 +33801,8 @@ function pipe_modlet_array_lit_string_pool_bytes(
  * Label form (22 bytes, TU-unique): Lxmls_ + hex8(seq) + hex8(module_fp).
  * Seq resets with the modlet table. G.7: reloc authority is
  * pipeline_elf_ctx_append_reloc_absolute64 (same sentinel the F7 vtable
- * statics use). Bytes come from pipeline_expr_var_name_into (arena
- * Expr.var_name[128]); slen>127 loud-fails.
+ * statics use). Bytes come from the STRING_LIT overflow chain (head
+ * var_name plus int_val-linked chunks); slen>4095 loud-fails.
  *
  * Called with shndx_override already 4 (prepare's bake window).
  * @param arena *u8 - ASTArena
@@ -33827,17 +33827,19 @@ function pipe_modlet_bake_string_lit_elem_to_data(
   let nib: i32 = 0;
   let ch: u8 = 0 as u8;
   let sbuf: u8[128] = [];
+  let cur: i32 = 0;
+  let n: i32 = 0;
+  let copied: i32 = 0;
   if (arena == (0 as *u8) || elf_ctx == (0 as *u8) || eref <= 0 || slot_off < 0) {
     return 0 - 1;
   }
   unsafe {
     slen = glue_asm_string_lit_len(arena, eref);
   }
-  if (slen < 0 || slen > 127) {
+  if (slen < 0 || slen > 4095) {
     return 0 - 1;
   }
   unsafe {
-    pipeline_expr_var_name_into(arena, eref, &sbuf[0]);
     pool_off = pipeline_elf_ctx_emit_data_len(elf_ctx);
   }
   if (pool_off < 0) {
@@ -33849,15 +33851,42 @@ function pipe_modlet_bake_string_lit_elem_to_data(
   if (rc != 0) {
     return 0 - 1;
   }
-  bi = 0;
-  while (bi < slen) {
+  copied = 0;
+  cur = eref;
+  while (copied < slen && cur > 0) {
     unsafe {
-      rc = pipeline_elf_ctx_data_poke_u8(elf_ctx, pool_off + bi, sbuf[bi] as i32);
+      pipeline_expr_var_name_into(arena, cur, &sbuf[0]);
     }
-    if (rc != 0) {
-      return 0 - 1;
+    if (cur == eref) {
+      n = slen;
+      if (n > 127) {
+        n = 127;
+      }
+    } else {
+      unsafe {
+        n = glue_asm_string_lit_len(arena, cur);
+      }
     }
-    bi = bi + 1;
+    if (n < 0) {
+      n = 0;
+    }
+    if (n > slen - copied) {
+      n = slen - copied;
+    }
+    bi = 0;
+    while (bi < n) {
+      unsafe {
+        rc = pipeline_elf_ctx_data_poke_u8(elf_ctx, pool_off + copied + bi, sbuf[bi] as i32);
+      }
+      if (rc != 0) {
+        return 0 - 1;
+      }
+      bi = bi + 1;
+    }
+    copied = copied + n;
+    unsafe {
+      cur = pipeline_expr_int_val_at(arena, cur);
+    }
   }
   g_pipe_modlet_strpool_seq = g_pipe_modlet_strpool_seq + 1;
   seq = g_pipe_modlet_strpool_seq;

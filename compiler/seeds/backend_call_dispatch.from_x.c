@@ -212,6 +212,7 @@ extern int32_t pipeline_expr_var_name_len(struct ast_ASTArena *arena, int32_t ex
 extern void pipeline_expr_var_name_into(struct ast_ASTArena *arena, int32_t expr_ref, uint8_t *out);
 extern struct ast_Expr *pipeline_arena_expr_ptr(struct ast_ASTArena *a, int32_t ref);
 extern int32_t pipeline_expr_var_name_len_for_string_lit_c(struct ast_ASTArena *arena, int32_t expr_ref);
+extern int32_t pipeline_expr_int_val_at(struct ast_ASTArena *arena, int32_t er);
 
 /** STRING_LIT（kind 59）字节长度。 */
 /* G-02f-122：逻辑源 .x（真迁）；seed 保留同语义 C 供产品 cc */
@@ -234,7 +235,9 @@ int32_t glue_asm_string_lit_len(struct ast_ASTArena *arena, int32_t expr_ref) {
 int32_t glue_asm_string_lit_into_impl(struct ast_ASTArena *arena, int32_t expr_ref, uint8_t *out64) {
   if (!out64)
     return 0;
-  /* out is u8[128]; pipeline_expr_var_name_into zeros/copies up to 127. Empty lit OK. */
+  /* out is u8[128]; pipeline_expr_var_name_into zeros/copies up to 127. Empty lit OK.
+   * Long STRING_LIT overflow lives in int_val-chained chunks; callers that need
+   * the full payload use glue_asm_string_lit_copy_c (cap 4095). */
   memset(out64, 0, 128);
   if (glue_asm_string_lit_len(arena, expr_ref) < 0)
     return 0;
@@ -242,6 +245,45 @@ int32_t glue_asm_string_lit_into_impl(struct ast_ASTArena *arena, int32_t expr_r
     return 0;
   pipeline_expr_var_name_into(arena, expr_ref, out64);
   return 0;
+}
+
+#define GLUE_ASM_STRING_LIT_MAX 4095
+
+/* Copy full STRING_LIT payload (head + int_val overflow chunks) into dst. */
+static int32_t glue_asm_string_lit_copy_c(struct ast_ASTArena *arena, int32_t expr_ref, uint8_t *dst,
+                                         int32_t cap) {
+  int32_t slen;
+  int32_t copied;
+  int32_t cur;
+  uint8_t buf[128];
+  int32_t n;
+  int32_t i;
+  if (!arena || !dst || expr_ref <= 0 || cap < 0)
+    return -1;
+  slen = glue_asm_string_lit_len(arena, expr_ref);
+  if (slen < 0 || slen > cap || slen > GLUE_ASM_STRING_LIT_MAX)
+    return -1;
+  copied = 0;
+  cur = expr_ref;
+  while (copied < slen && cur > 0) {
+    pipeline_expr_var_name_into(arena, cur, buf);
+    if (cur == expr_ref)
+      n = slen < 127 ? slen : 127;
+    else
+      n = pipeline_expr_var_name_len_for_string_lit_c(arena, cur);
+    if (n < 0)
+      n = 0;
+    if (n > slen - copied)
+      n = slen - copied;
+    i = 0;
+    while (i < n) {
+      dst[copied + i] = buf[i];
+      i++;
+    }
+    copied += n;
+    cur = pipeline_expr_int_val_at(arena, cur);
+  }
+  return copied;
 }
 
 #ifndef XLANG_L2_CALL_DISPATCH_THIN_FROM_X
@@ -283,8 +325,9 @@ int32_t glue_asm_emit_jmp_skip_string_then_lea_impl(uint8_t *ctx_bytes, int32_t 
   uint32_t immlo;
   uint32_t immhi;
   int32_t i;
-  /* Stage 12.2.5: slen==0 empty ""; max 126 for x86 short-jmp (eb + len+1 ≤127). */
-  if (!ctx_bytes || !sbuf || slen < 0 || slen > 126)
+  /* Stage 12.2.5: slen==0 empty ""; x86 short-jmp when slen+1≤127 else E9 rel32.
+   * Cap 4095 matches parser STRING_LIT overflow (Expr.var_name chain). */
+  if (!ctx_bytes || !sbuf || slen < 0 || slen > 4095)
     return -1;
   if (ta != 0 && ta != 1)
     return -1;
@@ -328,13 +371,25 @@ int32_t glue_asm_emit_jmp_skip_string_then_lea_impl(uint8_t *ctx_bytes, int32_t 
     adr4[3] = (uint8_t)(adr_inst >> 24);
     return pipeline_elf_ctx_append_bytes(ctx_bytes, adr4, 4);
   }
-  /* PLATFORM: LINUX+MACOS x86_64 — short jmp + lea [rip]. */
-  if (slen + 1 > 127)
-    return -1;
-  jmp2[0] = 0xeb;
-  jmp2[1] = (uint8_t)(slen + 1);
-  if (pipeline_elf_ctx_append_bytes(ctx_bytes, jmp2, 2) != 0)
-    return -1;
+  /* PLATFORM: LINUX+MACOS x86_64 — EB rel8 when payload+NUL fits; E9 rel32 else.
+   * lea [rip] disp is from after the 7-byte lea back to payload = -(slen+8),
+   * independent of jmp width. */
+  if (slen + 1 <= 127) {
+    jmp2[0] = 0xeb;
+    jmp2[1] = (uint8_t)(slen + 1);
+    if (pipeline_elf_ctx_append_bytes(ctx_bytes, jmp2, 2) != 0)
+      return -1;
+  } else {
+    uint8_t jmp5[5];
+    uint32_t rel32 = (uint32_t)(slen + 1);
+    jmp5[0] = 0xe9;
+    jmp5[1] = (uint8_t)rel32;
+    jmp5[2] = (uint8_t)(rel32 >> 8);
+    jmp5[3] = (uint8_t)(rel32 >> 16);
+    jmp5[4] = (uint8_t)(rel32 >> 24);
+    if (pipeline_elf_ctx_append_bytes(ctx_bytes, jmp5, 5) != 0)
+      return -1;
+  }
   if (pipeline_elf_ctx_append_bytes(ctx_bytes, (uint8_t *)sbuf, slen) != 0)
     return -1;
   z = 0;
@@ -3646,18 +3701,21 @@ int32_t glue_asm_prefix_is_fmt_or_debug(const uint8_t *pre, int32_t pre_len) {
 /* G-02f-372 call：实现体始终 seed；public PREFER 时 thin forward */
 int32_t glue_asm_emit_string_lit_ptr_rax_elf_c_impl(struct ast_ASTArena *arena, struct platform_elf_ElfCodegenCtx *elf_ctx,
                                                int32_t str_expr_ref, int32_t ta) {
-  uint8_t sbuf[128];
+  uint8_t sbuf[4096];
   int32_t slen;
+  int32_t copied;
   /* PLATFORM: SHARED — ta 0/1 via glue_asm_emit_jmp_skip_string_then_lea (wave108 arm64). */
   if (!arena || !elf_ctx || str_expr_ref <= 0 || (ta != 0 && ta != 1))
     return -1;
   if (pipeline_expr_kind_ord_at(arena, str_expr_ref) != GLUE_EXPR_STRING_LIT_ORD)
     return -1;
   slen = glue_asm_string_lit_len(arena, str_expr_ref);
-  /* Stage 12.2.5: empty OK; long diag msgs up to 126 (was wrong hard-cap 63). */
-  if (slen < 0 || slen > 126)
+  /* Empty OK; overflow-chain payload up to parser STRING_LIT max 4095. */
+  if (slen < 0 || slen > 4095)
     return -1;
-  glue_asm_string_lit_into(arena, str_expr_ref, sbuf);
+  copied = glue_asm_string_lit_copy_c(arena, str_expr_ref, sbuf, 4096);
+  if (copied != slen)
+    return -1;
   if (glue_asm_emit_jmp_skip_string_then_lea((uint8_t *)elf_ctx, ta, 1, sbuf, slen) != 0)
     return -1;
   return 0;
@@ -3693,7 +3751,7 @@ int32_t glue_asm_try_emit_fmt_string_lit_import_call_elf_c_impl(struct ast_ASTAr
   int32_t expr_ko;
   uint8_t sym_flat[128];
   int32_t sym_len;
-  uint8_t sbuf[128];
+  uint8_t sbuf[4096];
   /* PLATFORM: SHARED — x86_64 (0) + aarch64 (1) string-embed fmt path (wave108). */
   if (!arena || !elf_ctx || !ctx || call_expr_ref <= 0 || (ta != 0 && ta != 1))
     return 0;
@@ -3722,10 +3780,11 @@ int32_t glue_asm_try_emit_fmt_string_lit_import_call_elf_c_impl(struct ast_ASTAr
   if (arg_ref <= 0 || pipeline_expr_kind_ord_at(arena, arg_ref) != GLUE_EXPR_STRING_LIT_ORD)
     return 0;
   slen = glue_asm_string_lit_len(arena, arg_ref);
-  /* Stage 12.2.5: empty OK; string lit embed cap 126. */
-  if (slen < 0 || slen > 126)
+  /* Empty OK; overflow-chain payload up to parser STRING_LIT max 4095. */
+  if (slen < 0 || slen > 4095)
     return -1;
-  glue_asm_string_lit_into(arena, arg_ref, sbuf);
+  if (glue_asm_string_lit_copy_c(arena, arg_ref, sbuf, 4096) != slen)
+    return -1;
   /*
    * Link name: bare std_fmt_println / std_fmt_print (runtime_asm_io_stubs T symbols).
    * Do not overload-mangle string lit → println_i32_reti32 UNDEF (wave105 root).
