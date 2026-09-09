@@ -144,7 +144,55 @@ ensure_driver_gen() {
     need_regen=1
   fi
 
-  if [ "$need_regen" = "0" ]; then
+  # 7.4.4 v3 follow-up (2026-09-10): product -E + -lib-name regen lane — the
+  # primary path once need_regen fires. The live product emits main.x
+  # completely (EMIT_HEAVY included); -lib-name main prefixes the entry
+  # exports; gen_strip_dep_bodies.py removes the co-emitted dep bodies
+  # (std.sys etc., bare names) so the real link providers stay authoritative
+  # (reproduces the retired -E-extern semantics). Falls through to the
+  # historical seed/xlang-x/xlang-c chain on any failure.
+  _prod_done=0
+  if [ -x ./xlang_asm ] || [ -x ./xlang ]; then
+    if [ -x ./xlang_asm ]; then _prod=./xlang_asm; else _prod=./xlang; fi
+    log "driver_gen.c: try $_prod -x -E -lib-name main ..."
+    run_with_timeout "$_prod" -x -E -lib-name main "${MAIN_X_E_DIRS[@]}" src/main.x >"$tmp" 2>/dev/null
+    if [ -s "$tmp" ] && grep -q 'argc < 3' "$tmp" \
+      && grep -q 'main_eq_minus_E(arg_buf, len) !=0' "$tmp"; then
+      if python3 scripts/gen_strip_dep_bodies.py main "$tmp" "$tmp.stripped" 2>/dev/null \
+        && python3 scripts/post_E_fixup.py "$tmp.stripped" "$tmp.fixed" 2>/dev/null; then
+        # driver_get_argv_i: the -E output has its extern only at prototype
+        # scope (post_E_fixup sees it as already-declared and skips) — pin the
+        # decl at file scope so the cold cc lane needs no -Wno-implicit escape.
+        python3 - "$tmp.fixed" driver_gen.c <<'PYEOF'
+import sys
+src_path, dst_path = sys.argv[1], sys.argv[2]
+decl = 'extern int32_t driver_get_argv_i(int32_t argc, uint8_t * argv, int32_t i, uint8_t * buf, int32_t max);'
+lines = open(src_path).read().split('\n')
+last_inc = 0
+for idx, l in enumerate(lines[:400]):
+    if l.startswith('#include'):
+        last_inc = idx
+lines.insert(last_inc + 1, decl)
+open(dst_path, 'w').write('\n'.join(lines))
+PYEOF
+        if cc -fsyntax-only -I. -Iinclude -Isrc driver_gen.c 2>/dev/null; then
+          _prod_done=1
+          rm -f "$tmp" "$tmp.stripped" "$tmp.fixed"
+          log "driver_gen.c: regenerated via $_prod -E -lib-name main (+strip/+fixup/+decl)"
+        else
+          log "driver_gen.c: product regen failed cc self-check; fallback"
+          rm -f "$tmp" "$tmp.stripped" "$tmp.fixed"
+        fi
+      else
+        rm -f "$tmp" "$tmp.stripped" "$tmp.fixed" 2>/dev/null || true
+      fi
+    fi
+    rm -f "$tmp" 2>/dev/null || true
+  fi
+
+  if [ "$_prod_done" = "1" ]; then
+    :
+  elif [ "$need_regen" = "0" ]; then
     log "driver_gen.c: pinned ($(bytes_of driver_gen.c) bytes; up-to-date with MAIN_X_DEPS)"
   elif seed_ok "$seed" && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
     && { [ ! -s driver_gen.c ] || [ ! -f "./$XLANG_X" ]; }; then
