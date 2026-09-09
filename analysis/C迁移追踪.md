@@ -236,7 +236,7 @@
 
 #### 未开／残
 
-- 🟡 **8.3.6 残** 全表 from_x 退役策略终稿——**第一片已落（2026-09-10 普查）**：[seed面普查-2026-09-10.md](seed面普查-2026-09-10.md)（311 个：116 混合/195 纯冷/31 marker-only/1 缺头注；四类退役路径骨架＋冷启动原则；重跑即刷新）。终稿待各类逐面处置结论。**第二片已落（同日）**：纯冷体 195 消费面扫描＝115 构建系统零引用＋80 有引用。**第三片已落（`88cc6d028`）**：全仓 git grep 核证（排自身；含 seed 互引/py/pl/CI 面；无动态 glob——唯一真 glob 为 pin 族）→ **88 个 DEAD 物理删（−123,566 行）**；余 27 零构建引用者**第四片已定性**：25＝兄弟 seed 头注 prove 契约（删须同波更新约 20 头注＝文档一致性波）＋1 子串假阳性（diag_surface，DEAD 候选）＋1 真活（preprocess_shim＝build_runtime 内嵌 cc 脚本）。删后双端闸 15/5/0＋矩阵 5/5＋m2=42＋run-compress OK  
+- 🟡 **8.3.6 残** 全表 from_x 退役策略终稿——**第一片已落（2026-09-10 普查）**：[seed面普查-2026-09-10.md](seed面普查-2026-09-10.md)（311 个：116 混合/195 纯冷/31 marker-only/1 缺头注；四类退役路径骨架＋冷启动原则；重跑即刷新）。终稿待各类逐面处置结论。**第二片已落（同日）**：纯冷体 195 消费面扫描＝115 构建系统零引用＋80 有引用。**第三片已落（`88cc6d028`）**：全仓 git grep 核证（排自身；含 seed 互引/py/pl/CI 面；无动态 glob——唯一真 glob 为 pin 族）→ **88 个 DEAD 物理删（−123,566 行）**；余 27 零构建引用者**第四片已定性**：25＝兄弟 seed 头注 prove 契约（删须同波更新约 20 头注＝文档一致性波）＋1 子串假阳性（diag_surface，DEAD 候选）＋1 真活（preprocess_shim＝build_runtime 内嵌 cc 脚本）。**第五片已落（`f6af9bca9`＋`5974a75fa`）**：25 处陈旧 prove 契约注清理（20 seed 头注＋3 `.x` 源＋`xlang_posix_env.h` 列表；runtime.x 两处 PLATFORM 注保留「product g05 不链此 mega」尾句）＋**26 件删除**（25 surface＋diag_surface）→ **8.3.6 累计删除 114 件（−157,003 行）**；编辑面 cc 语法零错＋双端闸 15/5/0＋矩阵 5/5＋m2=42＋run-compress OK。误提交的构建包装件已移除（`5974a75fa`）。删后双端闸 15/5/0＋矩阵 5/5＋m2=42＋run-compress OK  
 - ⬜ **8.3.10** `editors/tree-sitter-xlang/` 第三方 .c — 删／submodule／独立 release  
 - ⬜ **BC 终局** `pipeline_x` 整 TU 离 host-cc（gen／runtime seed 等在图内）  
 
