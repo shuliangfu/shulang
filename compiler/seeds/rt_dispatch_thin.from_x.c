@@ -13,6 +13,8 @@
  *  - driver_run_asm_backend_c / driver_run_emit_c_path_c 兼容旧名薄门闩
  *  - driver_run_compiler_full 入口选择
  *  - driver_try_compile_via_shu_c_sibling（fork/exec 同目录 xlang-c）🔒
+ *    mega leftover sibling → _impl wrapper retired (residual 9);
+ *    this public name stays here (product T). Do not delete.
  * impl_c / parsed 巨石在其它 R2 切片。
  */
 #include <stddef.h>

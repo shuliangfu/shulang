@@ -104,8 +104,6 @@ export extern "C" function driver_lib_roots_from_key_impl(lib_key: *u8, out_arr:
 export extern "C" function runtime_prepare_dce_ctx_impl(mod: *u8, all_dep_mods: *u8, n_all: i32, used_funcs: *u8, n_used: *i32, used_mono: *u8, used_type_names: *u8, n_used_types: *i32, wpo_reach: *u8, dce: *u8, dce_ready: *i32): void;
 export extern "C" function driver_run_x_emit_c_from_compile_state_impl(state: *u8, argc: i32, argv: *u8): i32;
 
-export extern "C" function driver_try_compile_via_shu_c_sibling_impl(argc: i32, argv: *u8): i32;
-
 export extern "C" function write_fs_path_map_error_abi_inline_impl(cf: *u8): i32;
 export extern "C" function codegen_emit_include_pipeline_glue_c_impl(out: *u8, argv0: *u8): void;
 export extern "C" function runtime_pipeline_elf_ctx_diag_note_impl(ctx_bytes: *u8): void;
@@ -1079,19 +1077,18 @@ export function driver_run_x_emit_c_from_compile_state(state: *u8, argc: i32, ar
  * above). PLATFORM: SHARED — do not re-add.
  */
 
-/** Exported function `driver_try_compile_via_shu_c_sibling`.
- * Implements `driver_try_compile_via_shu_c_sibling`.
- * @param argc i32
- * @param argv *u8
- * @return i32
+/*
+ * Retired mega wrapper: driver_try_compile_via_shu_c_sibling forwarded
+ * to never-defined driver_try_compile_via_shu_c_sibling_impl. Product
+ * authority is rt_dispatch_thin.x → driver_dispatch_sibling_try_spawn
+ * (HAS a real fork/exec body; leftover consume site retired at residual
+ * 6). Re-adding this export here would first-wins overlay the spawn
+ * body — same class as the deleted smoke / c_typeck / esc_gate /
+ * via_cparser stubs. Missing provider → link UNDEF, not a silent
+ * _impl -1. Do not delete the spawn body itself.
+ * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
+ * isomorphic; product g05 does not link this mega.
  */
-#[no_mangle]
-export function driver_try_compile_via_shu_c_sibling(argc: i32, argv: *u8): i32 {
-  unsafe {
-    return driver_try_compile_via_shu_c_sibling_impl(argc, argv);
-  }
-  return 0 - 1;
-}
 
 /*
  * Retired mega wrapper: driver_smoke_lex_dump_thread_fn (see

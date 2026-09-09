@@ -10,8 +10,9 @@
  * FROM_X 下本文件仅前向声明 + slice marker（产品 rest 业务符号 H=0）。
  * Cap residual（driver_abi）：lib_key→lib_roots 槽 + Parsed 填表。
  * Leftover !XLANG_NO_C_FRONTEND sibling demote in emit_c_path retired
- * (this knife). Spawn helper stays in rt_dispatch_thin (Cap residual,
- * different class — HAS a real fork/exec body).
+ * (residual 6). Spawn helper stays in rt_dispatch_thin (Cap residual,
+ * different class — HAS a real fork/exec body). Mega leftover sibling
+ * → _impl wrapper retired (residual 9).
  * 冷启动/无 PREFER 时仍编译完整 C 体。
  *
  * Scope: asm/emit/full_x/post_parse/x_emit_from_state 中型分派；

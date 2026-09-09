@@ -501,8 +501,8 @@ MODULES=(
   #   prove 锁 mixed surface IDENTICAL (42 nm T · no doc_anchor)
   #   注：wave571 修复 diag_io_fputc 参数顺序 bug (c,o)→(o,c)，-E + cc -c 全绿，L2 真测通过
   "diag|src/diag.x|seeds/diag_surface.from_x.c||"
-  # runtime R2 mixed (wave572)：.x 100 nm T symbols
-  #   (30 DIRECT compute + 70 thin+rest forwards to _impl;
+  # runtime R2 mixed (wave572)：.x 99 nm T symbols
+  #   (30 DIRECT compute + 69 thin+rest forwards to _impl;
   #    9.7.6 residual retired mega esc_gate wrappers → rt_stack authority;
   #    9.7.6 residual 2 retired mega smoke_lex_dump / c_typeck_entry_* →
   #    pipeline_typeck_entry_module authority;
@@ -521,9 +521,11 @@ MODULES=(
   #    !XLANG_NO_C_FRONTEND -E-extern cparser consume site →
   #    driver_x_emit_try_extern_via_cparser always BLD001;
   #    9.7.6 residual 8 retired mega via_cparser wrapper → never-defined
-  #    _impl (T 101→100); product -E-extern still try_extern BLD001);
-  #   rest 含 85 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
-  #   prove 锁 mixed surface IDENTICAL (100 nm T · no doc_anchor)
+  #    _impl (T 101→100); product -E-extern still try_extern BLD001;
+  #    9.7.6 residual 9 retired mega sibling wrapper → never-defined
+  #    _impl (T 100→99); product sibling still T from rt_dispatch_thin);
+  #   rest 含 84 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
+  #   prove 锁 mixed surface IDENTICAL (99 nm T · no doc_anchor)
   "runtime|src/runtime.x|seeds/runtime_surface.from_x.c||"
   # runtime_link_abi R2 mixed (wave573)：.x 145 nm T symbols
   #   (75 DIRECT compute + 70 thin+rest forwards to _impl);
@@ -612,6 +614,8 @@ MODULES=(
   # consume site retired; cold seed now also refuses via
   # driver_x_emit_try_extern_via_cparser (always BLD001)
   # 9.7.6 residual 8: mega via_cparser → _impl wrapper retired (T 101→100)
+  # 9.7.6 residual 9: mega sibling → _impl wrapper retired (T 100→99);
+  # spawn body stays in rt_dispatch_thin (HAS a real fork/exec body)
   "rt_run_x_emit|src/runtime/rt_run_x_emit.x|seeds/rt_run_x_emit_surface.from_x.c||"
   # rt_parse_diag R2 full：.x 吃满 precise parse failure P001；产品 rest 在 FROM_X 下业务符号 H=0
   # prove 锁 full surface IDENTICAL（1 公共符号）；冷/无 PREFER 仍可走 seeds/rt_parse_diag.from_x.c 全 C 体

@@ -86,7 +86,6 @@ extern int32_t runtime_run_test_c(int32_t argc, uint8_t * argv);
 extern int32_t driver_lib_roots_from_key(uint8_t * lib_key, uint8_t * out_arr, uint8_t * bufs);
 extern void runtime_prepare_dce_ctx(uint8_t * mod, uint8_t * all_dep_mods, int32_t n_all, uint8_t * used_funcs, int32_t * n_used, uint8_t * used_mono, uint8_t * used_type_names, int32_t * n_used_types, uint8_t * wpo_reach, uint8_t * dce, int32_t * dce_ready);
 extern int32_t driver_run_x_emit_c_from_compile_state(uint8_t * state, int32_t argc, uint8_t * argv);
-extern int32_t driver_try_compile_via_shu_c_sibling(int32_t argc, uint8_t * argv);
 extern int32_t write_fs_path_map_error_abi_inline(uint8_t * cf);
 extern void codegen_emit_include_pipeline_glue_c(uint8_t * out, uint8_t * argv0);
 extern void runtime_pipeline_elf_ctx_diag_note(uint8_t * ctx_bytes);
@@ -202,12 +201,11 @@ extern int32_t runtime_run_test_c_impl(int32_t argc, uint8_t * argv);
 extern int32_t driver_lib_roots_from_key_impl(uint8_t * lib_key, uint8_t * out_arr, uint8_t * bufs);
 extern void runtime_prepare_dce_ctx_impl(uint8_t * mod, uint8_t * all_dep_mods, int32_t n_all, uint8_t * used_funcs, int32_t * n_used, uint8_t * used_mono, uint8_t * used_type_names, int32_t * n_used_types, uint8_t * wpo_reach, uint8_t * dce, int32_t * dce_ready);
 extern int32_t driver_run_x_emit_c_from_compile_state_impl(uint8_t * state, int32_t argc, uint8_t * argv);
-extern int32_t driver_try_compile_via_shu_c_sibling_impl(int32_t argc, uint8_t * argv);
 extern int32_t write_fs_path_map_error_abi_inline_impl(uint8_t * cf);
 extern void codegen_emit_include_pipeline_glue_c_impl(uint8_t * out, uint8_t * argv0);
 extern void runtime_pipeline_elf_ctx_diag_note_impl(uint8_t * ctx_bytes);
 extern int32_t driver_compile_parse_argv_step_c_impl(int32_t argc, uint8_t * argv, uint8_t * state, int32_t i, uint8_t * arg_buf, int32_t arg_cap);
-/* Function definitions: 30 DIRECT compute + 71 thin+rest forwards to _impl. */
+/* Function definitions: 30 DIRECT compute + 69 thin+rest forwards to _impl. */
 int32_t driver_run_x_emit_c_set_path(uint8_t * path, int32_t path_len) {
   return driver_run_x_emit_c_set_path_impl(path, path_len);
   return -1;
@@ -455,10 +453,13 @@ int32_t driver_run_x_emit_c_from_compile_state(uint8_t * state, int32_t argc, ui
  * Retired mega wrapper: driver_c_frontend_smoke.
  * PLATFORM: SHARED — do not re-add.
  */
-int32_t driver_try_compile_via_shu_c_sibling(int32_t argc, uint8_t * argv) {
-  return driver_try_compile_via_shu_c_sibling_impl(argc, argv);
-  return -1;
-}
+/*
+ * Retired mega wrapper: driver_try_compile_via_shu_c_sibling forwarded
+ * to never-defined *_impl. Product authority is rt_dispatch_thin
+ * (HAS a real fork/exec body). Re-adding here would first-wins overlay
+ * the spawn body.
+ * PLATFORM: SHARED — do not re-add.
+ */
 /*
  * Retired mega wrapper: driver_smoke_lex_dump_thread_fn.
  * PLATFORM: SHARED — do not re-add.

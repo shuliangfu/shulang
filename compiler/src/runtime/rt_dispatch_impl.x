@@ -210,7 +210,8 @@ export function driver_run_asm_backend_impl_c(
  * Leftover !XLANG_NO_C_FRONTEND sibling xlang-c demote lived only in the
  * cold seed twin (rt_dispatch_impl.from_x.c). This product body never
  * called driver_try_compile_via_shu_c_sibling; the spawn helper stays in
- * rt_dispatch_thin (HAS a real fork/exec body, different class).
+ * rt_dispatch_thin (HAS a real fork/exec body, different class). Mega
+ * leftover sibling → _impl wrapper retired (residual 9).
  * @param input_path *u8 — entry source path; forwarded to parsed
  * @param out_path *u8 — optional -o path; null allowed
  * @param lib_key *u8 — opaque compile-state / lib_roots sidecar
