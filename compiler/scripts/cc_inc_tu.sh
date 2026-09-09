@@ -34,23 +34,31 @@ cc_inc_tu_seed_for_out() {
   # no product binary exists. Prints nothing on fallback so --auto proceeds
   # to the seed table below.
   case "$(basename "$1")" in
-  build_tool_main.o|crt0_mingw.o)
+  build_tool_main.o|crt0_mingw.o|pipeline_glue_link.o)
     local _btm_prod=""
     for _b in ./xlang_asm ./xlang ./xlang-c; do
       [ -x "$_b" ] && _btm_prod="$_b" && break
     done
     _btm_src=src/build_tool_main.x
     [ "$(basename "$1")" = "crt0_mingw.o" ] && _btm_src=src/crt0_mingw.x
+    [ "$(basename "$1")" = "pipeline_glue_link.o" ] && _btm_src=src/pipeline_glue_link.x
     if [ -n "$_btm_prod" ] && [ -f "$_btm_src" ]; then
       # Stable worktree gen (driver_gen.c lifecycle): regenerated on each
       # ensure, untracked, compiled in place below.
       local _btm_gen
       _btm_gen="$(basename "$1" .o)_gen.c"
+      # Entry-leaf validity: main() signature; bridge-leaf validity: the
+      # leaf's own export (pipeline_run_x_pipeline for the glue bridge).
+      _btm_need='^int32_t main('
+      [ "$(basename "$1")" = "pipeline_glue_link.o" ] && _btm_need='^int32_t pipeline_run_x_pipeline('
       if "$_btm_prod" -x -E -L .. "$_btm_src" >"$_btm_gen" 2>/dev/null \
-         && grep -q '^int32_t main(' "$_btm_gen"; then
-        perl -i -pe 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen" 2>/dev/null || \
-          sed -i.bak 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen"
-        rm -f "${_btm_gen}.bak"
+         && grep -q "$_btm_need" "$_btm_gen"; then
+        # char** fixup applies to entry leaves only (bridge keeps uint8_t* ABI).
+        if [ "$_btm_need" = '^int32_t main(' ]; then
+          perl -i -pe 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen" 2>/dev/null || \
+            sed -i.bak 's/uint8_t \* \* argv/char **argv/g' "$_btm_gen"
+          rm -f "${_btm_gen}.bak"
+        fi
         printf '%s\n' "$_btm_gen"
         return 0
       fi

@@ -1558,9 +1558,21 @@ detect_pipeline_gen_cflags() {
 # Target B 实验链：编译 pipeline_run_x_pipeline 最小 C 桥（见 seeds/pipeline_glue_link.from_x.c）。
 ensure_asm_pipeline_glue_link_obj() {
   GLUE_LINK_OBJ="$BUILD_DIR/pipeline_glue_link.o"
-  if [ ! -f "$GLUE_LINK_OBJ" ] || [ "seeds/pipeline_glue_link.from_x.c" -nt "$GLUE_LINK_OBJ" ]; then
-  echo " cc -c seeds/pipeline_glue_link.from_x.c -> $GLUE_LINK_OBJ"
-  sh scripts/cc_inc_tu.sh seeds/pipeline_glue_link.from_x.c "$GLUE_LINK_OBJ"
+  # 7.2.1 third knife: .x authority (src/pipeline_glue_link.x) via cc_inc_tu
+  # --auto prefer lane; seed fallback when no product binary (cold start).
+  # Freshness covers .x AND the seed (whichever is newer wins the rebuild).
+  _pgl_stale=0
+  [ ! -f "$GLUE_LINK_OBJ" ] && _pgl_stale=1
+  [ -f src/pipeline_glue_link.x ] && [ src/pipeline_glue_link.x -nt "$GLUE_LINK_OBJ" ] && _pgl_stale=1
+  [ -f seeds/pipeline_glue_link.from_x.c ] && [ seeds/pipeline_glue_link.from_x.c -nt "$GLUE_LINK_OBJ" ] && _pgl_stale=1
+  if [ "$_pgl_stale" = "1" ]; then
+    if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+      echo " cc_inc_tu --auto (src/pipeline_glue_link.x) -> $GLUE_LINK_OBJ"
+      sh scripts/cc_inc_tu.sh --auto "$GLUE_LINK_OBJ"
+    else
+      echo " cc -c seeds/pipeline_glue_link.from_x.c -> $GLUE_LINK_OBJ"
+      sh scripts/cc_inc_tu.sh seeds/pipeline_glue_link.from_x.c "$GLUE_LINK_OBJ"
+    fi
   fi
 }
 
