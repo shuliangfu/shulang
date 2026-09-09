@@ -646,7 +646,9 @@ fi
 # overwrote Ubuntu gold xlang_asm. G.7: complete this existing relink;
 # do not invent a second WPO/promote path. Darwin strict-fail keep /
 # smoke fallback / postlink experimental fallback consult the same flag
-# (not a second promote path).
+# (not a second promote path). Postlink compiler-fallback ($FALLBACK →
+# $ASM) is a different recovery class gated by
+# XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK (not this promote flag).
 if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ]; then
   cp -f xlang_asm.experimental xlang_asm
   experimental_bootstrap_info "OK (promoted to xlang_asm; XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1)"

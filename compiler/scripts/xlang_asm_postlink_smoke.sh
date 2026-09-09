@@ -4,11 +4,16 @@
 # 用法（compiler 目录）：
 #   ./scripts/xlang_asm_postlink_smoke.sh [xlang_asm_path] [fallback_compiler]
 #
-# 回退顺序（默认允许，本地调试）：experimental → fallback_compiler
-#   XLANG_BOOTSTRAP_NO_POSTLINK_FALLBACK=1 — 禁止任何回退（W3 gold 须设，防自举塌陷）
+# Fallback order after product smoke fails (default: do not overwrite $ASM):
+#   XLANG_BOOTSTRAP_NO_POSTLINK_FALLBACK=1 — hard-fail any fallback (W3 gold)
 #   XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1 — required to copy experimental
 #     onto product $ASM (same promote authority as relink @ ddf74296e).
 #     Without it, experimental smoke success does not overwrite product.
+#   XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK=1 — required to copy $FALLBACK
+#     (default ${XLANG:-./xlang}) onto product $ASM. Same flag as
+#     bootstrap-anti-collapse after-the-fact; G.7 completed it at the
+#     produce-point copy (was silent overwrite). Without it, compiler
+#     smoke success does not overwrite product.
 #
 # 环境：
 #   XLANG_BOOTSTRAP_AUDIT_DIR — 审计标记目录（默认 ../logs）
@@ -116,7 +121,7 @@ if [ -x ./xlang_asm.experimental ] && smoke_bin ./xlang_asm.experimental; then
   # PLATFORM: SHARED — do not silently promote experimental onto product.
   # G.7 complete existing XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT (relink
   # authority @ ddf74296e). Compiler-fallback ($FALLBACK → $ASM) is a
-  # different recovery class and stays documented leftover.
+  # different recovery class gated by XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK.
   if [ "${XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT:-0}" = "1" ]; then
   echo "xlang_asm_postlink_smoke: fallback ./xlang_asm.experimental -> $ASM" >&2
   cp -f ./xlang_asm.experimental "$ASM"
@@ -131,6 +136,11 @@ if [ -x ./xlang_asm.experimental ] && smoke_bin ./xlang_asm.experimental; then
 fi
 
 if [ -x "$FALLBACK" ] && smoke_bin "$FALLBACK"; then
+  # PLATFORM: SHARED — do not silently copy hosted ./xlang onto product.
+  # G.7 complete existing XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK (was
+  # anti-collapse after-the-fact only). Experimental copies stay on
+  # XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT (not a second compiler path).
+  if [ "${XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK:-0}" = "1" ]; then
   echo "xlang_asm_postlink_smoke: fallback $FALLBACK -> $ASM" >&2
   cp -f "$FALLBACK" "$ASM"
   : >"$AUDIT_DIR/bootstrap-postlink.compiler-fallback"
@@ -139,6 +149,8 @@ if [ -x "$FALLBACK" ] && smoke_bin "$FALLBACK"; then
     >>"$AUDIT_DIR/bootstrap-audit.log"
   echo "xlang_asm_postlink_smoke: OK after compiler fallback"
   exit 0
+  fi
+  echo "xlang_asm_postlink_smoke: compiler $FALLBACK smoke OK; not copying onto $ASM (set XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK=1)" >&2
 fi
 
 echo "xlang_asm_postlink_smoke: FAIL no working fallback for $ASM" >&2

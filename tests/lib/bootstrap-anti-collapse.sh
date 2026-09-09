@@ -91,7 +91,9 @@ bootstrap_host_pinned_seed() {
 # 环境：
 #   XLANG_BOOTSTRAP_ANTI_COLLAPSE_FAIL=1 — 硬失败（W3 gold 默认）
 #   XLANG_BOOTSTRAP_ALLOW_PINNED_FALLBACK=1 — 允许 seed 回退 pinned（本地调试）
-#   XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK=1 — 允许 postlink 回退（本地调试）
+#   XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK=1 — 允许 postlink 回退（本地调试）。
+#     Same flag is the produce-point gate for compiler-fallback copy in
+#     xlang_asm_postlink_smoke.sh (G.7 complete; default no overwrite).
 bootstrap_anti_collapse_check() {
   local stage1="${1:-compiler/xlang_asm_stage1}"
   local stage2="${2:-compiler/xlang_asm2}"

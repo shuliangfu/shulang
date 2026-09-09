@@ -6817,7 +6817,11 @@ fi
 if [ "$ASM_READY" -eq 1 ] && [ "$LINK_OK" -ne 1 ]; then
   exit 1
 fi
-# strict 重链后 xlang_asm 偶发 -o SIGSEGV：回退 experimental 快照或本轮 XLANG 编译器。
+# strict 重链后 xlang_asm 偶发 -o SIGSEGV：postlink 可试 experimental / FALLBACK。
+# Default does not overwrite product. Experimental copy needs
+# XLANG_EXPERIMENTAL_PROMOTE_TO_PRODUCT=1; compiler-fallback copy needs
+# XLANG_BOOTSTRAP_ALLOW_POSTLINK_FALLBACK=1. W3 gold sets
+# XLANG_BOOTSTRAP_NO_POSTLINK_FALLBACK=1 (hard-fail any fallback).
 if [ -x ./xlang_asm ] && [ "$LINK_OK" -eq 1 ]; then
   chmod +x scripts/xlang_asm_postlink_smoke.sh 2>/dev/null || true
   if [ -x scripts/xlang_asm_postlink_smoke.sh ]; then
