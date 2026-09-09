@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 路径／验收／为何开）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端 `/tmp` 日志、「证：…」长叙事。波次流水只写 `[自举进度.md](自举进度.md)` §6。  
 > **考古副本**（本波重写前全文）：`[archive/C迁移追踪-流水账归档-20260825.md](archive/C迁移追踪-流水账归档-20260825.md)`  
-> **刷新**：2026-09-09 · 钉盘 **`e194cd294`**（不随微步升钉）
+> **刷新**：2026-09-09 · tip **`8281d5777`** · 钉盘 **`e194cd294`**（不随微步升钉）
 
 ### 维护约定
 
@@ -444,8 +444,8 @@
 
 | 项 | 状态 | 备注 |
 |----|------|------|
-| Darwin fmt 收集 FMT001（挡 `./xbuild l4`） | 🟡 | 冷 `xlang_asm fmt` 任意路径零收集；Ubuntu L4 129/129＠`074544410`；不升钉 |
-| Darwin `-backend c` invoke_cc SEGV | 🟡 | `xlang_invoke_cc_impl` NULL deref（pin egg 同崩）；seed-smoke 改走 -E+cc `-I`＠`074544410` |
+| Darwin fmt 收集 FMT001（挡 `./xbuild l4`） | ✅ | Darwin `xlang_dir_open` 补 `O_DIRECTORY`＠`e194cd294`；双端 L4 129/129；本波 fmt 邻域仍 0 |
+| Darwin `-backend c` invoke_cc SEGV | ✅ | `pipeline_asm_compute_frame_size_c` min scratch 512→2048＋w157 CALL (n+1)*32／ADDR_OF 51（.x＋seed）；Darwin／Ubuntu `-backend c -o` hello42＠`8281d5777`；不升钉 |
 | L8b g15 seed count 孪生＋c_face T（24 vs 28 航道非确定性） | ✅ | seed `labi_od_simple_group_sym_count(g==15)` 24→28（L8c 失败＝full-seed 胜者）；c_face 补 4 stream T；`.so` 从 slice 块挪回 compress 伴块；heavy.x 不动＠`51327d07b`／`e6c8d28f2` |
 | g15 stream 针＋系统 .so 推送（run-compress 绿＝bstrict 129/129 零红首次） | ✅ | 双活航道：L8b `.x` 切片表 24→28＋seed 伴块 libzstd/libbrotli* 推送；heavy.x 不动（-E 清了翻 split 雷区）＠`d583f61f5` |
 | u64 slice 步长＋core_slice ensure＋xlang_sys 针/fio 推送（run-slice/run-process 双端绿） | ✅ | ①elem ≤8；②L4 wipe 自愈 ensure；③sys 针表 34→38＋freestanding_io_x86_64.o 推送＠`f7e9a16a7`；bstrict 单红 run-compress（zstd/brotli 未建） |
