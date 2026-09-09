@@ -24,31 +24,67 @@ def main() -> int:
         sys.stderr.write("usage: gen_strip_dep_bodies.py <PREFIX> <in.c> <out.c>\n")
         return 1
     prefix, src_path, dst_path = sys.argv[1], sys.argv[2], sys.argv[3]
-    defmatch = re.compile(
-        r'^(int32_t|void|uint8_t\s*\*|const char\s*\*|char\s*\*|size_t|int)\s+([a-zA-Z_]\w*)\s*\('
+    # Generic top-level definition matcher: ANY C return type (identifiers,
+    # const, pointer stars) followed by the function name and '('.
+    # The original int32_t-only enumeration missed int64_t — the
+    # std_sys_linux_raw_syscallN dep bodies leaked through and broke the
+    # Ubuntu lane's cc self-check (undeclared xlang_panic_ calls inside
+    # un-stripped dep bodies).
+    # Header-accumulation stripper (robust against multi-line signatures,
+    # any return type, and mixed blocks where extern decls precede defs):
+    # a top-level definition = a run of column-0 lines ending in '{' whose
+    # first line is not structural (extern/static/preprocessor/typedef/
+    # struct/...). The function name is the identifier immediately before
+    # the first '(' of the run. Non-<PREFIX>_ definitions are dropped to
+    # their column-0 '}'. Replaces the return-type enumeration which missed
+    # int64_t (std_sys_linux_raw_syscallN leaked; broke the Ubuntu cc gate).
+    skip_prefixes = (
+        "extern ", "static ", "#", "typedef ", "struct ", "enum ", "union ",
+        "}", "//", "/*", "*", "return ", "if ", "while ", "switch ", "for ",
+        "else", "sizeof", "PYEOF",
     )
-    try:
-        with open(src_path, "r") as f:
-            lines = f.read().split("\n")
-    except OSError as e:
-        sys.stderr.write(f"gen_strip_dep_bodies: read {src_path}: {e}\n")
-        return 1
+    import re as _re
+    ident_re = _re.compile(r"([A-Za-z_]\w*)\s*\(")
+
+    lines = open(src_path).read().split("\n")
     out = []
     stripped = []
     i = 0
-    while i < len(lines):
+    n = len(lines)
+    while i < n:
         line = lines[i]
-        m = defmatch.match(line)
-        if m and not m.group(2).startswith(prefix + "_") and not line.startswith("static"):
-            name = m.group(2)
-            stripped.append(name)
-            j = i + 1
-            while j < len(lines) and lines[j] != "}":
-                j += 1
-            i = j + 1
+        if not line.strip() or line.startswith(skip_prefixes) or line[0] in " \t":
+            out.append(line)
+            i += 1
             continue
-        out.append(line)
-        i += 1
+        # accumulate a header run until a line ends with '{'
+        run = []
+        j = i
+        while j < n and not lines[j].rstrip().endswith("{"):
+            run.append(lines[j])
+            j += 1
+        if j >= n:
+            out.extend(run)
+            break
+        run.append(lines[j])  # the '{' line
+        header = " ".join(run)
+        m = ident_re.search(header)
+        if m and not m.group(1).startswith(prefix + "_"):
+            stripped.append(m.group(1))
+            k = j + 1
+            while k < n and lines[k] != "}":
+                k += 1
+            i = k + 1  # skip past the closing brace
+            continue
+        out.extend(run)
+        # copy the body verbatim up to the col-0 '}'
+        k = j + 1
+        while k < n and lines[k] != "}":
+            out.append(lines[k])
+            k += 1
+        if k < n:
+            out.append(lines[k])
+        i = k + 1
     try:
         with open(dst_path, "w") as f:
             f.write("\n".join(out))
