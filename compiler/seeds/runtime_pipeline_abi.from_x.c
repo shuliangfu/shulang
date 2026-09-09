@@ -16411,7 +16411,7 @@ int32_t glue_vector_type_lanes_esz_c(void *arena, int32_t type_ref, int32_t *out
  * Cap residual: top_level readers, common_sym, enc load/store/mov, hoist, let_init_reserve.
  */
 
-#define XLANG_ASM_MODLET_MAX 64
+#define XLANG_ASM_MODLET_MAX 256
 
 typedef struct {
   int32_t n;
@@ -17095,8 +17095,6 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
   for (tl = 0; tl < n; tl++) {
     int32_t name_len, init_ref, init_kind, k, is_const, idx;
     int32_t type_ref, tk, cell_sz, imm;
-    if (g_pipeline_asm_modlet_cold.n >= XLANG_ASM_MODLET_MAX)
-      break;
     is_const = pipeline_module_top_level_let_is_const(m, tl);
     /* Const TYPE_ARRAY + ARRAY_LIT also needs COMMON (non-main INDEX).
      * Gate after tk / init_kind. Other const still skip. */
@@ -17137,6 +17135,13 @@ int32_t pipeline_asm_modlet_prepare_and_emit_elf_c(void *m, void *a, void *elf_c
     } else {
       continue;
     }
+    /* PLATFORM: SHARED — twin of runtime_pipeline_abi.x prepare cap.
+     * Silent `break` at 64 dropped extras onto stack slots (9.6.0 class).
+     * G.7: complete this existing table; loud-fail when a registrable
+     * cell would exceed XLANG_ASM_MODLET_MAX. Skip-only leftover lets
+     * (const scalars / nameless / non-ARRAY) must not trip the cap. */
+    if (g_pipeline_asm_modlet_cold.n >= XLANG_ASM_MODLET_MAX)
+      return -1;
     idx = g_pipeline_asm_modlet_cold.n;
     g_pipeline_asm_modlet_cold.name_len[idx] = name_len;
     for (k = 0; k < name_len; k++)

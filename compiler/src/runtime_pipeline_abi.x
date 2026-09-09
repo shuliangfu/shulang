@@ -32398,15 +32398,19 @@ export function pipeline_asm_emit_as_elf_c(arena: *u8, elf_ctx: *u8, expr_ref: i
 //   pipeline_asm_modlet_seed_nonzero_inits_elf_c
 //   pipeline_asm_register_module_top_level_lets_c
 //   pipeline_asm_emit_module_top_level_mutable_lit_inits_elf_c
-// Table BSS layout ≡ C pipeline_asm_modlet_table_t (XLANG_ASM_MODLET_MAX=64):
+// Table BSS layout ≡ C pipeline_asm_modlet_table_t (XLANG_ASM_MODLET_MAX=256):
 //   n@0 (i32)
-//   name_len[64]@4 (256B)
-//   name[64][128]@260 (8192B)
-//   label_len[64]@8452 (256B)
-//   label[64][24]@8708 (1536B)
-//   init_imm[64]@10244 (256B)
-//   cell_size[64]@10500 (256B) — Stage 12.0.5: COMMON payload bytes (8 scalar; N array)
-//   total 10756B
+//   name_len[256]@4 (1024B)
+//   name[256][128]@1028 (32768B)
+//   label_len[256]@33796 (1024B)
+//   label[256][24]@34820 (6144B)
+//   init_imm[256]@40964 (1024B)
+//   cell_size[256]@41988 (1024B) — Stage 12.0.5: COMMON payload bytes (8 scalar; N array)
+//   total 43012B = 4 + 256*168
+// Cap was 64 (wave139). 9.6.0 made COMMON the unique home for every mutable
+// scalar, so a silent `break` at 64 dropped extras onto stack slots.
+// G.7: complete this existing table (no second growable table). 256 covers
+// product asm TUs (lexer/fmt/thin ≤57) with headroom; pabi mega stays host-cc.
 // Cap residual: top_level is_const/type_ref + common_sym + enc load/store/mov +
 //   hoist_target + let_init_stack_reserve + asm_ctx local faces + pipe module/arena
 //   num getters (LP64).
@@ -32415,40 +32419,86 @@ export function pipeline_asm_emit_as_elf_c(arena: *u8, elf_ctx: *u8, expr_ref: i
 //   MACOS|ARM64 PAGE21/PAGEOFF12 (wave405)
 // ---------------------------------------------------------------------------
 
-// wave139: modlet shared mutable cell table (max 64). Reset each mega emit.
+// wave139: modlet shared mutable cell table. Reset each mega emit.
 // PLATFORM: SHARED - layout matches host-cc pipeline_asm_modlet_table_t.
-// Stage 12.0.5: +cell_size[64] so TYPE_ARRAY module lets emit full COMMON (not stack).
-let g_pipeline_asm_modlet: u8[10756] = [];
+// Stage 12.0.5: +cell_size[N] so TYPE_ARRAY module lets emit full COMMON (not stack).
+// MAX 64→256 (modlet 64-cap knife): 4 + 256*168 = 43012.
+let g_pipeline_asm_modlet: u8[43012] = [];
 
+/**
+ * Fixed modlet table capacity (COMMON / .data cells per TU).
+ * @return i32 — XLANG_ASM_MODLET_MAX; index range 0 .. max-1
+ * PLATFORM: SHARED — single authority for offset bases and the prepare cap.
+ * G.7: complete the existing table; do not add a second growable table.
+ */
+function pipe_modlet_max(): i32 {
+  return 256;
+}
+
+/**
+ * Byte offset of n (registered cell count) in the modlet table.
+ * @return i32 — always 0
+ * PLATFORM: SHARED — LP64 table layout.
+ */
 function pipe_modlet_off_n(): i32 {
   return 0;
 }
 
+/**
+ * Byte offset of name_len[i] in the modlet table.
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
+ * @return i32 — byte offset within g_pipeline_asm_modlet
+ * PLATFORM: SHARED — LP64 table layout.
+ */
 function pipe_modlet_off_name_len(i: i32): i32 {
   return 4 + (i * 4);
 }
 
+/**
+ * Byte offset of name[i][0] in the modlet table (128B slot).
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
+ * @return i32 — byte offset within g_pipeline_asm_modlet
+ * PLATFORM: SHARED — LP64 table layout. Base = 4 + max*4.
+ */
 function pipe_modlet_off_name(i: i32): i32 {
-  return 260 + (i * 128);
+  return 4 + (pipe_modlet_max() * 4) + (i * 128);
 }
 
+/**
+ * Byte offset of label_len[i] in the modlet table.
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
+ * @return i32 — byte offset within g_pipeline_asm_modlet
+ * PLATFORM: SHARED — LP64 table layout. Base = name_base + max*128.
+ */
 function pipe_modlet_off_label_len(i: i32): i32 {
-  return 8452 + (i * 4);
+  return pipe_modlet_off_name(0) + (pipe_modlet_max() * 128) + (i * 4);
 }
 
+/**
+ * Byte offset of label[i][0] in the modlet table (24B slot).
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
+ * @return i32 — byte offset within g_pipeline_asm_modlet
+ * PLATFORM: SHARED — LP64 table layout. Base = label_len_base + max*4.
+ */
 function pipe_modlet_off_label(i: i32): i32 {
-  return 8708 + (i * 24);
+  return pipe_modlet_off_label_len(0) + (pipe_modlet_max() * 4) + (i * 24);
 }
 
+/**
+ * Byte offset of init_imm[i] in the modlet table.
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
+ * @return i32 — byte offset within g_pipeline_asm_modlet
+ * PLATFORM: SHARED — LP64 table layout. Base = label_base + max*24.
+ */
 function pipe_modlet_off_init_imm(i: i32): i32 {
-  return 10244 + (i * 4);
+  return pipe_modlet_off_label(0) + (pipe_modlet_max() * 24) + (i * 4);
 }
 
 /**
  * Byte offset of cell_size[i] in the modlet table (COMMON payload size).
- * @param i i32 — table index 0..63
+ * @param i i32 — table index 0 .. pipe_modlet_max()-1
  * @return i32 — byte offset within g_pipeline_asm_modlet
- * PLATFORM: SHARED — LP64 table layout Stage 12.0.5.
+ * PLATFORM: SHARED — LP64 table layout Stage 12.0.5. Base = init_imm_base + max*4.
  *
  * Encoding (Stage 12.0.5 / invoke_cc_list + library-TU .data):
  *   low 29 bits = payload bytes for SHN_COMMON or .data
@@ -32460,7 +32510,7 @@ function pipe_modlet_off_init_imm(i: i32): i32 {
  * Product max payload 8 MiB << bit29; mask shrink 30→29 is safe.
  */
 function pipe_modlet_off_cell_size(i: i32): i32 {
-  return 10500 + (i * 4);
+  return pipe_modlet_off_init_imm(0) + (pipe_modlet_max() * 4) + (i * 4);
 }
 
 /**
@@ -33172,9 +33222,6 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
   let nexprs: i32 = pipe_load_i32_le(a, pipe_arena_off_num_exprs());
   let tl: i32 = 0;
   while (tl < nlets) {
-    if (pipe_modlet_get_n() >= 64) {
-      break;
-    }
     let is_const: i32 = 0;
     unsafe {
       is_const = pipeline_module_top_level_let_is_const(m, tl);
@@ -33270,6 +33317,15 @@ export function pipeline_asm_modlet_prepare_and_emit_elf_c(m: *u8, a: *u8, elf_c
       // Mark array decay so payload==8 (u8[8]) is not treated as scalar load.
       cell_sz = cell_sz | pipe_modlet_cell_array_bit();
       imm = 0;
+    }
+    // PLATFORM: SHARED — table is a fixed BSS (pipe_modlet_max).
+    // Silent `break` at 64 used to drop extras: load/store then missed the
+    // cell and fell through to a stack slot (9.6.0 dual-home class).
+    // G.7: complete this existing table — loud-fail (return -1 → CG002)
+    // when a registrable cell would exceed the cap. Skip-only leftover
+    // lets (const scalars, nameless, non-ARRAY) must not trip the cap.
+    if (pipe_modlet_get_n() >= pipe_modlet_max()) {
+      return 0 - 1;
     }
     let idx: i32 = pipe_modlet_get_n();
     pipe_store_i32_le(&g_pipeline_asm_modlet[0], pipe_modlet_off_name_len(idx), name_len);
