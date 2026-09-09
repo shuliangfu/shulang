@@ -147,6 +147,7 @@ extern int32_t pipeline_codegen_dep_skip_asm_user_std_process(uint8_t *path);
 extern int32_t pipeline_codegen_dep_skip_asm_user_std_fmt(uint8_t *path);
 extern int32_t pipeline_codegen_dep_skip_asm_user_std_misc(uint8_t *path);
 extern int32_t pipeline_codegen_dep_skip_asm_user_core_lib(uint8_t *path);
+extern int32_t pipeline_asm_user_dep_is_in_tree_core(uint8_t *path);
 extern int32_t pipeline_asm_user_std_net_dep_path(uint8_t *path);
 extern int32_t pipeline_asm_user_deps_need_coemit(char **dep_paths, int32_t n);
 extern void pipeline_asm_seed_std_net_struct_layouts(struct ast_Module *m);
@@ -679,6 +680,11 @@ int32_t asm_asm_codegen_elf_o(void *module, void *arena, void *ctx, void *elf_ct
         if (pipeline_codegen_dep_skip_asm_user_std_misc(dep_path_buf) != 0)
           continue;
         if (pipeline_codegen_dep_skip_asm_user_core_lib(dep_path_buf) != 0)
+          continue;
+        /* PLATFORM: SHARED — mixed scratch core.m6 + in-tree core.slice:
+         * need_coemit is already 1; still skip hosted core/ so formal .o
+         * stays the single authority (no duplicate T with on-demand). */
+        if (pipeline_asm_user_dep_is_in_tree_core(dep_path_buf) != 0)
           continue;
       }
       driver_set_current_dep_path_for_codegen((const char *)dep_path_buf);

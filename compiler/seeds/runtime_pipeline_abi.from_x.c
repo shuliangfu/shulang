@@ -63018,6 +63018,39 @@ int32_t pipeline_codegen_dep_skip_asm_user_core_lib(uint8_t *path) {
   return 0;
 }
 
+/**
+ * In-tree core.* modules under repo core/ (formal .o / on-demand needles).
+ * Scratch dotted deps that only *look* like core.* (e.g. /tmp core.m6) are
+ * not listed: they must co-emit or ld leaves UN _core_*.
+ * Not the typeck skip set — pipeline_codegen_dep_skip_asm_user_core_lib stays
+ * the 4-name parse/typeck skip (expanding it would skip dep typeck and
+ * regress layout / parent-link).
+ * PLATFORM: SHARED — Darwin -dead_strip hides unused UN _core_* on the
+ * product path; scratch probes that CALL the dep still fail.
+ */
+int32_t pipeline_asm_user_dep_is_in_tree_core(uint8_t *path) {
+  static const char *const k[] = {
+      "core.assert", "core.builtin", "core.cmp", "core.debug", "core.fmt",
+      "core.iterator", "core.mem", "core.option", "core.result", "core.slice",
+      "core.str", "core.types", NULL};
+  int i;
+  size_t n;
+  size_t plen;
+  if (!path || !path[0])
+    return 0;
+  plen = 0;
+  while (plen < 64 && path[plen] != 0)
+    plen++;
+  for (i = 0; k[i]; i++) {
+    n = strlen(k[i]);
+    if (n > plen)
+      continue;
+    if (memcmp(path, k[i], n) == 0 && (n == plen || path[n] == '.' || path[n] == 0))
+      return 1;
+  }
+  return 0;
+}
+
 int32_t pipeline_asm_user_std_net_dep_path(uint8_t *path) {
   if (!path)
     return 0;
@@ -63032,7 +63065,11 @@ int32_t pipeline_asm_user_deps_need_coemit(char **dep_paths, int32_t n) {
     return 0;
   for (i = 0; i < n; i++) {
     uint8_t *p = (uint8_t *)(dep_paths[i] ? dep_paths[i] : "");
-    if (memcmp(p, "std.", 4) == 0 || memcmp(p, "core.", 5) == 0)
+    /* Hosted std.* still skip co-emit (prebuilt .o / on-demand). */
+    if (memcmp(p, "std.", 4) == 0)
+      continue;
+    /* Only in-tree core/ — scratch core.m6 etc. must co-emit (UN _core_*). */
+    if (pipeline_asm_user_dep_is_in_tree_core(p) != 0)
       continue;
     return 1;
   }
