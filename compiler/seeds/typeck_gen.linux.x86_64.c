@@ -15001,6 +15001,13 @@ int32_t typeck_x_ast_check_one_top_level_let(struct ast_Module * module, struct 
   (void)((init_ty = decl_ty));
  }) : 0);
     }
+    /* PLATFORM: SHARED — p3 family: module-level TYPE_FN ← Cap *u8 / TYPE_FN.
+     * G.7 typeck_fnptr_surface_compat (same as typeck_check_block_one_let). */
+    if ((!(ast_ref_is_null(init_ty)) && !(typeck_type_refs_equal(arena, decl_ty, init_ty)))) {
+      ((typeck_fnptr_surface_compat(module, arena, decl_ty, init_ty, init_ref, 0) != 0) ? ({   (void)(pipeline_expr_set_resolved_type_ref(arena, init_ref, decl_ty));
+  (void)((init_ty = decl_ty));
+ }) : 0);
+    }
     if ((!(ast_ref_is_null(init_ty)) && !(typeck_type_refs_equal(arena, decl_ty, init_ty)))) {
       (void)((eb = driver_typeck_diag_scratch_expect()));
       (void)((gb = driver_typeck_diag_scratch_found()));

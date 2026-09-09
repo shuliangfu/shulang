@@ -19985,6 +19985,11 @@ export extern function xlang_trait_check_impls_complete_c(module: *Module): i32;
  * T001. This is G.7 complete of the same check_expr + coerce + const-expr
  * whitelist (not a second checker).
  *
+ * After lit/array coerce and integer widen, a remaining TYPE_FN decl vs
+ * Cap *u8 (bare same-module fn name) or TYPE_FN↔TYPE_FN mismatch is
+ * accepted only via typeck_fnptr_surface_compat — same authority as
+ * typeck_check_block_one_let / assign. Arity/ret/opaque Cap stay T001.
+ *
  * @param module *Module — entry or library module after parse
  * @param arena *ASTArena — expr/type arena
  * @param ctx *PipelineDepCtx — current_func_index / current_block_ref
@@ -20045,6 +20050,21 @@ ctx: *PipelineDepCtx, tl: i32): i32 {
     init_ty = expr_type_ref(arena, init_ref);
     if (!ast.ref_is_null(init_ty) && !type_refs_equal(arena, decl_ty, init_ty)) {
       if (typeck_integer_widen_ok_refs(arena, decl_ty, init_ty)) {
+        pipeline_expr_set_resolved_type_ref(arena, init_ref, decl_ty);
+        init_ty = decl_ty;
+      }
+    }
+    /*
+     * p3 family: `let f: function(i32): i32 = inc` at module scope.
+     * Bare fn VAR is Cap *u8 (wave100); function-scope let/assign already
+     * accept via typeck_fnptr_surface_compat. The top-level equal-ref gate
+     * used to T001 "expected function, found *u8". Stamp decl when the
+     * existing surface gate says yes (allow_opaque=0 — true opaque Cap
+     * without recoverable same-module fn stays mismatch).
+     * G.7: do not invent a second fnptr checker. PLATFORM: SHARED.
+     */
+    if (!ast.ref_is_null(init_ty) && !type_refs_equal(arena, decl_ty, init_ty)) {
+      if (typeck_fnptr_surface_compat(module, arena, decl_ty, init_ty, init_ref, 0) != 0) {
         pipeline_expr_set_resolved_type_ref(arena, init_ref, decl_ty);
         init_ty = decl_ty;
       }
