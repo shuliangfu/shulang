@@ -241,10 +241,17 @@ extern int32_t pipeline_type_kind_ord_at(void *a, int32_t r);
 int32_t pipeline_type_kind_ord_at_u8_ptr_i32_reti32(void *a, int32_t r) {
   return pipeline_type_kind_ord_at(a, r);
 }
-/* weak: product may already define a real heap redirect local */
-XLANG_WEAK int32_t glue_try_std_heap_redirect_sym_local(void *name, int32_t nlen, void *out) {
-  (void)name;
-  (void)nlen;
-  (void)out;
-  return 0;
+/* X-ABI mangled face for the 4-param heap-redirect local (name, nlen, out,
+ * out_cap): the -E'd backend_call_dispatch.x emits signature-suffixed calls
+ * to it, and the strong plain-name body lives in backend_call_dispatch.o
+ * (seed + prefer lanes alike). Replaces the stale pre-cap 3-param weak stub
+ * (fossil of the old signature, satisfied nobody). Without this face the
+ * seed-phase1 / g05 pure-ld links fail on
+ * glue_try_std_heap_redirect_sym_local_u8_ptr_i32_u8_ptr_i32_reti32 unless
+ * the generated asm_full_link_stubs scan happens to cover the gap.
+ * PLATFORM: SHARED. */
+extern int32_t glue_try_std_heap_redirect_sym_local(void *name, int32_t nlen, void *out, int32_t out_cap);
+int32_t glue_try_std_heap_redirect_sym_local_u8_ptr_i32_u8_ptr_i32_reti32(
+    void *name, int32_t nlen, void *out, int32_t out_cap) {
+  return glue_try_std_heap_redirect_sym_local(name, nlen, out, out_cap);
 }
