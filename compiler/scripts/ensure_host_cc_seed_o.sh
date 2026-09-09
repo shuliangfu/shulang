@@ -1715,6 +1715,9 @@ ensure_labi_prefer_one() {
       l8c_ok=1
       log "labi L8b+L8c ← $l8b_x + $l8c_x (capacity split)"
     elif [ -f "$l8b_seed" ]; then
+      # PLATFORM: SHARED — L8c prefer of heavy.x often fails (fn#142 typeck).
+      # This seed then first-wins as the live L8b table. Counts/needles must
+      # stay twin of labi_ondemand_list.x (g15 24 vs 28 was seed-count drift).
       # shellcheck disable=SC2086
       if $CC $BASE_CFLAGS -I. -Iinclude -Isrc -c -o "$l8b_o" "$l8b_seed" 2>/dev/null; then
         l8b_ok=1

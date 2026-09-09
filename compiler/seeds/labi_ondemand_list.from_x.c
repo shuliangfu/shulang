@@ -204,8 +204,12 @@ int labi_od_simple_group_sym_count(int g) {
     return 6; /* core.assert */
   if (g == 14)
     return 9; /* std.fmt — +format_template cookbook sole UNDEF */
+  /* PLATFORM: SHARED — twin of labi_ondemand_list.x g==15. Needles i==24..27
+   * (stream_state_bytes ×3 + brotli_stream_init_decompress_) already live
+   * below; count 24 never walked them → Ubuntu run-compress UNDEF when L8c
+   * prefer fails and this seed is the first-wins L8b winner (L8b 24 vs 28). */
   if (g == 15)
-    return 24; /* std.compress — +stream/format/mode + 9.2.2 zlib/gzip unique + Linux *_c */
+    return 28; /* std.compress — +4 stream needles (24→28; i==24..27) */
   if (g == 16)
     return 4; /* std.io.driver */
   if (g == 17)
