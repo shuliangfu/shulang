@@ -4,7 +4,9 @@
  *
  * R2 full（2026-07-14）：公共业务符号 driver_run_compiler_parsed 由 full .x 提供；
  * FROM_X 下本文件仅前向声明 + slice marker（产品 rest 业务符号 H=0）。
- * Cap residual（driver_abi）：Parsed 字段/C 前端块/FILE+invoke_cc/work 槽。
+ * Cap residual（driver_abi）：Parsed 字段/FILE+invoke_cc/work 槽。
+ * Leftover C frontend generic-syntax lexer/parse + import-downgrade
+ * !XLANG_NO_C_FRONTEND blocks retired (this knife).
  * 冷启动/无 PREFER 时仍编译完整 C 体。
  *
  * Scope: driver_run_compiler_parsed（argv 已解析后的 asm/C/pipeline 编排）。
@@ -34,7 +36,7 @@
  * PLATFORM: SHARED — cold seed twin uses same face as product hybrid pure .x peers. */
 extern char *link_abi_getenv(const char *name);
 #include "runtime_proc_abi.h"
-#include "token.h"
+/* token.h / Lexer retired with leftover C frontend lexer_new/parse (this knife). */
 
 #ifndef XLANG_TMP_PREFIX
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -86,7 +88,6 @@ extern void cfg_apply_compile_target_from_triple(const char *triple, int len);
 extern void cfg_reset_compile_target(void);
 extern char *xlang_preprocess_with_path(const char *data, size_t len, const char *path, const char **defines, int n_defines, size_t *out_len);
 extern char *xlang_preprocess(const char *data, size_t len, const char **defines, int n_defines, size_t *out_len);
-extern char *xlang_preprocess_quiet(const char *data, size_t len, const char **defines, int n_defines, size_t *out_len);
 extern void pipeline_diag_emitted_reset(void);
 extern int pipeline_diag_emitted_get(void);
 extern void diag_set_file(const char *path, const char *src, size_t len);
@@ -109,9 +110,6 @@ extern void pipeline_set_dep_slots(void **arenas, void **modules);
 extern void codegen_set_dep_slots_for_x_pipeline(struct ASTModule **mods, const char **paths, int n);
 extern void codegen_set_preamble_has_core_option_result(int on);
 extern void pipeline_dep_ctx_heap_destroy(struct ast_PipelineDepCtx *ctx);
-extern int driver_source_has_generic_syntax(const uint8_t *path, int path_len);
-extern int driver_source_has_top_level_import(const char *src, size_t len);
-extern int driver_source_has_top_level_import_path(const char *path);
 extern int driver_run_asm_backend(const char *input_path, const char *out_path, const char **lib_roots_arr, int n_lib_roots,
                                   const char *target, int argc, char **argv);
 extern int driver_try_compile_via_shu_c_sibling(int argc, char **argv);
@@ -145,8 +143,6 @@ extern void codegen_or_preamble_skip_mask(unsigned mask);
 extern int write_io_net_abi_inline(uint8_t *cf);
 extern int write_fs_path_map_error_abi_inline(uint8_t *cf);
 extern void codegen_emit_include_pipeline_glue_c(uint8_t *out, const char *argv0);
-extern int content_has_generic_syntax(const char *content, size_t n);
-extern int content_has_compound_assign_syntax(const char *content, size_t n);
 extern const char *xlang_entry_lib_name_from_path(const char *path);
 extern void xlang_emit_pipeline_glue_include(void);
 
@@ -208,23 +204,15 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
      * Default path: X pipeline + asm; no out_path → asm text to stdout;
      * else .o / .s / exe via driver_run_asm_backend.
      */
-#if !defined(XLANG_NO_C_FRONTEND)
     /*
-     * xlang-c 路径：顶层 import 时 X asm parse 易 0 func，降级 C；xlang_asm（XLANG_NO_C_FRONTEND）须保留 asm + driver_run_asm_backend。
+     * Retired leftover !XLANG_NO_C_FRONTEND import-downgrade (this knife):
+     * top-level import used to force want_asm_backend=0 (xlang-c demote).
+     * Product xlang_asm keeps asm + driver_run_asm_backend; rt_run_compiler_parsed.x
+     * has no import demote. Re-adding that demote would resurrect a C frontend
+     * path that no longer exists.
+     * PLATFORM: SHARED — consume-site hygiene; product PREFER rest is FROM_X
+     * marker (H=0); this body compiles only on cold/no-PREFER.
      */
-    if (want_asm_backend) {
-        XlangRuntimeFileView imp_raw_view;
-        if (runtime_read_file_view(input_path, &imp_raw_view) == 0) {
-            size_t imp_src_len = 0;
-            pipeline_diag_emitted_reset();
-            char *imp_src = xlang_preprocess_quiet(imp_raw_view.data, imp_raw_view.length, NULL, 0, &imp_src_len);
-            runtime_release_file_view(&imp_raw_view);
-            if (imp_src && driver_source_has_top_level_import(imp_src, imp_src_len))
-                want_asm_backend = 0;
-            free(imp_src);
-        }
-    }
-#endif
     if (want_asm_backend)
         return driver_run_asm_backend(input_path, out_path, lib_roots_arr, n_lib_roots, target, argc, argv);
 #endif
@@ -251,394 +239,20 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
         return 1;
     diag_set_file(input_path, src, src_len);
     /*
-     * Retired leftover !XLANG_NO_C_FRONTEND consume sites:
-     * driver_check_only_c_typeck / driver_c_frontend_smoke. C frontend is
-     * gone; mega wrappers deleted (36bb731f1). Product check/smoke continues
-     * into the X pipeline below (rt_run_compiler_parsed.x has no C-frontend
-     * early return). Re-adding those calls would UNDEF, not recover a C
-     * frontend. Leftover generic-syntax lexer/parse block below is a
-     * different class (not this knife).
+     * Retired leftover !XLANG_NO_C_FRONTEND consume sites (a08d04d70):
+     * driver_check_only_c_typeck / driver_c_frontend_smoke.
+     *
+     * Retired leftover !XLANG_NO_C_FRONTEND generic-syntax lexer/parse
+     * block (this knife): content_has_generic_syntax || out_path used to
+     * call lexer_new/parse/typeck_module/codegen_module_to_c/invoke_cc.
+     * C frontend is gone. Product authority is rt_cp_step_try_c ->
+     * driver_parsed_try_c_after_pp (always -2) then parser_parse_into_buf
+     * / pipeline_typeck_entry_module. Dropping XLANG_NO_C_FRONTEND now
+     * continues the X pipeline below; it does not UNDEF lexer_new or
+     * resurrect a C frontend.
      * PLATFORM: SHARED — consume-site hygiene; product PREFER rest is
      * FROM_X marker (H=0); this body compiles only on cold/no-PREFER.
      */
-    /* 若预处理后源码含泛型语法，.x 流水线不解析泛型，改走 C 流水线（parse + typeck_module + codegen）以保证 id<i32>(42) 等正确单态化。
-     * `-backend c -o`（want_asm_backend=0）：单文件无泛型亦走 C 前端，与 xlang check 对齐（LANG-007 unsafe 等 S0 规则）。
-     * 无 import 时内联 C 路径，避免 run_compiler_c 重入导致崩溃；有 import 时仍调 run_compiler_c。 */
-#if !defined(XLANG_NO_C_FRONTEND)
-    if (content_has_generic_syntax(src, src_len) || out_path) {
-        {
-            Lexer *lex = lexer_new(src);
-            ASTModule *c_mod = NULL;
-            int pr = parse(lex, &c_mod);
-            lexer_free(lex);
-            if (pr != 0 || !c_mod) {
-                if (c_mod) ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            /*
-             * 有 import 时默认回退 .x pipeline；core.* 仅依赖时内联 C 前端（与 run_compiler_c -o 一致），
-             * 避免 pipeline codegen 产出 out_len=0。std/用户 dep 仍走 pipeline。
-             */
-            int c_inline_o = 0;
-            if (c_mod->num_imports > 0) {
-                if (out_path && driver_c_mod_imports_are_core_only(c_mod))
-                    c_inline_o = 1;
-                else {
-                    ast_module_free(c_mod);
-                    /* 不 free(src)，fall through 到 pipeline */
-                }
-            } else {
-                c_inline_o = 1;
-            }
-            if (c_inline_o) {
-            ASTModule *dep_mods[32];
-            ASTModule *all_dep_mods[MAX_ALL_DEPS];
-            char *all_dep_paths[MAX_ALL_DEPS];
-            int ndep = 0, n_all = 0;
-            char c_entry_dir[512];
-            xlang_get_entry_dir(input_path, c_entry_dir, sizeof(c_entry_dir));
-            if (c_mod->num_imports > 0 &&
-                xlang_c_resolve_and_load_imports(c_mod, lib_roots_arr, n_lib_roots, c_entry_dir,
-                    ndefines > 0 ? defines : NULL, ndefines, 0, dep_mods, &ndep, all_dep_mods, all_dep_paths,
-                    NULL, &n_all, MAX_ALL_DEPS) != 0) {
-                ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            if (!c_mod->main_func || !c_mod->main_func->body) {
-                if (driver_check_only_get() && c_mod->num_funcs > 0) {
-                    if (typeck_module(c_mod, ndep > 0 ? dep_mods : NULL, ndep, n_all > 0 ? all_dep_mods : NULL, n_all) != 0) {
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return 1;
-                    }
-                    while (n_all--) {
-                        free(all_dep_paths[n_all]);
-                        ast_module_free(all_dep_mods[n_all]);
-                    }
-                    ast_module_free(c_mod);
-                    free(src);
-                    driver_print_check_ok(input_path);
-                    return 0;
-                }
-                /* LANG-007 v2：库模块 -backend c -o *.o → codegen_library_module_to_c + cc -c。 */
-                if (out_path && xlang_output_is_elf_o(out_path) && c_mod->num_funcs > 0) {
-                    if (typeck_module(c_mod, ndep > 0 ? dep_mods : NULL, ndep,
-                            n_all > 0 ? all_dep_mods : NULL, n_all) != 0) {
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return 1;
-                    }
-                    codegen_set_preamble_has_core_option_result(0);
-                    char tmp_lib[128]; snprintf(tmp_lib, sizeof(tmp_lib), "%ssXXXXXX", XLANG_TMP_PREFIX);
-                    int fd_lib = mkstemp(tmp_lib);
-                    if (fd_lib < 0) {
-                        runtime_diag_errno_path(input_path, "build error", "mkstemp", tmp_lib);
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return 1;
-                    }
-                    FILE *cf_lib = fdopen(fd_lib, "w");
-                    if (!cf_lib) {
-                        runtime_diag_errno_path(input_path, "build error", "fdopen", tmp_lib);
-                        close(fd_lib);
-                        unlink(tmp_lib);
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return 1;
-                    }
-                    fprintf(cf_lib, "/* generated (library module) */\n");
-                    fprintf(cf_lib, "#include <stdint.h>\n");
-                    fprintf(cf_lib, "#include <stddef.h>\n");
-                    fprintf(cf_lib, "#include <stdlib.h>\n");
-                    fprintf(cf_lib, "#include <stdio.h>\n");
-                    fprintf(cf_lib, "#include <string.h>\n");
-                    fprintf(cf_lib, "#include <math.h>\n");
-                    codegen_emit_fmt_json_helpers_once(cf_lib);
-                    codegen_emit_builtin_inline_decls(cf_lib);
-                    {
-                        const char *lib_name = lib_name_override ? lib_name_override : xlang_entry_lib_name_from_path(input_path);
-                        if (codegen_library_module_to_c(c_mod, lib_name, ndep > 0 ? dep_mods : NULL,
-                                ndep > 0 ? (const char **)c_mod->import_paths : NULL, ndep,
-                                cf_lib, NULL, NULL, NULL, NULL, NULL, NULL, 0, input_path) != 0) {
-                            fclose(cf_lib);
-                            unlink(tmp_lib);
-                            while (n_all--) {
-                                free(all_dep_paths[n_all]);
-                                ast_module_free(all_dep_mods[n_all]);
-                            }
-                            ast_module_free(c_mod);
-                            free(src);
-                            return 1;
-                        }
-                    }
-                    fclose(cf_lib);
-                    char tmp_lib_c[256];
-                    snprintf(tmp_lib_c, sizeof(tmp_lib_c), "%s.c", tmp_lib);
-                    if (rename(tmp_lib, tmp_lib_c) != 0) {
-                        runtime_diag_errno_path_pair(input_path, "build error", "rename", tmp_lib, tmp_lib_c);
-                        unlink(tmp_lib);
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return 1;
-                    }
-                    {
-                        #ifdef _WIN32
-        runtime_diag("build error", "fork not supported on Windows", input_path); return -1;
-#else
-        pid_t cpid = fork();
-                        int cc_ok = 0;
-                        if (cpid < 0) {
-                            runtime_diag_errno_path(input_path, "build error", "fork (cc -c)", out_path);
-                            cc_ok = -1;
-                        } else if (cpid == 0) {
-                            execlp("cc", "cc", "-std=gnu11", "-Wall", "-Wextra", "-c", "-o", (char *)out_path,
-                                tmp_lib_c, (char *)NULL);
-                            runtime_diag_errno_path(input_path, "build error", "execlp(cc -c)", tmp_lib_c);
-                            _exit(127);
-                        } else {
-                            int status = 0;
-                            #endif
-                        if (xlang_waitpid_retry(cpid, &status) != 0 ||
-                                !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                                diag_report_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001,
-                                            "cc -c failed for library module", NULL);
-                                cc_ok = -1;
-                            }
-                        }
-                        if (cc_ok != 0)
-                            diag_reportf_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001, NULL,
-                                         "cc failed, keeping generated C: %s", tmp_lib_c);
-                        else if (!link_abi_getenv("XLANG_KEEP_C"))
-                            unlink(tmp_lib_c);
-                        while (n_all--) {
-                            free(all_dep_paths[n_all]);
-                            ast_module_free(all_dep_mods[n_all]);
-                        }
-                        ast_module_free(c_mod);
-                        free(src);
-                        return cc_ok == 0 ? 0 : 1;
-                    }
-                }
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-            diag_report_with_code(NULL, 0, 0, "codegen error", XLANG_DIAG_CODE_CODEGEN_CG001,
-                                  "no main function (cannot emit executable)", NULL);
-                return 1;
-            }
-            if (typeck_module(c_mod, ndep > 0 ? dep_mods : NULL, ndep, n_all > 0 ? all_dep_mods : NULL, n_all) != 0) {
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            if (driver_check_only_get()) {
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                driver_print_check_ok(input_path);
-                return 0;
-            }
-            codegen_set_preamble_has_core_option_result(0);
-            char tmp[128]; snprintf(tmp, sizeof(tmp), "%ssXXXXXX", XLANG_TMP_PREFIX);
-            int fd = mkstemp(tmp);
-            if (fd < 0) {
-                runtime_diag_errno_path(input_path, "build error", "mkstemp", tmp);
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            FILE *cf = fdopen(fd, "w");
-            if (!cf) {
-                runtime_diag_errno_path(input_path, "build error", "fdopen", tmp);
-                close(fd);
-                unlink(tmp);
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            {
-                char emitted_type_buf[128][CODEGEN_EMITTED_TYPE_NAME_MAX];
-                int n_emitted = 0;
-                const int max_emitted = (int)(sizeof(emitted_type_buf) / sizeof(emitted_type_buf[0]));
-                if (n_all > 0) {
-                    fprintf(cf, "/* generated (single-file with core deps) */\n");
-                    fprintf(cf, "#include <stdint.h>\n");
-                    fprintf(cf, "#include <stddef.h>\n");
-                    fprintf(cf, "#include <stdlib.h>\n");
-                    fprintf(cf, "#include <stdio.h>\n");
-                    fprintf(cf, "#include <string.h>\n");
-                    codegen_emit_builtin_inline_decls(cf);
-                    for (int di = 0; di < n_all; di++) {
-                        ASTModule *lib_deps[32];
-                        const char *lib_dep_paths[32];
-                        int n_lib = 0;
-                        for (int dj = 0; dj < all_dep_mods[di]->num_imports && n_lib < 32; dj++) {
-                            int idx = xlang_find_loaded_import_index(all_dep_mods[di]->import_paths[dj], all_dep_paths, n_all);
-                            if (idx >= 0) {
-                                lib_deps[n_lib] = all_dep_mods[idx];
-                                lib_dep_paths[n_lib] = all_dep_paths[idx];
-                                n_lib++;
-                            }
-                        }
-                        if (codegen_library_module_to_c(all_dep_mods[di], all_dep_paths[di], lib_deps, lib_dep_paths, n_lib,
-                                cf, NULL, NULL, NULL, NULL, emitted_type_buf, &n_emitted, max_emitted, NULL) != 0) {
-                            fclose(cf);
-                            unlink(tmp);
-                            while (n_all--) {
-                                free(all_dep_paths[n_all]);
-                                ast_module_free(all_dep_mods[n_all]);
-                            }
-                            ast_module_free(c_mod);
-                            free(src);
-                            return 1;
-                        }
-                    }
-                }
-                if (codegen_module_to_c(c_mod, cf, ndep > 0 ? dep_mods : NULL, ndep > 0 ? (const char **)c_mod->import_paths : NULL,
-                        ndep, NULL, NULL, NULL, NULL, n_all > 0 ? emitted_type_buf : NULL, n_all > 0 ? &n_emitted : NULL,
-                        n_all > 0 ? max_emitted : 0) != 0) {
-                    fclose(cf);
-                    unlink(tmp);
-                    while (n_all--) {
-                        free(all_dep_paths[n_all]);
-                        ast_module_free(all_dep_mods[n_all]);
-                    }
-                    ast_module_free(c_mod);
-                    free(src);
-                    return 1;
-                }
-            }
-            fclose(cf);
-            char tmp_c[256];
-            snprintf(tmp_c, sizeof(tmp_c), "%s.c", tmp);
-            if (rename(tmp, tmp_c) != 0) {
-                runtime_diag_errno_path_pair(input_path, "build error", "rename", tmp, tmp_c);
-                unlink(tmp);
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                return 1;
-            }
-            {
-                const char *c_paths[1] = { tmp_c };
-                const char *io_o = xlang_std_io_o_path(argv[0]); /* F-03：纯 .x，无 io.o */
-                const char *fs_o = NULL; /* F-06 v1：纯 .x，invoke_cc 扫描生成 C 按需 -lc */
-                const char *process_o = xlang_rel_o_path_from_argv0(argv[0], "std/process/process.o");
-                const char *string_o = xlang_rel_o_path_from_argv0(argv[0], "std/string/string.o");
-                const char *heap_o = NULL; /* F-06 v1：纯 .x，invoke_cc 按需扫描 std 各 .o 引用 std.heap API 链入 */
-                const char *path_o = xlang_rel_o_path_from_argv0(argv[0], "std/path/path.o");
-                const char *runtime_o = xlang_rel_o_path_from_argv0(argv[0], "std/runtime/runtime.o");
-                const char *runtime_panic_o = xlang_runtime_panic_o_path(argv[0]);
-                const char *net_o = xlang_rel_o_path_from_argv0(argv[0], "std/net/net.o");
-                const char *thread_o = xlang_rel_o_path_from_argv0(argv[0], "std/thread/thread.o");
-                const char *time_o = xlang_rel_o_path_from_argv0(argv[0], "std/time/time.o");
-                const char *random_o = xlang_rel_o_path_from_argv0(argv[0], "std/random/random.o");
-                const char *env_o = xlang_rel_o_path_from_argv0(argv[0], "std/env/env.o");
-                const char *sync_o = xlang_rel_o_path_from_argv0(argv[0], "std/sync/sync.o");
-                const char *encoding_o = xlang_rel_o_path_from_argv0(argv[0], "std/encoding/encoding.o");
-                const char *base64_o = xlang_rel_o_path_from_argv0(argv[0], "std/base64/base64.o");
-                const char *crypto_o = xlang_rel_o_path_from_argv0(argv[0], "std/crypto/crypto.o");
-                const char *log_o = xlang_rel_o_path_from_argv0(argv[0], "std/log/log.o");
-                const char *atomic_o = xlang_rel_o_path_from_argv0(argv[0], "std/atomic/atomic.o");
-                const char *channel_o = xlang_rel_o_path_from_argv0(argv[0], "std/channel/channel.o");
-                const char *backtrace_o = xlang_rel_o_path_from_argv0(argv[0], "std/backtrace/backtrace.o");
-                const char *hash_o = xlang_rel_o_path_from_argv0(argv[0], "std/hash/hash.o");
-                const char *math_o = xlang_rel_o_path_from_argv0(argv[0], "std/math/math.o");
-                const char *sort_o = xlang_rel_o_path_from_argv0(argv[0], "std/sort/sort.o");
-                const char *ffi_o = xlang_rel_o_path_from_argv0(argv[0], "std/ffi/ffi.o");
-                const char *db_o = xlang_rel_o_path_from_argv0(argv[0], "std/db/sqlite/sqlite.o");
-                const char *elf_o = xlang_rel_o_path_from_argv0(argv[0], "std/elf/elf.o");
-                const char *json_o = xlang_rel_o_path_from_argv0(argv[0], "std/json/json.o");
-                const char *csv_o = xlang_rel_o_path_from_argv0(argv[0], "std/csv/csv.o");
-                const char *regex_o = xlang_rel_o_path_from_argv0(argv[0], "std/regex/regex.o");
-                const char *compress_o = NULL; /* F-06 v1 / F-04 v7：无 compress.o，user .o / 生成 C 按需压缩库 */
-                const char *unicode_o = xlang_rel_o_path_from_argv0(argv[0], "std/unicode/unicode.o");
-                const char *dynlib_o = xlang_rel_o_path_from_argv0(argv[0], "std/dynlib/dynlib.o");
-                const char *http_o = xlang_rel_o_path_from_argv0(argv[0], "std/http/http.o");
-                const char *tar_o = xlang_rel_o_path_from_argv0(argv[0], "std/tar/tar.o");
-                const char *simd_o = xlang_rel_o_path_from_argv0(argv[0], "std/simd/simd.o");
-                const char *context_o = xlang_rel_o_path_from_argv0(argv[0], "std/context/context.o");
-                const char *datetime_o = xlang_rel_o_path_from_argv0(argv[0], "std/datetime/datetime.o");
-                const char *uuid_o = xlang_rel_o_path_from_argv0(argv[0], "std/uuid/uuid.o");
-                const char *url_o = xlang_rel_o_path_from_argv0(argv[0], "std/url/url.o");
-                const char *cli_o = xlang_rel_o_path_from_argv0(argv[0], "std/cli/cli.o");
-                const char *security_o = xlang_rel_o_path_from_argv0(argv[0], "std/security/security.o");
-                const char *config_o = xlang_rel_o_path_from_argv0(argv[0], "std/config/config.o");
-                const char *cache_o = xlang_rel_o_path_from_argv0(argv[0], "std/cache/cache.o");
-                const char *trace_o = xlang_rel_o_path_from_argv0(argv[0], "std/trace/trace.o");
-                const char *task_o = xlang_rel_o_path_from_argv0(argv[0], "std/task/task.o");
-                const char *schema_o = xlang_rel_o_path_from_argv0(argv[0], "std/schema/schema.o");
-                const char *test_o = xlang_rel_o_path_from_argv0(argv[0], "std/test/test.o");
-                /* Single authority (G.3/G.4): push user .o args from argv to cc link line. */
-                xlang_invoke_cc_set_user_o_files_from_argv(argc, argv);
-                int cc_ret = xlang_invoke_cc(c_paths, 1, out_path, NULL, opt_level, use_lto, io_o, fs_o, process_o, string_o, heap_o, path_o, runtime_o, runtime_panic_o, net_o, thread_o, time_o, random_o, env_o, sync_o, encoding_o, base64_o, crypto_o, log_o, atomic_o, channel_o, backtrace_o, hash_o, math_o, sort_o, ffi_o, db_o, elf_o, json_o, csv_o, regex_o, compress_o, unicode_o, dynlib_o, http_o, tar_o, simd_o, context_o, datetime_o, uuid_o, url_o, cli_o, security_o, config_o, cache_o, trace_o, task_o, schema_o, test_o, xlang_repo_root_from_argv0(argv[0]), NULL);
-                xlang_invoke_cc_clear_user_o_files();
-                if (cc_ret != 0) {
-                    driver_unlink_failed_output(out_path);
-                    diag_reportf_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001, NULL,
-                                 "cc failed, keeping generated C: %s", tmp_c);
-                } else if (!link_abi_getenv("XLANG_KEEP_C"))
-                    unlink(tmp_c);
-                while (n_all--) {
-                    free(all_dep_paths[n_all]);
-                    ast_module_free(all_dep_mods[n_all]);
-                }
-                ast_module_free(c_mod);
-                free(src);
-                return cc_ret == 0 ? 0 : 1;
-            }
-            }
-        }
-    }
-#else  /* XLANG_NO_C_FRONTEND */
-    /*
-     * G-06 seed 链仅 X 前端；泛型/trait 由 typeck.x 单态化。
-     * 勿在此拒掉（否则 -E asm.x / build_seed_asm_host 无法冷启动 partial）。
-     */
-#endif /* !XLANG_NO_C_FRONTEND */
     if (link_abi_getenv("XLANG_DUMP_PREP")) {
         if (xlang_write_path_bytes("/tmp/xlang_prep_entry.bin", src, src_len) == 0) {
             diag_reportf(input_path, 0, 0, "note", NULL,

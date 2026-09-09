@@ -3588,8 +3588,11 @@ int32_t driver_parsed_try_c_after_pp(uint8_t *input_path, uint8_t *src, size_t s
                                      int32_t argc, uint8_t *argv, uint8_t *opt_level,
                                      int32_t use_lto, int32_t ndefines, uint8_t *defines) {
     /*
-     * 产品 runtime_driver_no_c 为 XLANG_NO_C_FRONTEND：固定继续 .x pipeline。
-     * 冷启动全 C 体（seeds/rt_run_compiler_parsed.from_x.c 无 FROM_X）仍含完整 C 分支。
+     * PLATFORM: SHARED — product XLANG_NO_C_FRONTEND: always continue .x pipeline
+     * (return -2). Leftover generic-syntax lexer/parse / import-downgrade in
+     * rt_run_compiler_parsed.from_x.c retired (this knife); cold seed no longer
+     * hosts a C frontend branch either. Twin of driver_parsed_try_c_after_pp
+     * in runtime_driver_abi_thin.x.
      */
     (void)input_path;
     (void)src;

@@ -509,7 +509,11 @@ MODULES=(
   #    9.7.6 residual 3 retired mega c_frontend_smoke / check_only_c_typeck →
   #    pipeline_typeck_entry_module authority;
   #    9.7.6 residual 4 retired rt_run_* leftover !XLANG_NO_C_FRONTEND
-  #    consume sites → driver_asm_try_c_* + pipeline_typeck_entry_module);
+  #    consume sites → driver_asm_try_c_* + pipeline_typeck_entry_module;
+  #    9.7.6 residual 5 retired rt_run_compiler_parsed leftover generic
+  #    lexer/parse + import-downgrade !XLANG_NO_C_FRONTEND blocks →
+  #    rt_cp_step_try_c / driver_parsed_try_c_after_pp always -2;
+  #    T still 101, mega unchanged);
   #   rest 含 86 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
   #   prove 锁 mixed surface IDENTICAL (101 nm T · no doc_anchor)
   "runtime|src/runtime.x|seeds/runtime_surface.from_x.c||"

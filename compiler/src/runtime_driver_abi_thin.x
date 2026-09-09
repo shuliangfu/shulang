@@ -4287,7 +4287,8 @@ export function driver_parsed_use_lto(p: *u8): i32 {
  * @param defines *u8 — opaque defines table (unused)
  * @return i32 — -2 continue .x pipeline; >=0 would be terminal rc
  * Product XLANG_NO_C_FRONTEND always returns -2 (no C frontend body in pure).
- * Cold full-C seeds may still host a real branch; product hybrid keeps stub.
+ * Leftover generic-syntax lexer/parse / import-downgrade in the cold
+ * rt_run_compiler_parsed seed retired; both PREFER and cold continue .x.
  * Wave32 pure. PLATFORM: SHARED — product path; permanent NO_C contract.
  */
 #[no_mangle]
