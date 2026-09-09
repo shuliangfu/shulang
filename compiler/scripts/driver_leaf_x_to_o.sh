@@ -737,10 +737,25 @@ driver_leaf_ensure() {
   # wave828: FORCE-thin mtime — shell owns catalog source freshness (G.7).
   # Makefile always invokes via FORCE; skip recompile when OUT is newer than the
   # catalog .x source. FORCE=1 forces rebuild (tests / explicit). PLATFORM: SHARED.
+  # 7.4.4 配套基建 (2026-09-10): the B4 leaves (driver_x / preprocess_x /
+  # pipeline_x / lsp_x) also have a pin-derived gen twin (driver_gen.c ←
+  # seeds/<stem>.linux.x86_64.c) that feeds the cold path and the product
+  # link's expectations. A pin-only edit refreshed the gen but left the .o
+  # "up-to-date" w.r.t. the untouched .x (2026-09-10 driver_x trap: parse
+  # guard shipped without its first layer until a manual try-heat FORCE).
+  # The gen.c (worktree, when present) is therefore a first-class staleness
+  # input alongside the .x source. PLATFORM: SHARED.
   if [ "${FORCE:-0}" != "1" ] && [ -f "$OUT_O" ]; then
     _dl_stale=0
     if [ -f "$_src" ] && [ "$_src" -nt "$OUT_O" ]; then
       _dl_stale=1
+    fi
+    if [ "$_dl_stale" = "0" ] && [ -n "$_seed" ] && [ "$_seed" != "-" ]; then
+      # gen twin lives at the compiler root (driver_gen.c ← seeds/driver_gen.linux.x86_64.c)
+      _dl_gen="$(basename "${_seed%.linux.x86_64.c}").c"
+      if [ -f "$_dl_gen" ] && [ "$_dl_gen" -nt "$OUT_O" ]; then
+        _dl_stale=1
+      fi
     fi
     if [ "$_dl_stale" = "0" ]; then
       echo "driver_leaf_x_to_o: skip up-to-date $OUT_O (driver_leaf/$_key)" >&2

@@ -487,6 +487,23 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
       RUNTIME_DRIVER_NO_C_CFLAGS="$RUNTIME_DRIVER_NO_C_CFLAGS" \
       bash scripts/ensure_host_cc_seed_o.sh try-rt-prefer src/runtime_driver_no_c.o \
       || echo "g05_ensure: try-rt-prefer failed (non-fatal if unused)" >&2
+    # 7.4.4 配套基建 (2026-09-10): G05_OBJS also links the five STANDALONE rt
+    # seed slices (rt_arena_buf/rt_emit_state/rt_preamble/rt_stack/rt_parse_diag
+    # via _RT_SEED_SLICE_OBJS) but nothing in the g05 chain refreshed them —
+    # only the asm-strict lane's ensure_rt_seed_slice_objs did. A stale slice
+    # survived g05 green and broke the link later (rt_emit_state trap: new seed
+    # functions missing until a manual rm+try-heat). Delegate to the existing
+    # rt-slice family authority (seed -nt .o → cc -c). PLATFORM: SHARED.
+    echo "g05_ensure: rt-slice standalone refresh (G05_OBJS members)"
+    bash scripts/ensure_host_cc_seed_o.sh rt-slice \
+      || echo "g05_ensure: rt-slice refresh failed (non-fatal if unused)" >&2
+    # Same class: driver_x.o compiles from driver_gen.c (gen-x family), but a
+    # driver_gen.c regen above never re-triggered the .o in the warm g05 path
+    # (2026-09-10 trap: pin gained a helper, gen refreshed, .o stayed old).
+    # try-heat dispatches the gen-x ladder (driver_gen.c → driver_x.o).
+    echo "g05_ensure: driver_x.o gen-x refresh (driver_gen.c staleness)"
+    bash scripts/ensure_host_cc_seed_o.sh try-heat driver_x.o \
+      || echo "g05_ensure: driver_x.o refresh failed (non-fatal if unused)" >&2
   else
     echo "g05_ensure: missing ensure_host_cc_seed_o.sh; rt prefer residual" >&2
   fi
