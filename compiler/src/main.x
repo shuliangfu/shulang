@@ -162,6 +162,9 @@ export extern function driver_argv_ensure_run_o(argc: i32, argv: *u8, out_argc: 
  * Fetching argv[i+1] clobbers arg_buf — call only after the flag matched.
  * PLATFORM: SHARED. */
 export extern function driver_compile_argv_next_is_value_c(argc: i32, argv: *u8, i: i32, arg_buf: *u8, arg_cap: i32): i32;
+/* Opt-in -lib-name slot for the X-pipeline emit lane (always-seed authority
+ * in seeds/rt_emit_state.from_x.c; bare default when unset). PLATFORM: SHARED. */
+export extern "C" function xlang_driver_x_emit_set_lib_name(buf: *u8, len: i32): void;
 /* See implementation. */
 export extern function driver_build_build_x(): i32;
 /* See implementation. */
@@ -240,6 +243,30 @@ export function eq_minus_L(buf: *u8, len: i32): i32 {
     return 0;
   }
   if (buf[0] == 45 && buf[1] == 76) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * Exported function `eq_minus_lib_name`.
+ * Exact-match "-lib-name" (len 9). Opt-in lib-name flag for the X-pipeline
+ * -E/-o emit lane: the parse loops store its value via
+ * xlang_driver_x_emit_set_lib_name; driver_run_x_emit_c (rt_run_x_emit.x —
+ * the hot -x -E lane per main_entry dispatch) seeds the codegen ctx entry
+ * prefix from it. Absent/empty = bare emission (default); "-lib-name \"\""
+ * stays a tolerated no-op for the vehicle LIB_NAME_SUPPORTED probe.
+ * @param buf *u8 — argv token bytes
+ * @param len i32 — token length
+ * @return i32 — 1 on exact match, 0 otherwise
+ * PLATFORM: SHARED.
+ */
+export function eq_minus_lib_name(buf: *u8, len: i32): i32 {
+  if (len != 9) {
+    return 0;
+  }
+  if (buf[0] == 45 && buf[1] == 108 && buf[2] == 105 && buf[3] == 98 && buf[4] == 45
+      && buf[5] == 110 && buf[6] == 97 && buf[7] == 109 && buf[8] == 101) {
     return 1;
   }
   return 0;
@@ -523,6 +550,20 @@ export function driver_argv_parse_x_path(argc: i32, argv: *u8, state: *DriverXEm
         }
         continue;
       }
+      if (eq_minus_lib_name(arg_buf, len) != 0) {
+        /* "-lib-name <v>": store the opt-in emit prefix (empty/flag-shaped
+         * next = tolerated no-op, matching the vehicle probe semantics). */
+        if (i + 1 < argc && driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {
+          let nl: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+          if (nl > 0) {
+            unsafe { xlang_driver_x_emit_set_lib_name(&arg_buf[0], nl); }
+          }
+          i = i + 2;
+        } else {
+          i = i + 1;
+        }
+        continue;
+      }
       if (eq_minus_x(arg_buf, len) != 0) {
         i = i + 1;
         continue;
@@ -626,10 +667,39 @@ export function driver_argv_parse_x(argc: i32, argv: *u8, state: *DriverXEmitSta
         i = i + 1;
         continue;
       }
+      if (eq_minus_lib_name(arg_buf, len) != 0) {
+        /* "-lib-name <v>": same opt-in emit-prefix slot as parse_x_path. */
+        if (i + 1 < argc && driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {
+          let nl2: i32 = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+          if (nl2 > 0) {
+            unsafe { xlang_driver_x_emit_set_lib_name(&arg_buf[0], nl2); }
+          }
+          i = i + 2;
+        } else {
+          i = i + 1;
+        }
+        continue;
+      }
       if (eq_minus_E(arg_buf, len) != 0) {
         let pi: i32 = i + 1;
         while (pi < argc) {
           let plen_temp: i32 = driver_get_argv_i(argc, argv, pi, arg_buf, 512);
+          if (plen_temp > 0 && eq_minus_lib_name(arg_buf, plen_temp) != 0 && pi + 1 < argc) {
+            /* 7.4.4 v3: -lib-name inside the -E scan — without this the
+             * subloop grabs "-lib-name" itself as the emit path and the
+             * outer-loop branch is unreachable (the -E branch returns 1
+             * immediately). Store the opt-in prefix, consume the pair. */
+            if (driver_compile_argv_next_is_value_c(argc, argv, pi, arg_buf, 512) != 0) {
+              let nl3: i32 = driver_get_argv_i(argc, argv, pi + 1, arg_buf, 512);
+              if (nl3 > 0) {
+                unsafe { xlang_driver_x_emit_set_lib_name(&arg_buf[0], nl3); }
+              }
+              pi = pi + 2;
+            } else {
+              pi = pi + 1;
+            }
+            continue;
+          }
           if (plen_temp > 0 && eq_minus_L(arg_buf, plen_temp) != 0 && pi + 1 < argc) {
             /* Dangling guard inside the -E scan: flag-shaped next → skip the
              * "-L" standalone instead of eating the next argv slot. */

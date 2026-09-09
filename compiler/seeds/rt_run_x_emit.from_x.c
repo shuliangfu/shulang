@@ -306,6 +306,15 @@ int driver_run_x_emit_c(void) {
             return 1;
         }
         xlang_pipeline_fill_ctx_path_buffers(pctx_e, entry_dir_buf, lib_roots_arr, n_lib_roots);
+        /* 7.4.4 v3: opt-in -lib-name entry prefix (slot in rt_emit_state). */
+        {
+            extern int32_t xlang_driver_x_emit_lib_name_into(void *out, int32_t cap);
+            extern void xlang_pipeline_pctx_set_entry_lib_prefix(void *ctx, const void *name, int32_t name_len);
+            char ln_buf[64];
+            int32_t ln_len = xlang_driver_x_emit_lib_name_into(ln_buf, (int32_t)sizeof ln_buf);
+            if (ln_len > 0)
+                xlang_pipeline_pctx_set_entry_lib_prefix(pctx_e, ln_buf, ln_len);
+        }
         if (asm_direct_import_only)
             xlang_pipeline_pctx_seed_dep_import_paths_only(pctx_e, dep_paths, n_deps);
         else

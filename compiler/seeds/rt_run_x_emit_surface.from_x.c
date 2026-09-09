@@ -105,6 +105,8 @@ extern int32_t driver_x_emit_try_extern_via_cparser(uint8_t * input_path);
 extern void pipeline_dep_ctx_heap_destroy(uint8_t * ctx);
 extern int32_t xlang_pipeline_run_x_pipeline_large_stack(uint8_t * module, uint8_t * arena, uint8_t * src, size_t src_len, uint8_t * out_buf, uint8_t * pctx);
 extern void xlang_pipeline_fill_ctx_path_buffers(uint8_t * ctx, uint8_t * entry_dir, uint8_t * lib_roots, int32_t n_lib);
+extern int32_t xlang_driver_x_emit_lib_name_into(uint8_t * out, int32_t cap);
+extern void xlang_pipeline_pctx_set_entry_lib_prefix(uint8_t * ctx, uint8_t * name, int32_t name_len);
 extern void xlang_pipeline_pctx_seed_dep_import_paths_only(uint8_t * ctx, uint8_t * import_paths, int32_t n);
 extern void xlang_pipeline_pctx_seed_dep_slots(uint8_t * ctx, uint8_t * dep_mods, uint8_t * dep_ar, uint8_t * dep_paths, int32_t n);
 extern void xlang_pipeline_one_ctx_for_dep_prerun(uint8_t * ctx, int32_t j, uint8_t * dep_mods, uint8_t * dep_ar, uint8_t * dep_paths, int32_t n, uint8_t * dep_src, size_t dep_len);
@@ -1054,6 +1056,14 @@ int32_t rt_xe_step_prerun(void) {
     (void)(driver_x_emit_work_p_set(wp_out(), out_buf));
     (void)(driver_x_emit_work_p_set(wp_pctx(), pctx));
     (void)(xlang_pipeline_fill_ctx_path_buffers(pctx, entry, lib, n_lib));
+    /* 7.4.4 v3: opt-in -lib-name entry prefix (slot in rt_emit_state). */
+    {
+      uint8_t ln_buf[64] = { 0 };
+      int32_t ln_len = xlang_driver_x_emit_lib_name_into((&((ln_buf)[0])), 64);
+      if ((ln_len >0)) {
+        (void)(xlang_pipeline_pctx_set_entry_lib_prefix(pctx, (&((ln_buf)[0])), ln_len));
+      }
+    }
   }
   if ((asm_d !=0)) {
     {
