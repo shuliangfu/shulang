@@ -4906,21 +4906,25 @@ export function link_abi_user_o_needs_async_scheduler(user_o: *u8): i32 {
  * Count of zlib UNDEF needles for link_abi_obj_needs_zlib (exact libz symbols).
  * Product complete set (G.7): one-shot compress2/uncompress plus gzip Init2
  * and Darwin/ELF gzip product mangles.
- * @return i32 — 16
- * PLATFORM: SHARED — Darwin gzip-only import must pull glue/-lz
+ * @return i32 — 20
+ * PLATFORM: SHARED — Darwin gzip-only import must pull glue/-lz.
+ * 16..19: facade names (`std_compress_gzip_compress`) so `xlang build`
+ * user.o UNDEF fires needs_zlib while asm ld passes compress_o=NULL.
  */
 #[no_mangle]
 export function labi_od_zlib_undef_sym_count(): i32 {
-  return 16;
+  return 20;
 }
 
 /**
  * zlib UNDEF needle at index (needs_zlib probe table; exact symbols).
- * @param i i32 — index in [0, 16)
+ * @param i i32 — index in [0, 20)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete zlib undef authority
  * 0..3 Mach-O one-shot; 4..7 ELF one-shot; 8..11 Mach-O Init2 + gzip
- * product mangle; 12..15 ELF Init2 + gzip product mangle.
+ * product mangle; 12..15 ELF Init2 + gzip product mangle;
+ * 16..19 Mach-O/ELF facade (`std_compress_gzip_compress`) for `xlang build`
+ * user.o (asm ld compress_o is NULL; tail libs scan user.o only).
  * gzip-only import has UNDEF _std_compress_gzip_gzip_compress (no
  * _compress2); without those needles Darwin -dead_strip omits glue/-lz.
  */
@@ -4991,6 +4995,22 @@ export function labi_od_zlib_undef_sym_at(i: i32): *u8 {
   }
   if (i == 15) {
     let p: *u8 = "std_compress_gzip_gzip_decompress";
+    return p;
+  }
+  if (i == 16) {
+    let p: *u8 = "_std_compress_gzip_compress";
+    return p;
+  }
+  if (i == 17) {
+    let p: *u8 = "_std_compress_gzip_decompress";
+    return p;
+  }
+  if (i == 18) {
+    let p: *u8 = "std_compress_gzip_compress";
+    return p;
+  }
+  if (i == 19) {
+    let p: *u8 = "std_compress_gzip_decompress";
     return p;
   }
   return 0 as *u8;

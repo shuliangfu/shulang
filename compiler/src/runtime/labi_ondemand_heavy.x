@@ -5191,6 +5191,24 @@ export function xlang_asm_ld_append_on_demand_user_objs(link_argv0: *u8, user_o:
             unsafe {
               let _sg: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, rel, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
             }
+            // PLATFORM: SHARED — g15 facade compress.o is c_face; product gzip/zlib
+            // live in submodule formal .o. User.o only U std_compress_gzip_compress
+            // (facade). G.7 complete existing sg15 ensure with companion push
+            // (≡ g2 encoding → string/base64). Do not add a second group.
+            // Tail -lz fires via L8b facade UNDEF needles on user.o (asm ld
+            // passes compress_o=NULL into mach/unix tail libs).
+            if (sg == 15) {
+              if (flags != 0 as *u8) {
+                let fc: *i32 = flags as *i32;
+                fc[6] = 1;
+              }
+              let zrel: *u8 = "std/compress/zlib/zlib.o";
+              let grel: *u8 = "std/compress/gzip/gzip.o";
+              unsafe {
+                let _pz: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, zrel, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
+                let _pg: i32 = link_abi_asm_ld_push_obj(0 as *u8, link_argv0, grel, lib_roots, n_lib_roots, bank, argv, la, max_la, 0 as *i32);
+              }
+            }
             // PLATFORM: SHARED — g12 std.test monofile C dual companions
             // (fn_invoke / env_os / time_os). ≡ need_test path; dedup-safe.
             if (sg == 12) {

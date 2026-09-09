@@ -2420,7 +2420,7 @@ int link_abi_user_o_needs_async_scheduler(const char *user_o) {
 
 /* wave131: product compress family marker + UNDEF/prefix tables + pure orch.
  * PLATFORM: SHARED — Cap residual exports_marker + has_undef_sym (popen/nm). */
-int labi_od_zlib_undef_sym_count(void) { return 16; }
+int labi_od_zlib_undef_sym_count(void) { return 20; }
 const char *labi_od_zlib_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2458,6 +2458,15 @@ const char *labi_od_zlib_undef_sym_at(int i) {
     return "std_compress_gzip_gzip_compress";
   if (i == 15)
     return "std_compress_gzip_gzip_decompress";
+  /* PLATFORM: SHARED — facade names for `xlang build` user.o (asm ld compress_o=NULL). */
+  if (i == 16)
+    return "_std_compress_gzip_compress";
+  if (i == 17)
+    return "_std_compress_gzip_decompress";
+  if (i == 18)
+    return "std_compress_gzip_compress";
+  if (i == 19)
+    return "std_compress_gzip_decompress";
   return NULL;
 }
 const char *labi_od_compress_zlib_marker(void) { return "xlang_compress_zlib_marker"; }

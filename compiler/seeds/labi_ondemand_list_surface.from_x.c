@@ -1982,7 +1982,7 @@ int32_t link_abi_user_o_needs_async_scheduler(uint8_t * user_o) {
   return 0;
 }
 int32_t labi_od_zlib_undef_sym_count(void) {
-  return 16;
+  return 20;
 }
 uint8_t * labi_od_zlib_undef_sym_at(int32_t i) {
   if ((i < 0)) {
@@ -2050,6 +2050,22 @@ uint8_t * labi_od_zlib_undef_sym_at(int32_t i) {
   }
   if ((i ==15)) {
     uint8_t * p = ((uint8_t *)"std_compress_gzip_gzip_decompress");
+    return p;
+  }
+  if ((i ==16)) {
+    uint8_t * p = ((uint8_t *)"_std_compress_gzip_compress");
+    return p;
+  }
+  if ((i ==17)) {
+    uint8_t * p = ((uint8_t *)"_std_compress_gzip_decompress");
+    return p;
+  }
+  if ((i ==18)) {
+    uint8_t * p = ((uint8_t *)"std_compress_gzip_compress");
+    return p;
+  }
+  if ((i ==19)) {
+    uint8_t * p = ((uint8_t *)"std_compress_gzip_decompress");
     return p;
   }
   return ((uint8_t *)(0));

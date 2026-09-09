@@ -1,29 +1,33 @@
 /* PLATFORM: SHARED — pure-asm formal vehicle for std/compress (class-batch 2).
  *
  * Why C face: .x monofile co-emits bare deflate/inflate that conflict with zlib
- * C API types in the same TU. Product body stays in mod.x + submodules (C path).
- * This vehicle only exports std_compress_* with unavailable semantics (return -1),
- * matching product when codecs are not linked (tests/compress/main.x allows n<=0).
+ * C API types in the same TU. Product body stays in submodule formal .o
+ * (std/compress/gzip/gzip.o, zlib/zlib.o). This vehicle exports the facade
+ * std_compress_* names the user import mangles to.
+ *
+ * G.7: complete existing c_face — gzip one-shot faces trampoline to the
+ * submodule mangle (std_compress_gzip_gzip_*), not return -1. Returning -1
+ * made `xlang build` skip-green (tests/compress/main.x treats n<=0 as skip)
+ * while gzip.o was never on the ld argv. zstd/brotli stay unavailable until
+ * those submodule .o are catalogued and pushed (separate residual).
  *
  * G.7: single formal vehicle for pure-asm product link (catalog key
  * std/compress/compress.o). formal_mod kind=c_face.
  */
 #include <stdint.h>
 
+/* PLATFORM: SHARED — product gzip lives in gzip.o (mod.x + libz.x). */
+extern int32_t std_compress_gzip_gzip_compress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                               int32_t out_cap);
+extern int32_t std_compress_gzip_gzip_decompress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                                 int32_t out_cap);
+
 int32_t std_compress_gzip_compress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_gzip_gzip_compress(in, in_len, out, out_cap);
 }
 
 int32_t std_compress_gzip_decompress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_gzip_gzip_decompress(in, in_len, out, out_cap);
 }
 
 int32_t std_compress_brotli_compress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
