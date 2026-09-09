@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 路径／验收／为何开）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端 `/tmp` 日志、「证：…」长叙事。波次流水只写 `[自举进度.md](自举进度.md)` §6。  
 > **考古副本**（本波重写前全文）：`[archive/C迁移追踪-流水账归档-20260825.md](archive/C迁移追踪-流水账归档-20260825.md)`  
-> **刷新**：2026-09-02 · 钉盘 **`b5be5ed97`**（不随微步升钉）
+> **刷新**：2026-09-09 · 钉盘 **`e194cd294`**（不随微步升钉）
 
 ### 维护约定
 
@@ -32,7 +32,7 @@
 | xbuild／MG（阶段 11） | 🟡 | Makefile 物理删 ✅；核心终局／零 cc CI／editors 仍开 |
 | 冷启动零 cc（阶段 12） | 🟡 | LINK／`.s`／门禁大半 ✅；最小 seed／全路径零 cc ⬜ |
 | 终局 MG+BC+PC+v2==v3（阶段 13） | 🟡 | MG 文件层 ✅；BC／PC／v2==v3 未终 |
-| 产品 L4 钉盘 | ✅ | **`d583f61f5`**（2026-09-09 升钉；双端 L4＋bstrict 129/129 零红首次）；前 `b5be5ed97` |
+| 产品 L4 钉盘 | ✅ | **`e194cd294`**（2026-09-09 晚升钉；双端 L4＋bstrict 129/129；Darwin dir_open `O_DIRECTORY`）；前 `d583f61f5` |
 | BC（自举编译层零 host-cc） | 🟡 | inventory 冻；`pipeline_x` 仍 host-cc mega |
 | PC（产品默认 asm／禁默 host-cc） | 🟡 | 去 import→C／FORBID／ALLOW／ld-only ✅；invoke_cc 未删 |
 | `pipeline_abi` mega pure-asm | ⬜ 硬禁 | 须点名；产品 thin-first／inject |
@@ -208,7 +208,7 @@
   - ✅ leftover rest unique rec ASSIGN／.x let-init VAR dest TYPE_ARRAY IF／BLOCK `d = if true { [3, 4] } else { [0, 0] }`／`d = { [3, 4] }`／dest-in-rbx `*p = if true { [3, 4] }` glue_emit_fixed_array_type_let_init dest-in-rbx IF／BLOCK＋frame dest park recurse −3（复用 glue_emit_if_arm_dest_in_rbx）；leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY IF／BLOCK leftover-PE 孪生 park dest＋leftover_emit_match_arm_result dest_tk==10＠`5514ff21f`
   - ✅ leftover rest unique rec ASSIGN／.x let-init VAR dest TYPE_ARRAY MATCH `d = match 1 { 1 => [3, 4]; _ => [0, 0]; }`／let-init `let d: [2]i32 = match` glue_emit_fixed_array_type_let_init dest-in-rbx MATCH（park dest_spill＋glue_emit_match_dest_in_rbx）＋frame dest park recurse −3；leftover rest unique rec ASSIGN VAR dest TYPE_ARRAY MATCH leftover-PE 孪生（已拦 asg_lko==3 rko==43；禁第二拦截）＠`73baa9ca2`
   - ✅ .x struct_type_let_init dest-in-rbx FIELD／INDEX／DEREF 8B TYPE_ARRAY MATCH 臂 `d = match { 1 => s.a; }`／`rows[1]`／`*q`／dest-in-rbx `*p = s.a`／`*p = rows[1]`／`*p = *q` glue_emit_struct_type_let_init dest-in-rbx memcpy let_sz>=8（同 VAR dest-in-rbx `[2]i32`；frame dest 8B 仍 emit_expr fall-through）；leftover unique leftover_emit_match_arm_result rko==44／47／52 dest_tk==10 leftover-PE 已 dest-park；禁 leftover unique leftover_emit_field 孪生；禁 leftover rest unique rec ASSIGN 第二拦截＠`9e80e57d7`
-  - ✅ **9.1.10** opendir／readdir／closedir Darwin Cap 离 libc 闭环 — `xlang_dir_cap.h` 增加 Darwin raw syscall open(5)+SYS_getdirentries64(344)+close(6)，对齐 DIRENT_D_NAME_OFF=21；`std/fs/posix.x` 消除 Darwin libc 分支统一委托 `xlang_dir_*`；`std/fs/fs.o` 消除 libc U opendir/readdir/closedir；`compiler/src/runtime/labi_ondemand_heavy.x` 与 seeds 扩充 `std_fs_dir_*` 门控针（k=15 count=15）；双端 gate 探针全绿 · tests/sys/fs_dir_raw_smoke.x 经 xlang_asm 编译运行 exit 0 · 双端 L2 5/5 全绿
+  - ✅ **9.1.10** opendir／readdir／closedir Darwin Cap 离 libc 闭环 — `xlang_dir_cap.h` Darwin raw syscall open(5, O_RDONLY+O_DIRECTORY)+SYS_getdirentries64(344)+close(6)，对齐 DIRENT_D_NAME_OFF=21；缺 `O_DIRECTORY` 时 SYS_open 对普通文件成功→`fmt_path_stat_kind` 把 `.x` 当目录→FMT001（已补＠`e194cd294`）；`std/fs/posix.x` 消除 Darwin libc 分支统一委托 `xlang_dir_*`；`std/fs/fs.o` 消除 libc U opendir/readdir/closedir；`compiler/src/runtime/labi_ondemand_heavy.x` 与 seeds 扩充 `std_fs_dir_*` 门控针（k=15 count=15）；双端 gate 探针全绿 · tests/sys/fs_dir_raw_smoke.x 经 xlang_asm 编译运行 exit 0 · 双端 L2 5/5 全绿
 - ✅ **L4＠1174c5bb3 bstrict** — Ubuntu shuffle 后 **select SIGILL**：`vpxor ymm3` 写 `C5 F5 77`（EMMS #UD）；`vpand`／`vpandn`／`vpor` VEX.vvvv 误用 ymm3。i32 ymm 编码器已补（Ubuntu L4＠`6c0fdeebf` shuffle-select **OK**）；f32 ymm select 编码器亦已补全（`vxorps` `C5 E4 57 DB`、`vcmpgtps` `C5 EC C2 D3 0E`、`vandps` `C5 FC 54 C2`、`vandnps` `C5 EC 55 D1`、`vorps` `C5 FC 56 C2`）
 
 ---
@@ -261,7 +261,7 @@
 - ✅ **9.1.7** getaddrinfo／socket／connect／poll／recvmmsg／sendmmsg — **全平台 Cap 闭环 ✅**：`xlang_net_cap.h`＋`xlang_dns_cap.h` 统管 socket/poll/recvmmsg/sendmmsg 与纯 Cap DNS，net/dns/http 五 seed 收敛、std/net+http 双端零 libc U；验收＝Steps1..10 门禁、sock/dns raw smoke 双端 0、双端 L2 与 F-http 绿。
 - ✅ **9.1.8** `_write`／write／read — **全平台 Cap 闭环 ✅**：`xlang_io_cap.h` 统管 write/read/writev（raw syscall／Win `_write`/`_read`），21 个 seed/TU 全收敛直呼 libc=0；验收＝三端 io cap 门禁（nm 强校验零 libc）、io_write/read raw smoke 双端 0、双端门禁+L2 绿。
 - ✅ **9.1.9** inline asm syscall（Linux x86_64）— **Ubuntu ✅（WIP）**：G.7 `xlang_syscall_cap.h`（syscall0..6；x86_64＋aarch64）；path／io／net／process／time／random 改 alias。探针 `syscall_cap_raw_smoke.x`＠**`fecc624dd`**。残：非 Cap 种子内仍有独立 asm（bootstrap／freestanding）  
-- ✅ **9.1.10** opendir／readdir／closedir — **全平台 Cap 闭环 ✅**：`xlang_dir_cap.h` 统管 getdents64/getdirentries64/_findfirst，`std/fs/posix.x` 收敛零 libc；验收＝dir cap 门禁全通、`fs_dir_raw_smoke.x` 双端 0、双端 L2 5/5。
+- ✅ **9.1.10** opendir／readdir／closedir — **全平台 Cap 闭环 ✅**：`xlang_dir_cap.h` 统管 getdents64/getdirentries64/_findfirst；Darwin open 须 `O_DIRECTORY`（与 Linux 同契约；缺则 fmt FMT001）；`std/fs/posix.x` 收敛零 libc；验收＝dir cap 门禁全通、`fs_dir_raw_smoke.x` 双端 0、双端 L2 5/5、双端 L4＠`e194cd294`。
 - ✅ **9.1.11** execinfo／dladdr／DbgHelp — **Linux+Darwin+Windows Cap ✅**＠`dcd335be4`：SHARED FP walk＋Linux maps/ELF＋Darwin Mach-O＋**Win VirtualQuery+PE export**（无 CaptureStackBackTrace／DbgHelp／`-ldbghelp`）；双端 capture／dladdr smoke **0**。残：MSYS 实机金标
 - ✅ **9.1.12** sysctl／proc／`#if` — **全平台 Cap 闭环 ✅**：`xlang_proc_cap.h` 统管读文件（raw syscall／Win CRT），`target_cpu_pure` 收敛零 fopen/sysctl（arm NEON／x86 CPUID）；验收＝三端 proc cap 门禁、`target_cpu_proc_raw_smoke.x` 双端 0、simd-s1 双端绿。
 
