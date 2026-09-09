@@ -2,13 +2,14 @@
  * dir_cap_darwin_smoke.c — Stage 9 (9.1.10) Darwin Cap residual probe.
  *
  * Host-cc smoke for xlang_dir_cap.h on Darwin:
- *   - opendir via raw syscall open (no libc opendir)
+ *   - opendir via raw syscall open(O_DIRECTORY) (no libc opendir)
  *   - readdir via raw syscall 344 (SYS_getdirentries64, no libc readdir)
  *   - closedir via raw syscall close (no libc closedir)
  *   - layout verification: d_name at offset 21 (matching DIRENT_D_NAME_OFF)
+ *   - regular file must return NULL (POSIX opendir / fmt_path_stat_kind)
  *
  * PLATFORM: MACOS|DARWIN gold.
- * Exit: 0 ok; 1..9 step failure.
+ * Exit: 0 ok; 1..10 step failure.
  */
 
 #include <stdint.h>
@@ -100,6 +101,14 @@ int main(void) {
   if (xlang_dir_open(missing_dir) != NULL) {
     fprintf(stderr, "xlang_dir_open(%s) should have returned NULL\n", missing_dir);
     return 8;
+  }
+
+  /* Step 5b: POSIX opendir(file) is NULL. Without O_DIRECTORY, SYS_open
+   * succeeds and fmt_path_stat_kind classifies every .x file as a directory
+   * (Darwin FMT001 empty collect). PLATFORM: MACOS|DARWIN */
+  if (xlang_dir_open("compiler/include/xlang_dir_cap.h") != NULL) {
+    fprintf(stderr, "xlang_dir_open(regular file) should have returned NULL\n");
+    return 10;
   }
 
   /* Step 6: Edge cases */

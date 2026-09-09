@@ -9,8 +9,11 @@
  *
  * Linux: open(O_DIRECTORY) + getdents64 into a heap DIR stream; readdir fills a
  * glibc-layout dirent so DIRENT_D_NAME_OFF=19 stays valid for std.fs.
- * Darwin: open + getdirentries64 into a heap DIR stream; readdir fills a
- * Darwin-layout dirent so DIRENT_D_NAME_OFF=21 stays valid for std.fs.
+ * Darwin: open(O_RDONLY|O_DIRECTORY) + getdirentries64 into a heap DIR stream;
+ * readdir fills a Darwin-layout dirent so DIRENT_D_NAME_OFF=21 stays valid for
+ * std.fs. O_DIRECTORY is mandatory: POSIX opendir(file) returns NULL; without
+ * it SYS_open succeeds on regular files and fmt_path_stat_kind (opendir
+ * success ⇒ directory) classifies every .x file as a dir → FMT001 empty list.
  * Windows (MinGW/MSYS leftover PE SAT): _findfirst / _findnext / _findclose.
  *   fmt_check_cmd.from_x.c previously kept a second _findfirst copy
  *   (opendir_win / closedir_win returning void). Casting that void closedir
@@ -253,6 +256,11 @@ static inline int xlang_dir_close(void *dirp) {
 #ifndef O_RDONLY
 #define O_RDONLY 0
 #endif
+/* Darwin fcntl.h: O_DIRECTORY = 0x00100000. Same contract as Linux Cap:
+ * opendir(file) must return NULL (ENOTDIR). PLATFORM: MACOS|DARWIN */
+#ifndef O_DIRECTORY
+#define O_DIRECTORY 0x00100000
+#endif
 
 #if defined(__aarch64__)
 static inline long xlang_darwin_dir_sys1(long nr, long a1) {
@@ -360,6 +368,9 @@ struct xlang_dir_stream {
 
 /**
  * Cap residual opendir(3) on Darwin via raw syscall open (no libc opendir).
+ * Flags are O_RDONLY|O_DIRECTORY so a regular file yields NULL, matching
+ * POSIX opendir / Linux Cap xlang_dir_sys_open_dir. fmt_path_stat_kind and
+ * std.fs both treat a non-NULL DIR* as "this path is a directory".
  * @return opaque DIR* or NULL
  * PLATFORM: MACOS|DARWIN
  */
@@ -372,9 +383,9 @@ static inline void *xlang_dir_open(const char *name) {
   if (!d)
     return NULL;
 #if defined(__x86_64__)
-  fd = xlang_darwin_dir_sys3(0x2000005L, (long)name, O_RDONLY, 0);
+  fd = xlang_darwin_dir_sys3(0x2000005L, (long)name, (long)(O_RDONLY | O_DIRECTORY), 0);
 #elif defined(__aarch64__)
-  fd = xlang_darwin_dir_sys3(5, (long)name, O_RDONLY, 0);
+  fd = xlang_darwin_dir_sys3(5, (long)name, (long)(O_RDONLY | O_DIRECTORY), 0);
 #endif
   if (fd < 0) {
     free(d);
