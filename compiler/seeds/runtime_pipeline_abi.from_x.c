@@ -15120,6 +15120,10 @@ int32_t pipeline_asm_emit_cmp_elf(void *arena, void *elf_ctx, int32_t cmp_expr_r
   is_cmp_64bit = 0;
   if (left_ref > 0) {
     lt_ref = pipeline_expr_resolved_type_ref(arena, left_ref);
+    /* PLATFORM: SHARED — dep decl fallback (parse-only has no typeck stamp;
+     * u64 `t == 0` else compares 32-bit). Mirrors the .x twin. */
+    if (lt_ref <= 0 && pipeline_expr_kind_ord_at(arena, left_ref) == 3)
+      lt_ref = glue_var_expr_type_ref_with_decl_fallback_c(arena, left_ref);
     if (lt_ref > 0) {
       lt_kind = pipeline_type_kind_ord_at(arena, lt_ref);
       is_cmp_64bit = glue_type_kind_is_64bit_int_seed(lt_kind);
@@ -15132,6 +15136,9 @@ int32_t pipeline_asm_emit_cmp_elf(void *arena, void *elf_ctx, int32_t cmp_expr_r
   }
   if (is_cmp_64bit == 0 && right_ref > 0) {
     rt_ref = pipeline_expr_resolved_type_ref(arena, right_ref);
+    /* PLATFORM: SHARED — dep decl fallback (see left side note). */
+    if (rt_ref <= 0 && pipeline_expr_kind_ord_at(arena, right_ref) == 3)
+      rt_ref = glue_var_expr_type_ref_with_decl_fallback_c(arena, right_ref);
     if (rt_ref > 0) {
       rt_kind = pipeline_type_kind_ord_at(arena, rt_ref);
       is_cmp_64bit = glue_type_kind_is_64bit_int_seed(rt_kind);

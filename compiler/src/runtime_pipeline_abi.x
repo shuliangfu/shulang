@@ -31268,6 +31268,17 @@ export function pipeline_asm_emit_cmp_elf(arena: *u8, elf_ctx: *u8, cmp_expr_ref
     unsafe {
       lt_ref = pipeline_expr_resolved_type_ref(arena, left_ref);
     }
+    // PLATFORM: SHARED — parse-only deps carry no typeck stamp (resolved=0);
+    // fall back to the param/let decl chain (same authority discipline as the
+    // binop-shift width) or a u64 `t == 0` compares 32-bit and 0x8000...0000
+    // low half "equals" zero (std clz64(2^63) returned 64).
+    if (lt_ref <= 0) {
+      unsafe {
+        if (pipeline_expr_kind_ord_at(arena, left_ref) == 3) {
+          lt_ref = glue_var_expr_type_ref_with_decl_fallback_c(arena, left_ref);
+        }
+      }
+    }
     if (lt_ref > 0) {
       unsafe {
         lt_kind = pipeline_type_kind_ord_at(arena, lt_ref);
@@ -31291,6 +31302,14 @@ export function pipeline_asm_emit_cmp_elf(arena: *u8, elf_ctx: *u8, cmp_expr_ref
   if (is_cmp_64bit == 0 && right_ref > 0) {
     unsafe {
       rt_ref = pipeline_expr_resolved_type_ref(arena, right_ref);
+    }
+    // PLATFORM: SHARED — dep decl fallback (see left side note).
+    if (rt_ref <= 0) {
+      unsafe {
+        if (pipeline_expr_kind_ord_at(arena, right_ref) == 3) {
+          rt_ref = glue_var_expr_type_ref_with_decl_fallback_c(arena, right_ref);
+        }
+      }
     }
     if (rt_ref > 0) {
       unsafe {
