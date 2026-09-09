@@ -904,10 +904,19 @@ ensure_driver_compile_link_obj() {
   local loop_partial="$BUILD_DIR/driver_compile_parse_argv_loop_partial.o"
   local merge_objs=""
   [ -f "$eh_o" ] && [ -s "$eh_o" ] || return 1
-  [ -f "$alias_src" ] || return 1
-  if [ ! -f "$alias_o" ] || [ "$alias_src" -nt "$alias_o" ]; then
-  build_xlang_asm_info "cc_inc_tu driver_compile_asm_link_alias.o"
-  sh scripts/cc_inc_tu.sh "$alias_src" "$alias_o"
+  # 7.2.1 eighth knife: .x authority via cc_inc_tu --auto prefer lane.
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$alias_o" ] || [ src/driver_compile_asm_link_alias.x -nt "$alias_o" ] \
+       || { [ -f "$alias_src" ] && [ "$alias_src" -nt "$alias_o" ]; }; then
+      build_xlang_asm_info "cc_inc_tu --auto (src/driver_compile_asm_link_alias.x)"
+      sh scripts/cc_inc_tu.sh --auto "$alias_o"
+    fi
+  else
+    [ -f "$alias_src" ] || return 1
+    if [ ! -f "$alias_o" ] || [ "$alias_src" -nt "$alias_o" ]; then
+      build_xlang_asm_info "cc_inc_tu driver_compile_asm_link_alias.o"
+      sh scripts/cc_inc_tu.sh "$alias_src" "$alias_o"
+    fi
   fi
   if nm "$eh_o" 2>/dev/null | grep -qE ' U (_)?driver_compile_parse_argv_loop$'; then
   ensure_driver_parse_argv_loop_partial_obj || return 1
