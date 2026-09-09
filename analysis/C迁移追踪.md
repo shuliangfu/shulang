@@ -348,7 +348,7 @@
 - ✅ **10.6.1** Linux futex／clone／mmap 栈＋Darwin POSIX Cap — **Ubuntu＋Darwin ✅**：futex／mmap／clone trampoline（Linux）＋Darwin pthread Cap residual（`xlang_thread_cap.h` spawn/join）；**product `runtime_thread_glue` Linux+Darwin 全 Cap 收敛**（pool／create／join 统一使用 `xlang_thread_spawn` / `xlang_thread_join`，消除双实现；STD-043 run=2；THREAD-SYNC-CAP-DARWIN run=1）。残：TLS  
 - 🟡 **10.6.2** Windows CreateThread／WaitForSingleObject — **slice0–1 ✅（源码＋gate；Ubuntu skip）**：Cap spawn／join＋product glue join-handle ABI；**product `runtime_thread_glue` 全平台（Linux+Darwin+Windows）全 Cap 线程池收敛**（pool／create／join 统一使用 `xlang_thread_spawn` / `xlang_thread_join` 与 `xlang_cap_mutex` / `xlang_cap_cond`，消除 Windows 特例硬编码；STD-043 run=2）。残：MSYS／Win 实机 **run=1** · affinity 金标  
 - ✅ **10.6.3** 互斥锁／条件变量／信号量 — **全平台（Ubuntu＋Darwin＋Windows）Cap 闭环 ✅**：futex mutex／cond／sem／rwlock（Linux）＋Darwin pthread sync Cap＋Windows Win32 sync Cap（`xlang_sync_cap.h` 全平台 mutex/cond/sem/rwlock）；**product `runtime_sync_os` Linux+Darwin+Windows 全 Cap 收口**（mutex／cond／rwlock 统一使用 `xlang_cap_*` 结构与操作，消灭 Windows 240 行重复副本；STD-045 run=2；THREAD-SYNC-CAP-DARWIN run=1；SYNC-CAP-WIN gate OK）。残：无
-- 🟡 **10.7.1** va_list + va_start／arg／end — **slice0–18 ✅＠`d79894f86`**＋**gate 双端绿＠`f35b03fe1`**（SHARED Cap＋语言＋arity＋host-cc＋rt_preamble＋unsafe 豁免＋产品 `-backend c -o` Cap `-I`＋默认 asm Cap＋typed `va_arg<T>`＋aarch64＋f32/f64 XMM/NEON＋mixed overflow；slice18＝GP/FP/共享 OV 游标）。gate 修＝`codegen_is_libc_conflicting_extern_name` 转调 Cap va 名表（Darwin `-E` 不再重声明 builtin）＋CALL extras `glue_arg_ref_is_sse_float_c`（Ubuntu f32 XMM）＋AAPCS64 `x29+off` +8／GE＋cleanup＝reserve。残：MSVC·host-C 多份 `va_arg<i32>` 同符号
+- ✅ **10.7.1** va_list + va_start／arg／end — **slice0–18 ✅＠`d79894f86`**＋**gate 双端绿＠`f35b03fe1`**＋**host-C `va_arg<i32>` 单实例＠`4ca63e4cd`**（SHARED Cap＋语言＋arity＋host-cc＋rt_preamble＋unsafe 豁免＋产品 `-backend c -o` Cap `-I`＋默认 asm Cap＋typed `va_arg<T>`＋aarch64＋f32/f64 XMM/NEON＋mixed overflow；slice18＝GP/FP/共享 OV 游标）。gate 修＝`codegen_is_libc_conflicting_extern_name` 转调 Cap va 名表＋CALL extras `glue_arg_ref_is_sse_float_c`＋AAPCS64 `x29+off` +8／GE＋cleanup＝reserve。host-C 修＝`codegen_mono_combo_slot_equal` 转调 `codegen_type_refs_same_for_mono`（五份 `va_arg<i32>` 一 def；mixed 两份 `va_arg<f64>` host-cc）。残：MSVC（须切 Windows）
 - 🟡 **10.7.2** .x／Cap 自实现 vsnprintf — **slice0–21 ✅（SHARED）**＠`b5b7d323d`：产品 seed／gen pin／Track L／build_tool cold **Cap 收口**（labi「snprintf」仅为注释假阳）。残：纯 .x fmt · MSVC
 
 ---
@@ -896,7 +896,7 @@
 1. 日常软刀／PC 底盘（非 mega；须点名才动 check／mega）  
 2. 🟡 **BC + 8.3**（`pipeline_x` 离 host-cc · from_x 全表策略）  
 3. ⬜ **7.2.1／7.4.4** parser seed 物理删／双权威闸  
-4. 🟡 **阶段 10** 语言能力残（10.1.3 NT 暂缓／10.7.1 host-C `va_arg<i32>` 同符号／qemu／Win 实机；阶段 9 已 ✅；va gate＠`f35b03fe1`）  
+4. 🟡 **阶段 10** 语言能力残（10.1.3 NT 暂缓／10.7.1 MSVC／qemu／Win 实机；阶段 9 已 ✅；va POSIX host-C＠`4ca63e4cd`）  
 5. ⬜ **阶段 12–13** 最小 seed · 全路径零 cc · v2==v3 · 公告  
 
 ---
