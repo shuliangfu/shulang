@@ -205,7 +205,24 @@ export function driver_run_asm_backend_impl_c(
   return 1;
 }
 
-/* See signature and body for contracts. */
+/**
+ * C-backend dispatch: lib_key → lib_roots, then driver_dispatch_run_compiler_parsed.
+ * Leftover !XLANG_NO_C_FRONTEND sibling xlang-c demote lived only in the
+ * cold seed twin (rt_dispatch_impl.from_x.c). This product body never
+ * called driver_try_compile_via_shu_c_sibling; the spawn helper stays in
+ * rt_dispatch_thin (HAS a real fork/exec body, different class).
+ * @param input_path *u8 — entry source path; forwarded to parsed
+ * @param out_path *u8 — optional -o path; null allowed
+ * @param lib_key *u8 — opaque compile-state / lib_roots sidecar
+ * @param target *u8 — optional target triple; empty treated as null
+ * @param opt_level *u8 — optional opt; empty falls back to driver_dispatch_opt_default
+ * @param use_lto i32 — explicit LTO flag; also honors XLANG_LTO=1
+ * @param argc i32 — argv count forwarded to parsed
+ * @param argv *u8 — opaque argv pointer forwarded to parsed
+ * @return i32 — parsed dispatch status
+ * PLATFORM: SHARED — product authority; leftover consume site retired in
+ * the cold seed twin (this knife). Spawn body not deleted.
+ */
 #[no_mangle]
 export function driver_run_emit_c_path_impl_c(
   input_path: *u8, out_path: *u8, lib_key: *u8, target: *u8,
@@ -235,7 +252,7 @@ export function driver_run_emit_c_path_impl_c(
     }
   }
   lto = rt_di_effective_use_lto(use_lto);
-  // Dispatch medium impl (asm/emit/post_parse/full_x); G.9 English; body authoritative.
+  // Always parsed. Do not re-add sibling xlang-c demote on top-level import.
   unsafe {
     return driver_dispatch_run_compiler_parsed(
       input_path, out_path, roots, n, tgt, opt, lto, argc, argv);

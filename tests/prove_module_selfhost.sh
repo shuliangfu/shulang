@@ -513,6 +513,10 @@ MODULES=(
   #    9.7.6 residual 5 retired rt_run_compiler_parsed leftover generic
   #    lexer/parse + import-downgrade !XLANG_NO_C_FRONTEND blocks →
   #    rt_cp_step_try_c / driver_parsed_try_c_after_pp always -2;
+  #    9.7.6 residual 6 retired rt_dispatch_impl leftover
+  #    !XLANG_NO_C_FRONTEND driver_try_compile_via_shu_c_sibling consume
+  #    site → driver_dispatch_run_compiler_parsed (spawn body stays in
+  #    rt_dispatch_thin; HAS a real fork/exec body, different class);
   #    T still 101, mega unchanged);
   #   rest 含 86 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
   #   prove 锁 mixed surface IDENTICAL (101 nm T · no doc_anchor)

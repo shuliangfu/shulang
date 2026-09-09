@@ -112,7 +112,6 @@ extern void codegen_set_preamble_has_core_option_result(int on);
 extern void pipeline_dep_ctx_heap_destroy(struct ast_PipelineDepCtx *ctx);
 extern int driver_run_asm_backend(const char *input_path, const char *out_path, const char **lib_roots_arr, int n_lib_roots,
                                   const char *target, int argc, char **argv);
-extern int driver_try_compile_via_shu_c_sibling(int argc, char **argv);
 extern int runtime_report_precise_parse_failure_if_known(const char *input_path, const char *src, size_t src_len);
 extern int runtime_report_parse_recovery_diagnostics(const char *input_path, const char *src, size_t src_len);
 extern void driver_unlink_failed_output(const char *out_path);
