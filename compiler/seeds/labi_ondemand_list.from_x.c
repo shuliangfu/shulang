@@ -670,6 +670,15 @@ const char *labi_od_simple_group_sym_at(int g, int i) {
       return "compress_gzip_compress_c";
     if (i == 23)
       return "compress_gzip_decompress_c";
+    /* PLATFORM: SHARED — stream needles (see g15 count note). */
+    if (i == 24)
+      return "std_compress_gzip_stream_state_bytes";
+    if (i == 25)
+      return "std_compress_brotli_stream_state_bytes";
+    if (i == 26)
+      return "std_compress_zstd_stream_state_bytes";
+    if (i == 27)
+      return "std_compress_brotli_lib_compress_brotli_stream_init_decompress_";
     return NULL;
   }
   if (g == 16) {
@@ -4849,6 +4858,16 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                                         "../core/slice/slice.o");
                 link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_core_slice(), lib_roots, n_lib_roots,
                                          bank, argv, la, max_la, NULL);
+        /* PLATFORM: LINUX|x86_64 — zstd/brotli submodule lib.x are
+         * extern C FFI; raw ld has no -l face, push system .so
+         * directly when present. Mirrors the .x twin; macOS brew
+         * .dylib face is a separate card. */
+        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libzstd.so",
+                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlienc.so",
+                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlidec.so",
+                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
             }
         }
         /*

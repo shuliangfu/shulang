@@ -371,7 +371,9 @@ export function labi_od_simple_group_sym_count(g: i32): i32 {
   // bare compress_*_c (exact matcher; facade std_compress_gzip_compress does
   // not fire for std_compress_zlib_deflate / std_compress_gzip_gzip_compress).
   if (g == 15) {
-    return 24;
+    /* PLATFORM: SHARED — 28: +4 stream needles the co-emitted std.compress
+   * module leaves U (glue in std/compress/*.o; run-compress BLD001 root). */
+  return 28;
   }
   // PLATFORM: SHARED — std.io.driver formal (run-io-driver residual).
   if (g == 16) {
@@ -1241,6 +1243,24 @@ export function labi_od_simple_group_sym_at(g: i32, i: i32): *u8 {
     }
     if (i == 23) {
       let p: *u8 = "compress_gzip_decompress_c";
+      return p;
+    }
+
+    /* PLATFORM: SHARED — stream needles (see g15 count note). */
+    if (i == 24) {
+      let p: *u8 = "std_compress_gzip_stream_state_bytes";
+      return p;
+    }
+    if (i == 25) {
+      let p: *u8 = "std_compress_brotli_stream_state_bytes";
+      return p;
+    }
+    if (i == 26) {
+      let p: *u8 = "std_compress_zstd_stream_state_bytes";
+      return p;
+    }
+    if (i == 27) {
+      let p: *u8 = "std_compress_brotli_lib_compress_brotli_stream_init_decompress_";
       return p;
     }
     return 0 as *u8;
