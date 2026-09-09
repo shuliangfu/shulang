@@ -127,3 +127,26 @@ int32_t std_compress_compress_end(std_compress_StreamCompress sc) {
   (void)sc;
   return -1;
 }
+
+/* PLATFORM: SHARED — g15 needles 24→28 (run-compress BLD001). gzip/brotli/zstd
+ * lib.x co-emit calls these facade names (and one brotli-lib init) as U;
+ * c_face is the compress.o product vehicle so it must export the T.
+ * Caps match compress_state_bytes_for (128/32/32). init stays unavailable. */
+int32_t std_compress_gzip_stream_state_bytes(void) {
+  return 128;
+}
+
+int32_t std_compress_brotli_stream_state_bytes(void) {
+  return 32;
+}
+
+int32_t std_compress_zstd_stream_state_bytes(void) {
+  return 32;
+}
+
+int32_t std_compress_brotli_lib_compress_brotli_stream_init_decompress_(uint8_t *state,
+                                                                        int32_t state_cap) {
+  (void)state;
+  (void)state_cap;
+  return -1;
+}

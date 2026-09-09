@@ -4816,6 +4816,16 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                          bank, argv, la, max_la, NULL);
                 /* Glue + -lz stay in asm_ld_append_compress_libs (needs_zlib).
                  * Do not push runtime_compress_zlib_glue.o here (duplicate T). */
+                /* PLATFORM: LINUX|x86_64 — zstd/brotli lib.x are extern C FFI;
+                 * raw ld has no -l face. Push system .so when present. macOS
+                 * brew .dylib is a separate card. Must stay in this compress.o
+                 * companion (was mistakenly nested under core/slice/mod.o). */
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libzstd.so",
+                                         lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlienc.so",
+                                         lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlidec.so",
+                                         lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
             }
             /* PLATFORM: SHARED — g12 std/test/test.o monofile C dual (≡ need_test). */
             if (strstr(rel, "std/test/test.o"))
@@ -4862,16 +4872,6 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                                         "../core/slice/slice.o");
                 link_abi_asm_ld_push_obj(NULL, link_argv0, labi_od_rel_core_slice(), lib_roots, n_lib_roots,
                                          bank, argv, la, max_la, NULL);
-        /* PLATFORM: LINUX|x86_64 — zstd/brotli submodule lib.x are
-         * extern C FFI; raw ld has no -l face, push system .so
-         * directly when present. Mirrors the .x twin; macOS brew
-         * .dylib face is a separate card. */
-        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libzstd.so",
-                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
-        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlienc.so",
-                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
-        link_abi_asm_ld_push_obj(NULL, link_argv0, "/usr/lib/x86_64-linux-gnu/libbrotlidec.so",
-                                 lib_roots, n_lib_roots, bank, argv, la, max_la, NULL);
             }
         }
         /*
