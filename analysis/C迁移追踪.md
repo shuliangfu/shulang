@@ -446,7 +446,7 @@
 |----|------|------|
 | Darwin fmt 收集 FMT001（挡 `./xbuild l4`） | ✅ | Darwin `xlang_dir_open` 补 `O_DIRECTORY`＠`e194cd294`；双端 L4 129/129；本波 fmt 邻域仍 0 |
 | Darwin `-backend c` invoke_cc SEGV | ✅ | `pipeline_asm_compute_frame_size_c` min scratch 512→2048＋w157 CALL (n+1)*32／ADDR_OF 51（.x＋seed）；Darwin／Ubuntu `-backend c -o` hello42＠`8281d5777`；不升钉 |
-| u64 其余比较族（关系比较有符号 setcc） | ✅ | `glue_emit_cmp_finish` 接既有 `glue_binop_operand_is_unsigned_elf_c`：cc 2..5→6..9（setb/seta／cset lo/hi／sltu）＠`1adfbaa58`；宽度回退已盖 `==`／`!=`；Darwin family/dep/len=0＋i64 仍 signed；不升钉；残＝compress stream 面 |
+| u64 其余比较族（关系比较有符号 setcc） | ✅ | `glue_emit_cmp_finish` 接既有 `glue_binop_operand_is_unsigned_elf_c`：cc 2..5→6..9（setb/seta／cset lo/hi／sltu）＠`1adfbaa58`；宽度回退已盖 `==`／`!=`；双端 family/dep/len=0＋i64 仍 signed；不升钉；残＝compress stream 面 |
 | zstd/brotli 子模块 catalog＋伴推（c_face 桩假绿） | ✅ | catalog `zstd.o`／`brotli.o`（mod+lib）；c_face 转发 `std_compress_{zstd_zstd,brotli_brotli}_*`；heavy.x sg15 伴推；L8b/seed facade 针 2→10 开火 `-lzstd`／`-lbrotli*`＠`e0b5013b4`；双端 zs/br probe=0＋L2 5/5；不升钉；残＝stream init/process/end 仍 `-1` |
 | `xlang build` on-demand gzip 推送面（c_face 桩假绿） | ✅ | c_face 转发 `std_compress_gzip_gzip_*`；heavy.x sg15 伴推 zlib.o/gzip.o；L8b/seed facade 针开火 `-lz`＠`189eb9b08`；双端 gzip 真往返 probe=0＋L2 5/5；不升钉；残＝zstd/brotli catalog（已闭＠`e0b5013b4`） |
 | mac scratch 点分 dep 不共发射（UN `_core_*`） | ✅ | `pipeline_asm_user_deps_need_coemit` 不再把一切 `core.*` 当 hosted；仅 in-tree `core/` 12 名跳共发射；scratch `core.m6` 共发射；seed_bridge 混编仍跳 hosted core＠`8236ed6d8`；不升钉 |
