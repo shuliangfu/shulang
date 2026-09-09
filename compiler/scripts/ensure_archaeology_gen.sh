@@ -118,11 +118,14 @@ ensure_driver_subcmd_gen() {
   tmp="${out}.tmp.$$"
   rm -f "$tmp"
 
-  if [ -s "$out" ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ]; then
+  if [ -s "$out" ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt "$out" ]; }; then
     log "$out: pinned ($(bytes_of "$out") bytes; Track L retired — product uses ${out%_gen.c}_x.o; XLANG_FORCE_REGEN_GEN=1 to regen)"
-  elif seed_ok "$seed" && [ ! -s "$out" ]; then
+  elif seed_ok "$seed" && { [ ! -s "$out" ] || [ "$seed" -nt "$out" ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap —
+    # existence-only "pinned" left stale gens after pin edits).
     cp -f "$seed" "$out"
-    log "$out: restored from seed (archaeology)"
+    log "$out: restored from seed (pin newer; archaeology)"
   else
     log "$out: $XLANG_C -E -E-extern ($label archaeology)"
     ensure_xlang_c

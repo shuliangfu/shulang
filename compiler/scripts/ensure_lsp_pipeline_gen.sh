@@ -99,11 +99,13 @@ ensure_lsp_diag_gen() {
   tmp="lsp_diag_gen.c.tmp.$$"
   rm -f "$tmp"
 
-  if [ -s lsp_diag_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ]; then
+  if [ -s lsp_diag_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt lsp_diag_gen.c ]; }; then
     log "lsp_diag_gen.c: pinned ($(bytes_of lsp_diag_gen.c) bytes; XLANG_FORCE_REGEN_GEN=1 to regen)"
-  elif seed_ok "$seed" && [ ! -s lsp_diag_gen.c ]; then
+  elif seed_ok "$seed" && { [ ! -s lsp_diag_gen.c ] || [ "$seed" -nt lsp_diag_gen.c ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap).
     cp -f "$seed" lsp_diag_gen.c
-    log "lsp_diag_gen.c: restored from $seed"
+    log "lsp_diag_gen.c: restored from $seed (pin newer)"
   else
     log "lsp_diag_gen.c: $XLANG_C -E -E-extern (avoid xlang-x -x -E: broken TU for lsp_diag.x)"
     ensure_xlang_c
@@ -154,11 +156,13 @@ ensure_lsp_io_gen() {
   tmp="lsp_io_gen.c.tmp.$$"
   rm -f "$tmp"
 
-  if [ -s lsp_io_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ]; then
+  if [ -s lsp_io_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt lsp_io_gen.c ]; }; then
     log "lsp_io_gen.c: pinned ($(bytes_of lsp_io_gen.c) bytes)"
-  elif seed_ok "$seed" && [ ! -s lsp_io_gen.c ]; then
+  elif seed_ok "$seed" && { [ ! -s lsp_io_gen.c ] || [ "$seed" -nt lsp_io_gen.c ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap).
     cp -f "$seed" lsp_io_gen.c
-    log "lsp_io_gen.c: restored from $seed"
+    log "lsp_io_gen.c: restored from $seed (pin newer)"
   elif [ -f "./$XLANG_X" ]; then
     log "lsp_io_gen.c: ./$XLANG_X -x -E ..."
     "./$XLANG_X" -x -E "${LSP_X_E_DIRS[@]}" -E-extern src/lsp/lsp_io.x >"$tmp" 2>/dev/null || true
@@ -210,11 +214,13 @@ ensure_lsp_gen() {
   tmp="lsp_gen.c.tmp.$$"
   rm -f "$tmp"
 
-  if [ -s lsp_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ]; then
+  if [ -s lsp_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt lsp_gen.c ]; }; then
     log "lsp_gen.c: pinned ($(bytes_of lsp_gen.c) bytes)"
-  elif seed_ok "$seed" && [ ! -s lsp_gen.c ]; then
+  elif seed_ok "$seed" && { [ ! -s lsp_gen.c ] || [ "$seed" -nt lsp_gen.c ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap).
     cp -f "$seed" lsp_gen.c
-    log "lsp_gen.c: restored from $seed"
+    log "lsp_gen.c: restored from $seed (pin newer)"
   elif [ -f "./$XLANG_X" ]; then
     log "lsp_gen.c: ./$XLANG_X -x -E ..."
     "./$XLANG_X" -x -E "${LSP_X_E_DIRS[@]}" -E-extern src/lsp/lsp.x >"$tmp" 2>/dev/null || true
@@ -279,11 +285,13 @@ ensure_pipeline_gen() {
       log "pipeline_gen.c: FAIL forced -E"
       exit 1
     fi
-  elif [ -s pipeline_gen.c ]; then
+  elif [ -s pipeline_gen.c ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt pipeline_gen.c ]; }; then
     log "pipeline_gen.c: pinned ($(bytes_of pipeline_gen.c) bytes; XLANG_FORCE_REGEN_GEN=1 to regen)"
-  elif seed_ok "$seed"; then
+  elif seed_ok "$seed" && { [ ! -s pipeline_gen.c ] || [ "$seed" -nt pipeline_gen.c ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap).
     cp -f "$seed" pipeline_gen.c
-    log "pipeline_gen.c: restored from $seed"
+    log "pipeline_gen.c: restored from $seed (pin newer)"
   else
     ensure_xlang_c
     if "./$XLANG_C" "${PIPELINE_X_E_DIRS[@]}" -E -E-extern src/pipeline/pipeline.x >pipeline_gen.c 2>/dev/null \

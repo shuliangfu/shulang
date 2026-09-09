@@ -136,7 +136,11 @@ ensure_driver_gen() {
 
   if [ "$XLANG_FORCE_REGEN_GEN" = "1" ]; then
     need_regen=1
-  elif any_dep_newer driver_gen.c "${MAIN_X_DEPS[@]}"; then
+  elif any_dep_newer driver_gen.c "${MAIN_X_DEPS[@]}" "$seed"; then
+    # 7.4.4 v2 (2026-09-10): the seed pin is a first-class dependency. A pin
+    # edited in git must invalidate a stale worktree driver_gen.c — the
+    # MAIN_X_DEPS-only check left the gen "up-to-date" after pin edits and the
+    # product shipped without the pin's changes (parse-guard wave trap).
     need_regen=1
   fi
 
@@ -207,11 +211,14 @@ ensure_preprocess_gen() {
   tmp="preprocess_gen.c.tmp.$$"
   rm -f "$tmp"
 
-  if [ -s preprocess_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ]; then
+  if [ -s preprocess_gen.c ] && [ "$XLANG_FORCE_REGEN_GEN" != "1" ] \
+     && ! { [ -e "$seed" ] && [ "$seed" -nt preprocess_gen.c ]; }; then
     log "preprocess_gen.c: pinned ($(bytes_of preprocess_gen.c) bytes; XLANG_FORCE_REGEN_GEN=1 to regen)"
-  elif seed_ok "$seed" && [ ! -s preprocess_gen.c ]; then
+  elif seed_ok "$seed" && { [ ! -s preprocess_gen.c ] || [ "$seed" -nt preprocess_gen.c ]; }; then
+    # 7.4.4 v2: a pin newer than the worktree gen refreshes it (mtime trap —
+    # see the driver_gen comment above).
     cp -f "$seed" preprocess_gen.c
-    log "preprocess_gen.c: restored from $seed"
+    log "preprocess_gen.c: restored from $seed (pin newer)"
   else
     ensure_xlang_c
     if "./$XLANG_C" -L src/lexer -E -E-extern src/preprocess/preprocess.x >"$tmp" 2>/dev/null \
