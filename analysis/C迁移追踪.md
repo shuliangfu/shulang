@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 路径／验收／为何开）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端 `/tmp` 日志、「证：…」长叙事。波次流水只写 `[自举进度.md](自举进度.md)` §6。  
 > **考古副本**（本波重写前全文）：`[archive/C迁移追踪-流水账归档-20260825.md](archive/C迁移追踪-流水账归档-20260825.md)`  
-> **刷新**：2026-09-09 · tip **`1adfbaa58`** · 钉盘 **`e194cd294`**（不随微步升钉）
+> **刷新**：2026-09-09 · tip **`f8156c1c6`** · 钉盘 **`e194cd294`**（不随微步升钉）
 
 ### 维护约定
 
@@ -278,7 +278,7 @@
 
 - ✅ **9.3.1** ed25519 ref10 宏重命名 — **勘正：机制已落地 ✅**：`runtime_ed25519_ref10_glue.from_x.c`（R2 thin+rest）即本条机制——ref10 实现（.inc）经**宏重命名**发射 `*_impl_c`，thin .x 供 `ed25519_ref10_create_keypair/_sign/_verify` 包装；sha512 符号由 `runtime_crypto_inc_glue` 消费。门证据＝`run-f04-std-crypto-closure-gate` 双端 ok（v16–v19/crypto/inventory 全 1）＋`run-std-crypto-chacha20-poly1305-gate` 双端 ok（ed25519 列观测）。9.2.3 同机制并条。链上 aes-gcm 门 Ubuntu 红＝`crypto_mem_eq_c` UNDEF（std 红簇既有，非 9.3 域，立卡不动）
 - ✅ **9.3.2** zlib macros `#undef` — **勘正：桥已立 ✅**：zlib 胶层即「`#undef` 宏 + 直调真 `deflateInit2_`／`inflateInit2_`」的 C 桥 TU（9.2.2 勘正同指此域）；门＝`run-f04-std-compress-zlib-gate` 双端 ok
-- ✅ **9.3.3** `#if` host 字面量 — **双端闭环 ✅（`c5b2178a0`）**：两层。(a) host 字面量＝wave98 已立权威：`cfg_host_os_lit`／`cfg_host_arch_lit`（seed 内 C `#if defined(__APPLE__)` 编译期探针）→ `cfg_eval.x` `target_os`／`target_arch` 比较；(b) 本波根修**裸十进制字面量**：`preprocess_eval_condition_c`（`runtime_pipeline_abi.x` 纯权威）单 token 路径在 `-D` 查表前先做纯数字判定——非零真／`"0"` 假（旧逻辑数字 token 落 define 表恒假，`#if 1` 恒走 #else）；weak 冷孪生 `runtime_driver_strict_glue_stubs` 同 commit 同语义＋surface 镜像同 body。验收＝.o 直连 probe `lit1=1/lit0=0/lit2=1/FOO=0/empty=0` 双端＋`run-preprocess.sh` run=16 双端（新增 `if_numeric{1,0}.x` 两 case）＋双端 L2 5/5＠`c5b2178a0`＋12 门全 ok。残立卡：C 全表达式文法（`defined()`／`&&`／十六进制／后缀）仍走 cfg_eval X 方言（更大域）；macOS prove `runtime_pipeline_abi` 1832 行符号差＝既有漂移红（stash 基线同，非本刀）。**运维发现**：mega `.x` 体内改动需 `XLANG_HOST_CC_SEED_FORCE=1` 全量 thin+rest 重建——平日 try-heat 走 inject-only thin 捷径不吃 mega 体（`FORCE` 环境变量名无效，须用全名）
+- ✅ **9.3.3** `#if` host 字面量 — **双端闭环 ✅（`c5b2178a0`）**：两层。(a) host 字面量＝wave98 已立权威：`cfg_host_os_lit`／`cfg_host_arch_lit`（seed 内 C `#if defined(__APPLE__)` 编译期探针）→ `cfg_eval.x` `target_os`／`target_arch` 比较；(b) 本波根修**裸十进制字面量**：`preprocess_eval_condition_c`（`runtime_pipeline_abi.x` 纯权威）单 token 路径在 `-D` 查表前先做纯数字判定——非零真／`"0"` 假（旧逻辑数字 token 落 define 表恒假，`#if 1` 恒走 #else）；weak 冷孪生 `runtime_driver_strict_glue_stubs` 同 commit 同语义＋surface 镜像同 body。验收＝.o 直连 probe `lit1=1/lit0=0/lit2=1/FOO=0/empty=0` 双端＋`run-preprocess.sh` run=16 双端（新增 `if_numeric{1,0}.x` 两 case）＋双端 L2 5/5＠`c5b2178a0`＋12 门全 ok。残立卡：C 全表达式文法（`defined()`／`&&`／十六进制／后缀）仍走 cfg_eval X 方言（更大域）；prove `runtime_pipeline_abi` surface regen＝2044 nm T IDENTICAL＠`f8156c1c6`（原 1833 行漂移已闭）。**运维发现**：mega `.x` 体内改动需 `XLANG_HOST_CC_SEED_FORCE=1` 全量 thin+rest 重建——平日 try-heat 走 inject-only thin 捷径不吃 mega 体（`FORCE` 环境变量名无效，须用全名）
 - ✅ **9.3.4** C11 stdatomic／GCC `__atomic` — **勘正：语言极限有意 C 桥 ✅（standing）**：`runtime_atomic_glue.from_x.c`（572 行）＝`<stdatomic.h>` + `__atomic_load_n/store_n/compare_exchange_n/fetch_add…` builtins（`USE_C11_ATOMICS` 门）——xlang asm 后端不发射原子指令，C 桥即长期权威形态。门＝`run-f-atomic-v1-gate` Ubuntu 金标 ok（static/ensure/glue/ordering/widen 全 1）；macOS ordering/widen 红＝`std_atomic_*` 5 dup（本地 std/atomic/atomic.o 构建态既有，与本桥无关，立卡）
 - ✅ **9.3.5** SIMD intrinsics — **勘正：桥已立 ✅（standing）**：`runtime_arrow_simd_glue.from_x.c`（292 行）SIMD intrinsics C 桥；门＝`run-simd-s1-gate` 双端 ok（daily 12 之一，run=2）。**9.2.5 并条**（四 arrow kernel `_impl`＝本桥，非 libc Cap）。残立卡：`run-f-simd-v1-gate` Ubuntu 红＝autovec/prod/intr/shuffle=0（构建态）。前 tip L2＠`7c1b71306` `arrow_kernel_rc` Ubuntu abort＝SysV 8B ABI，已根修＠`b5cf55fd0`（非本桥）
 
