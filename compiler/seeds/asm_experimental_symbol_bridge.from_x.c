@@ -95,20 +95,40 @@ XLANG_WEAK int32_t main_run_compiler_c(int32_t argc, uint8_t *argv) {
   return driver_run_compiler_full(argc, argv);
 }
 
-/** build_asm/asm.o 未导出 elf 路径时弱符号兜底（实验链可链通；完整功能仍须真 asm_codegen_elf_o）。 */
-XLANG_WEAK int32_t asm_codegen_elf_o(void *module, void *arena, void *ctx, void *elf_ctx, void *out_buf) {
-  (void)module;
-  (void)arena;
-  (void)ctx;
-  (void)elf_ctx;
-  (void)out_buf;
-  return -1;
-}
-
-/** asm 模块导出名与 runtime 期望的 asm_asm_codegen_elf_o 对齐；pipeline_x.o 链入时由其强符号覆盖。 */
-XLANG_WEAK int32_t asm_asm_codegen_elf_o(void *module, void *arena, void *ctx, void *elf_ctx, void *out_buf) {
-  return asm_codegen_elf_o(module, arena, ctx, elf_ctx, out_buf);
-}
+/*
+ * The 5-arg weak asm_codegen_elf_o that returned -1 was deleted,
+ * and with it the weak asm_asm_codegen_elf_o alias that only
+ * forwarded into that -1.
+ *
+ * Why: ELF and Mach-O pick the first weak definition of a name.
+ * Darwin product USER_ASM_LINK includes this bridge.o (Linux
+ * product does not; experimental/strict_glue still do). Product
+ * emit is PREFIX asm_asm_codegen_elf_o from strong
+ * user_asm_seed_bridge — there is no unprefixed product provider.
+ * Keeping the alias as a weak forward to unprefixed therefore
+ * UNDEFs Darwin product ld (`_asm_codegen_elf_o` referenced from
+ * this TU). The -1 body was the Cap trap: without seed_bridge,
+ * callers of the prefix name got ok=-1 → CG002 code_len=0.
+ * Darwin product nm showed T asm_codegen_elf_o = `mov w0,#-1`
+ * next to the real strong prefix. Same class as the
+ * typeck_x_ast / parser_parse_into_buf / 4-arg asm_codegen_ast
+ * weak stubs deleted in this file.
+ *
+ * Contrast with 4-arg asm_codegen_ast: product authority there
+ * IS the unprefixed name (rt_asm_stub 3-arg GAS), so prefix
+ * aliases stay as weak forwarders. Here product authority is
+ * the prefix name; a second weak prefix def is the first-wins
+ * hazard, not a name-bridge.
+ *
+ * Invariant: every product/strict/experimental link that needs
+ * asm_asm_codegen_elf_o must provide a real body
+ * (user_asm_seed_bridge). Missing provider → link UNDEF, not a
+ * silent -1.
+ *
+ * PLATFORM: SHARED — first-weak-wins is ELF + Mach-O. Darwin
+ * product g05 links this bridge in USER_ASM_LINK; Linux product
+ * USER_ASM_LINK does not (experimental/strict_glue still do).
+ */
 
 /** parser.o 在 SKIP_TYPECK 下常缺 parse_into_buf；弱符号供 bridge 转发。 */
 XLANG_WEAK struct parser_ParseIntoResult parse_into_buf(void *arena, void *module, uint8_t *data,
