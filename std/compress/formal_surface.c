@@ -143,6 +143,12 @@ int32_t std_compress_compress_state_bytes_for(int32_t format) {
   return -1;
 }
 
+/* PLATFORM: SHARED — mod.x max(gzip=128, brotli=32, zstd=32). Needed when
+ * link_only skips co-emit of compress_state_bytes (unified_stream_roundtrip). */
+int32_t std_compress_compress_state_bytes(void) {
+  return 128;
+}
+
 int32_t std_compress_compress_init(std_compress_StreamCompress *sc, uint8_t *state,
                                    int32_t state_cap, int32_t format, int32_t mode) {
   if (sc == 0) {

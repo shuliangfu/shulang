@@ -3192,7 +3192,12 @@ int pipeline_codegen_std_dep_link_only(uint8_t *path) {
        * mod.x+sort.x（std_sort_sort_*），asm 由 fk0 探针按需推入。 */
       "std.ffi",
       "std.db", "std.test",
-      /* 勿 link_only std.compress：纯 .x、无 compress.o；link_only 只留 extern → 未定义符号 */
+      /* std.compress: compress.o is now c_face (formal_surface.c) plus
+       * gzip/zstd/brotli companions. Co-emitting mod.x/lib.x on Ubuntu
+       * stores s.hdr.inited as movq@0, wiping gzip magic so stream
+       * process returns n<0. Darwin -dead_strip hid the duplicate T.
+       * PLATFORM: SHARED — link formal .o; do not host-cc compress/mod.x. */
+      "std.compress",
       /* set/map/queue/vec：预编 .o 权威；-o co-emit 重载/布局易与 preamble 漂移 */
       "std.set", "std.map", "std.queue", "std.vec",
       /* path：path.o = runtime_path_fast 权威；co-emit mod.x 再链 path.o → duplicate */
@@ -3241,6 +3246,21 @@ int pipeline_codegen_std_dep_link_only(uint8_t *path) {
     return 1;
   if (plen >= 10 && memcmp(path, "std.base64", 10) == 0)
     return 1;
+  /* File-path twin of std.compress (Ubuntu dep slots are std/compress/mod.x
+   * or .../std/compress/...). Dotted names already hit k[] "std.compress".
+   * PLATFORM: SHARED — same skip as need_coemit std/ ; plen cap is 64 so
+   * absolute paths must use strstr on the live C string. */
+  if (plen >= 12 && memcmp(path, "std/compress", 12) == 0 &&
+      (path[12] == 0 || path[12] == '/' || path[12] == '.'))
+    return 1;
+  {
+    const char *hit = strstr((const char *)path, "/std/compress");
+    if (hit != NULL) {
+      char nxt = hit[13];
+      if (nxt == 0 || nxt == '/' || nxt == '.')
+        return 1;
+    }
+  }
   /* Cap residual 9.5.3 slice3b: debug trace via xlang_snprintf (%zu now
    * supported by the 10.7.2 fmt authority) + raw fd 2. */
   if (link_abi_getenv("XLANG_DEBUG_PIPE")) {
