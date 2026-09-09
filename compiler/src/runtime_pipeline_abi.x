@@ -14515,7 +14515,7 @@ export function pipeline_codegen_call_num_args_override(prefix: *u8, prefix_len:
 }
 
 /**
- * std.io.driver bridge short names (register/submit_*/wait_readable/register_fixed_buffers).
+ * std.io.driver bridge short names (register/submit_* / wait_readable/register_fixed_buffers).
  * @param name *u8 - function short name; null -> 0
  * @param name_len i32 - name length
  * @return i32 - 1 bridge, 0 otherwise

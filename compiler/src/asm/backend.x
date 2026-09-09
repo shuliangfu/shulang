@@ -2703,9 +2703,6 @@ export function emit_expr_elf(arena: *ASTArena, elf_ctx: *ElfCodegenCtx, expr_re
   }
 }
 
-
-/** ELF è·¯å¾ INDEX ææå°åè£
-å
 /** ELF INDEX effective address into rax/x0 (no load). Must be defined after emit_expr_elf for mutual calls. */
 /** Exported function `emit_index_eff_addr_elf`.
  * Implements `emit_index_eff_addr_elf`.

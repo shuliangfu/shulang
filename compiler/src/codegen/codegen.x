@@ -21309,7 +21309,7 @@ export function codegen_is_libc_conflicting_extern_name(name: *u8, name_len: i32
     return 1;
   }
   /* sendfile 8 — Darwin <sys/socket.h> 6-arg (off_t *, struct sf_hdtr *) vs
-   * XLANG extern i64*/u8* → "conflicting types for 'sendfile'" in fs_formal
+   * XLANG extern i64* / u8* -> "conflicting types for 'sendfile'" in fs_formal
    * KEEP_C, so std/fs/fs.o never lands and product -o UNDEF _std_fs_invalid.
    * Linux 4-arg leftover (fs_libc_sendfile) keeps a prototype via fs_formal
    * #include <sys/sendfile.h>. Darwin 6-arg FFI is unused (fs_libc_sendfile_mac

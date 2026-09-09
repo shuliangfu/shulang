@@ -8050,7 +8050,7 @@ export function glue_try_std_heap_redirect_sym_local(name: *u8, nlen: i32, out: 
     }
   }
   /* bare realloc (7) / free (4) removed: collide with libc FFI in heap.libc co-emit.
-   * PLATFORM: SHARED — typed free_*/realloc_* rows below; seed table same (G.7). */
+   * PLATFORM: SHARED — typed free_* / realloc_* rows below; seed table same (G.7). */
   if (nlen == 9) {
     if (name[0]==97 && name[1]==108 && name[2]==108 && name[3]==111 && name[4]==99 && name[5]==95 && name[6]==105 && name[7]==51 && name[8]==50) {
       if (16 + 1 > cap) { return 0; }
