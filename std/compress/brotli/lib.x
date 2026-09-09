@@ -113,7 +113,9 @@ let xlang_compress_brotli_marker: u8 = 1;
  * See implementation.
  */
 export function xlang_brotli_stream_cast(state: *u8, state_cap: i32): *BrotliStream {
-  let need: i32 = brotli_stream_state_bytes();
+  // PLATFORM: SHARED — cap is 32; do not call brotli_stream_state_bytes()
+  // (co-emitted short name aliases std.compress facade → recurse).
+  let need: i32 = 32;
   if (state == 0 || state_cap < need) {
     return 0 as *BrotliStream;
   }
@@ -197,14 +199,16 @@ export function compress_brotli_smoke_c(): i32 {
  * See implementation.
  */
 export function compress_brotli_stream_state_bytes_c(): i32 {
-  return brotli_stream_state_bytes();
+  // PLATFORM: SHARED — literal cap (same as brotli_stream_state_bytes). Co-emitted
+  // short-name call aliases the facade and recurses (Ubuntu xlang build).
+  return 32;
 }
 
 /**
  * See implementation.
  */
 export function compress_brotli_stream_init_compress_c(state: *u8, state_cap: i32): i32 {
-  let need: i32 = brotli_stream_state_bytes();
+  let need: i32 = 32;
   if (state == 0 || state_cap < need) {
     return -1;
   }
@@ -224,7 +228,7 @@ export function compress_brotli_stream_init_compress_c(state: *u8, state_cap: i3
  * See implementation.
  */
 export function compress_brotli_stream_init_decompress_c(state: *u8, state_cap: i32): i32 {
-  let need: i32 = brotli_stream_state_bytes();
+  let need: i32 = 32;
   if (state == 0 || state_cap < need) {
     return -1;
   }
@@ -335,7 +339,8 @@ export function compress_brotli_stream_decompress_c(state: *u8, state_cap: i32, 
  * See implementation.
  */
 export function compress_brotli_stream_end_c(state: *u8, state_cap: i32): i32 {
-  let hdr_need: i32 = brotli_stream_hdr_bytes();
+  // PLATFORM: SHARED — hdr cap is 16; avoid co-emit short-name alias.
+  let hdr_need: i32 = 16;
   if (state == 0 || state_cap < hdr_need) {
     return 0;
   }
