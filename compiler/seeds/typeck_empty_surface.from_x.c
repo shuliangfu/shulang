@@ -626,6 +626,7 @@ extern int32_t typeck_call_is_fmt_debug_print_any(struct ast_Module * mod, int32
 extern int32_t typeck_check_call_arg_types(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_expr_is_null_keyword(struct ast_ASTArena * arena, int32_t expr_ref);
 extern int32_t typeck_check_expr_call(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
+extern int32_t typeck_cmp_promote_subint_to_i32(struct ast_ASTArena * arena, int32_t expr_ref, int32_t ty_ref);
 extern 
 int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_check_expr_binop_arith(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
@@ -5715,6 +5716,30 @@ int32_t typeck_type_is_aggregate_cmp_operand(struct ast_Module * module, struct 
   return 0;
 }
 
+/* Defect D / 9.6.1 residual: C integer promotions for compare (G.7 ≡ typeck.x).
+ * Sub-int (u8 / NAMED i8,i16,u16) that true-widen to i32 are stamped to i32.
+ * i32 vs i64 / u32 vs i32 stay mismatch (wave666). PLATFORM: SHARED. */
+int32_t typeck_cmp_promote_subint_to_i32(struct ast_ASTArena * arena, int32_t expr_ref, int32_t ty_ref) {
+  int32_t fam = 0;
+  int32_t i32t = 0;
+  if (((arena == 0) || ast_ref_is_null(ty_ref)) || (ty_ref <= 0) || (expr_ref <= 0)) {
+    return 0;
+  }
+  fam = typeck_int_family_id(arena, ty_ref);
+  if ((fam == 0) || (fam < 0)) {
+    return 0;
+  }
+  i32t = ensure_i32_type_ref(arena);
+  if (i32t <= 0) {
+    return 0;
+  }
+  if (typeck_integer_widen_ok_refs(arena, i32t, ty_ref)) {
+    (void)(pipeline_expr_set_resolved_type_ref(arena, expr_ref, i32t));
+    return 1;
+  }
+  return 0;
+}
+
 int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx) {
   int32_t bop_l = pipeline_expr_binop_left_ref_at(arena, expr_ref);
   int32_t bop_r = pipeline_expr_binop_right_ref_at(arena, expr_ref);
@@ -5789,7 +5814,8 @@ int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTAr
       (void)(driver_diagnostic_typeck_invalid_aggregate_cmp(line_ac, col_ac));
       return -(1);
     }
-    /* wave666 Cap residual: hard-fail mixed-type comparison (G.7 ≡ typeck.x). */
+    /* wave666 Cap residual: hard-fail mixed-type comparison (G.7 ≡ typeck.x).
+     * Defect D: C integer promotions (sub-int → i32) before equal check. */
     (void)((lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l)));
     (void)((rt_cmp = pipeline_expr_resolved_type_ref(arena, bop_r)));
     if ((!(ast_ref_is_null(lt_cmp)) && !(ast_ref_is_null(rt_cmp)))) {
@@ -5809,6 +5835,14 @@ int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTAr
       }
       if (((((lt_cmp > 0) && (rt_cmp > 0)) && (lt_cmp <= (arena->num_types)))
            && (rt_cmp <= (arena->num_types)))) {
+        if (!(type_refs_equal(arena, lt_cmp, rt_cmp))) {
+          if ((typeck_cmp_promote_subint_to_i32(arena, bop_l, lt_cmp) != 0)) {
+            (void)((lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l)));
+          }
+          if ((typeck_cmp_promote_subint_to_i32(arena, bop_r, rt_cmp) != 0)) {
+            (void)((rt_cmp = pipeline_expr_resolved_type_ref(arena, bop_r)));
+          }
+        }
         if (!(type_refs_equal(arena, lt_cmp, rt_cmp))) {
           (void)((line_ac = pipeline_expr_line_at(arena, expr_ref)));
           (void)((col_ac = pipeline_expr_col_at(arena, expr_ref)));

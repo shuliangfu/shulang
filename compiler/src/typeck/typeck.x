@@ -14375,9 +14375,49 @@ export function typeck_type_is_aggregate_cmp_operand(module: *Module, arena: *AS
 }
 
 /**
+ * C integer promotions for compare operands (Defect D / 9.6.1 residual).
+ * Sub-int families (u8 / NAMED i8,i16,u16) that true-widen to i32 are
+ * stamped to i32 so `u8 == i32` is not mixed-type T001.
+ * Does NOT apply usual arithmetic conversions: i32 vs i64 / u32 vs i32
+ * stay mismatch (wave666).
+ * @param arena *ASTArena — type/expr pool
+ * @param expr_ref i32 — operand expr to stamp when promoted
+ * @param ty_ref i32 — current resolved type of expr_ref
+ * @return i32 — 1 if stamped to i32; 0 if already i32 / not a sub-int / cannot widen
+ * PLATFORM: SHARED — typeck_gen pin + empty_surface same commit.
+ */
+function typeck_cmp_promote_subint_to_i32(arena: *ASTArena, expr_ref: i32, ty_ref: i32): i32 {
+  // PLATFORM: SHARED — LANG-007 S0: Cap-T001 whole-body unsafe FFI gate.
+  unsafe {
+    let fam: i32 = 0;
+    let i32t: i32 = 0;
+    if (ast.ref_is_null(ty_ref) || ty_ref <= 0 || expr_ref <= 0) {
+      return 0;
+    }
+    fam = typeck_int_family_id(arena, ty_ref);
+    /* Already i32 (family 0) or not an integer. */
+    if (fam == 0 || fam < 0) {
+      return 0;
+    }
+    i32t = ensure_i32_type_ref(arena);
+    if (i32t <= 0) {
+      return 0;
+    }
+    /* G.7: reuse dest-directed true-widen-to-i32 (u8/i8/i16/u16 → i32).
+     * i32→u8 narrow-store is dest=u8, not used here. */
+    if (typeck_integer_widen_ok_refs(arena, i32t, ty_ref)) {
+      pipeline_expr_set_resolved_type_ref(arena, expr_ref, i32t);
+      return 1;
+    }
+    return 0;
+  }
+}
+
+/**
  * Type-check comparison binops (== != < <= > >=). Stamps result as bool.
  * wave317: f32 peer + bare FLOAT_LIT coerce. wave657: hard-fail aggregate operands.
- * wave665: LOGAND/LOGOR require bool. wave666: mixed operand types hard-fail.
+ * wave665: LOGAND/LOGOR require bool. wave666: mixed operand types hard-fail
+ * except Defect D C integer promotions (sub-int → i32) inside the equal gate.
  * @param module *Module
  * @param arena *ASTArena
  * @param expr_ref i32 — EQ/NE/LT/LE/GT/GE expr
@@ -14522,7 +14562,10 @@ return_type_ref: i32, ctx: *PipelineDepCtx): i32 {
        * (or host warning-only for distinct pointer types).
        * Policy (strict, Cap residual): operands must be equal after peer lit coerce
        * (G.7 reuse typeck_coerce_init_lit_to_decl for bare INT_LIT / 0→ptr; float lit
-       * already coerced above). No integer widen, no float widen, no int↔bool.
+       * already coerced above). No float widen, no int↔bool, no i32 vs i64 usual
+       * arithmetic conversions (those were the wave666 false greens).
+       * Defect D / 9.6.1 residual: C integer promotions ARE applied — sub-int
+       * families (u8 / NAMED i8,i16,u16) stamp to i32 so `u8 == i32` is not T001.
        * Soft: unknown/null operand type (incomplete resolve) is not a hard leaf.
        * G.7: type_refs_equal; diag comparison_type_mismatch.
        * PLATFORM: SHARED — seed typeck_gen + empty_surface + diagnostic twin same commit.
@@ -14542,6 +14585,15 @@ return_type_ref: i32, ctx: *PipelineDepCtx): i32 {
           lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l);
         }
         if (lt_cmp > 0 && rt_cmp > 0 && lt_cmp <= arena.num_types && rt_cmp <= arena.num_types) {
+          if (!type_refs_equal(arena, lt_cmp, rt_cmp)) {
+            /* Defect D: promote sub-int operands to i32, then re-check equal. */
+            if (typeck_cmp_promote_subint_to_i32(arena, bop_l, lt_cmp) != 0) {
+              lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l);
+            }
+            if (typeck_cmp_promote_subint_to_i32(arena, bop_r, rt_cmp) != 0) {
+              rt_cmp = pipeline_expr_resolved_type_ref(arena, bop_r);
+            }
+          }
           if (!type_refs_equal(arena, lt_cmp, rt_cmp)) {
             line_ac = pipeline_expr_line_at(arena, expr_ref);
             col_ac = pipeline_expr_col_at(arena, expr_ref);

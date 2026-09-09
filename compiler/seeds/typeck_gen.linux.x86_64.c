@@ -1918,6 +1918,7 @@ extern int32_t typeck_check_call_ptr_struct_compat(struct ast_Module * module, s
 extern int32_t typeck_check_call_slice_region(struct ast_Module * module, struct ast_ASTArena * arena, int32_t call_expr_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_check_expr_call(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_type_is_aggregate_cmp_operand(struct ast_Module * module, struct ast_ASTArena * arena, int32_t ty_ref);
+extern int32_t typeck_cmp_promote_subint_to_i32(struct ast_ASTArena * arena, int32_t expr_ref, int32_t ty_ref);
 extern int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_check_expr_binop_arith(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
 extern int32_t typeck_check_expr_binop(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx);
@@ -11614,6 +11615,28 @@ int32_t typeck_type_is_aggregate_cmp_operand(struct ast_Module * module, struct 
     return 0;
   }
 }
+int32_t typeck_cmp_promote_subint_to_i32(struct ast_ASTArena * arena, int32_t expr_ref, int32_t ty_ref) {
+  {
+    int32_t fam = 0;
+    int32_t i32t = 0;
+    if (((((arena == 0) || ast_ref_is_null(ty_ref)) || (ty_ref <= 0)) || (expr_ref <= 0))) {
+      return 0;
+    }
+    (void)((fam = typeck_int_family_id(arena, ty_ref)));
+    if (((fam == 0) || (fam < 0))) {
+      return 0;
+    }
+    (void)((i32t = typeck_ensure_i32_type_ref(arena)));
+    if ((i32t <= 0)) {
+      return 0;
+    }
+    if (typeck_integer_widen_ok_refs(arena, i32t, ty_ref)) {
+      (void)(pipeline_expr_set_resolved_type_ref(arena, expr_ref, i32t));
+      return 1;
+    }
+    return 0;
+  }
+}
 int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTArena * arena, int32_t expr_ref, int32_t return_type_ref, struct ast_PipelineDepCtx * ctx) {
   {
     int32_t bop_l = pipeline_expr_binop_left_ref_at(arena, expr_ref);
@@ -11722,7 +11745,12 @@ int32_t typeck_check_expr_binop_cmp(struct ast_Module * module, struct ast_ASTAr
       (void)((lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l)));
     }
   }
-  (((((lt_cmp > 0) && (rt_cmp > 0)) && (lt_cmp <=((arena)->num_types))) && (rt_cmp <=((arena)->num_types))) ? ({   (!(typeck_type_refs_equal(arena, lt_cmp, rt_cmp)) ? ({   (void)((line_ac = pipeline_expr_line_at(arena, expr_ref)));
+  (((((lt_cmp > 0) && (rt_cmp > 0)) && (lt_cmp <=((arena)->num_types))) && (rt_cmp <=((arena)->num_types))) ? ({   (!(typeck_type_refs_equal(arena, lt_cmp, rt_cmp)) ? ({   ((typeck_cmp_promote_subint_to_i32(arena, bop_l, lt_cmp) !=0) ? ({   (void)((lt_cmp = pipeline_expr_resolved_type_ref(arena, bop_l)));
+ }) : 0);
+  ((typeck_cmp_promote_subint_to_i32(arena, bop_r, rt_cmp) !=0) ? ({   (void)((rt_cmp = pipeline_expr_resolved_type_ref(arena, bop_r)));
+ }) : 0);
+ }) : 0);
+  (!(typeck_type_refs_equal(arena, lt_cmp, rt_cmp)) ? ({   (void)((line_ac = pipeline_expr_line_at(arena, expr_ref)));
   (void)((col_ac = pipeline_expr_col_at(arena, expr_ref)));
   (void)(driver_diagnostic_typeck_comparison_type_mismatch(line_ac, col_ac));
   return -1;
