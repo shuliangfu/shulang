@@ -2058,13 +2058,33 @@ uint8_t *xlang_driver_exec_scan_out_path_opaque(int32_t argc, uint8_t *argv_opaq
     return (uint8_t *)(void *)driver_exec_scan_out_path(argc, (char **)(void *)argv_opaque);
 }
 
+/* 9.4.3 v1: driver flags that consume a separate value argument.
+ * Mirrors the parse authorities' i+2 advance — main.x driver_argv_parse_x_path
+ * / driver_argv_parse_x (-target, -L, -backend, -o, -O) and the rt_compile
+ * surface parse (-target-cpu) — plus the usage tables above. Exact matches
+ * only: attached forms ("-O1", "-E-extern") are standalone flags and are
+ * skipped by the generic '-' rule. Keep in lockstep with those parsers
+ * (same commit, same semantics). PLATFORM: SHARED. */
+static int xlang_driver_run_flag_consumes_value(const char *s) {
+    if (s == NULL || s[0] != '-')
+        return 0;
+    if (strcmp(s, "-o") == 0 || strcmp(s, "-O") == 0 || strcmp(s, "-L") == 0 ||
+        strcmp(s, "-backend") == 0 || strcmp(s, "-target") == 0 ||
+        strcmp(s, "-target-cpu") == 0)
+        return 1;
+    return 0;
+}
+
 /* Permanent OS residual: wait for product exe (spawn/fork/exec).
  * Pure wave42 owns null/non_exe orch; this is process boundary only.
  * 9.4.3 C ABI argv: child argv = [exe] + user positionals after the .x source
- * path. Driver flags stay driver-owned (not forwarded); "-o" also consumes its
- * value (the run path appends the injected temp pair at argv tail; an explicit
- * -o product path is likewise a driver artifact). argv[0] is the exe path per
- * C convention. Falls back to [exe] only when the source path / argv is absent.
+ * path. Driver flags stay driver-owned (not forwarded); value-taking flags
+ * (-o, -O, -L, -backend, -target, -target-cpu — see
+ * xlang_driver_run_flag_consumes_value) also consume their separate value so
+ * it does not leak into the child argv (the run path appends the injected
+ * "-o <temp>" pair at argv tail; an explicit -o product path is likewise a
+ * driver artifact). argv[0] is the exe path per C convention. Falls back to
+ * [exe] only when the source path / argv is absent.
  * PLATFORM: WINDOWS _spawnvp; POSIX fork+execv+xlang_waitpid_retry. */
 int32_t xlang_driver_exec_spawn_wait(uint8_t *exe, int32_t argc, uint8_t *argv_opaque) {
     const char *path;
@@ -2097,9 +2117,17 @@ int32_t xlang_driver_exec_spawn_wait(uint8_t *exe, int32_t argc, uint8_t *argv_o
                 const char *s = argv[i];
                 if (s == NULL)
                     continue;
-                if (s[0] == '-' && s[1] == 'o' && s[2] == '\0') {
-                    /* Skip "-o" and its value (injected temp or explicit path). */
-                    i++;
+                if (xlang_driver_run_flag_consumes_value(s)) {
+                    /* Skip the value-taking flag and its separate value
+                     * (e.g. the injected "-o <temp>" tail pair; -O/-L/-backend/
+                     * -target/-target-cpu values are driver-owned, not user
+                     * args — 9.4.3 v1 flag-value table). Guard: only consume
+                     * a next entry that exists and does not start with '-'
+                     * (documented values are paths/levels/triples, never
+                     * flag-shaped); a dangling flag at the tail must not eat
+                     * the injected "-o" pair and leak the temp path. */
+                    if (i + 1 < argc && argv[i + 1] != NULL && argv[i + 1][0] != '-')
+                        i++;
                     continue;
                 }
                 if (s[0] == '-')

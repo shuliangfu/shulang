@@ -127,7 +127,8 @@ int driver_exec_compiled_body(int argc, uint8_t *argv_opaque);
 uint8_t *xlang_driver_exec_scan_out_path_opaque(int32_t argc, uint8_t *argv_opaque);
 /** Permanent OS residual: spawn/fork product exe and wait. 9.4.3: run_argv
  * rides along; user positionals after the .x source path become the child's
- * argv (C ABI). PLATFORM: WIN vs POSIX. */
+ * argv (C ABI). v1: value-taking driver flags (-o/-O/-L/-backend/-target/
+ * -target-cpu) also skip their separate value. PLATFORM: WIN vs POSIX. */
 int32_t xlang_driver_exec_spawn_wait(uint8_t *exe, int32_t argc, uint8_t *argv_opaque);
 
 /**

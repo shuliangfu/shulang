@@ -5707,8 +5707,11 @@ export extern "C" function xlang_driver_exec_scan_out_path_opaque(argc: i32, arg
 /**
  * Cap residual: run product exe and wait for exit status (spawn/fork/exec).
  * 9.4.3 C ABI argv: the child receives [exe] + user positionals after the .x
- * source path in run_argv; driver flags (and the "-o" pair, injected temp or
- * explicit) stay driver-owned and are not forwarded. argv[0] = exe path.
+ * source path in run_argv; driver flags stay driver-owned and are not
+ * forwarded. v1 flag-value table: value-taking flags ("-o", "-O", "-L",
+ * "-backend", "-target", "-target-cpu") also consume their separate value so
+ * it does not leak into the child argv (the injected "-o <temp>" pair and an
+ * explicit -o product path are driver artifacts). argv[0] = exe path.
  * @param exe *u8 — NUL-terminated path; null → 1
  * @param argc i32 — run_argv length; out of [1,512] or null argv → exe-only child
  * @param argv_opaque *u8 — opaque char** run_argv from cmd_run; null allowed
