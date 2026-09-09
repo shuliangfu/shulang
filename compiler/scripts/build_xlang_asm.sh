@@ -1719,7 +1719,14 @@ ensure_pipeline_asm_run_all_partial_obj() {
   PARTIAL="$BUILD_DIR/pipeline_asm_run_all_partial.o"
   SYMS="$BUILD_DIR/pipeline_asm_run_all_export.txt"
   ALIAS_O="$BUILD_DIR/pipeline_asm_run_all_alias.o"
-  if [ ! -f "$ALIAS_O" ] || [ "seeds/pipeline_asm_run_all_alias.from_x.c" -nt "$ALIAS_O" ]; then
+  # 7.2.1 ninth knife: .x authority via cc_inc_tu --auto prefer lane.
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f "$ALIAS_O" ] || [ src/pipeline_asm_run_all_alias.x -nt "$ALIAS_O" ] \
+       || { [ -f seeds/pipeline_asm_run_all_alias.from_x.c ] && [ seeds/pipeline_asm_run_all_alias.from_x.c -nt "$ALIAS_O" ]; }; then
+      echo " cc_inc_tu --auto (src/pipeline_asm_run_all_alias.x) -> $ALIAS_O"
+      sh scripts/cc_inc_tu.sh --auto "$ALIAS_O"
+    fi
+  elif [ ! -f "$ALIAS_O" ] || [ "seeds/pipeline_asm_run_all_alias.from_x.c" -nt "$ALIAS_O" ]; then
   echo " cc -c seeds/pipeline_asm_run_all_alias.from_x.c -> $ALIAS_O"
   sh scripts/cc_inc_tu.sh seeds/pipeline_asm_run_all_alias.from_x.c "$ALIAS_O"
   fi
