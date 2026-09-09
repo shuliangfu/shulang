@@ -446,6 +446,7 @@
 |----|------|------|
 | Darwin fmt 收集 FMT001（挡 `./xbuild l4`） | ✅ | Darwin `xlang_dir_open` 补 `O_DIRECTORY`＠`e194cd294`；双端 L4 129/129；本波 fmt 邻域仍 0 |
 | Darwin `-backend c` invoke_cc SEGV | ✅ | `pipeline_asm_compute_frame_size_c` min scratch 512→2048＋w157 CALL (n+1)*32／ADDR_OF 51（.x＋seed）；Darwin／Ubuntu `-backend c -o` hello42＠`8281d5777`；不升钉 |
+| `xlang build` on-demand gzip 推送面（c_face 桩假绿） | ✅ | c_face 转发 `std_compress_gzip_gzip_*`；heavy.x sg15 伴推 zlib.o/gzip.o；L8b/seed facade 针开火 `-lz`＠`189eb9b08`；Darwin gzip 真往返；不升钉；残＝zstd/brotli catalog |
 | mac scratch 点分 dep 不共发射（UN `_core_*`） | ✅ | `pipeline_asm_user_deps_need_coemit` 不再把一切 `core.*` 当 hosted；仅 in-tree `core/` 12 名跳共发射；scratch `core.m6` 共发射；seed_bridge 混编仍跳 hosted core＠`8236ed6d8`；不升钉 |
 | L8c heavy.x fn typeck／-E 发射缺口 | ✅ | L8c 头补 5 个 L8b extern（`needs_std_{thread,vec,http}`＋`labi_od_rel_{vec,http}`）；on_demand 函数体不动；`-E` typeck OK 且发射 T；g05 `L8b+L8c` `.x` split＠`d3f0a2feb`；不升钉 |
 | L8b g15 seed count 孪生＋c_face T（24 vs 28 航道非确定性） | ✅ | seed `labi_od_simple_group_sym_count(g==15)` 24→28（L8c 失败＝full-seed 胜者）；c_face 补 4 stream T；`.so` 从 slice 块挪回 compress 伴块；heavy.x 不动＠`51327d07b`／`e6c8d28f2` |
