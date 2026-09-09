@@ -2471,7 +2471,7 @@ const char *labi_od_zlib_undef_sym_at(int i) {
 }
 const char *labi_od_compress_zlib_marker(void) { return "xlang_compress_zlib_marker"; }
 
-int labi_od_zstd_undef_sym_count(void) { return 2; }
+int labi_od_zstd_undef_sym_count(void) { return 10; }
 const char *labi_od_zstd_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2479,11 +2479,28 @@ const char *labi_od_zstd_undef_sym_at(int i) {
     return "ZSTD_";
   if (i == 1)
     return "_ZSTD";
+  /* PLATFORM: SHARED — facade names for `xlang build` user.o (asm ld compress_o=NULL). */
+  if (i == 2)
+    return "_std_compress_zstd_compress";
+  if (i == 3)
+    return "_std_compress_zstd_decompress";
+  if (i == 4)
+    return "std_compress_zstd_compress";
+  if (i == 5)
+    return "std_compress_zstd_decompress";
+  if (i == 6)
+    return "_std_compress_zstd_zstd_compress";
+  if (i == 7)
+    return "_std_compress_zstd_zstd_decompress";
+  if (i == 8)
+    return "std_compress_zstd_zstd_compress";
+  if (i == 9)
+    return "std_compress_zstd_zstd_decompress";
   return NULL;
 }
 const char *labi_od_compress_zstd_marker(void) { return "xlang_compress_zstd_marker"; }
 
-int labi_od_brotli_undef_sym_count(void) { return 2; }
+int labi_od_brotli_undef_sym_count(void) { return 10; }
 const char *labi_od_brotli_undef_sym_at(int i) {
   if (i < 0)
     return NULL;
@@ -2491,6 +2508,23 @@ const char *labi_od_brotli_undef_sym_at(int i) {
     return "BrotliEncoderCompress";
   if (i == 1)
     return "BrotliDecoderDecompress";
+  /* PLATFORM: SHARED — facade names for `xlang build` user.o (asm ld compress_o=NULL). */
+  if (i == 2)
+    return "_std_compress_brotli_compress";
+  if (i == 3)
+    return "_std_compress_brotli_decompress";
+  if (i == 4)
+    return "std_compress_brotli_compress";
+  if (i == 5)
+    return "std_compress_brotli_decompress";
+  if (i == 6)
+    return "_std_compress_brotli_brotli_compress";
+  if (i == 7)
+    return "_std_compress_brotli_brotli_decompress";
+  if (i == 8)
+    return "std_compress_brotli_brotli_compress";
+  if (i == 9)
+    return "std_compress_brotli_brotli_decompress";
   return NULL;
 }
 const char *labi_od_compress_brotli_marker(void) { return "xlang_compress_brotli_marker"; }
@@ -4818,10 +4852,18 @@ void xlang_asm_ld_append_on_demand_user_objs(const char *link_argv0, const char 
                                                         "../std/compress/zlib/zlib.o");
                     (void)xlang_ensure_formal_std_make_o(include_root, "std/compress/gzip/gzip.o",
                                                         "../std/compress/gzip/gzip.o");
+                    (void)xlang_ensure_formal_std_make_o(include_root, "std/compress/zstd/zstd.o",
+                                                        "../std/compress/zstd/zstd.o");
+                    (void)xlang_ensure_formal_std_make_o(include_root, "std/compress/brotli/brotli.o",
+                                                        "../std/compress/brotli/brotli.o");
                 }
                 link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/zlib/zlib.o", lib_roots, n_lib_roots,
                                          bank, argv, la, max_la, NULL);
                 link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/gzip/gzip.o", lib_roots, n_lib_roots,
+                                         bank, argv, la, max_la, NULL);
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/zstd/zstd.o", lib_roots, n_lib_roots,
+                                         bank, argv, la, max_la, NULL);
+                link_abi_asm_ld_push_obj(NULL, link_argv0, "std/compress/brotli/brotli.o", lib_roots, n_lib_roots,
                                          bank, argv, la, max_la, NULL);
                 /* Glue + -lz stay in asm_ld_append_compress_libs (needs_zlib).
                  * Do not push runtime_compress_zlib_glue.o here (duplicate T). */

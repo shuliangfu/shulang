@@ -143,6 +143,10 @@ formal_mod_key_for_out() {
     # PLATFORM: SHARED — 9.2.2 real zlib/gzip product .o (not the facade c_face stub).
     ../std/compress/zlib/zlib.o|std/compress/zlib/zlib.o|*std/compress/zlib/zlib.o) printf '%s' "std/compress/zlib/zlib.o" ;;
     ../std/compress/gzip/gzip.o|std/compress/gzip/gzip.o|*std/compress/gzip/gzip.o) printf '%s' "std/compress/gzip/gzip.o" ;;
+    # PLATFORM: SHARED — zstd/brotli submodule product .o (mod + lib FFI to libzstd/libbrotli*).
+    # Facade compress.o stays c_face; do not host-cc std/compress/mod.x (bare deflate vs zlib.h).
+    ../std/compress/zstd/zstd.o|std/compress/zstd/zstd.o|*std/compress/zstd/zstd.o) printf '%s' "std/compress/zstd/zstd.o" ;;
+    ../std/compress/brotli/brotli.o|std/compress/brotli/brotli.o|*std/compress/brotli/brotli.o) printf '%s' "std/compress/brotli/brotli.o" ;;
     ../std/io/driver.o|std/io/driver.o|*std/io/driver.o) printf '%s' "std/io/driver.o" ;;
     # PLATFORM: SHARED — pure-asm std.io ctx-timeout formal (STD-091; ≠ driver nested).
     ../std/io/io.o|std/io/io.o|*std/io/io.o) printf '%s' "std/io/io.o" ;;
@@ -283,6 +287,10 @@ formal_mod_spec_for_key() {
     # Submodule vehicles are the product path: compress2 / deflateInit2 glue + -lz.
     std/compress/zlib/zlib.o) printf '%s' "mod|1|../std/compress/zlib/mod.x|../std/compress/zlib/libz.x" ;;
     std/compress/gzip/gzip.o) printf '%s' "mod|1|../std/compress/gzip/mod.x|../std/compress/gzip/libz.x" ;;
+    # PLATFORM: SHARED — zstd/brotli ≡ gzip: submodule vehicle is the product path.
+    # lib.x is extern C FFI (ZSTD_* / BrotliEncoder*/Decoder*); ld -l* is the lib face.
+    std/compress/zstd/zstd.o) printf '%s' "mod|1|../std/compress/zstd/mod.x|../std/compress/zstd/lib.x" ;;
+    std/compress/brotli/brotli.o) printf '%s' "mod|1|../std/compress/brotli/mod.x|../std/compress/brotli/lib.x" ;;
     std/io/driver.o) printf '%s' "c_face|0|../std/io/driver_formal_surface.c" ;;
     # PLATFORM: SHARED — pure-asm std.io ctx-timeout faces (≡ mod.x; STD-091).
     std/io/io.o) printf '%s' "c_face|0|../std/io/formal_surface.c" ;;
@@ -363,6 +371,8 @@ formal_mod_all_keys() {
     std/compress/compress.o \
     std/compress/zlib/zlib.o \
     std/compress/gzip/gzip.o \
+    std/compress/zstd/zstd.o \
+    std/compress/brotli/brotli.o \
     std/io/driver.o \
     std/io/io.o \
     std/debug/debug.o \
@@ -1902,6 +1912,18 @@ if command -v nm >/dev/null 2>&1 && [ -f "$out_o" ]; then
       # Import mangle is std_compress_gzip_* (gzip_compress → gzip_gzip_compress).
       # Leaf basename gzip would yield std_gzip_* (Ubuntu objcopy).
       leaf="compress_gzip"
+      ;;
+    std/compress/zstd/zstd.o)
+      # PLATFORM: SHARED — nested module std.compress.zstd product face.
+      # Import mangle is std_compress_zstd_* (zstd_compress → zstd_zstd_compress).
+      # Leaf basename zstd would yield std_zstd_* (Ubuntu objcopy). Twin of gzip.
+      leaf="compress_zstd"
+      ;;
+    std/compress/brotli/brotli.o)
+      # PLATFORM: SHARED — nested module std.compress.brotli product face.
+      # Import mangle is std_compress_brotli_* (brotli_compress → brotli_brotli_compress).
+      # Leaf basename brotli would yield std_brotli_* (Ubuntu objcopy). Twin of gzip.
+      leaf="compress_brotli"
       ;;
     std/db/kv/kv.o)
       # PLATFORM: SHARED — nested module std.db.kv product face.

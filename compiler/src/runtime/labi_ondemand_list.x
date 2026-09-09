@@ -5030,20 +5030,24 @@ export function labi_od_compress_zlib_marker(): *u8 {
 /**
  * Count of zstd UNDEF/prefix needles for link_abi_obj_needs_zstd.
  * Product complete set (G.7): seed authority prefix needles ZSTD_ and _ZSTD
- * (Cap residual has_undef_sym does substring match on UNDEF lines).
- * @return i32 — 2
+ * (Cap residual has_undef_sym does substring match on UNDEF lines) plus
+ * facade / submodule mangles so `xlang build` user.o fires needs_zstd while
+ * asm ld passes compress_o=NULL.
+ * @return i32 — 10
  * PLATFORM: SHARED — must match zstd C API surface used by product compress gate
  */
 #[no_mangle]
 export function labi_od_zstd_undef_sym_count(): i32 {
-  return 2;
+  return 10;
 }
 
 /**
  * zstd UNDEF/prefix needle at index (needs_zstd probe table).
- * @param i i32 — index in [0, 2)
+ * @param i i32 — index in [0, 10)
  * @return *u8 — static C string needle, or null if out of range
  * PLATFORM: SHARED — G.7 complete zstd undef/prefix authority
+ * 0..1 C API prefix; 2..5 Mach-O/ELF facade (`std_compress_zstd_compress`);
+ * 6..9 Mach-O/ELF submodule (`std_compress_zstd_zstd_compress`).
  */
 #[no_mangle]
 export function labi_od_zstd_undef_sym_at(i: i32): *u8 {
@@ -5056,6 +5060,38 @@ export function labi_od_zstd_undef_sym_at(i: i32): *u8 {
   }
   if (i == 1) {
     let p: *u8 = "_ZSTD";
+    return p;
+  }
+  if (i == 2) {
+    let p: *u8 = "_std_compress_zstd_compress";
+    return p;
+  }
+  if (i == 3) {
+    let p: *u8 = "_std_compress_zstd_decompress";
+    return p;
+  }
+  if (i == 4) {
+    let p: *u8 = "std_compress_zstd_compress";
+    return p;
+  }
+  if (i == 5) {
+    let p: *u8 = "std_compress_zstd_decompress";
+    return p;
+  }
+  if (i == 6) {
+    let p: *u8 = "_std_compress_zstd_zstd_compress";
+    return p;
+  }
+  if (i == 7) {
+    let p: *u8 = "_std_compress_zstd_zstd_decompress";
+    return p;
+  }
+  if (i == 8) {
+    let p: *u8 = "std_compress_zstd_zstd_compress";
+    return p;
+  }
+  if (i == 9) {
+    let p: *u8 = "std_compress_zstd_zstd_decompress";
     return p;
   }
   return 0 as *u8;
@@ -5074,20 +5110,24 @@ export function labi_od_compress_zstd_marker(): *u8 {
 
 /**
  * Count of brotli UNDEF needles for link_abi_obj_needs_brotli (exact libbrotli symbols).
- * Product complete set (G.7): seed authority BrotliEncoderCompress + BrotliDecoderDecompress.
- * @return i32 — 2
+ * Product complete set (G.7): seed authority BrotliEncoderCompress + BrotliDecoderDecompress
+ * plus facade / submodule mangles so `xlang build` user.o fires needs_brotli while
+ * asm ld passes compress_o=NULL.
+ * @return i32 — 10
  * PLATFORM: SHARED — must match brotli C API surface used by product compress gate
  */
 #[no_mangle]
 export function labi_od_brotli_undef_sym_count(): i32 {
-  return 2;
+  return 10;
 }
 
 /**
  * brotli UNDEF needle at index (needs_brotli probe table; exact symbols).
- * @param i i32 — index in [0, 2)
+ * @param i i32 — index in [0, 10)
  * @return *u8 — static C string symbol, or null if out of range
  * PLATFORM: SHARED — G.7 complete brotli undef authority
+ * 0..1 C API; 2..5 Mach-O/ELF facade (`std_compress_brotli_compress`);
+ * 6..9 Mach-O/ELF submodule (`std_compress_brotli_brotli_compress`).
  */
 #[no_mangle]
 export function labi_od_brotli_undef_sym_at(i: i32): *u8 {
@@ -5100,6 +5140,38 @@ export function labi_od_brotli_undef_sym_at(i: i32): *u8 {
   }
   if (i == 1) {
     let p: *u8 = "BrotliDecoderDecompress";
+    return p;
+  }
+  if (i == 2) {
+    let p: *u8 = "_std_compress_brotli_compress";
+    return p;
+  }
+  if (i == 3) {
+    let p: *u8 = "_std_compress_brotli_decompress";
+    return p;
+  }
+  if (i == 4) {
+    let p: *u8 = "std_compress_brotli_compress";
+    return p;
+  }
+  if (i == 5) {
+    let p: *u8 = "std_compress_brotli_decompress";
+    return p;
+  }
+  if (i == 6) {
+    let p: *u8 = "_std_compress_brotli_brotli_compress";
+    return p;
+  }
+  if (i == 7) {
+    let p: *u8 = "_std_compress_brotli_brotli_decompress";
+    return p;
+  }
+  if (i == 8) {
+    let p: *u8 = "std_compress_brotli_brotli_compress";
+    return p;
+  }
+  if (i == 9) {
+    let p: *u8 = "std_compress_brotli_brotli_decompress";
     return p;
   }
   return 0 as *u8;

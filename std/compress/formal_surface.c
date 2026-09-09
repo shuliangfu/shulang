@@ -5,11 +5,11 @@
  * (std/compress/gzip/gzip.o, zlib/zlib.o). This vehicle exports the facade
  * std_compress_* names the user import mangles to.
  *
- * G.7: complete existing c_face — gzip one-shot faces trampoline to the
- * submodule mangle (std_compress_gzip_gzip_*), not return -1. Returning -1
- * made `xlang build` skip-green (tests/compress/main.x treats n<=0 as skip)
- * while gzip.o was never on the ld argv. zstd/brotli stay unavailable until
- * those submodule .o are catalogued and pushed (separate residual).
+ * G.7: complete existing c_face — gzip/zstd/brotli one-shot faces trampoline
+ * to the submodule mangle (std_compress_{gzip_gzip,zstd_zstd,brotli_brotli}_*),
+ * not return -1. Returning -1 made `xlang build` skip-green
+ * (tests/compress/main.x treats n<=0 as skip) while submodule .o was never
+ * on the ld argv. Stream init/process/end stay unavailable (-1).
  *
  * G.7: single formal vehicle for pure-asm product link (catalog key
  * std/compress/compress.o). formal_mod kind=c_face.
@@ -30,36 +30,32 @@ int32_t std_compress_gzip_decompress(uint8_t *in, int32_t in_len, uint8_t *out, 
   return std_compress_gzip_gzip_decompress(in, in_len, out, out_cap);
 }
 
+/* PLATFORM: SHARED — product brotli lives in brotli.o (mod.x + lib.x). */
+extern int32_t std_compress_brotli_brotli_compress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                                   int32_t out_cap);
+extern int32_t std_compress_brotli_brotli_decompress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                                     int32_t out_cap);
+
 int32_t std_compress_brotli_compress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_brotli_brotli_compress(in, in_len, out, out_cap);
 }
 
 int32_t std_compress_brotli_decompress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_brotli_brotli_decompress(in, in_len, out, out_cap);
 }
 
+/* PLATFORM: SHARED — product zstd lives in zstd.o (mod.x + lib.x). */
+extern int32_t std_compress_zstd_zstd_compress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                               int32_t out_cap);
+extern int32_t std_compress_zstd_zstd_decompress(uint8_t *in, int32_t in_len, uint8_t *out,
+                                                 int32_t out_cap);
+
 int32_t std_compress_zstd_compress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_zstd_zstd_compress(in, in_len, out, out_cap);
 }
 
 int32_t std_compress_zstd_decompress(uint8_t *in, int32_t in_len, uint8_t *out, int32_t out_cap) {
-  (void)in;
-  (void)in_len;
-  (void)out;
-  (void)out_cap;
-  return -1;
+  return std_compress_zstd_zstd_decompress(in, in_len, out, out_cap);
 }
 
 /* Stream surface (cookbook compress_stream_br_zs unique UNDEF).
