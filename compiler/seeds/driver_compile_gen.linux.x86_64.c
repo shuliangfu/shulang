@@ -540,6 +540,10 @@ extern int32_t driver_compile_parse_argv(int32_t argc, uint8_t * argv, struct Dr
 extern int32_t driver_run_compiler_full_x_post_parse(struct DriverCompileState * state, int32_t argc, uint8_t * argv);
 extern int32_t driver_run_compiler_full_x(int32_t argc, uint8_t * argv);
 extern int32_t driver_get_argv_i(int32_t argc, uint8_t * argv, int32_t i, uint8_t * buf, int32_t max);
+/* Dangling-value guard for value-taking driver flags (authority body in
+ * seeds/rt_compile.from_x.c / src/runtime/rt_compile.x, same commit): 1 iff
+ * argv[i+1] exists, is non-empty, and does not start with '-'. PLATFORM: SHARED. */
+extern int32_t driver_compile_argv_next_is_value_c(int32_t argc, uint8_t * argv, int32_t i, uint8_t * arg_buf, int32_t arg_cap);
 extern void driver_compile_argv_copy_path_c(struct DriverCompileState * state, uint8_t * arg_buf, int32_t plen);
 extern void driver_compile_ensure_default_lib_c(uint8_t * key);
 extern void driver_compile_parse_argv_init_c(struct DriverCompileState * state);
@@ -716,14 +720,23 @@ int32_t driver_compile_parse_argv_step(int32_t argc, uint8_t * argv, struct Driv
       return (i + 1);
     }
     if (((driver_eq_minus_o(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_minus_o_next_c(state, argc, argv, i));
       return (i + 2);
     }
     if (((driver_eq_minus_L(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_minus_L_next_c(state, argc, argv, i, arg_buf, arg_cap));
       return (i + 2);
     }
     if (((driver_eq_minus_O(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_minus_O_next_c(state, argc, argv, i));
       return (i + 2);
     }
@@ -744,14 +757,23 @@ int32_t driver_compile_parse_argv_step(int32_t argc, uint8_t * argv, struct Driv
       return (i + 1);
     }
     if (((driver_eq_minus_backend(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_backend_next_c(state, argc, argv, i, arg_buf, arg_cap));
       return (i + 2);
     }
     if (((driver_eq_minus_target(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_target_next_c(state, argc, argv, i));
       return (i + 2);
     }
     if (((driver_eq_minus_target_cpu(arg_buf, len) !=0) && ((i + 1) < argc))) {
+      if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+        return (i + 1);
+      }
       (void)(driver_compile_argv_apply_target_cpu_next_c(state, argc, argv, i));
       return (i + 2);
     }

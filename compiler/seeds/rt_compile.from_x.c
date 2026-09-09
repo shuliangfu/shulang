@@ -234,6 +234,26 @@ void driver_compile_parse_argv_init_c(DriverCompileStateSU *state) {
 
 /* --- G-02f-293: apply next-token argv helpers --- */
 
+/* Dangling-value guard shared by every value-taking driver-flag parse branch
+ * (twin of src/runtime/rt_compile.x driver_compile_argv_next_is_value_c):
+ * returns 1 iff argv[i+1] exists, is non-empty, and does not start with '-'.
+ * Documented flag values (paths/levels/dirs/triples/cpu names) are never
+ * flag-shaped; the run path appends the injected "-o <temp>" pair at the argv
+ * tail, so an unconditional i+2 advance would eat it and the product never
+ * links (execv ENOENT; reproducer tests/probes/wave943/m6.x). Fetching
+ * argv[i+1] clobbers arg_buf — call only after the flag matched.
+ * PLATFORM: SHARED. */
+int driver_compile_argv_next_is_value_c(int argc, char **argv, int i, char *arg_buf, int arg_cap) {
+  int nlen;
+
+  if (!arg_buf || arg_cap <= 0)
+    return 0;
+  nlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, arg_cap);
+  if (nlen >= 1 && arg_buf[0] != '-')
+    return 1;
+  return 0;
+}
+
 /** -o：下一 argv 写入 out_path_buf/out_path_len。 */
 void driver_compile_argv_apply_minus_o_next_c(DriverCompileStateSU *state, int32_t argc, uint8_t *argv_opaque,
                                               int32_t i) {
@@ -243,6 +263,10 @@ void driver_compile_argv_apply_minus_o_next_c(DriverCompileStateSU *state, int32
   if (!state || i + 1 >= argc)
     return;
   olen = driver_get_argv_i(argc, argv, i + 1, (char *)state->out_path_buf, 512);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not a path — leave state untouched. */
+  if (olen >= 1 && state->out_path_buf[0] == '-')
+    return;
   if (olen >= 0)
     state->out_path_len = olen;
 }
@@ -256,6 +280,10 @@ void driver_compile_argv_apply_minus_L_next_c(DriverCompileStateSU *state, int32
   if (!state || !arg_buf || arg_cap <= 0 || i + 1 >= argc)
     return;
   llen = driver_get_argv_i(argc, argv, i + 1, (char *)arg_buf, arg_cap);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not a lib dir — leave state untouched. */
+  if (llen >= 1 && arg_buf[0] == '-')
+    return;
   if (llen >= 0)
     driver_compile_append_lib_root_c(state, arg_buf, llen);
 }
@@ -269,6 +297,10 @@ void driver_compile_argv_apply_minus_O_next_c(DriverCompileStateSU *state, int32
   if (!state || i + 1 >= argc)
     return;
   olen = driver_get_argv_i(argc, argv, i + 1, (char *)state->opt_level_buf, 8);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not an opt level — leave state untouched. */
+  if (olen >= 1 && state->opt_level_buf[0] == '-')
+    return;
   if (olen >= 0)
     state->opt_level_len = olen;
 }
@@ -282,6 +314,10 @@ void driver_compile_argv_apply_backend_next_c(DriverCompileStateSU *state, int32
   if (!state || !arg_buf || arg_cap <= 0 || i + 1 >= argc)
     return;
   vlen = driver_get_argv_i(argc, argv, i + 1, (char *)arg_buf, arg_cap);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not "asm"/"c" — leave state untouched. */
+  if (vlen >= 1 && arg_buf[0] == '-')
+    return;
   if (vlen >= 0 && drv_eq_asm_word((char *)arg_buf, vlen)) {
     state->use_asm_backend = 1;
     state->backend_asm_explicit = 1;
@@ -300,8 +336,12 @@ void driver_compile_argv_apply_target_next_c(DriverCompileStateSU *state, int32_
 
   if (!state || i + 1 >= argc)
     return;
-  state->parse_saw_target = 1;
   tlen = driver_get_argv_i(argc, argv, i + 1, (char *)state->target_buf, 512);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not a triple — leave state untouched. */
+  if (tlen >= 1 && state->target_buf[0] == '-')
+    return;
+  state->parse_saw_target = 1;
   if (tlen >= 0) {
     state->target_len = tlen;
     if (drv_target_has_arm((char *)state->target_buf, tlen))
@@ -317,8 +357,12 @@ void driver_compile_argv_apply_target_cpu_next_c(DriverCompileStateSU *state, in
 
   if (!state || i + 1 >= argc)
     return;
-  state->parse_saw_target_cpu = 1;
   tlen = driver_get_argv_i(argc, argv, i + 1, (char *)state->target_cpu_buf, 64);
+  /* Dangling guard (twin of driver_compile_argv_next_is_value_c): a
+   * flag-shaped next entry is not a cpu name — leave state untouched. */
+  if (tlen >= 1 && state->target_cpu_buf[0] == '-')
+    return;
+  state->parse_saw_target_cpu = 1;
   if (tlen >= 0)
     state->target_cpu_len = tlen;
 }
@@ -334,18 +378,27 @@ int driver_compile_parse_argv_step_c(int argc, char **argv, DriverCompileStateSU
   if (len < 0)
     return i + 1;
   if (drv_eq_minus_o(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-o" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int olen = driver_get_argv_i(argc, argv, i + 1, (char *)state->out_path_buf, 512);
     if (olen >= 0)
       state->out_path_len = olen;
     return i + 2;
   }
   if (drv_eq_minus_L(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-L" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int llen = driver_get_argv_i(argc, argv, i + 1, arg_buf, arg_cap);
     if (llen >= 0)
       driver_compile_append_lib_root_c(state, (uint8_t *)arg_buf, llen);
     return i + 2;
   }
   if (drv_eq_minus_O(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-O" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int olen = driver_get_argv_i(argc, argv, i + 1, (char *)state->opt_level_buf, 8);
     if (olen >= 0)
       state->opt_level_len = olen;
@@ -368,6 +421,9 @@ int driver_compile_parse_argv_step_c(int argc, char **argv, DriverCompileStateSU
     return i + 1;
   }
   if (drv_eq_minus_backend(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-backend" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int vlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, arg_cap);
     if (vlen >= 0 && drv_eq_asm_word(arg_buf, vlen)) {
       state->use_asm_backend = 1;
@@ -380,6 +436,9 @@ int driver_compile_parse_argv_step_c(int argc, char **argv, DriverCompileStateSU
     return i + 2;
   }
   if (drv_eq_minus_target(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-target" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int tlen;
     state->parse_saw_target = 1;
     tlen = driver_get_argv_i(argc, argv, i + 1, (char *)state->target_buf, 512);
@@ -391,6 +450,9 @@ int driver_compile_parse_argv_step_c(int argc, char **argv, DriverCompileStateSU
     return i + 2;
   }
   if (drv_eq_minus_target_cpu(arg_buf, len) && i + 1 < argc) {
+    /* Dangling guard: flag-shaped/missing next → skip "-target-cpu" standalone. */
+    if (!driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap))
+      return i + 1;
     int tlen;
     state->parse_saw_target_cpu = 1;
     tlen = driver_get_argv_i(argc, argv, i + 1, (char *)state->target_cpu_buf, 64);

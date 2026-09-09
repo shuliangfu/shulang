@@ -445,6 +445,24 @@ void driver_compile_parse_argv_init_c(struct RtCompileState * state) {
     (void)(driver_emit_lib_root_reset(((uint8_t *)(state))));
   }
 }
+int32_t driver_compile_argv_next_is_value_c(int32_t argc, uint8_t * * argv, int32_t i, uint8_t * arg_buf, int32_t arg_cap) {
+  int32_t nlen = 0;
+  if ((arg_buf ==((uint8_t *)(0)))) {
+    return 0;
+  }
+  if ((arg_cap <=0)) {
+    return 0;
+  }
+  {
+    (void)((nlen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
+  }
+  if ((nlen >=1)) {
+    if ((arg_buf[0] !=45)) {
+      return 1;
+    }
+  }
+  return 0;
+}
 void driver_compile_argv_apply_minus_o_next_c(struct RtCompileState * state, int32_t argc, uint8_t * * argv, int32_t i) {
   int32_t olen = 0;
   if ((state ==((struct RtCompileState *)(0)))) {
@@ -455,6 +473,11 @@ void driver_compile_argv_apply_minus_o_next_c(struct RtCompileState * state, int
   }
   {
     (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->out_path_buf))[0]), 512)));
+  }
+  if ((olen >=1)) {
+    if ((state->out_path_buf[0] ==45)) {
+      return;
+    }
   }
   if ((olen >=0)) {
     (void)(((state->out_path_len) = olen));
@@ -479,6 +502,11 @@ void driver_compile_argv_apply_minus_L_next_c(struct RtCompileState * state, int
   {
     (void)((llen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
   }
+  if ((llen >=1)) {
+    if ((arg_buf[0] ==45)) {
+      return;
+    }
+  }
   if ((llen >=0)) {
     (void)(driver_compile_append_lib_root_c(state, arg_buf, llen));
   }
@@ -495,6 +523,11 @@ void driver_compile_argv_apply_minus_O_next_c(struct RtCompileState * state, int
   }
   {
     (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->opt_level_buf))[0]), 8)));
+  }
+  if ((olen >=1)) {
+    if ((state->opt_level_buf[0] ==45)) {
+      return;
+    }
   }
   if ((olen >=0)) {
     (void)(((state->opt_level_len) = olen));
@@ -519,6 +552,11 @@ void driver_compile_argv_apply_backend_next_c(struct RtCompileState * state, int
   {
     (void)((vlen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
   }
+  if ((vlen >=1)) {
+    if ((arg_buf[0] ==45)) {
+      return;
+    }
+  }
   if ((vlen >=0)) {
     {
       if ((drv_eq_asm_word(arg_buf, vlen) !=0)) {
@@ -542,10 +580,15 @@ void driver_compile_argv_apply_target_next_c(struct RtCompileState * state, int3
   if (((i + 1) >=argc)) {
     return;
   }
-  (void)(((state->parse_saw_target) = 1));
   {
     (void)((tlen = driver_get_argv_i(argc, argv, (i + 1), &(((state->target_buf))[0]), 512)));
   }
+  if ((tlen >=1)) {
+    if ((state->target_buf[0] ==45)) {
+      return;
+    }
+  }
+  (void)(((state->parse_saw_target) = 1));
   if ((tlen >=0)) {
     (void)(((state->target_len) = tlen));
     {
@@ -563,10 +606,15 @@ void driver_compile_argv_apply_target_cpu_next_c(struct RtCompileState * state, 
   if (((i + 1) >=argc)) {
     return;
   }
-  (void)(((state->parse_saw_target_cpu) = 1));
   {
     (void)((tlen = driver_get_argv_i(argc, argv, (i + 1), &(((state->target_cpu_buf))[0]), 64)));
   }
+  if ((tlen >=1)) {
+    if ((state->target_cpu_buf[0] ==45)) {
+      return;
+    }
+  }
+  (void)(((state->parse_saw_target_cpu) = 1));
   if ((tlen >=0)) {
     (void)(((state->target_cpu_len) = tlen));
   }
@@ -594,8 +642,13 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
   }
   {
     if ((drv_eq_minus_o(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
-        (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->out_path_buf))[0]), 512)));
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
+        {
+          (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->out_path_buf))[0]), 512)));
+        }
         if ((olen >=0)) {
           (void)(((state->out_path_len) = olen));
         }
@@ -603,8 +656,13 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
       }
     }
     if ((drv_eq_minus_L(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
-        (void)((llen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
+        {
+          (void)((llen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
+        }
         if ((llen >=0)) {
           (void)(driver_compile_append_lib_root_c(state, arg_buf, llen));
         }
@@ -612,8 +670,13 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
       }
     }
     if ((drv_eq_minus_O(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
-        (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->opt_level_buf))[0]), 8)));
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
+        {
+          (void)((olen = driver_get_argv_i(argc, argv, (i + 1), &(((state->opt_level_buf))[0]), 8)));
+        }
         if ((olen >=0)) {
           (void)(((state->opt_level_len) = olen));
         }
@@ -637,8 +700,13 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
       return (i + 1);
     }
     if ((drv_eq_minus_backend(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
-        (void)((vlen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
+        {
+          (void)((vlen = driver_get_argv_i(argc, argv, (i + 1), arg_buf, arg_cap)));
+        }
         if ((vlen >=0)) {
           if ((drv_eq_asm_word(arg_buf, vlen) !=0)) {
             (void)(((state->use_asm_backend) = 1));
@@ -653,7 +721,10 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
       }
     }
     if ((drv_eq_minus_target(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
         (void)(((state->parse_saw_target) = 1));
         (void)((tlen = driver_get_argv_i(argc, argv, (i + 1), &(((state->target_buf))[0]), 512)));
         if ((tlen >=0)) {
@@ -666,7 +737,10 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * * argv, struct 
       }
     }
     if ((drv_eq_minus_target_cpu(arg_buf, len) !=0)) {
-      if (((i + 1) < argc)) {
+      if (((i + 1) <argc)) {
+        if ((driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, arg_cap) ==0)) {
+          return (i + 1);
+        }
         (void)(((state->parse_saw_target_cpu) = 1));
         (void)((tlen = driver_get_argv_i(argc, argv, (i + 1), &(((state->target_cpu_buf))[0]), 64)));
         if ((tlen >=0)) {

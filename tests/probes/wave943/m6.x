@@ -1,17 +1,15 @@
-// wave943 (9.4.3 v1) · REPRODUCER for the carded parse-layer dangling-value
-// defect (compile side, NOT a forwarding issue):
-//   xlang run m6.x hi -backend   -> 42 expected; 127 today (card open)
-// What happens: driver_argv_ensure_run_o appends "-o <temp>" after the user
-// argv, and the parse layer (main.x driver_argv_parse_x_path / the rt_compile
-// C twins) consumes argv[i+1] UNCONDITIONALLY for value-taking flags, so a
-// dangling "-backend"/"-L"/"-target"/"-O" eats the injected "-o" as its value
-// at compile time; the product is never linked to the temp path and the exec
-// funnel dies with execv ENOENT (127). The forwarding-side consume guard in
-// xlang_driver_exec_spawn_wait (next must not start with '-') is already
-// correct and becomes load-bearing once the parse card is fixed. This probe
-// turns green (42) together with that parse-layer card. PLATFORM: SHARED.
-// Discrimination: after the fix, temp path leaked -> argc>2 -> 43; "hi" lost
-// -> argc<2 -> 7; argv[1] wrong bytes -> 9/10/11; argv[1] null -> 8.
+// wave943 (9.4.3 v1) · dangling value-taking flag must not eat the injected
+// "-o <temp>" tail pair (parse-layer dangling-value guard):
+//   xlang run m6.x hi -L   -> argc==2, argv[1]=="hi" -> 42
+// Why: driver_argv_ensure_run_o appends "-o <temp>" AFTER the user argv; the
+// parse layers (main.x driver_argv_parse_x_path/_x, rt_compile step_c, the
+// apply_*_next_c helpers, and their C twins/pins) now consult
+// driver_compile_argv_next_is_value_c — argv[i+1] must exist, be non-empty,
+// and not start with '-' before a value-taking flag consumes it — so the
+// dangling "-L" is skipped standalone, the injected -o pair stays
+// driver-owned, and the child argv keeps only "hi". PLATFORM: SHARED.
+// Discrimination: temp path leaked -> argc>2 -> 43; "hi" lost -> argc<2 -> 7;
+// argv[1] wrong bytes -> 9/10/11; argv[1] null -> 8.
 function main(argc: i32, argv: **u8): i32 {
   if (argc < 2) { return 7; }
   if (argc > 2) { return 43; }

@@ -134,6 +134,10 @@ extern int32_t driver_emit_lib_root_count(uint8_t * state);
 extern int32_t driver_emit_lib_root_len(uint8_t * state, int32_t i);
 extern void driver_emit_lib_root_copy(uint8_t * state, int32_t i, uint8_t * dst, int32_t cap);
 extern int32_t driver_get_argv_i(int32_t argc, uint8_t * argv, int32_t i, uint8_t * buf, int32_t max);
+/* Dangling-value guard for value-taking driver flags (authority body in
+ * seeds/rt_compile.from_x.c / src/runtime/rt_compile.x, same commit): 1 iff
+ * argv[i+1] exists, is non-empty, and does not start with '-'. PLATFORM: SHARED. */
+extern int32_t driver_compile_argv_next_is_value_c(int32_t argc, uint8_t * argv, int32_t i, uint8_t * arg_buf, int32_t arg_cap);
 extern uint8_t * driver_argv_drop_subcommand(int32_t argc, uint8_t * argv);
 /* xlang run / bare xlang file.x: append `-o <temp>` when no -o so the product
    is built in /tmp and exec'd (no a.out, no generated C to stdout). */
@@ -334,29 +338,35 @@ XLANG_LIB_WEAK int32_t main_driver_argv_parse_x_path(int32_t argc, uint8_t * arg
     if (len < 0) {   ++i;
   continue;
  }
-    if (main_eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {   int32_t tlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+    if (main_eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   int32_t tlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
   if (tlen >= 0 && main_target_contains_arm(arg_buf, tlen) != 0) {   ((state)->target_arch = (1));
  }
   if (tlen >= 0 && main_target_contains_riscv(arg_buf, tlen) != 0) {   ((state)->target_arch = (2));
  }
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
     if (main_eq_minus_L(arg_buf, len) != 0) {   if (i + 1 >= argc) {   return 2;
  }
-  (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, i + 1, state));
+  if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, i + 1, state));
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
-    if (main_eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {   int32_t vlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+    if (main_eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   int32_t vlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
   if (vlen >= 0 && vlen == 1 && (arg_buf)[0] == 99) {   ((state)->use_asm_backend = (0));
  }
   if (vlen >= 0 && main_eq_asm(arg_buf, vlen) != 0) {   ((state)->use_asm_backend = (1));
  }
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
-    if (len == 2 && (arg_buf)[0] == 45 && (1 < 0 || (1) >= 512 ? (xlang_panic_(1, 0), (arg_buf)[0]) : (arg_buf)[1]) == 111) {   if (i + 1 < argc) {   int32_t olen = driver_get_argv_i(argc, argv, i + 1, (state)->out_path_buf, 512);
+    if (len == 2 && (arg_buf)[0] == 45 && (1 < 0 || (1) >= 512 ? (xlang_panic_(1, 0), (arg_buf)[0]) : (arg_buf)[1]) == 111) {   if (i + 1 < argc && driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   int32_t olen = driver_get_argv_i(argc, argv, i + 1, (state)->out_path_buf, 512);
   if (olen >= 0) {   ((state)->out_path_len = (olen));
  }
   i += 2;
@@ -365,8 +375,8 @@ XLANG_LIB_WEAK int32_t main_driver_argv_parse_x_path(int32_t argc, uint8_t * arg
  }
   continue;
  }
-    if (len == 2 && (arg_buf)[0] == 45 && (1 < 0 || (1) >= 512 ? (xlang_panic_(1, 0), (arg_buf)[0]) : (arg_buf)[1]) == 79) {   ++i;
-  if (i < argc) {   ++i;
+    if (len == 2 && (arg_buf)[0] == 45 && (1 < 0 || (1) >= 512 ? (xlang_panic_(1, 0), (arg_buf)[0]) : (arg_buf)[1]) == 79) {   if (i + 1 < argc && driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   i += 2;
+ } else {   ++i;
  }
   continue;
  }
@@ -411,22 +421,28 @@ XLANG_LIB_WEAK int32_t main_driver_argv_parse_x(int32_t argc, uint8_t * argv, st
     if (len < 0) {   ++i;
   continue;
  }
-    if (main_eq_minus_L(arg_buf, len) != 0 && i + 1 < argc) {   (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, i + 1, state));
+    if (main_eq_minus_L(arg_buf, len) != 0 && i + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, i + 1, state));
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
-    if (main_eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {   int32_t vlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+    if (main_eq_minus_backend(arg_buf, len) != 0 && i + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   int32_t vlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
   if (vlen >= 0 && main_eq_asm(arg_buf, vlen) != 0) {   ((state)->use_asm_backend = (1));
  }
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
-    if (main_eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {   int32_t tlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
+    if (main_eq_minus_target(arg_buf, len) != 0 && i + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, i, arg_buf, 512) != 0) {   int32_t tlen = driver_get_argv_i(argc, argv, i + 1, arg_buf, 512);
   if (tlen >= 0 && main_target_contains_arm(arg_buf, tlen) != 0) {   ((state)->target_arch = (1));
  }
   if (tlen >= 0 && main_target_contains_riscv(arg_buf, tlen) != 0) {   ((state)->target_arch = (2));
  }
   i += 2;
+ } else {   ++i;
+ }
   continue;
  }
     if (main_eq_minus_x(arg_buf, len) != 0) {   ++i;
@@ -435,8 +451,10 @@ XLANG_LIB_WEAK int32_t main_driver_argv_parse_x(int32_t argc, uint8_t * argv, st
     if (main_eq_minus_E(arg_buf, len) != 0) {   int32_t pi = i + 1;
   while (pi < argc) {
     int32_t plen_temp = driver_get_argv_i(argc, argv, pi, arg_buf, 512);
-    if (plen_temp > 0 && main_eq_minus_L(arg_buf, plen_temp) != 0 && pi + 1 < argc) {   (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, pi + 1, state));
+    if (plen_temp > 0 && main_eq_minus_L(arg_buf, plen_temp) != 0 && pi + 1 < argc) {   if (driver_compile_argv_next_is_value_c(argc, argv, pi, arg_buf, 512) != 0) {   (void)(main_driver_emit_try_append_lib_from_argv(argc, argv, pi + 1, state));
   pi += 2;
+ } else {   ++pi;
+ }
   continue;
  }
     if (plen_temp > 0 && main_eq_minus_x(arg_buf, plen_temp) != 0) {   ++pi;
