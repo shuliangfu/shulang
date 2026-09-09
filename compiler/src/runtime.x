@@ -102,15 +102,11 @@ export extern "C" function runtime_report_precise_parse_failure_if_known_impl(in
 export extern "C" function runtime_run_test_c_impl(argc: i32, argv: *u8): i32;
 export extern "C" function driver_lib_roots_from_key_impl(lib_key: *u8, out_arr: *u8, bufs: *u8): i32;
 
-export extern "C" function driver_smoke_lex_dump_on_large_stack_impl(src: *u8): void;
-export extern "C" function driver_c_typeck_entry_thread_fn_impl(arg: *u8): *u8;
-export extern "C" function driver_c_typeck_entry_large_stack_impl(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32, print_ok: i32): i32;
 export extern "C" function runtime_prepare_dce_ctx_impl(mod: *u8, all_dep_mods: *u8, n_all: i32, used_funcs: *u8, n_used: *i32, used_mono: *u8, used_type_names: *u8, n_used_types: *i32, wpo_reach: *u8, dce: *u8, dce_ready: *i32): void;
 export extern "C" function driver_run_x_emit_c_from_compile_state_impl(state: *u8, argc: i32, argv: *u8): i32;
 
 export extern "C" function driver_c_frontend_smoke_impl(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32): i32;
 export extern "C" function driver_try_compile_via_shu_c_sibling_impl(argc: i32, argv: *u8): i32;
-export extern "C" function driver_smoke_lex_dump_thread_fn_impl(arg: *u8): *u8;
 
 export extern "C" function write_fs_path_map_error_abi_inline_impl(cf: *u8): i32;
 export extern "C" function codegen_emit_include_pipeline_glue_c_impl(out: *u8, argv0: *u8): void;
@@ -1009,14 +1005,20 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
   return 0;
 }
 
-/* See implementation. */
-
-#[no_mangle]
-export function driver_smoke_lex_dump_on_large_stack(src: *u8): void {
-  unsafe {
-    driver_smoke_lex_dump_on_large_stack_impl(src);
-  }
-}
+/*
+ * Retired mega wrappers: driver_smoke_lex_dump_{on_large_stack,thread_fn}
+ * and driver_c_typeck_entry{,_thread_fn,_large_stack} forwarded to
+ * never-defined *_impl. C frontend was physically deleted; product
+ * typeck authority is pipeline_typeck_entry_module /
+ * pipeline_typeck_entry_module_c. Call sites in rt_run_asm_backend /
+ * rt_run_compiler_parsed are behind !XLANG_NO_C_FRONTEND (product
+ * defines it). Re-adding these export names here would first-wins
+ * the same class as the deleted esc_gate / typeck / parser /
+ * asm_codegen_ast stubs. Missing provider → link UNDEF, not a
+ * silent _impl -1.
+ * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
+ * isomorphic; product g05 does not link this mega.
+ */
 
 /*
  * Retired mega wrappers: driver_stack_esc_gate_thread_fn / large_stack
@@ -1028,36 +1030,6 @@ export function driver_smoke_lex_dump_on_large_stack(src: *u8): void {
  * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is isomorphic;
  * product g05 links rt_stack.o, not this mega.
  */
-
-/** Exported function `driver_c_typeck_entry_thread_fn`.
- * Read path helper `driver_c_typeck_entry_thread_fn`.
- * @param arg *u8
- * @return *u8
- */
-#[no_mangle]
-export function driver_c_typeck_entry_thread_fn(arg: *u8): *u8 {
-  unsafe {
-    return driver_c_typeck_entry_thread_fn_impl(arg);
-  }
-  return 0 as *u8;
-}
-
-/** Exported function `driver_c_typeck_entry_large_stack`.
- * Implements `driver_c_typeck_entry_large_stack`.
- * @param input_path *u8
- * @param src *u8
- * @param lib_roots_arr *u8
- * @param n_lib_roots i32
- * @param print_ok i32
- * @return i32
- */
-#[no_mangle]
-export function driver_c_typeck_entry_large_stack(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32, print_ok: i32): i32 {
-  unsafe {
-    return driver_c_typeck_entry_large_stack_impl(input_path, src, lib_roots_arr, n_lib_roots, print_ok);
-  }
-  return 0 - 1;
-}
 
 /** Exported function `runtime_prepare_dce_ctx`.
  * Implements `runtime_prepare_dce_ctx`.
@@ -1120,18 +1092,11 @@ export function driver_try_compile_via_shu_c_sibling(argc: i32, argv: *u8): i32 
   return 0 - 1;
 }
 
-/** Exported function `driver_smoke_lex_dump_thread_fn`.
- * Read path helper `driver_smoke_lex_dump_thread_fn`.
- * @param arg *u8
- * @return *u8
+/*
+ * Retired mega wrapper: driver_smoke_lex_dump_thread_fn (see
+ * driver_smoke_lex_dump / driver_c_typeck_entry retirement above).
+ * PLATFORM: SHARED — do not re-add.
  */
-#[no_mangle]
-export function driver_smoke_lex_dump_thread_fn(arg: *u8): *u8 {
-  unsafe {
-    return driver_smoke_lex_dump_thread_fn_impl(arg);
-  }
-  return 0 as *u8;
-}
 
 /* See implementation. */
 
@@ -1218,15 +1183,11 @@ export function driver_run_x_emit_c_extern_via_cparser(path: *u8): i32 { unsafe 
 
 // See implementation.
 
-export extern "C" function driver_c_typeck_entry_impl(mod: *u8, arena: *u8): i32;
-
-/* See implementation. */
-
-#[no_mangle]
-export function driver_c_typeck_entry(mod: *u8, arena: *u8): i32 {
-  unsafe { return driver_c_typeck_entry_impl(mod, arena); }
-  return 0;
-}
+/*
+ * Retired mega wrapper: driver_c_typeck_entry (see
+ * driver_smoke_lex_dump / driver_c_typeck_entry retirement above).
+ * PLATFORM: SHARED — do not re-add.
+ */
 
 // drv_eq_minus_o: see function docblock below.
 
