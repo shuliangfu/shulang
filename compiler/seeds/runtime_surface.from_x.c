@@ -430,13 +430,14 @@ int32_t driver_lib_roots_from_key(uint8_t * lib_key, uint8_t * out_arr, uint8_t 
  * Retired mega wrappers: driver_smoke_lex_dump_{on_large_stack,thread_fn}
  * and driver_c_typeck_entry{,_thread_fn,_large_stack} forwarded to
  * never-defined *_impl. Product typeck authority is
- * pipeline_typeck_entry_module. PLATFORM: SHARED — isomorphic with
- * src/runtime.x; do not re-add.
+ * pipeline_typeck_entry_module. rt_run_* leftover consume sites also
+ * retired. PLATFORM: SHARED — isomorphic with src/runtime.x; do not re-add.
  */
 /*
  * Retired mega wrappers: driver_c_frontend_smoke /
  * driver_check_only_c_typeck forwarded to never-defined *_impl.
  * Product typeck authority is pipeline_typeck_entry_module.
+ * rt_run_* leftover consume sites also retired.
  * PLATFORM: SHARED — isomorphic with src/runtime.x; do not re-add.
  */
 /*

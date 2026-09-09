@@ -82,7 +82,6 @@ extern char *xlang_preprocess_quiet(const char *data, size_t len, const char **d
 extern void pipeline_diag_emitted_reset(void);
 extern int pipeline_diag_emitted_get(void);
 extern void diag_set_file(const char *path, const char *src, size_t len);
-extern int driver_c_frontend_smoke(const char *input_path, char *src, const char **lib_roots_arr, int n_lib_roots);
 extern size_t pipeline_sizeof_arena(void);
 extern size_t pipeline_sizeof_module(void);
 extern size_t pipeline_sizeof_elf_ctx(void);
@@ -115,8 +114,6 @@ extern int pipeline_asm_user_deps_need_coemit(char **dep_paths, int n_deps);
 extern void pipeline_debug_module_funcs(void *module);
 extern void driver_diagnostic_after_entry_parse_module(void *module);
 extern int driver_check_diag_emitted_get(void);
-extern int driver_c_typeck_entry(void *module, void *arena, const char *src, size_t len);
-extern int driver_c_typeck_entry_large_stack(void *module, void *arena, const char *src, size_t len);
 extern int32_t driver_get_pending_target_cpu_features(void);
 extern int32_t driver_freestanding_get(void);
 extern void driver_set_pipeline_entry_source_len(size_t len);
@@ -169,43 +166,17 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
     if (!src)
         return 1;
     diag_set_file(input_path, src, src_len);
-#if !defined(XLANG_NO_C_FRONTEND) && !defined(XLANG_USE_X_PIPELINE)
     /*
-     * Why: Both C-frontend fallback paths (smoke + check) require the deleted
-     *      C frontend (parse / typeck_module / driver_c_typeck_entry). With
-     *      XLANG_USE_X_PIPELINE defined (default on all current modes:
-     *      macOS no_c, Linux no_c, Windows LEGACY), these paths are dead and
-     *      must NOT be compiled: on Windows PE/MinGW XLANG_WEAK expands to
-     *      empty, so the weak stubs in runtime_driver_strict_glue_stubs.o
-     *      (parse, typeck_module, driver_c_frontend_smoke_impl) become STRONG
-     *      defs. With --allow-multiple-definition the stub `parse()` returns
-     *      -1 → driver_c_frontend_smoke returns 1 → silent exit=1 on every
-     *      `xlang -c file.x` invocation. Guarding with !XLANG_USE_X_PIPELINE
-     *      (matching driver_c_typeck_entry below) makes `-c file.x` route
-     *      through the X pipeline exactly as on macOS no_c mode.
-     * Invariant: When XLANG_USE_X_PIPELINE is defined, the X pipeline path
-     *            (parser_parse_into_init + parser_parse_into_buf) handles
-     *            `-c file.x` smoke and `xlang check` alike; this entire
-     *            block is skipped.
-     * PLATFORM: SHARED — guard applies on all platforms; verified macOS arm64
-     *           (no_c + LEGACY) and Windows MSYS x86_64.
+     * Retired leftover !XLANG_NO_C_FRONTEND consume sites:
+     * driver_c_frontend_smoke / driver_c_typeck_entry. C frontend is gone;
+     * mega wrappers deleted (36bb731f1 / 023b26d09). Product early-exit
+     * authority is driver_asm_try_c_frontend_early (always -2 → .x pipeline)
+     * in runtime_driver_abi_thin.x. Cold seed falls through to
+     * parser_parse_into_* below (same as PREFER .x rt_ab_step_early).
+     * Re-adding those calls would UNDEF, not silently recover a C frontend.
+     * PLATFORM: SHARED — consume-site hygiene; product PREFER rest is
+     * FROM_X marker (H=0); this body compiles only on cold/no-PREFER.
      */
-    /* 无 -o 烟测走 C 前端（含 import 时 X asm parse 易 0 func）；xlang check 不走烟测。 */
-    if (out_path == NULL && !driver_check_only_get()) {
-        int smoke_rc = driver_c_frontend_smoke(input_path, src, lib_roots_arr, n_lib_roots);
-        free(src);
-        return smoke_rc;
-    }
-    /*
-     * xlang check + asm 后端：优先走下方 X pipeline（check_only_mode），与 compile 同 parse/typeck 路径。
-     * 无 X pipeline 时回退 C typeck。
-     */
-    if (driver_check_only_get()) {
-        int ck = driver_c_typeck_entry(input_path, src, lib_roots_arr, n_lib_roots, 1);
-        free(src);
-        return ck;
-    }
-#endif
     size_t arena_sz = pipeline_sizeof_arena();
     size_t module_sz = pipeline_sizeof_module();
     void *arena = malloc(arena_sz);
@@ -630,8 +601,11 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
                     pipeline_asm_seed_std_net_struct_layouts((struct ast_Module *)dep_modules[j]);
             } else if (emit_elf_o && pctx->asm_entry_module_only && driver_asm_build_skip_typeck() == 0) {
                 /*
-                 * ENTRY_MODULE_ONLY 且将走 C typeck 预检：dep 仅 parse 填槽，勿对整棵 dep 再跑 .x typeck（栈/耗时）。
-                 * 入口模块类型由 driver_c_typeck_entry 与并列 build_asm/*.o 保证。
+                 * ENTRY_MODULE_ONLY: dep parse-only (do not .x-typeck the whole
+                 * dep tree). Entry types come from pipeline_typeck_entry_module
+                 * plus sibling build_asm/*.o. (Was: driver_c_typeck_entry C
+                 * precheck — C frontend gone; leftover call deleted this knife.)
+                 * PLATFORM: SHARED.
                  */
                 ec_loop = xlang_pipeline_dep_prerun_parse_only(dep_modules[j], dep_arenas[j],
                     (const uint8_t *)dep_sources[j], (size_t)dep_lens[j]);
@@ -703,40 +677,24 @@ int driver_run_asm_backend(const char *input_path, const char *out_path, const c
             diag_report(NULL, 0, 0, "note",
                         "asm entry debug: BEFORE pipeline_run_x_pipeline", NULL);
         }
-#if !defined(XLANG_NO_C_FRONTEND)
         /*
-         * 用户程序 asm 编译：C typeck 预检（strict 链 typeck_c_orchestration_partial 提供真 typeck_module），
-         * 再 skip pipeline 内 .x typeck（第 2+ CALL 实参仍可能 SIGSEGV）。
+         * Retired leftover !XLANG_NO_C_FRONTEND driver_c_typeck_entry_large_stack
+         * precheck. Product authority is driver_asm_try_c_typeck_precheck
+         * (always -1 → skip) in runtime_driver_abi_thin.x; typeck is
+         * pipeline_typeck_entry_module. Skip-typeck flags below stay live
+         * on product xlang_asm (XLANG_NO_C_FRONTEND).
+         * PLATFORM: SHARED.
          */
-        if (!driver_asm_build_skip_typeck()) {
-            const char *skip_c_precheck = link_abi_getenv("XLANG_ASM_SKIP_C_TYPECK_PRECHECK");
-            if (skip_c_precheck == NULL || skip_c_precheck[0] == '\0' || skip_c_precheck[0] == '0') {
-                if (driver_c_typeck_entry_large_stack(input_path, src, lib_roots_arr, n_lib_roots, 0) != 0) {
-                    free(out_buf);
-                    pipeline_dep_ctx_heap_destroy(pctx);
-                    for (j = 0; j < n_deps; j++) {
-                        free(dep_arenas[j]);
-                        free(dep_modules[j]);
-                    }
-                    while (n_deps > 0) {
-                        n_deps--;
-                        free(dep_sources[n_deps]);
-                        free(dep_paths[n_deps]);
-                    }
-                    free(arena);
-                    free(module);
-                    free(src);
-                    return 1;
-                }
-            }
-        }
-#endif
         /*
-         * 用户 asm -o：入口 pipeline 跳过 .x typeck（须在 #endif 外：xlang_asm 为 XLANG_NO_C_FRONTEND 时仍要 skip）。
-         * import 程序（dead_user 等）否则 typecheck_entry SIGSEGV。
-         * 无 import 单文件仍须 typeck（struct field_access_offset）；仅 skip codegen，机器码由 asm_codegen_elf_o 生成。
-         * std 库 .o 仍靠 C typeck 预检 + pipeline_fill_*_for_skipped_typeck；勿跑 x typeck（enc_label 失败）。
-         * xlang check + std/core 闭包：与 -o 多文件一致 skip 入口 .x typeck，parse 已在 smoke 路径完成。
+         * User asm -o: skip entry .x typeck (product xlang_asm is
+         * XLANG_NO_C_FRONTEND and still needs this skip). Import programs
+         * otherwise SIGSEGV in typecheck_entry. Single-file no-import still
+         * typecks (struct field_access_offset); only skip codegen — machine
+         * code comes from asm_codegen_elf_o. std library .o skip .x typeck
+         * (enc_label fails) and fill via pipeline_fill_*_for_skipped_typeck.
+         * C typeck precheck is gone. xlang check + std/core closure: same
+         * skip as multi-file -o; parse already happened above.
+         * PLATFORM: SHARED.
          */
         if (!asm_smoke_only) {
             if (n_deps > 0)

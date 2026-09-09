@@ -120,8 +120,6 @@ extern int runtime_report_parse_recovery_diagnostics(const char *input_path, con
 extern void driver_unlink_failed_output(const char *out_path);
 extern void driver_print_x_smoke_summary(void *module, size_t codegen_len);
 extern void driver_print_check_ok(const char *input_path);
-extern int driver_c_typeck_entry(void *module, void *arena, const char *src, size_t len);
-extern int driver_c_typeck_entry_large_stack(void *module, void *arena, const char *src, size_t len);
 extern void driver_diagnostic_after_entry_parse_module(void *module);
 extern int driver_check_diag_emitted_get(void);
 extern void driver_set_pipeline_entry_source_len(size_t len);
@@ -252,21 +250,17 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
     if (!src)
         return 1;
     diag_set_file(input_path, src, src_len);
-#if !defined(XLANG_NO_C_FRONTEND)
     /*
-     * xlang check：优先 C parse+typeck（支持库模块、import -L）；X pipeline check 待与 compile 对齐后再切回。
+     * Retired leftover !XLANG_NO_C_FRONTEND consume sites:
+     * driver_check_only_c_typeck / driver_c_frontend_smoke. C frontend is
+     * gone; mega wrappers deleted (36bb731f1). Product check/smoke continues
+     * into the X pipeline below (rt_run_compiler_parsed.x has no C-frontend
+     * early return). Re-adding those calls would UNDEF, not recover a C
+     * frontend. Leftover generic-syntax lexer/parse block below is a
+     * different class (not this knife).
+     * PLATFORM: SHARED — consume-site hygiene; product PREFER rest is
+     * FROM_X marker (H=0); this body compiles only on cold/no-PREFER.
      */
-    if (driver_check_only_get()) {
-        int ck = driver_check_only_c_typeck(input_path, src, lib_roots_arr, n_lib_roots);
-        free(src);
-        return ck;
-    }
-    if (emit_to_stdout && !driver_check_only_get()) {
-        int smoke_rc = driver_c_frontend_smoke(input_path, src, lib_roots_arr, n_lib_roots);
-        free(src);
-        return smoke_rc;
-    }
-#endif
     /* 若预处理后源码含泛型语法，.x 流水线不解析泛型，改走 C 流水线（parse + typeck_module + codegen）以保证 id<i32>(42) 等正确单态化。
      * `-backend c -o`（want_asm_backend=0）：单文件无泛型亦走 C 前端，与 xlang check 对齐（LANG-007 unsafe 等 S0 规则）。
      * 无 import 时内联 C 路径，避免 run_compiler_c 重入导致崩溃；有 import 时仍调 run_compiler_c。 */
@@ -947,22 +941,14 @@ int driver_run_compiler_parsed(DriverCompileParsed *p, int argc, char **argv) {
         diag_reportf(NULL, 0, 0, "note", NULL,
                      "pipeline debug: before pipeline_run entry=%s src_len=%zu",
                      input_path ? input_path : "?", (size_t)src_slice.length);
-#if !defined(XLANG_NO_C_FRONTEND)
-    if (n_deps > 0 && !driver_check_only_get() &&
-        driver_deps_are_std_core_closure_only(dep_paths, n_deps)) {
-        if (driver_c_typeck_entry_large_stack(input_path, src, lib_roots_arr, n_lib_roots, 0) != 0) {
-            driver_x_pipeline_skip_typeck_set(0);
-            free(out_buf);
-            pipeline_dep_ctx_heap_destroy(pctx);
-            for (int k = 0; k < n_deps; k++) { rt_cp_release_arena_module(dep_arenas[k], dep_modules[k]); }
-            if (!emit_to_stdout) { xlang_driver_handle_close(cf); unlink(tmp_c); }
-            while (n_deps > 0) { n_deps--; free(dep_sources[n_deps]); free(dep_paths[n_deps]); }
-            rt_cp_release_arena_module(arena, module);
-            free(src);
-            return 1;
-        }
-    }
-#endif
+    /*
+     * Retired leftover !XLANG_NO_C_FRONTEND driver_c_typeck_entry_large_stack
+     * precheck on std/core-closure deps. Product authority is
+     * driver_asm_try_c_typeck_precheck (always -1 → skip) plus
+     * pipeline_typeck_entry_module. Fall through to
+     * xlang_pipeline_run_x_pipeline_large_stack.
+     * PLATFORM: SHARED.
+     */
     /*
      * PLATFORM: SHARED — xlang check (NO_C_FRONTEND product xlang_asm).
      * Do **not** print_ok + return before the pipeline when deps are a

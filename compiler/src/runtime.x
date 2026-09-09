@@ -861,8 +861,7 @@ export function driver_c_mod_imports_are_core_only(mod: *u8): i32 {
  * never-defined driver_check_only_c_typeck_impl. C frontend was
  * physically deleted; product typeck authority is
  * pipeline_typeck_entry_module / pipeline_typeck_entry_module_c.
- * Call sites in rt_run_compiler_parsed are behind
- * !XLANG_NO_C_FRONTEND (product defines it). Re-adding this export
+ * rt_run_* leftover consume sites retired (this knife). Re-adding this export
  * here would first-wins the same class as the deleted
  * smoke_lex_dump / c_typeck_entry / esc_gate stubs. Missing
  * provider → link UNDEF, not a silent _impl -1.
@@ -1004,9 +1003,8 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  * and driver_c_typeck_entry{,_thread_fn,_large_stack} forwarded to
  * never-defined *_impl. C frontend was physically deleted; product
  * typeck authority is pipeline_typeck_entry_module /
- * pipeline_typeck_entry_module_c. Call sites in rt_run_asm_backend /
- * rt_run_compiler_parsed are behind !XLANG_NO_C_FRONTEND (product
- * defines it). Re-adding these export names here would first-wins
+ * pipeline_typeck_entry_module_c. rt_run_* leftover consume sites
+ * retired (this knife). Re-adding these export names here would first-wins
  * the same class as the deleted esc_gate / typeck / parser /
  * asm_codegen_ast stubs. Missing provider → link UNDEF, not a
  * silent _impl -1.
@@ -1018,9 +1016,9 @@ export function driver_lib_roots_from_key(lib_key: *u8, out_arr: *u8, bufs: *u8)
  * Retired mega wrappers: driver_c_frontend_smoke /
  * driver_check_only_c_typeck forwarded to never-defined *_impl.
  * Same class as smoke_lex_dump / c_typeck_entry above (C frontend
- * gone; product typeck = pipeline_typeck_entry_module). Call sites
- * in rt_run_asm_backend / rt_run_compiler_parsed remain behind
- * !XLANG_NO_C_FRONTEND. Re-adding these export names here would
+ * gone; product typeck = pipeline_typeck_entry_module). rt_run_*
+ * leftover consume sites retired (this knife). Re-adding these
+ * export names here would
  * first-wins the same class. Missing provider → link UNDEF, not a
  * silent _impl -1.
  * PLATFORM: SHARED — prove surface isomorphic; product g05 does
