@@ -205,23 +205,36 @@ XLANG_WEAK int32_t peephole_peephole_run(void *out) {
   return 0;
 }
 
-/** build_asm/backend.o 导出 asm_codegen_ast；asm.o 期望 backend_asm_codegen_ast。 */
+/*
+ * The 4-arg weak asm_codegen_ast that returned -1 was deleted.
+ *
+ * Why: ELF and Mach-O pick the first weak definition of a name. This
+ * bridge.o often precedes rt_asm_stub's 3-arg GAS writer
+ * (runtime_driver_no_c.o / XLANG_WEAK asm_codegen_ast) and any backend.o
+ * 4-arg body. The -1 stub then covered the real symbol: callers of the
+ * unprefixed name got ok=-1 instead of GAS/backend. Same class as the
+ * typeck_x_ast / parser_parse_into_buf weak stubs deleted below in this
+ * file. Darwin product nm showed weak asm_codegen_ast = `mov w0,#-1`
+ * while the strong 3-arg GAS TU was dead-stripped as unused.
+ *
+ * Invariant: every product/strict/experimental link that needs
+ * asm_codegen_ast must provide a real body (rt_asm_stub 3-arg GAS and/or
+ * backend.x 4-arg). Missing provider → link UNDEF, not a silent -1.
+ * Prefix aliases stay as weak forwarders (backend_asm_codegen_ast /
+ * asm_asm_codegen_ast), matching typeck_typeck_x_ast.
+ *
+ * PLATFORM: SHARED — first-weak-wins is ELF + Mach-O. Darwin product g05
+ * links this bridge in USER_ASM_LINK; Linux product USER_ASM_LINK does
+ * not (experimental/strict_glue still do).
+ */
 extern int32_t asm_codegen_ast(void *module, void *arena, void *out_buf, void *ctx);
 
-/** backend.o 未产出时 asm.o 仍须链通；有 backend.o 时转发到 asm_codegen_ast。 */
+/** asm.o expects backend_asm_codegen_ast; backend.o strong wins when present. */
 XLANG_WEAK int32_t backend_asm_codegen_ast(void *module, void *arena, void *out, void *ctx) {
   return asm_codegen_ast(module, arena, out, ctx);
 }
 
-/** build_asm/backend.o 导出 asm_codegen_ast；pipeline/orchestration 期望 asm_asm_codegen_ast。 */
-XLANG_WEAK int32_t asm_codegen_ast(void *module, void *arena, void *out_buf, void *ctx) {
-  (void)module;
-  (void)arena;
-  (void)out_buf;
-  (void)ctx;
-  return -1;
-}
-
+/** pipeline/orchestration expects asm_asm_codegen_ast; strong pipeline_x wins. */
 XLANG_WEAK int32_t asm_asm_codegen_ast(void *module, void *arena, void *out_buf, void *ctx) {
   return asm_codegen_ast(module, arena, out_buf, ctx);
 }
