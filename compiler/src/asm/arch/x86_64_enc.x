@@ -413,6 +413,11 @@ export function enc_cmp_setcc_movzbl(ctx: *ElfCodegenCtx, cc: i32): i32 {
   if (cc == 3) { op = 158; }
   if (cc == 4) { op = 159; }
   if (cc == 5) { op = 157; }
+  // Unsigned 6..9: SETB/SETBE/SETA/SETAE (0x92/0x96/0x97/0x93).
+  if (cc == 6) { op = 146; }
+  if (cc == 7) { op = 150; }
+  if (cc == 8) { op = 151; }
+  if (cc == 9) { op = 147; }
   let s: u8[3] = [15, elf.elf_to_u8(op), 192];
   if (elf.append_elf_bytes(ctx, s, 3) != 0) { return -1; }
   let m: u8[3] = [15, 182, 192];

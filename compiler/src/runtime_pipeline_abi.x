@@ -30898,9 +30898,11 @@ export function pipeline_asm_cmp_cc_for_expr_kind_ord(kind_ord: i32): i32 {
 /**
  * Map x86-style condition code to ARM64 CSET machine cond field (0..15).
  * CSET encodes as CSINC with inverted cond; table matches GAS cset semantics.
- * @param cc i32 - 0=eq,1=ne,2=lt,3=le,4=gt,5=ge
- * @return i32 - ARM64 cond encoding; unknown → 0 (EQ)
+ * @param cc i32 - 0=eq,1=ne,2=lt,3=le,4=gt,5=ge,6=ult,7=ule,8=ugt,9=uge
+ * @return i32 - ARM64 invert(cond) field for CSINC/CSET; unknown → 0 (EQ)
  * wave137 pure: G.7 authority (was pipeline_asm_emit_cmp.c; arm64_enc Cap).
+ * Unsigned 6..9: LO/LS/HI/HS inverted to HS/HI/LS/LO (u64 `t > 0` with
+ * t=2^63 must cset hi, not signed gt).
  * PLATFORM: SHARED — ARM64 AAPCS64 consumer + x86 cmp path share symbol.
  */
 #[no_mangle]
@@ -30922,6 +30924,20 @@ export function pipeline_asm_arm64_cset_cond_enc_from_cc(cc: i32): i32 {
   }
   if (cc == 5) {
     return 11;
+  }
+  // Unsigned: invert(LO=3)→HS=2, invert(LS=9)→HI=8,
+  // invert(HI=8)→LS=9, invert(HS=2)→LO=3.
+  if (cc == 6) {
+    return 2;
+  }
+  if (cc == 7) {
+    return 8;
+  }
+  if (cc == 8) {
+    return 9;
+  }
+  if (cc == 9) {
+    return 3;
   }
   return 0;
 }
@@ -31104,7 +31120,8 @@ function pipeline_asm_cmp_enum_rhs_tag_c(arena: *u8, expr_ref: i32): i32 {
  * @param left_ref i32 - left operand expr
  * @param right_ref i32 - right operand expr
  * @param is_cmp_64bit i32 - REX.W for int path
- * @param cc i32 - setcc condition 0..5
+ * @param cc i32 - setcc condition 0..5 (signed); 2..5 remapped to 6..9 when
+ *   glue_binop_operand_is_unsigned_elf_c (same authority as SHR/DIV).
  * @param ta i32 - target arch
  * @return i32 - 0 ok; -1 failure
  * wave137 pure: was static glue_emit_cmp_finish_rbx_rax_elf_c.
@@ -31116,6 +31133,7 @@ function glue_emit_cmp_finish_rbx_rax_elf_c(arena: *u8, ctx: *u8, elf_ctx: *u8, 
   let is_f64_r: i32 = 0;
   let is_f32_l: i32 = 0;
   let is_f32_r: i32 = 0;
+  let is_un: i32 = 0;
   if ((ta == 0 || ta == 1) && left_ref > 0 && right_ref > 0) {
     unsafe {
       is_f64_l = glue_binop_operand_is_scalar_f64_elf_c(arena, ctx, left_ref);
@@ -31148,6 +31166,17 @@ function glue_emit_cmp_finish_rbx_rax_elf_c(arena: *u8, ctx: *u8, elf_ctx: *u8, 
         rc = backend_enc_fp_cmp_setcc_movzbl_arch(elf_ctx, cc, ta);
       }
       return rc;
+    }
+  }
+  // PLATFORM: SHARED — u8/u32/u64/usize relational cmp must use unsigned
+  // setcc (setb/seta / cset lo/hi). Signed gt treats u64 2^63 as negative
+  // (family probe t>0 returned 3). EQ/NE (cc 0/1) are identical either way.
+  if (cc >= 2 && cc <= 5) {
+    unsafe {
+      is_un = glue_binop_operand_is_unsigned_elf_c(arena, ctx, left_ref, right_ref);
+    }
+    if (is_un != 0) {
+      cc = cc + 4;
     }
   }
   rc = glue_emit_rex_w_if_64bit(elf_ctx, is_cmp_64bit, ta);

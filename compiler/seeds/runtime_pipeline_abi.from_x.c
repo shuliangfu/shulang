@@ -14954,6 +14954,7 @@ extern int32_t backend_enc_pop_rbx_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_test_eax_eax_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_cmp_rbx_rax_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_cmp_setcc_movzbl_arch(void *elf_ctx, int32_t cc, int32_t ta);
+extern int32_t glue_binop_operand_is_unsigned_elf_c(void *arena, void *ctx, int32_t left_ref, int32_t right_ref);
 extern int32_t backend_enc_ucomisd_rbx_rax_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_ucomiss_rbx_rax_arch(void *elf_ctx, int32_t ta);
 extern int32_t backend_enc_fp_cmp_setcc_movzbl_arch(void *elf_ctx, int32_t cc, int32_t ta);
@@ -14978,6 +14979,11 @@ int32_t pipeline_asm_arm64_cset_cond_enc_from_cc(int32_t cc) {
   case 3: return 12;
   case 4: return 13;
   case 5: return 11;
+  /* Unsigned 6..9: invert(LO/LS/HI/HS) → HS/HI/LS/LO. Twin of .x. */
+  case 6: return 2;
+  case 7: return 8;
+  case 8: return 9;
+  case 9: return 3;
   default: return 0;
   }
 }
@@ -15080,6 +15086,11 @@ static int32_t glue_emit_cmp_finish_seed(void *arena, void *ctx, void *elf_ctx, 
       return -1;
     return backend_enc_fp_cmp_setcc_movzbl_arch(elf_ctx, cc, ta);
   }
+  /* PLATFORM: SHARED — u8/u32/u64/usize relational cmp uses unsigned setcc
+   * (same glue_binop_operand_is_unsigned_elf_c as SHR/DIV). Twin of .x. */
+  if (cc >= 2 && cc <= 5 &&
+      glue_binop_operand_is_unsigned_elf_c(arena, ctx, left_ref, right_ref) != 0)
+    cc = cc + 4;
   if (glue_emit_rex_w_if_64bit_seed(elf_ctx, is_cmp_64bit, ta) != 0)
     return -1;
   if (backend_enc_cmp_rbx_rax_arch(elf_ctx, ta) != 0)

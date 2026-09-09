@@ -1183,8 +1183,10 @@ export function arch_x86_64_enc_enc_label(elf_ctx: *u8, name: *u8, name_len: i32
   return 0 - 1;
 }
 
-/** cmp + setcc + movzbl %al,%eax for condition code cc (0..5).
- * Cap residual pure R2 wave2. PLATFORM: SHARED — x86_64 SysV encode.
+/** cmp + setcc + movzbl %al,%eax for condition code cc (0..9).
+ * 0..5 signed sete/setne/setl/setle/setg/setge; 6..9 unsigned
+ * setb/setbe/seta/setae. Cap residual pure R2 wave2.
+ * PLATFORM: SHARED — x86_64 SysV encode.
  */
 #[no_mangle]
 export function arch_x86_64_enc_enc_cmp_setcc_movzbl(elf_ctx: *u8, cc: i32): i32 {
@@ -1195,6 +1197,10 @@ export function arch_x86_64_enc_enc_cmp_setcc_movzbl(elf_ctx: *u8, cc: i32): i32
   else if (cc == 3) { op = 158; }
   else if (cc == 4) { op = 159; }
   else if (cc == 5) { op = 157; }
+  else if (cc == 6) { op = 146; }
+  else if (cc == 7) { op = 150; }
+  else if (cc == 8) { op = 151; }
+  else if (cc == 9) { op = 147; }
   let s: u8[3] = [15, 0, 192];
   s[1] = op;
   if (x86_enc_bytes(elf_ctx, s, 3) != 0) { return 0 - 1; }

@@ -328,7 +328,7 @@ export function enc_cmp_rbx_rax(ctx: *ElfCodegenCtx): i32 {
 export function enc_cmp_setcc_movzbl(ctx: *ElfCodegenCtx, cc: i32): i32 {
   let c: i32 = cc;
   if (c < 0) { c = 0; }
-  if (c > 5) { c = 5; }
+  if (c > 9) { c = 5; }
   if (c == 0) { return enc_u32_le(ctx, 19 | (10 << 7) | (3 << 12) | (10 << 15) | (1 << 20)); }
   if (c == 1) { return enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (0 << 15) | (10 << 20)); }
   if (c == 2) { return enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (11 << 15) | (10 << 20)); }
@@ -337,7 +337,18 @@ export function enc_cmp_setcc_movzbl(ctx: *ElfCodegenCtx, cc: i32): i32 {
     return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
   }
   if (c == 4) { return enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (10 << 15) | (11 << 20)); }
-  if (enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (11 << 15) | (10 << 20)) != 0) { return -1; }
+  if (c == 5) {
+    if (enc_u32_le(ctx, 51 | (10 << 7) | (2 << 12) | (11 << 15) | (10 << 20)) != 0) { return -1; }
+    return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
+  }
+  // Unsigned 6..9: sltu (funct3=3) instead of slt (funct3=2).
+  if (c == 6) { return enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (11 << 15) | (10 << 20)); }
+  if (c == 7) {
+    if (enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (10 << 15) | (11 << 20)) != 0) { return -1; }
+    return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
+  }
+  if (c == 8) { return enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (10 << 15) | (11 << 20)); }
+  if (enc_u32_le(ctx, 51 | (10 << 7) | (3 << 12) | (11 << 15) | (10 << 20)) != 0) { return -1; }
   return enc_u32_le(ctx, 19 | (10 << 7) | (4 << 12) | (10 << 15) | (1 << 20));
 }
 

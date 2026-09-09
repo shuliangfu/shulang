@@ -875,6 +875,10 @@ int32_t arch_x86_64_enc_enc_cmp_setcc_movzbl(struct platform_elf_ElfCodegenCtx *
   else if (cc == 3) op = 158;
   else if (cc == 4) op = 159;
   else if (cc == 5) op = 157;
+  else if (cc == 6) op = 146; /* SETB */
+  else if (cc == 7) op = 150; /* SETBE */
+  else if (cc == 8) op = 151; /* SETA */
+  else if (cc == 9) op = 147; /* SETAE */
   s[0] = 15; s[1] = op; s[2] = 192;
   if (x86_enc_bytes(elf_ctx, s, 3) != 0) return -1;
   return x86_enc_bytes(elf_ctx, m, 3);

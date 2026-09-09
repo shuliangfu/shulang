@@ -885,6 +885,22 @@ int32_t arch_x86_64_enc_enc_cmp_setcc_movzbl(uint8_t * elf_ctx, int32_t cc) {
         } else {
           if ((cc ==5)) {
             (void)((op = 157));
+          } else {
+            if ((cc ==6)) {
+              (void)((op = 146));
+            } else {
+              if ((cc ==7)) {
+                (void)((op = 150));
+              } else {
+                if ((cc ==8)) {
+                  (void)((op = 151));
+                } else {
+                  if ((cc ==9)) {
+                    (void)((op = 147));
+                  }
+                }
+              }
+            }
           }
         }
       }
