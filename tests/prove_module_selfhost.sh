@@ -501,10 +501,11 @@ MODULES=(
   #   prove 锁 mixed surface IDENTICAL (42 nm T · no doc_anchor)
   #   注：wave571 修复 diag_io_fputc 参数顺序 bug (c,o)→(o,c)，-E + cc -c 全绿，L2 真测通过
   "diag|src/diag.x|seeds/diag_surface.from_x.c||"
-  # runtime R2 mixed (wave572)：.x 110 nm T symbols
-  #   (30 DIRECT compute + 80 thin+rest forwards to _impl);
-  #   rest 含 95 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
-  #   prove 锁 mixed surface IDENTICAL (110 nm T · no doc_anchor)
+  # runtime R2 mixed (wave572)：.x 108 nm T symbols
+  #   (30 DIRECT compute + 78 thin+rest forwards to _impl;
+  #    9.7.6 residual retired mega esc_gate wrappers → rt_stack authority);
+  #   rest 含 93 extern bridges (*_impl) + 7 helper externs (link_abi_getenv + diag_json_enabled + ...);
+  #   prove 锁 mixed surface IDENTICAL (108 nm T · no doc_anchor)
   "runtime|src/runtime.x|seeds/runtime_surface.from_x.c||"
   # runtime_link_abi R2 mixed (wave573)：.x 145 nm T symbols
   #   (75 DIRECT compute + 70 thin+rest forwards to _impl);

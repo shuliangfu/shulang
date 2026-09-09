@@ -103,8 +103,6 @@ export extern "C" function runtime_run_test_c_impl(argc: i32, argv: *u8): i32;
 export extern "C" function driver_lib_roots_from_key_impl(lib_key: *u8, out_arr: *u8, bufs: *u8): i32;
 
 export extern "C" function driver_smoke_lex_dump_on_large_stack_impl(src: *u8): void;
-export extern "C" function driver_stack_esc_gate_thread_fn_impl(arg: *u8): *u8;
-export extern "C" function driver_stack_esc_gate_large_stack_impl(src: *u8, src_len: i32): i32;
 export extern "C" function driver_c_typeck_entry_thread_fn_impl(arg: *u8): *u8;
 export extern "C" function driver_c_typeck_entry_large_stack_impl(input_path: *u8, src: *u8, lib_roots_arr: *u8, n_lib_roots: i32, print_ok: i32): i32;
 export extern "C" function runtime_prepare_dce_ctx_impl(mod: *u8, all_dep_mods: *u8, n_all: i32, used_funcs: *u8, n_used: *i32, used_mono: *u8, used_type_names: *u8, n_used_types: *i32, wpo_reach: *u8, dce: *u8, dce_ready: *i32): void;
@@ -1020,32 +1018,16 @@ export function driver_smoke_lex_dump_on_large_stack(src: *u8): void {
   }
 }
 
-/** Exported function `driver_stack_esc_gate_thread_fn`.
- * Read path helper `driver_stack_esc_gate_thread_fn`.
- * @param arg *u8
- * @return *u8
+/*
+ * Retired mega wrappers: driver_stack_esc_gate_thread_fn / large_stack
+ * forwarded to never-defined *_impl. Product authority is
+ * src/runtime/rt_stack.x (+ seeds/rt_stack.from_x.c cold twin).
+ * Re-adding these export names here would duplicate rt_stack (ELF/Mach-O
+ * first-wins) the same class as the deleted typeck/parser/asm_codegen_ast
+ * weak stubs. Missing provider → link UNDEF, not a silent _impl -1.
+ * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is isomorphic;
+ * product g05 links rt_stack.o, not this mega.
  */
-#[no_mangle]
-export function driver_stack_esc_gate_thread_fn(arg: *u8): *u8 {
-  unsafe {
-    return driver_stack_esc_gate_thread_fn_impl(arg);
-  }
-  return 0 as *u8;
-}
-
-/** Exported function `driver_stack_esc_gate_large_stack`.
- * Implements `driver_stack_esc_gate_large_stack`.
- * @param src *u8
- * @param src_len i32
- * @return i32
- */
-#[no_mangle]
-export function driver_stack_esc_gate_large_stack(src: *u8, src_len: i32): i32 {
-  unsafe {
-    return driver_stack_esc_gate_large_stack_impl(src, src_len);
-  }
-  return 0 - 1;
-}
 
 /** Exported function `driver_c_typeck_entry_thread_fn`.
  * Read path helper `driver_c_typeck_entry_thread_fn`.

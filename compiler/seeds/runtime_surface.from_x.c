@@ -1,19 +1,19 @@
 /* seeds/runtime_surface.from_x.c
  * G-02f runtime R2 mixed surface - isomorphic with src/runtime.x
  * Product: multi-slice layer seeds (wave321 monofile retired; was runtime.from_x.c rest)
- * Prove: full.x vs this surface -> nm IDENTICAL (110 symbols)
- * Mode: mixed - 30 DIRECT compute + 80 thin+rest forwards to _impl
- * Cap residual: 95 _impl bridges + 7 helper externs (link_abi_getenv,
+ * Prove: full.x vs this surface -> nm IDENTICAL (108 symbols)
+ * Mode: mixed - 30 DIRECT compute + 78 thin+rest forwards to _impl
+ * Cap residual: 93 _impl bridges + 7 helper externs (link_abi_getenv,
  *   diag_json_enabled, xlang_output_want_exe, driver_argv_at,
  *   main_run_compiler_c, driver_run_fmt, driver_run_compiler_check).
  * doc_anchor: none (src/runtime.x has no doc_anchor).
- * Logic: 110 functions = 30 DIRECT compute (drv_eq_*, content_has_*,
+ * Logic: 108 functions = 30 DIRECT compute (drv_eq_*, content_has_*,
  *   driver_argv0_basename_is, driver_x_emit_asm_*, xlang_smoke_diag_enabled,
  *   driver_asm_output_want_exe, drv_target_has_arm, driver_argv_has_emit_c_flag,
  *   driver_lib_root_ptr_usable, drv_path_ends_x, run_compiler_c,
  *   runtime_run_fmt_c, runtime_run_compiler_check_c,
  *   driver_run_x_emit_c_set_emit_extern, driver_run_x_emit_c_set_n_lib_roots)
- *   + 80 thin+rest forwards to _impl (driver_run_x_emit_c_set_path_impl,
+ *   + 78 thin+rest forwards to _impl (driver_run_x_emit_c_set_path_impl,
  *   driver_fs_open_read_path_impl, driver_run_asm_backend_c_impl,
  *   driver_compile_state_free_c_impl, cfg_sync_compile_target_from_state_c_impl,
  *   main_entry_impl, runtime_diag_errno_impl, dce_is_func_used_impl,
@@ -22,7 +22,7 @@
  */
 #include <stdint.h>
 #include <stddef.h>
-/* Forward declarations for all 110 surface functions (nm IDENTICAL targets). */
+/* Forward declarations for all 108 surface functions (nm IDENTICAL targets). */
 extern int32_t driver_run_x_emit_c_set_path(uint8_t * path, int32_t path_len);
 extern int32_t driver_run_x_emit_c_set_lib(int32_t i, uint8_t * buf, int32_t len);
 extern int32_t driver_fs_open_read_path(uint8_t * path, int32_t path_len);
@@ -86,8 +86,6 @@ extern int32_t runtime_report_precise_parse_failure_if_known(uint8_t * input_pat
 extern int32_t runtime_run_test_c(int32_t argc, uint8_t * argv);
 extern int32_t driver_lib_roots_from_key(uint8_t * lib_key, uint8_t * out_arr, uint8_t * bufs);
 extern void driver_smoke_lex_dump_on_large_stack(uint8_t * src);
-extern uint8_t * driver_stack_esc_gate_thread_fn(uint8_t * arg);
-extern int32_t driver_stack_esc_gate_large_stack(uint8_t * src, int32_t src_len);
 extern uint8_t * driver_c_typeck_entry_thread_fn(uint8_t * arg);
 extern int32_t driver_c_typeck_entry_large_stack(uint8_t * input_path, uint8_t * src, uint8_t * lib_roots_arr, int32_t n_lib_roots, int32_t print_ok);
 extern void runtime_prepare_dce_ctx(uint8_t * mod, uint8_t * all_dep_mods, int32_t n_all, uint8_t * used_funcs, int32_t * n_used, uint8_t * used_mono, uint8_t * used_type_names, int32_t * n_used_types, uint8_t * wpo_reach, uint8_t * dce, int32_t * dce_ready);
@@ -212,8 +210,6 @@ extern int32_t runtime_report_precise_parse_failure_if_known_impl(uint8_t * inpu
 extern int32_t runtime_run_test_c_impl(int32_t argc, uint8_t * argv);
 extern int32_t driver_lib_roots_from_key_impl(uint8_t * lib_key, uint8_t * out_arr, uint8_t * bufs);
 extern void driver_smoke_lex_dump_on_large_stack_impl(uint8_t * src);
-extern uint8_t * driver_stack_esc_gate_thread_fn_impl(uint8_t * arg);
-extern int32_t driver_stack_esc_gate_large_stack_impl(uint8_t * src, int32_t src_len);
 extern uint8_t * driver_c_typeck_entry_thread_fn_impl(uint8_t * arg);
 extern int32_t driver_c_typeck_entry_large_stack_impl(uint8_t * input_path, uint8_t * src, uint8_t * lib_roots_arr, int32_t n_lib_roots, int32_t print_ok);
 extern void runtime_prepare_dce_ctx_impl(uint8_t * mod, uint8_t * all_dep_mods, int32_t n_all, uint8_t * used_funcs, int32_t * n_used, uint8_t * used_mono, uint8_t * used_type_names, int32_t * n_used_types, uint8_t * wpo_reach, uint8_t * dce, int32_t * dce_ready);
@@ -225,7 +221,7 @@ extern int32_t write_fs_path_map_error_abi_inline_impl(uint8_t * cf);
 extern void codegen_emit_include_pipeline_glue_c_impl(uint8_t * out, uint8_t * argv0);
 extern void runtime_pipeline_elf_ctx_diag_note_impl(uint8_t * ctx_bytes);
 extern int32_t driver_compile_parse_argv_step_c_impl(int32_t argc, uint8_t * argv, uint8_t * state, int32_t i, uint8_t * arg_buf, int32_t arg_cap);
-/* Function definitions: 30 DIRECT compute + 80 thin+rest forwards to _impl. */
+/* Function definitions: 30 DIRECT compute + 78 thin+rest forwards to _impl. */
 int32_t driver_run_x_emit_c_set_path(uint8_t * path, int32_t path_len) {
   return driver_run_x_emit_c_set_path_impl(path, path_len);
   return -1;
@@ -450,14 +446,11 @@ int32_t driver_lib_roots_from_key(uint8_t * lib_key, uint8_t * out_arr, uint8_t 
 void driver_smoke_lex_dump_on_large_stack(uint8_t * src) {
   (void)(driver_smoke_lex_dump_on_large_stack_impl(src));
 }
-uint8_t * driver_stack_esc_gate_thread_fn(uint8_t * arg) {
-  return driver_stack_esc_gate_thread_fn_impl(arg);
-  return ((uint8_t *)(0));
-}
-int32_t driver_stack_esc_gate_large_stack(uint8_t * src, int32_t src_len) {
-  return driver_stack_esc_gate_large_stack_impl(src, src_len);
-  return -1;
-}
+/*
+ * Retired mega wrappers: driver_stack_esc_gate_thread_fn / large_stack
+ * forwarded to never-defined *_impl. Product authority is rt_stack.x.
+ * PLATFORM: SHARED — isomorphic with src/runtime.x; do not re-add.
+ */
 uint8_t * driver_c_typeck_entry_thread_fn(uint8_t * arg) {
   return driver_c_typeck_entry_thread_fn_impl(arg);
   return ((uint8_t *)(0));
