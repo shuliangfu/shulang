@@ -4525,12 +4525,12 @@ export function driver_x_emit_effective_lib_roots(n_out: *i32): *u8 {
  * Leftover !XLANG_NO_C_FRONTEND cparser consume site lived only in the
  * cold rt_run_x_emit.from_x.c twin; this body never called
  * driver_run_x_emit_c_extern_via_cparser. Mega wrapper of that name
- * stays (never-defined _impl; different class).
+ * retired (never-defined _impl).
  * @param input_path *u8 — unused on product NO_C (ABI parity)
  * @return i32 — always 1 (terminal failure) on product hybrid
  * Wave33 pure: diag_report_with_code with fixed message; no C frontend body.
- * PLATFORM: SHARED — product NO_C contract; leftover consume site retired
- * in the cold seed twin (this knife).
+ * PLATFORM: SHARED — product NO_C contract; leftover consume site and
+ * mega wrapper both retired.
  */
 #[no_mangle]
 export function driver_x_emit_try_extern_via_cparser(input_path: *u8): i32 {

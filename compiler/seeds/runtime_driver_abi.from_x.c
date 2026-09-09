@@ -2886,11 +2886,11 @@ int32_t driver_x_emit_try_extern_via_cparser(uint8_t *input_path) {
      * Product runtime_driver_no_c is XLANG_NO_C_FRONTEND; this TU is not
      * compiled with that macro, so the body is the fixed no-C refuse
      * (same as product NO_C). Leftover !XLANG_NO_C_FRONTEND cparser
-     * consume site in rt_run_x_emit.from_x.c retired (this knife); the
+     * consume site in rt_run_x_emit.from_x.c retired (residual 7); the
      * cold seed now also calls this refuse instead of
      * driver_run_x_emit_c_extern_via_cparser.
      * PLATFORM: SHARED — consume-site hygiene; mega via_cparser wrapper
-     * stays (never-defined _impl; different class).
+     * retired (never-defined _impl).
      */
     (void)input_path;
     diag_report_with_code(NULL, 0, 0, "build error", XLANG_DIAG_CODE_BUILD_BLD001,

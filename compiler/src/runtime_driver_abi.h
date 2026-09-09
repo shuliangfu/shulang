@@ -279,10 +279,11 @@ void driver_x_emit_work_cleanup(void);
  * Cap residual: -x -E -E-extern refuse (always BLD001).
  * wave33 pure: product NO_C fixed BLD001 diag + return 1 under PREFER hybrid;
  * cold C twin under #ifndef FROM_X. Leftover !XLANG_NO_C_FRONTEND cparser
- * consume site in rt_run_x_emit.from_x.c retired (this knife); cold seed
+ * consume site in rt_run_x_emit.from_x.c retired (residual 7); cold seed
  * now also calls this refuse. Mega wrapper of
- * driver_run_x_emit_c_extern_via_cparser stays (never-defined _impl).
- * PLATFORM: SHARED — consume-site hygiene.
+ * driver_run_x_emit_c_extern_via_cparser retired (this knife;
+ * never-defined _impl).
+ * PLATFORM: SHARED — mega-wrapper hygiene.
  */
 int32_t driver_x_emit_try_extern_via_cparser(uint8_t *input_path);
 

@@ -93,7 +93,6 @@ extern void runtime_pipeline_elf_ctx_diag_note(uint8_t * ctx_bytes);
 extern int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * argv, uint8_t * state, int32_t i, uint8_t * arg_buf, int32_t arg_cap);
 extern int32_t write_io_net_abi_inline(uint8_t * cf);
 extern int32_t driver_run_compiler_parsed(uint8_t * p, int32_t argc, uint8_t * argv);
-extern int32_t driver_run_x_emit_c_extern_via_cparser(uint8_t * path);
 extern int32_t drv_eq_minus_o(uint8_t * buf, int32_t len);
 extern int32_t drv_eq_minus_L(uint8_t * buf, int32_t len);
 extern int32_t drv_eq_minus_O(uint8_t * buf, int32_t len);
@@ -480,7 +479,6 @@ int32_t driver_compile_parse_argv_step_c(int32_t argc, uint8_t * argv, uint8_t *
 }
 extern int32_t write_io_net_abi_inline_impl(uint8_t * cf);
 extern int32_t driver_run_compiler_parsed_impl(uint8_t * p, int32_t argc, uint8_t * argv);
-extern int32_t driver_run_x_emit_c_extern_via_cparser_impl(uint8_t * path);
 int32_t write_io_net_abi_inline(uint8_t * cf) {
   return write_io_net_abi_inline_impl(cf);
   return 0;
@@ -489,10 +487,12 @@ int32_t driver_run_compiler_parsed(uint8_t * p, int32_t argc, uint8_t * argv) {
   return driver_run_compiler_parsed_impl(p, argc, argv);
   return 0;
 }
-int32_t driver_run_x_emit_c_extern_via_cparser(uint8_t * path) {
-  return driver_run_x_emit_c_extern_via_cparser_impl(path);
-  return 0;
-}
+/*
+ * Retired mega wrapper: driver_run_x_emit_c_extern_via_cparser forwarded
+ * to never-defined *_impl. Product -E-extern authority is
+ * driver_x_emit_try_extern_via_cparser (always BLD001).
+ * PLATFORM: SHARED — do not re-add.
+ */
 /*
  * Retired mega wrapper: driver_c_typeck_entry.
  * PLATFORM: SHARED — do not re-add.

@@ -9,10 +9,10 @@
  *
  * Scope: driver_run_x_emit_c（读源 → pipeline → stdout）。
  * Leftover !XLANG_NO_C_FRONTEND -E-extern cparser branch retired
- * (this knife). Product PREFER already refuses via
+ * (residual 7). Product PREFER already refuses via
  * driver_x_emit_try_extern_via_cparser (always BLD001). Mega wrapper
- * of driver_run_x_emit_c_extern_via_cparser stays (never-defined
- * _impl; different class).
+ * of driver_run_x_emit_c_extern_via_cparser retired (never-defined
+ * _impl).
  * run_asm_backend / run_compiler_parsed 仍 mega rest。
  */
 #include <limits.h>
@@ -133,9 +133,9 @@ int driver_run_x_emit_c(void) {
                  * driver_run_x_emit_c_extern_via_cparser. Product PREFER
                  * rt_run_x_emit.x always refuses via
                  * driver_x_emit_try_extern_via_cparser (BLD001). Mega
-                 * wrapper of via_cparser stays (never-defined _impl;
-                 * different class). Dropping XLANG_NO_C_FRONTEND now
-                 * matches that refuse; it does not resurrect a C frontend.
+                 * wrapper of via_cparser retired (never-defined _impl).
+                 * Dropping XLANG_NO_C_FRONTEND now matches that refuse;
+                 * it does not resurrect a C frontend.
                  * PLATFORM: SHARED — consume-site hygiene; product PREFER
                  * rest is FROM_X marker (H=0); this body compiles only on
                  * cold/no-PREFER.

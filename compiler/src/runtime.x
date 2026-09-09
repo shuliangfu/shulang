@@ -1157,7 +1157,6 @@ export function driver_compile_parse_argv_step_c(argc: i32, argv: *u8, state: *u
 
 export extern "C" function write_io_net_abi_inline_impl(cf: *u8): i32;
 export extern "C" function driver_run_compiler_parsed_impl(p: *u8, argc: i32, argv: *u8): i32;
-export extern "C" function driver_run_x_emit_c_extern_via_cparser_impl(path: *u8): i32;
 
 /* See implementation. */
 
@@ -1174,13 +1173,19 @@ export function write_io_net_abi_inline(cf: *u8): i32 { unsafe { return write_io
  */
 #[no_mangle]
 export function driver_run_compiler_parsed(p: *u8, argc: i32, argv: *u8): i32 { unsafe { return driver_run_compiler_parsed_impl(p, argc, argv); } return 0; }
-/** Exported function `driver_run_x_emit_c_extern_via_cparser`.
- * Implements `driver_run_x_emit_c_extern_via_cparser`.
- * @param path *u8): i32 { unsafe { return driver_run_x_emit_c_extern_via_cparser_impl(path
- * @return void
+
+/*
+ * Retired mega wrapper: driver_run_x_emit_c_extern_via_cparser forwarded
+ * to never-defined driver_run_x_emit_c_extern_via_cparser_impl. C
+ * frontend was physically deleted; leftover consume site in
+ * rt_run_x_emit.from_x.c retired at residual 7. Product -E-extern
+ * authority is driver_run_x_emit_c → driver_x_emit_try_extern_via_cparser
+ * (always BLD001). Re-adding this export here would first-wins the
+ * same class as the deleted smoke / c_typeck / esc_gate stubs.
+ * Missing provider → link UNDEF, not a silent _impl -1.
+ * PLATFORM: SHARED — prove surface runtime_surface.from_x.c is
+ * isomorphic; product g05 does not link this mega.
  */
-#[no_mangle]
-export function driver_run_x_emit_c_extern_via_cparser(path: *u8): i32 { unsafe { return driver_run_x_emit_c_extern_via_cparser_impl(path); } return 0; }
 
 // See implementation.
 
