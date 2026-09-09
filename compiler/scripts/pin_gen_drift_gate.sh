@@ -29,6 +29,42 @@ cd "$(dirname "$0")/.."
 VERBOSE=0
 [ "${1:-}" = "-v" ] && VERBOSE=1
 
+# 7.4.4 staged-diff advisory: G.7 "seed 与 .x 同 commit 同语义" — flag
+# seed-only changes (seeds/pins touched, no .x touched) in a scope. Legitimate
+# seed-only commits exist (regen catch-up, retirements, my own re-pin waves),
+# so this WARNS by default rather than failing. Scope: --staged/--cached =
+# the git index (pre-commit use); --head = the last commit (post-hoc CI).
+# PLATFORM: SHARED.
+staged_seed_only_check() {
+  local scope="${1:---head}" files="" seed_files="" x_files=""
+  command -v git >/dev/null 2>&1 || { echo "staged-diff: no git"; return 0; }
+  case "$scope" in
+    --staged|--cached) files=$(git diff --cached --name-only 2>/dev/null) ;;
+    --head) files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null) ;;
+    *) echo "staged-diff: unknown scope $scope" >&2; return 2 ;;
+  esac
+  [ -z "$files" ] && { echo "staged-diff: no changes in scope $scope"; return 0; }
+  seed_files=$(printf '%s\n' "$files" | grep -E 'seeds/.*\.(from_x\.c|linux\.x86_64\.c)$|/(driver|preprocess|lexer|parser|typeck|codegen|pipeline|lsp|lsp_io|lsp_diag|lsp_io_std_heap)_gen\.c$|^compiler/[a-z0-9_]+_gen\.c$' || true)
+  if [ -n "$seed_files" ]; then
+    x_files=$(printf '%s\n' "$files" | grep -E '\.x$' || true)
+  fi
+  if [ -n "$seed_files" ] && [ -z "$x_files" ]; then
+    echo "WARN staged-diff ($scope): seed-only changes — no .x touched:"
+    printf '%s\n' "$seed_files" | sed 's/^/      /'
+    echo "      G.7: seed 与 .x 同 commit 同语义；若为合法再生成/退役请连同说明忽略"
+    return 0
+  fi
+  echo "staged-diff ($scope): OK (seed changes accompanied by .x, or none)"
+  return 0
+}
+
+case "${1:-}" in
+  --staged|--cached|--head)
+    staged_seed_only_check "$1"
+    exit $?
+    ;;
+esac
+
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t pindrift)
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT INT TERM
 

@@ -197,6 +197,7 @@ fi
 if [ -f scripts/pin_gen_drift_gate.sh ]; then
   note "CI → pin_gen_drift_gate (advisory)"
   bash scripts/pin_gen_drift_gate.sh || note "WARN: drift-gate reported drift — run ./xbuild drift-gate"
+  bash scripts/pin_gen_drift_gate.sh --head || true
 else
   note "WARN: pin_gen_drift_gate.sh missing (7.4.4 v2)"
 fi
