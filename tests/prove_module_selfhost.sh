@@ -517,14 +517,13 @@ MODULES=(
   #   rest 含 arch_*_enc_* extern bridges (per-arch enc helpers) + *_impl externs;
   #   prove 锁 thin full surface IDENTICAL (133 nm T · no doc_anchor)
   "backend_enc_dispatch_thin|src/asm/backend_enc_dispatch_thin.x|seeds/backend_enc_dispatch_thin_surface.from_x.c||"
-  # runtime_pipeline_abi R2 full (wave575)：.x 270 nm T symbols
+  # runtime_pipeline_abi R2 full (wave575 lock; 2026-09-09 surface regen)：.x 2044 nm T
   #   (DIRECT compute: pipeline import/load/sync/parse/typeck orch + module import storage +
   #    debug_trace + diag_emitted + dep_seeded + ndep + cfg_eval complex ops);
-  #   rest 含 333 extern bridges (parser_*/asm_*/pipeline_*/typeck_*/cfg_eval_*/driver_*/xlang_*) +
-  #   48 static BSS slots (g_import_open_*/g_pipe_*) + init_globals;
+  #   rest 含 extern bridges (parser_*/asm_*/pipeline_*/typeck_*/cfg_eval_*/driver_*/xlang_*);
   #   Ubuntu xlang_asm -E 给非 #[no_mangle] 的 pipe_* export function 加 pipeline_ 前缀；
-  #   macOS clang 不加。sym_rename 在 .x-E 上将 pipeline_pipe_* → pipe_* 匹配 surface
-  #   prove 锁 full surface IDENTICAL (270 nm T · no doc_anchor)
+  #   Darwin 同前缀。sym_rename 在 .x-E 上将 pipeline_pipe_* → pipe_* 匹配 surface
+  #   prove 锁 full surface IDENTICAL (2044 nm T · no doc_anchor)
   "runtime_pipeline_abi|src/runtime_pipeline_abi.x|seeds/runtime_pipeline_abi_surface.from_x.c|pipeline_pipe_append_suffix:pipe_append_suffix,pipeline_pipe_cstr_contains:pipe_cstr_contains,pipeline_pipe_cstr_copy:pipe_cstr_copy,pipeline_pipe_cstr_eq:pipe_cstr_eq,pipeline_pipe_cstr_has_char:pipe_cstr_has_char,pipeline_pipe_cstr_join_slash:pipe_cstr_join_slash,pipeline_pipe_cstr_len:pipe_cstr_len,pipeline_pipe_dir_tail:pipe_dir_tail,pipeline_pipe_imp_ensure_entries:pipe_imp_ensure_entries,pipeline_pipe_imp_ensure_select:pipe_imp_ensure_select,pipeline_pipe_imp_entry_at:pipe_imp_entry_at,pipeline_pipe_imp_entry_off:pipe_imp_entry_off,pipeline_pipe_imp_entry_size:pipe_imp_entry_size,pipeline_pipe_imp_find_or_create:pipe_imp_find_or_create,pipeline_pipe_imp_find_slot:pipe_imp_find_slot,pipeline_pipe_imp_get_header_n:pipe_imp_get_header_n,pipeline_pipe_imp_off_num_imports:pipe_imp_off_num_imports,pipeline_pipe_imp_set_header_n:pipe_imp_set_header_n,pipeline_pipe_imp_soft_sync:pipe_imp_soft_sync,pipeline_pipe_load_i32_le:pipe_load_i32_le,pipeline_pipe_load_ptr_slot:pipe_load_ptr_slot,pipeline_pipe_path_readable:pipe_path_readable,pipeline_pipe_pctx_off_entry_dir_buf:pipe_pctx_off_entry_dir_buf,pipeline_pipe_pctx_off_entry_dir_len:pipe_pctx_off_entry_dir_len,pipeline_pipe_pctx_off_loaded_len:pipe_pctx_off_loaded_len,pipeline_pipe_pctx_off_num_lib_roots:pipe_pctx_off_num_lib_roots,pipeline_pipe_pctx_off_preprocess_len:pipe_pctx_off_preprocess_len,pipeline_pipe_store_i32_le:pipe_store_i32_le,pipeline_pipe_store_i64_zero:pipe_store_i64_zero,pipeline_pipe_store_ptr_slot:pipe_store_ptr_slot,pipeline_pipe_strip_prefix_seg:pipe_strip_prefix_seg,pipeline_pipe_write_nested_name_x:pipe_write_nested_name_x,pipeline_pipe_write_root_dotted_imp:pipe_write_root_dotted_imp|"
   # fmt_check R2 thin + Cap residual pure 深迁（含 append_repo + missing_diag +
   #  collect_mode/user_passed_L BSS + init + file_list/ignore/lib_bufs n + ignore path slots +
