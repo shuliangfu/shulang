@@ -172,10 +172,16 @@ case "$TARGET" in
     esac
     (cd compiler && bash scripts/ensure_migrate_gen.sh "$_gen_mode")
     ;;
+  drift-gate|pin-drift-gate|pin-gen-drift-gate)
+    # 7.4.4 v1: pin↔gen T-symbol freshness gate. Catches "pin edited in git,
+    # worktree gen stale" (2026-09-10 driver_gen trap). G.7 body =
+    # compiler/scripts/pin_gen_drift_gate.sh. Optional: ./xbuild drift-gate -v
+    # PLATFORM: SHARED — cc/nm only.
+    (cd compiler && bash scripts/pin_gen_drift_gate.sh "${2:-}")
+    ;;
   driver-gen|ensure-driver-gen|preprocess-gen|ensure-preprocess-gen)
     # Wave738 · 11.1.6: driver_gen.c + preprocess_gen.c via ensure_driver_gen.sh
-    # Optional: ./xbuild driver-gen driver|preprocess
-    _dgen_mode="all"
+    # Optional: ./xbuild driver-gen driver|preprocess    _dgen_mode="all"
     if [ "${2:-}" = "driver" ] || [ "${2:-}" = "preprocess" ] || [ "${2:-}" = "all" ]; then
       _dgen_mode="$2"
     fi
