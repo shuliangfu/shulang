@@ -177,7 +177,7 @@
 #            DRIVER_SEED_TYPECK_F64_OBJS + DRIVER_SEED_CRT0_OBJS (lists = mk).
 #            typeck_f64_bits.o: host picks platform .s (Linux/Darwin/Windows).
 #            crt0*.o / freestanding_io_x86_64.o: fixed o→.s map; crt0_mingw.o
-#            uses seeds/crt0_mingw.from_x.c via cc_inc_tu (+ WIN32_O_CFLAGS).
+#            uses src/crt0_mingw.x via cc_inc_tu --auto (+ WIN32_O_CFLAGS).
 #            G.7 有则补全 on try-r2 (no second helper name).
 #
 # Authority (G.7):
@@ -6657,8 +6657,9 @@ r2_crt0_src_for_out() {
     src/asm/freestanding_io_x86_64.o)
       printf '%s\n' "asm src/asm/freestanding_io_x86_64.s" ;;
     src/asm/crt0_mingw.o)
-      # PLATFORM: WINDOWS — seed via cc_inc_tu (Makefile twin).
-      printf '%s\n' "cc_inc_tu seeds/crt0_mingw.from_x.c" ;;
+      # PLATFORM: WINDOWS — .x authority prefer lane (7.2.1 second knife);
+      # seed remains the no-product cold fallback.
+      printf '%s\n' "cc_inc_tu_x src/crt0_mingw.x" ;;
     *)
       echo "ensure_host_cc_seed_o r2-crt0: no source map for $o" >&2
       return 1
@@ -6688,6 +6689,15 @@ ensure_r2_crt0_one() {
       log "cc -c $src → $o"
       # Stage 12.2.3: pure_as_compile (as when XLANG_ZERO_CC_AS=1, else $CC -c).
       pure_as_compile "$o" "$src"
+      ;;
+    cc_inc_tu_x)
+      # 7.2.1: prefer-.x leaf — cc_inc_tu --auto (product -x -E + char**
+      # fixup); WIN32_O_CFLAGS pass-through like cc_inc_tu below.
+      if [ "$FORCE" != "1" ] && [ -f "$o" ]; then
+        log "skip $o (prefer-.x lane: FORCE to rebuild)"
+        return 0
+      fi
+      sh scripts/cc_inc_tu.sh --auto "$o" ${WIN32_O_CFLAGS:-}
       ;;
     cc_inc_tu)
       # PLATFORM: WINDOWS — WIN32_O_CFLAGS from env when set by caller (wave866:
