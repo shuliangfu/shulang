@@ -5339,7 +5339,14 @@ std_core_prefer_spec_for_out() {
       printf '%s' "seeds/runtime_slice_glue.from_x.c|src/asm/runtime_slice_glue.x|direct"
       ;;
     std/process/process.o)
-      printf '%s' "seeds/runtime_process_args_thin.from_x.c||process_merge"
+      # 7.2.1 fourth knife: .x authority (src/runtime_process_args_thin.x)
+      # via product -x -E into a stable gen; seed remains the no-product
+      # cold fallback.
+      if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+        printf '%s' "runtime_process_args_thin_gen.c|src/runtime_process_args_thin.x|process_merge"
+      else
+        printf '%s' "seeds/runtime_process_args_thin.from_x.c||process_merge"
+      fi
       ;;
     std/net/net.o)
       printf '%s' "||net_merge"
@@ -5598,6 +5605,17 @@ ensure_std_core_prefer_one() {
       # PLATFORM: SHARED — process.o = args_thin + argv + os_glue + import_alias.
       # import_alias exports std_process_* for pure-asm import METHOD (G.7 complete
       # process_merge; C-path co-emit of mod.x is not used on pure-asm product).
+      # 7.2.1 fourth knife: when the map pointed at the .x authority, regen the
+      # stable gen via the product -x -E first (both bare wrappers verified);
+      # $seed then names the gen file for the shared compile below.
+      if [ -n "$x_src" ] && [ -f "$x_src" ] && [ -x ./xlang_asm ]; then
+        if ! ./xlang_asm -x -E -L .. "$x_src" >"$seed" 2>/dev/null \
+           || ! grep -q '^int32_t process_args_count_c(' "$seed" \
+           || ! grep -q '^uint8_t \* process_arg_c(' "$seed"; then
+          echo "ensure_host_cc_seed_o: process args .x regen failed; cold seed needed" >&2
+          return 1
+        fi
+      fi
       if [ ! -f "$seed" ]; then
         echo "ensure_host_cc_seed_o try-std-core-prefer: missing seed $seed for $o" >&2
         return 1
