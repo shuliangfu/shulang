@@ -4094,9 +4094,16 @@ ensure_std_fs_io_heap_objs() {
 
 # pipeline.x import pipeline.run_x_pipeline → pipeline_run_x_link_alias 提供 C 符号。
 ensure_pipeline_run_x_link_alias_obj() {
-  if [ ! -f src/asm/pipeline_run_x_link_alias.o ] || [ seeds/pipeline_run_x_link_alias.from_x.c -nt src/asm/pipeline_run_x_link_alias.o ]; then
-  build_xlang_asm_info "cc pipeline_run_x_link_alias.o"
-  sh scripts/cc_inc_tu.sh seeds/pipeline_run_x_link_alias.from_x.c src/asm/pipeline_run_x_link_alias.o
+  # 7.2.1 tenth knife: .x authority via cc_inc_tu --auto prefer lane.
+  if [ -x ./xlang_asm ] || [ -x ./xlang ] || [ -x ./xlang-c ]; then
+    if [ ! -f src/asm/pipeline_run_x_link_alias.o ] || [ src/pipeline_run_x_link_alias.x -nt src/asm/pipeline_run_x_link_alias.o ] \
+       || { [ -f seeds/pipeline_run_x_link_alias.from_x.c ] && [ seeds/pipeline_run_x_link_alias.from_x.c -nt src/asm/pipeline_run_x_link_alias.o ]; }; then
+      build_xlang_asm_info "cc_inc_tu --auto (src/pipeline_run_x_link_alias.x)"
+      sh scripts/cc_inc_tu.sh --auto src/asm/pipeline_run_x_link_alias.o
+    fi
+  elif [ ! -f src/asm/pipeline_run_x_link_alias.o ] || [ seeds/pipeline_run_x_link_alias.from_x.c -nt src/asm/pipeline_run_x_link_alias.o ]; then
+    build_xlang_asm_info "cc pipeline_run_x_link_alias.o"
+    sh scripts/cc_inc_tu.sh seeds/pipeline_run_x_link_alias.from_x.c src/asm/pipeline_run_x_link_alias.o
   fi
 }
 
