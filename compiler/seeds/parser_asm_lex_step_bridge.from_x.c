@@ -184,3 +184,37 @@ int32_t parser_asm_lex_peek_kind_c(void *lex, void *source) {
   lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.kind;
 }
+
+/**
+ * Peek the NEXT token's ident_len without advancing the caller's lexer.
+ * .x audits that need several fields of one token call the peek family
+ * back-to-back (each peeks the same token; pure, no hidden state).
+ * @param lex *u8 — opaque struct parser_asm_lexer* (read-only)
+ * @param source *u8 — opaque struct parser_asm_slice_u8*
+ * @return i32 — next token's ident_len (0 when non-ident / null args)
+ * PLATFORM: SHARED.
+ */
+int32_t parser_asm_lex_peek_ident_len_c(void *lex, void *source) {
+  struct parser_asm_lexer_result r;
+  if (!lex || !source)
+    return 0;
+  lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.ident_len;
+}
+
+/**
+ * Peek the NEXT token's start offset (into source bytes) without advancing.
+ * With parser_asm_lex_source_data_c the .x side can byte-compare the token
+ * text itself (e.g. the `as` keyword check in import audits).
+ * @param lex *u8 — opaque struct parser_asm_lexer* (read-only)
+ * @param source *u8 — opaque struct parser_asm_slice_u8*
+ * @return usize — next token's token_start
+ * PLATFORM: SHARED.
+ */
+size_t parser_asm_lex_peek_token_start_c(void *lex, void *source) {
+  struct parser_asm_lexer_result r;
+  if (!lex || !source)
+    return 0;
+  lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
+  return r.token_start;
+}

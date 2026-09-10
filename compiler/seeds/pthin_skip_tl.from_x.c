@@ -98,7 +98,7 @@ extern void parser_asm_skip_balanced_parens_into_slice_c(struct parser_asm_lexer
 extern void parser_asm_skip_trait_impl_block_raw_c(struct parser_asm_lexer *out, struct parser_asm_lexer start, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_collect_imports_bind_audit_c(const uint8_t *bind, int32_t bind_len);
 extern int32_t parser_asm_stretch_enum_body_deep_slice_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_enum_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_enum_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_enum_variant_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start, int32_t name_len);
 extern int32_t parser_asm_stretch_enum_variants_body_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_enum_variants_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t *out_variant_count);

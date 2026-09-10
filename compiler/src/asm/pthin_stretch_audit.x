@@ -35,11 +35,38 @@ export extern "C" function parser_asm_lex_col_c(lex: *u8): i32;
 /** Write the opaque lexer's col (restore trio member 3/3). */
 export extern "C" function parser_asm_lex_set_col_c(lex: *u8, col: i32): void;
 
+/** Peek the NEXT token's kind without advancing (pure lookahead). */
+export extern "C" function parser_asm_lex_peek_kind_c(lex: *u8, source: *u8): i32;
+/** Peek the next token's ident_len without advancing (pure, no mutation). */
+export extern "C" function parser_asm_lex_peek_ident_len_c(lex: *u8, source: *u8): i32;
+/** Peek the next token's start offset into source bytes without advancing. */
+export extern "C" function parser_asm_lex_peek_token_start_c(lex: *u8, source: *u8): usize;
+/** Read the source slice's data pointer (byte-compare of token text in .x). */
+export extern "C" function parser_asm_lex_source_data_c(source: *u8): *u8;
+/** Read the source slice's length. */
+export extern "C" function parser_asm_lex_source_length_c(source: *u8): usize;
+
 // Lexer canonical TokenKind values (enum token_TokenKind indices; authority
 // include/token.h == seeds/lexer_gen.linux.x86_64.c, verified identical 133
 // entries — see pthin_stretch.x for the rest of the constant set).
+const TOKEN_EOF: i32 = 0;
+const TOKEN_LET: i32 = 2;
+const TOKEN_CONST: i32 = 3;
 const TOKEN_IF: i32 = 4;
+const TOKEN_ELSE: i32 = 5;
+const TOKEN_WHILE: i32 = 6;
+const TOKEN_FOR: i32 = 8;
+const TOKEN_BREAK: i32 = 9;
+const TOKEN_CONTINUE: i32 = 10;
+const TOKEN_RETURN: i32 = 11;
+const TOKEN_MATCH: i32 = 18;
+const TOKEN_ENUM: i32 = 47;
+const TOKEN_IMPORT: i32 = 53;
+const TOKEN_IDENT: i32 = 59;
 const TOKEN_LPAREN: i32 = 82;
+const TOKEN_LBRACE: i32 = 84;
+const TOKEN_COLON: i32 = 91;
+const TOKEN_SEMICOLON: i32 = 95;
 
 /**
  * Audit an `if` statement header: exactly `if (` opens a valid header.
@@ -85,6 +112,484 @@ export function parser_asm_stretch_if_header_audit_c(lex: *u8, source: *u8): i32
     if (kind == TOKEN_LPAREN) {
       return 1;
     }
+    return 0;
+  }
+  return 0;
+}
+
+/* ── tier26/27 audit family (B-minus wave 2) ─────────────────────────────
+ * All ports follow the pilot contract: pointer ABI, by-value net semantics
+ * via the snapshot/restore trio, peek-family inspection of the token about
+ * to be consumed (pure — several peeks see the same token), explicit step
+ * for advancement. Guard loops replicate the C `if (guard++ > N)` bail
+ * exactly: while (guard <= N) { guard++; body } ≡ 65/513-iteration caps. */
+
+/**
+ * Audit a loop header: keyword (while or for per expect_while) then `(`.
+ * Port of the suite twin `parser_asm_stretch_loop_header_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param expect_while i32 — nonzero expects `while`, zero expects `for`
+ * @return i32 — 1 iff `<kw> (` opens the header
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_loop_header_audit_c(lex: *u8, source: *u8, expect_while: i32): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let want: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    if (expect_while != 0) {
+      want = TOKEN_WHILE;
+    } else {
+      want = TOKEN_FOR;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != want) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_LPAREN) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit break/continue statements: keyword then `;`.
+ * Port of the suite twin `parser_asm_stretch_break_continue_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param want_break i32 — nonzero audits `break ;`, zero `continue ;`
+ * @return i32 — 1 iff `<kw> ;`
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_break_continue_audit_c(lex: *u8, source: *u8, want_break: i32): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let want: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    if (want_break != 0) {
+      want = TOKEN_BREAK;
+    } else {
+      want = TOKEN_CONTINUE;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != want) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_SEMICOLON) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit an else branch: `else {` or `else if (` openers.
+ * Port of the suite twin `parser_asm_stretch_else_stmt_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff the token after `else` is `{` or `if`
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_else_stmt_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_ELSE) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_IF || kind == TOKEN_LBRACE) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit an else-if chain opener: `else if (` exactly.
+ * Port of the suite twin `parser_asm_stretch_else_if_chain_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff `else if (`
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_else_if_chain_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_ELSE) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_IF) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_LPAREN) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit a let/const declaration head: `let|const name :` shape (no arena).
+ * Port of the suite twin `parser_asm_stretch_let_const_decl_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff `<let|const> <ident with len> <:>`
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_let_const_decl_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_LET && kind != TOKEN_CONST) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind != TOKEN_IDENT || idlen <= 0) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_COLON) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit an enum header: `enum Name {` shape.
+ * Port of the suite twin `parser_asm_stretch_enum_header_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff `enum <ident with len> {`
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_enum_header_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_ENUM) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind != TOKEN_IDENT || idlen <= 0) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_LBRACE) {
+      return 1;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit a match statement: `match ... {` — scans ahead (guard 512) until
+ * the opening brace; `;`/EOF first means not a match statement.
+ * Port of the suite twin `parser_asm_stretch_match_kw_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff a `{` is reached before `;`/EOF/512 tokens
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_match_kw_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let guard: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_MATCH) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    while (guard <= 512) {
+      guard = guard + 1;
+      kind = parser_asm_lex_step_kind_c(lex, source);
+      if (kind == TOKEN_LBRACE) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      if (kind == TOKEN_EOF || kind == TOKEN_SEMICOLON) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+      }
+    }
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit a return statement: `return ... ;` — scans ahead (guard 256) for
+ * the terminating `;`; EOF first means unterminated.
+ * Port of the suite twin `parser_asm_stretch_return_stmt_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff a `;` is reached before EOF/256 tokens
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_return_stmt_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let guard: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_RETURN) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    while (guard <= 256) {
+      guard = guard + 1;
+      kind = parser_asm_lex_step_kind_c(lex, source);
+      if (kind == TOKEN_SEMICOLON) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      if (kind == TOKEN_EOF) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+      }
+    }
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Audit an import statement: `import path ;` / `import path as bind ;`
+ * coarse check — scans ahead (guard 64) for the `;`. A two-byte IDENT whose
+ * bytes are exactly "as" does not advance the scan (legacy branch kept for
+ * fidelity; the lexer lexes `as` as TOKEN_AS so this cannot fire today).
+ * Port of the suite twin `parser_asm_stretch_import_stmt_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff `;` reached before EOF/65 scanned tokens
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_import_stmt_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let ts: usize = 0;
+  let slen: usize = 0;
+  let guard: i32 = 0;
+  let data: *u8 = 0 as *u8;
+  let b0: u8 = 0;
+  let b1: u8 = 0;
+  let is_as: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_IMPORT) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    while (guard <= 64) {
+      guard = guard + 1;
+      kind = parser_asm_lex_peek_kind_c(lex, source);
+      if (kind == TOKEN_SEMICOLON) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      if (kind == TOKEN_EOF) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+      }
+      is_as = 0;
+      if (kind == TOKEN_IDENT) {
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        if (idlen == 2) {
+          data = parser_asm_lex_source_data_c(source);
+          slen = parser_asm_lex_source_length_c(source);
+          ts = parser_asm_lex_peek_token_start_c(lex, source);
+          if (data != 0 as *u8 && ts + 1 < slen) {
+            b0 = data[ts];
+            b1 = data[ts + 1];
+            if (b0 == 97 && b1 == 115) {
+              is_as = 1;
+            }
+          }
+        }
+      }
+      if (is_as == 0) {
+        parser_asm_lex_step_kind_c(lex, source);
+      }
+    }
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
     return 0;
   }
   return 0;

@@ -289,7 +289,7 @@ extern int32_t parser_asm_stretch_control_flow_summit_apexversal_maxversal_whole
                                                          struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_control_flow_peak_summit_apexversal_maxversal_wholeversal_completeversal_fullversal_everyversal_totversal_allversal_panversal_omniversal_hyperversal_metaversal_multiversal_intergalactic_galactic_celestial_divine_imperial_sovereign_omnipotent_universal_cosmic_eternal_infinite_transcendent_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apex_max_ultra_hyper_mega_full_deep_audit_c(struct parser_asm_lexer lex_at_if,
                                                          struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_else_if_chain_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 
 /** 前向声明：else-if 递归。 */
 static int32_t parser_asm_parse_if_stmt_into_slice_c(void *arena, struct parser_asm_lexer lex_at_if,
@@ -1146,7 +1146,7 @@ static int32_t parser_asm_parse_if_stmt_into_slice_c(void *arena, struct parser_
       lexer_next_into(&r, lex_cur, source);
     if (r.tok.kind == (int32_t)TOKEN_IF) {
       elif_lex = parser_asm_lex_at_token_from_result_c(r);
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(elif_lex, source));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(&elif_lex, source));
       wrap_ref = ast_ast_arena_block_alloc(arena);
       if (wrap_ref == 0)
         return 0;

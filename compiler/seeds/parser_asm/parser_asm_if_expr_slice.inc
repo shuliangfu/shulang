@@ -29,7 +29,7 @@ extern int32_t parser_asm_stretch_if_expr_deep_audit_c(struct parser_asm_lexer l
                                                        struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_expr_branch_audit_c(struct parser_asm_lexer lex_at_if,
                                                          struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_else_if_chain_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 
 /** expr_set_common_zeros：与 parser.x 字段清零顺序一致。 */
 static void parser_asm_if_expr_common_zeros_c(struct ast_Expr *e) {
@@ -162,7 +162,7 @@ void parser_asm_parse_if_expr_into_c(void *arena, struct parser_asm_lexer lex_at
     lexer_next_into(&r, lex_cur, source);
     if (r.tok.kind == (int32_t)TOKEN_IF) {
       elif_lex = parser_lex_at_token_from_result_glue(r);
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(elif_lex, source));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(&elif_lex, source));
       memset(&elif_res, 0, sizeof(elif_res));
       elif_res.next_lex = elif_lex;
       parser_parse_if_expr_into_glue(arena, elif_lex, source, type_ref, &elif_res);

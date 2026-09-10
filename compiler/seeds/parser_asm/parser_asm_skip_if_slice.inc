@@ -896,11 +896,11 @@ void parser_asm_skip_one_if_statement_into_slice_c(struct parser_asm_lexer_resul
   parser_asm_skip_one_if_core_into_slice_c(out, lex, source);
   while (out->tok.kind == (int32_t)TOKEN_ELSE) {
     parser_asm_lex_from_result_val_into(&lex_cur, *out);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_stmt_audit_c(lex_cur, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_stmt_audit_c(&lex_cur, source));
     PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_one_if_else_chain_audit_c(lex_cur, source));
     lexer_next_into(out, lex_cur, source);
     if (out->tok.kind == (int32_t)TOKEN_IF) {
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(lex_cur, source));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_else_if_chain_audit_c(&lex_cur, source));
       parser_asm_lex_from_result_val_into(&lex_cur, *out);
       parser_asm_skip_one_if_core_into_slice_c(out, lex_cur, source);
     } else if (out->tok.kind == (int32_t)TOKEN_LBRACE) {
