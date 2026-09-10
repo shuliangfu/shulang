@@ -1068,7 +1068,7 @@ void parser_asm_skip_one_function_full_into_slice_c(struct parser_asm_lexer *out
   }
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_function_body_block_stmt_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_block_stmt_deep_audit_c(r.next_lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_block_stmt_kind_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_block_stmt_kind_probe_c(&r.next_lex, source, 0));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_block_stmt_mega_full_deep_audit_c(r.next_lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_match_mega_full_deep_audit_c(lex, source));
   parser_asm_skip_balanced_braces_into_slice_c(out, r.next_lex, source);

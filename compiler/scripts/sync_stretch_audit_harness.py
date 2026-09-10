@@ -118,12 +118,27 @@ int32_t parser_asm_stretch_enum_variant_bind_audit_c(struct parser_asm_slice_u8 
 int32_t parser_asm_stretch_enum_discriminant_kind_audit_c(int32_t kind) {
   return kind == (int32_t)TOKEN_I32 || kind == (int32_t)TOKEN_I64 || kind == (int32_t)TOKEN_INT ? 1 : 0;
 }
+/* v4.9: function_name_audit is a thin wrap of bind_name_validate (G.7). */
+int32_t parser_asm_stretch_function_name_audit_c(const uint8_t *name, int32_t name_len) {
+  return parser_asm_stretch_bind_name_validate_c(name, name_len);
+}
+/* v4.9: loop_stmt_body is by-value + void-cast in block_stmt twin — stub OK
+ * (no cursor net effect; .x port elides the same call). */
+int32_t parser_asm_stretch_loop_stmt_body_audit_c(struct parser_asm_lexer lex,
+                                                  struct parser_asm_slice_u8 *source,
+                                                  int32_t expect_while) {
+  (void)lex;
+  (void)source;
+  (void)expect_while;
+  return 0;
+}
 '''
 
 
 SUITE_HELPER_SIGS = [
     "static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(",
     "void parser_asm_skip_balanced_parens_into_slice_c(",
+    "void parser_asm_skip_balanced_braces_into_slice_c(",
     "void parser_asm_stretch_skip_balanced_brackets_into_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_type_suffix_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(",

@@ -339,3 +339,22 @@ void parser_asm_lex_skip_balanced_parens_inplace_c(void *lex_inout, void *source
                                                *(struct parser_asm_lexer *)lex_inout,
                                                (struct parser_asm_slice_u8 *)source);
 }
+
+extern void parser_asm_skip_balanced_braces_into_slice_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
+                                                          struct parser_asm_slice_u8 *source);
+
+/**
+ * In-place skip of a balanced {..} group (caller already consumed '{').
+ * G.7 single authority: wraps suite parser_asm_skip_balanced_braces_into_slice_c
+ * the same way parens/brackets inplace adapters do — do not re-implement.
+ * @param lex_inout *u8 — opaque lexer, advanced past the matching '}'
+ * @param source *u8 — opaque slice
+ * PLATFORM: SHARED.
+ */
+void parser_asm_lex_skip_balanced_braces_inplace_c(void *lex_inout, void *source) {
+  if (!lex_inout || !source)
+    return;
+  parser_asm_skip_balanced_braces_into_slice_c((struct parser_asm_lexer *)lex_inout,
+                                               *(struct parser_asm_lexer *)lex_inout,
+                                               (struct parser_asm_slice_u8 *)source);
+}

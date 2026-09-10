@@ -7702,7 +7702,7 @@ void parser_asm_skip_one_impl_into_slice_c(struct parser_asm_lexer *out, struct 
     return;
   }
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_impl_items_body_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_impl_items_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_impl_items_probe_c(&r.next_lex, source, 0));
   /* wave390: do NOT skip_balanced_braces — leave methods for outer parse_into free-fn commit. */
   out->pos = r.next_lex.pos;
   out->line = r.next_lex.line;
@@ -7750,7 +7750,7 @@ void parser_asm_parse_one_extern_skip_into_slice_c(struct parser_asm_extern_pars
     return;
   {
     int32_t extern_param_score = 0;
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_param_count_audit_c(lex, source, &extern_param_score));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_param_count_audit_c(&lex, source, &extern_param_score));
     (void)extern_param_score;
   }
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_fn_audit_c(&lex, source));

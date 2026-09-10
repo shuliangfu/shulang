@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.8 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.9 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -23,6 +23,13 @@
 #   struct_field_bind / function_name_audit are thin C wrappers of that
 #   path). Elide pure discarded kind audits. Wrap kind-only classifiers
 #   (`struct_field_name_kind` / `continues_kind`) as bool conditions.
+#
+# v4.9: block-nested kind-while; else-if chain after single-line if;
+#   for(;;) guard-return (was shadowed by break-only handler); pure
+#   look-ahead `lexer_next_into(&rnx, r.next_lex)` → kind2 snapshot;
+#   elide void by-value `loop_stmt_body_audit` (no cursor net effect).
+#   Soft-knife remaining out probes (trait_methods / struct_lit /
+#   extern_param / block_stmt).
 #
 # Outputs (in-place):
 #   src/asm/pthin_stretch_audit.x            — .x port appended
@@ -145,6 +152,11 @@ INOUT_CALLEES = {
     "parser_asm_stretch_skip_return_type_audit_c",
 }
 BLOCK_HOIST_USED = set()
+# Look-ahead result var → scalar kind slot (e.g. rnx → kind2). Cleared per translate().
+LOOKAHEAD_KIND = {}
+# Lexer locals that are by-value copies of the cursor (probe-only; must not
+# permanently advance the shared opaque lex). Cleared per translate().
+PROBE_LEX_COPIES = set()
 
 
 def lines_strip(l):
@@ -392,6 +404,8 @@ def translate(name, body, tokvals):
     helper_alias = None
     kind_arrays = {}  # name -> N for stack kinds[N] / peek_kinds[N]
     BLOCK_HOIST_USED.clear()
+    LOOKAHEAD_KIND.clear()
+    PROBE_LEX_COPIES.clear()
 
     def emit(s):
         x.append("    " + s)
@@ -761,7 +775,9 @@ def translate(name, body, tokvals):
             cur_results = set()
             si += 1
             continue
-        # v4.1: guard-break head loop for(;;){if(guard++>N)break;...}
+        # v4.1/v4.9: guard-break / guard-return head loop
+        # for(;;){if(guard++>N)break;...}  OR  for(;;){if(guard++>N)return 0;...}
+        # (v4.1 break-only handler used to shadow the return form below.)
         if st == "for (;;) {":
             j2 = si + 1
             depth = 1
@@ -789,6 +805,15 @@ def translate(name, body, tokvals):
                 used |= ntok2
                 x.extend(body_x)
                 emit("}")
+                si = j2 + 1
+                continue
+            # v4.9: return-0 / return-guard form → translate_guard_loop
+            m3 = re.match(r"if \((\w+)\+\+ > (\d+)\) return (\w+|\d+);$", head)
+            if m3 or (m and len(body_l) > 1 and body_l[1].strip() in (
+                    "return 0;", f"return {m.group(1)};", "return guard;")):
+                body_x, ntok2 = translate_guard_loop(body_l, cur_results)
+                used |= ntok2
+                x.extend(body_x)
                 si = j2 + 1
                 continue
             raise Refuse("guard-break loop head form")
@@ -1049,6 +1074,12 @@ def translate(name, body, tokvals):
         int_vars.update({"data2_us", "ts2_us", "sln2_us", "bhit_us"})
         if "adv0" in BLOCK_HOIST_USED:
             int_vars.add("adv0_us")
+        # v4.9: look-ahead temps
+        if "kind2" in BLOCK_HOIST_USED:
+            int_vars.add("kind2")
+        if "la_pos" in BLOCK_HOIST_USED:
+            # la_line/la_col emitted via la_pos_us special lets (not plain i32)
+            int_vars.add("la_pos_us")
     return x, used, int_vars
 
 
@@ -1160,6 +1191,10 @@ def translate_cond(cond, cur_results):
                    rf"({kn}(\1) == 0)", c)
         c = re.sub(rf"(?<![\w!=]){kn}\(([^()]*)\)(?!\s*[=!])",
                    rf"({kn}(\1) != 0)", c)
+    # v4.9: look-ahead result vars (rnx etc.) → kind2 scalar before main cursor map
+    for res, slot in list(LOOKAHEAD_KIND.items()):
+        c = c.replace(f"{res}.tok.kind", slot)
+        c = c.replace(f"{res}.tok.ident_len", "idlen2" if slot == "kind2" else "idlen")
     for res in cur_results | {"r", "r2"}:
         c = c.replace(f"{res}.tok.kind", "kind")
         c = c.replace(f"{res}.tok.ident_len", "idlen")
@@ -1362,9 +1397,11 @@ def translate_return(expr, cur_results):
 
 def translate_block(block, cur_results, indent=2):
     """Statements inside a branch/loop body. Recursively handles if/else-if
-    chains, breaks, continues, steps, score ops, calls, alias advances."""
+    chains, breaks, continues, steps, score ops, calls, alias advances,
+    and (v4.9) nested kind-whiles + look-ahead result peeks."""
     used = set()
-    int_vars = {"score", "n", "depth", "guard", "arms"}  # block-local name space
+    int_vars = {"score", "n", "depth", "guard", "arms", "nm", "ni", "nf",
+                "nparams", "nargs"}  # block-local name space
     cur_results = {'r'}  # block lexer_next re-fills r; conds reference it
     out = []
     pad = "    " * indent
@@ -1372,6 +1409,100 @@ def translate_block(block, cur_results, indent=2):
     si = 0
     while si < len(lines):
         st = lines[si].strip()
+        # v4.9: local lexer_result decl (look-ahead holder) — no emit
+        if st.startswith("struct parser_asm_lexer_result "):
+            si += 1
+            continue
+        # v4.9: local lexer decl / copy (probe alias) — tracked but no emit yet
+        m = re.match(r"struct parser_asm_lexer (\w+) = (\w+);$", st)
+        if m:
+            # by-value copy of the cursor: later &copy calls must snapshot/restore
+            PROBE_LEX_COPIES.add(m.group(1))
+            si += 1
+            continue
+        m = re.match(r"struct parser_asm_lexer (\w+);$", st)
+        if m:
+            si += 1
+            continue
+        # v4.9: if (!CALLEE(&probe_copy, source)) return N;
+        # Probe-copy semantics: call on shared lex then restore mid-cursor.
+        m = re.match(
+            r"if \(!?(parser_asm_stretch_\w+_c)\(&(\w+), source(?:, (\d+))?\)\) return (\d+);$",
+            st)
+        if m and m.group(2) in PROBE_LEX_COPIES:
+            callee, _copy, flag, rv = m.group(1), m.group(2), m.group(3), m.group(4)
+            # detect negation: original had !CALLEE
+            neg = "!" in st.split(callee)[0]
+            out.append(f"{pad}la_pos = parser_asm_lex_pos_c(lex);")
+            out.append(f"{pad}la_line = parser_asm_lex_line_c(lex);")
+            out.append(f"{pad}la_col = parser_asm_lex_col_c(lex);")
+            x2, ntok = translate_call(callee, "lex", flag)
+            used |= ntok
+            out.append(f"{pad}rc = {strip_inout(x2)};")
+            out.append(f"{pad}parser_asm_lex_set_pos_c(lex, la_pos);")
+            out.append(f"{pad}parser_asm_lex_set_line_c(lex, la_line);")
+            out.append(f"{pad}parser_asm_lex_set_col_c(lex, la_col);")
+            cond = "rc == 0" if neg else "rc != 0"
+            out.append(f"{pad}if ({cond}) {{")
+            out.append(f"{pad}  parser_asm_lex_set_pos_c(lex, pos0);")
+            out.append(f"{pad}  parser_asm_lex_set_line_c(lex, line0);")
+            out.append(f"{pad}  parser_asm_lex_set_col_c(lex, col0);")
+            out.append(f"{pad}  return {rv};")
+            out.append(f"{pad}}}")
+            BLOCK_HOIST_USED.update({"la_pos", "la_line", "la_col"})
+            si += 1
+            continue
+        # v4.9: nested kind-while (same shapes as top-level v4.2/v4.7)
+        m = re.match(
+            r"while \(((?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+"
+            r"(?: && (?:r\w*\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+|depth [><=!]+ \d+))*"
+            r"|depth [><=!]+ \d+ && (?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+)\) \{$",
+            st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            j = si + 1
+            depth_w = 1
+            body_l = []
+            while depth_w > 0:
+                t = lines[j].strip()
+                depth_w += t.count("{") - t.count("}")
+                if depth_w == 0:
+                    break
+                body_l.append(lines[j])
+                j += 1
+            out.append(f"{pad}while ({cond_x}) {{")
+            body_x, ntok2 = translate_block(body_l, cur_results, indent + 1)
+            used |= ntok2
+            out.extend(body_x)
+            out.append(f"{pad}}}")
+            si = j + 1
+            continue
+        # v4.9: look-ahead OR committed step from *.next_lex
+        #   lexer_next_into(&r, r.next_lex)     → commit (same result var)
+        #   lexer_next_into(&rnx, r.next_lex)   → look-ahead (different var;
+        #     snapshot/step/kind2/restore; do NOT poison r.tok.kind → kind2)
+        m = re.match(r"lexer_next_into\(&(r\w*), (r\w*)\.next_lex, source\);$", st)
+        if m and m.group(2) in cur_results:
+            if m.group(1) == m.group(2):
+                out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+                out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
+                out.append(f"{pad}idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
+                cur_results = {m.group(1)}
+                si += 1
+                continue
+            out.append(f"{pad}la_pos = parser_asm_lex_pos_c(lex);")
+            out.append(f"{pad}la_line = parser_asm_lex_line_c(lex);")
+            out.append(f"{pad}la_col = parser_asm_lex_col_c(lex);")
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            out.append(f"{pad}kind2 = parser_asm_lex_peek_kind_c(lex, source);")
+            out.append(f"{pad}parser_asm_lex_set_pos_c(lex, la_pos);")
+            out.append(f"{pad}parser_asm_lex_set_line_c(lex, la_line);")
+            out.append(f"{pad}parser_asm_lex_set_col_c(lex, la_col);")
+            LOOKAHEAD_KIND[m.group(1)] = "kind2"
+            BLOCK_HOIST_USED.update({"kind2", "la_pos", "la_line", "la_col"})
+            si += 1
+            continue
         # nested if / else-if chain: gather arms at this level
         m = re.match(r"if \((.+)\) \{$", st)
         if m:
@@ -1388,24 +1519,24 @@ def translate_block(block, cur_results, indent=2):
             arms.append((cond_x, collected))
             endj = collected[1]
             # the closing line may be a lone '}' or fused '} else ... {'
-            si = endj if (endj < len(lines) and lines[endj].strip().startswith("} else")) else endj + 1
-            # else-if / else continuations: lines[si] == "} else if (...) {" style
+            si = endj if (endj < len(lines) and re.match(r"\}\s*else", lines[endj].strip())) else endj + 1
+            # else-if / else continuations: "} else if (...) {" (allow extra spaces)
             while si < len(lines):
                 t = lines[si].strip()
-                m2 = re.match(r"\} else if \((.+)\) \{$", t)
+                m2 = re.match(r"\}\s*else if \((.+)\) \{$", t)
                 if m2:
                     c2, nt2 = translate_cond(m2.group(1), cur_results)
                     used |= nt2
                     collected = collect_braced(lines, si, offset_in_line=True)
                     arms.append((c2, collected))
                     endj = collected[1]
-                    si = endj if (endj < len(lines) and lines[endj].strip().startswith("} else")) else endj + 1
+                    si = endj if (endj < len(lines) and re.match(r"\}\s*else", lines[endj].strip())) else endj + 1
                     continue
-                if t == "} else {":
+                if re.match(r"\}\s*else \{$", t):
                     collected = collect_braced(lines, si, offset_in_line=True)
                     arms.append((None, collected))
                     endj = collected[1]
-                    si = endj if (endj < len(lines) and lines[endj].strip().startswith("} else")) else endj + 1
+                    si = endj if (endj < len(lines) and re.match(r"\}\s*else", lines[endj].strip())) else endj + 1
                     continue
                 break
             # emit chain
@@ -1498,6 +1629,15 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}{m.group(1)} = {m.group(1)} + 1;")
             si += 1
             continue
+        # v4.9: void by-value loop_stmt_body_audit — no cursor net effect (elide).
+        # Must run before the general void-call handler (which would refuse
+        # unmigrated callees via translate_call).
+        m = re.match(
+            r"\(void\)parser_asm_stretch_loop_stmt_body_audit_c\(lex, source, \d+\);$",
+            st)
+        if m:
+            si += 1
+            continue
         m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st) or \
         re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\);$", st)
         if m:
@@ -1538,6 +1678,18 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}parser_asm_lex_skip_balanced_parens_inplace_c(lex, source);")
             si += 1
             continue
+        # v4.9: balanced braces skip (impl body etc.) — same shape as parens
+        m = re.match(r"parser_asm_skip_balanced_braces_into_slice_c\(&\w+, (r\w*)\.next_lex, source\);$", st)
+        if m and m.group(1) in cur_results:
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            out.append(f"{pad}parser_asm_lex_skip_balanced_braces_inplace_c(lex, source);")
+            si += 1
+            continue
+        # v4.9: lex = after (cursor already at helper result via inplace skip)
+        m = re.match(r"lex = (\w+);$", st)
+        if m:
+            si += 1
+            continue
         m = re.match(r"parser_asm_lex_from_result_val_into\(&\w+, r\w*\);$", st)
         if m:
             out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
@@ -1554,26 +1706,8 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
             si += 1
             continue
-        m = re.match(r"if \((r\w*)\.tok\.kind (.+?)\) (\w+)\+\+;$", st)
-        if m:
-            cond_x, ntok = translate_cond(f"{m.group(1)}.tok.kind {m.group(2)}", {m.group(1)})
-            used |= ntok
-            out.append(f"{pad}if ({cond_x}) {{")
-            out.append(f"{pad}  {m.group(3)} = {m.group(3)} + 1;")
-            if si + 1 < len(lines):
-                m2 = re.match(r"else if \((.+)\) (\w+)(\+\+|--);$", lines[si + 1].strip())
-                if m2:
-                    c2, nt2 = translate_cond(m2.group(1), cur_results)
-                    used |= nt2
-                    v2, op2 = m2.group(2), m2.group(3)
-                    out.append(f"{pad}}} else if ({c2}) {{")
-                    out.append(f"{pad}  {v2} = {v2} {'+ 1' if op2 == '++' else '- 1'};")
-                    out.append(f"{pad}}}")
-                    si += 2
-                    continue
-            out.append(f"{pad}}}")
-            si += 1
-            continue
+        # (v4.9: former r.tok.kind VAR++ handler folded into the general
+        # single-line if + else-if chain consumer below)
         # v4.5: if (after.pos != r.next_lex.pos) score += N;
         m = re.match(r"if \((\w+)\.pos != (r\w*)\.next_lex\.pos\) (\w+) \+= (\d+);$", st)
         if m:
@@ -1627,28 +1761,59 @@ def translate_block(block, cur_results, indent=2):
             si += 1
             continue
         # single-line if (depth == N && ...) VAR++/VAR = N / depth++/--
-        # (+ optional following else-if VAR--/VAR++)
+        # v4.9: also consume following else-if / else arms (braced or single-line)
         m = re.match(r"if \((.+)\) (\w+)(\+\+|--);$", st)
         if m:
             cond_x, ntok = translate_cond(m.group(1), cur_results)
             used |= ntok
             var, op = m.group(2), m.group(3)
-            out.append(f"{pad}if ({cond_x}) {{")
-            out.append(f"{pad}  {var} = {var} {'+ 1' if op == '++' else '- 1'};")
-            # peek else-if sibling
-            if si + 1 < len(lines):
-                m2 = re.match(r"else if \((.+)\) (\w+)(\+\+|--);$", lines[si + 1].strip())
+            arms = [(cond_x, [f"{var} = {var} {'+ 1' if op == '++' else '- 1'};"])]
+            si += 1
+            while si < len(lines):
+                t = lines[si].strip()
+                m2 = re.match(r"(?:\}\s*)?else if \((.+)\) (\w+)(\+\+|--);$", t)
                 if m2:
                     c2, nt2 = translate_cond(m2.group(1), cur_results)
                     used |= nt2
                     v2, op2 = m2.group(2), m2.group(3)
-                    out.append(f"{pad}}} else if ({c2}) {{")
-                    out.append(f"{pad}  {v2} = {v2} {'+ 1' if op2 == '++' else '- 1'};")
-                    out.append(f"{pad}}}")
-                    si += 2
+                    arms.append((c2, [f"{v2} = {v2} {'+ 1' if op2 == '++' else '- 1'};"]))
+                    si += 1
                     continue
+                # bare `else if (...) {` or fused `} else if (...) {`
+                m3 = re.match(r"(?:\}\s*)?else if \((.+)\) \{$", t)
+                if m3:
+                    c3, nt3 = translate_cond(m3.group(1), cur_results)
+                    used |= nt3
+                    body_l, endj, _ = collect_braced(lines, si)
+                    body_x, nt4 = translate_block(body_l, cur_results, indent + 1)
+                    used |= nt4
+                    arms.append((c3, body_x))
+                    # stay on fused `} else ...` so the next arm can consume it
+                    si = endj if (endj < len(lines) and re.match(r"\}\s*else", lines[endj].strip())) else endj + 1
+                    continue
+                m4 = re.match(r"(?:\}\s*)?else \{$", t)
+                if m4:
+                    body_l, endj, _ = collect_braced(lines, si)
+                    body_x, nt5 = translate_block(body_l, cur_results, indent + 1)
+                    used |= nt5
+                    arms.append((None, body_x))
+                    si = endj if (endj < len(lines) and re.match(r"\}\s*else", lines[endj].strip())) else endj + 1
+                    continue
+                break
+            for ai, (cond, body_stmts) in enumerate(arms):
+                if ai == 0:
+                    out.append(f"{pad}if ({cond}) {{")
+                elif cond is not None:
+                    out.append(f"{pad}}} else if ({cond}) {{")
+                else:
+                    out.append(f"{pad}}} else {{")
+                for bl in body_stmts:
+                    # body_x already padded; single-line arm bodies are bare
+                    if bl.startswith("    "):
+                        out.append(bl)
+                    else:
+                        out.append(f"{pad}  {bl}")
             out.append(f"{pad}}}")
-            si += 1
             continue
         m = re.match(r"if \((.+)\) (\w+) = (\d+);$", st)
         if m:
@@ -1925,12 +2090,15 @@ def emit_out_x(name, x_lines, docline, out_name, int_vars=()):
         int_lets = "  let adv0: usize = 0;\n" + int_lets
     if "chain_pos_us" in int_vars:
         int_lets = "  let chain_pos: usize = 0;\n" + int_lets
+    if "la_pos_us" in int_vars:
+        int_lets = ("  let la_pos: usize = 0;\n  let la_line: i32 = 0;\n"
+                    "  let la_col: i32 = 0;\n") + int_lets
     if "bhit_us" in int_vars:
         int_lets = ("  let data2: *u8 = 0 as *u8;\n  let ts2: usize = 0;\n"
                     "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets
     return f"""/**
  * {docline}
- * B-minus generated out-param port (gen_stretch_audit_x.py v4.8) of the suite
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.9) of the suite
  * twin `{name}` — pointer ABI + by-value net semantics via the restore trio;
  * writes `{out_name}[0]` when the out pointer is non-null.
  * @param lex *u8 — opaque lexer (read-only net effect)

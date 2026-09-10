@@ -20,9 +20,7 @@ extern void ast_ast_arena_expr_set(void *arena, int32_t ref, struct ast_Expr e);
 extern int32_t ast_ast_arena_expr_alloc(void *arena);
 extern int32_t parser_asm_stretch_struct_lit_deep_audit_c(struct parser_asm_lexer lex,
                                                           struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_struct_lit_fields_probe_c(struct parser_asm_lexer lex,
-                                                             struct parser_asm_slice_u8 *source,
-                                                             int32_t *out_field_count);
+extern int32_t parser_asm_stretch_struct_lit_fields_probe_c(void *lex_inout, void *source, int32_t *out_field_count);
 extern int32_t parser_asm_stretch_struct_lit_fields_body_audit_c(struct parser_asm_lexer lex,
                                                                  struct parser_asm_slice_u8 *source);
 
@@ -132,7 +130,7 @@ static void parser_asm_parse_struct_lit_fields_c(void *arena, int32_t lit_ref, s
     return;
   out->ok = 0;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_lit_fields_body_audit_c(lex_in_brace, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_lit_fields_probe_c(lex_in_brace, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_lit_fields_probe_c(&lex_in_brace, source, 0));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_lit_deep_audit_c(lex_in_brace, source));
   lex = lex_in_brace;
   for (;;) {

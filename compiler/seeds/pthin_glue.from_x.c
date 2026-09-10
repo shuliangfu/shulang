@@ -339,7 +339,7 @@ extern int32_t parser_asm_stretch_async_fn_sig_full_deep_buf_audit_c(struct pars
 extern int32_t parser_asm_stretch_block_stmt_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_block_stmt_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_block_stmt_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-extern int32_t parser_asm_stretch_block_stmt_kind_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t *out_stmt_score);
+extern int32_t parser_asm_stretch_block_stmt_kind_probe_c(void *lex_inout, void *source, int32_t *out_stmt_score);
 extern int32_t parser_asm_stretch_block_stmt_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_block_stmt_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_cast_unary_full_deep_audit_c(void *lex_inout, void *source);
