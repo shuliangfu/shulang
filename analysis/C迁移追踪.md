@@ -105,13 +105,13 @@
 
 ### 开项
 
-- 🟡 **7.2.1b** parser_asm suite audit B-minus — **137／1,956**  
+- 🟡 **7.2.1b** parser_asm suite audit B-minus — **141／1,956**  
   - [x] ABI＝B-minus（opaque＋lexer-step 桥；RFC §5）  
-  - [x] 桥面／P9a／三契约／生成器 v1→v4.8／等价 harness  
+  - [x] 桥面／P9a／三契约／生成器 v1→v4.9／等价 harness  
   - [x] 栈 kinds[]／peek_kind_chain 根（toplevel_kind_peek 族）  
   - [ ] 厚 buf 体 ~279  
-  - [x] out 参族累计 4／9（match_arms／call_args／enum_variants／struct_fields；生成器 v4.7–v4.8）
-  - [ ] out 参族余 5（trait_methods／impl_items／block_stmt／extern_param／struct_lit）  
+  - [x] out 参族累计 8／9（＋impl_items／block_stmt／extern_param／struct_lit；生成器 v4.7–v4.9）
+  - [ ] out 参族余 1（trait_methods：`&r.next_lex` void-audit＋skip 双步进墙）  
   - [ ] 深链组合器（mega／bracket 步进语义等；harness 红未入）  
   - 机制 → [`7.2.1-parser-inc-port-ABI-RFC.md`](7.2.1-parser-inc-port-ABI-RFC.md)；逐波 → 自举进度 §6  
 - 🟡 **7.2.2** parser_gen 去 pin — 产品默认 pin-first；`FROM_X=1` 仅显式 assemble  
