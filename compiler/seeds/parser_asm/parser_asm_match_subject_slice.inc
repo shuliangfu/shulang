@@ -1227,7 +1227,7 @@ void parser_asm_parse_match_into_c(void *arena, struct parser_asm_lexer lex, str
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_LBRACE)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_match_arms_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_match_arms_probe_c(&r.next_lex, source, 0));
   lex = r.next_lex;
   mref = ast_ast_arena_expr_alloc(arena);
   if (mref == 0)

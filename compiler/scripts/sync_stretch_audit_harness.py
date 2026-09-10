@@ -11,7 +11,8 @@
 #   scripts/pthin_stretch_audit_eq_twins.h — c_ref_* static twins (verbatim
 #     gated C bodies, renamed) + helper authority copies
 #   scripts/pthin_stretch_audit_eq_table.h — shims + k_cases[] for every
-#     migrated 2-arg audit (3-arg flag audits get both polarities)
+#     migrated 2-arg audit (3-arg flag audits get both polarities;
+#     out-param audits get null + packed-slot polarities)
 #
 # PLATFORM: SHARED (host-side generator; output compiled on both ends).
 import re
@@ -116,17 +117,22 @@ def main():
     suite = open(SUITE).read()
     xsrc = open(XFILE).read()
 
-    # 1) migrated exports (2-arg audits; flag audits detected by param count)
+    # 1) migrated exports (2-arg audits; flag/out/buf detected by params)
     exports = re.findall(r"export function (parser_asm_stretch_\w+_c)\(", xsrc)
     flag3 = set()
     buf3 = set()
+    out3 = {}  # name -> out param ident
     for m in re.finditer(r"export function (parser_asm_stretch_\w+_c)\(([^)]*)\): i32 \{", xsrc):
         params = m.group(2)
         if params.count(",") == 2:
             if "data: *u8" in params and "len: i32" in params:
                 buf3.add(m.group(1))
             else:
-                flag3.add(m.group(1))
+                mo = re.search(r"(out_\w+): \*i32", params)
+                if mo:
+                    out3[m.group(1)] = mo.group(1)
+                else:
+                    flag3.add(m.group(1))
 
     # 2) twins from the suite (gated pointer-ABI bodies)
     twins = []
@@ -143,8 +149,11 @@ def main():
         base = name[len("parser_asm_stretch_"):-2]  # strip prefix and _c
         fm = re.search(name + r"\(void \*lex_inout, void \*source, int32_t (\w+)\)", suite)
         flagname = fm.group(1) if fm else "flag"
+        om = re.search(name + r"\(void \*lex_inout, void \*source, int32_t \*(out_\w+)\)", suite)
         if name in buf3:
             twin_extra = ", uint8_t *data, int32_t len"
+        elif name in out3:
+            twin_extra = f", int32_t *{out3[name]}"
         elif name in flag3:
             twin_extra = f", int32_t {flagname}"
         else:
@@ -181,6 +190,10 @@ def main():
         base = name[len("parser_asm_stretch_"):-2]
         if name in buf3:
             rows.append(f'    {{"{base}", r_{base}, x_{base}, 0, 0}},')
+        elif name in out3:
+            # flag=0 → NULL out (return only); flag=1 → pack out into high 16 bits
+            rows.append(f'    {{"{base}/null", r_{base}, x_{base}, 0, 0}},')
+            rows.append(f'    {{"{base}/slot", r_{base}, x_{base}, 1, 0}},')
         elif name in flag3:
             rows.append(f'    {{"{base}/1", c_ref_{base}, x_{base}, 1, 0}},')
             rows.append(f'    {{"{base}/0", c_ref_{base}, x_{base}, 0, 0}},')
@@ -195,6 +208,12 @@ def main():
                 f"static int32_t x_{base}(void *l, void *s, int32_t f) {{ (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return {name}(l, sl_->data, (int32_t)sl_->length); }}")
             shims.append(
                 f"static int32_t r_{base}(void *l, void *s, int32_t f) {{ (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_{base}(l, sl_->data, (int32_t)sl_->length); }}")
+        elif name in out3:
+            # Pack out into high 16 when f!=0 so check_one compares return+out.
+            shims.append(
+                f"static int32_t x_{base}(void *l, void *s, int32_t f) {{ int32_t slot = 0; int32_t rc = {name}(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }}")
+            shims.append(
+                f"static int32_t r_{base}(void *l, void *s, int32_t f) {{ int32_t slot = 0; int32_t rc = c_ref_{base}(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }}")
         elif name in flag3:
             shims.append(
                 f"static int32_t x_{base}(void *l, void *s, int32_t f) {{ return {name}(l, s, f); }}")
@@ -207,6 +226,8 @@ def main():
     for name in sorted(exports):
         if name in buf3:
             externs.append(f"extern int32_t {name}(void *lex_inout, uint8_t *data, int32_t len);")
+        elif name in out3:
+            externs.append(f"extern int32_t {name}(void *lex_inout, void *source, int32_t *{out3[name]});")
         elif name in flag3:
             externs.append(f"extern int32_t {name}(void *lex_inout, void *source, int32_t flag);")
         else:

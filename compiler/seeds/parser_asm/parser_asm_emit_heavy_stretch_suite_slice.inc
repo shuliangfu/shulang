@@ -30,6 +30,8 @@ enum {
 
 /** block_stmt 内嵌审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_match_arms_probe_c(void *lex_inout, void *source, int32_t *out_arm_count);
+int32_t parser_asm_stretch_call_args_shape_probe_c(void *lex_inout, void *source, int32_t *out_arg_count);
 int32_t parser_asm_stretch_toplevel_kind_peek_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_diag_toplevel_after_imports_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_diag_after_collect_preamble_audit_c(void *lex_inout, void *source);
@@ -958,36 +960,42 @@ int32_t parser_asm_stretch_async_fn_prefix_audit_c(void *lex_inout, void *source
 /**
  * match { arm => expr, ... } 臂数粗探（从 '{' 之后 lex 起）。
  */
-int32_t parser_asm_stretch_match_arms_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
-                                              int32_t *out_arm_count) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_match_arms_probe_c(void *lex_inout, void *source, int32_t *out_arm_count) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_lexer_result r;
   int32_t arms;
   int32_t guard;
-  if (!source)
-    return 0;
   arms = 0;
   guard = 0;
-  lexer_next_into(&r, lex, source);
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   while (r.tok.kind != (int32_t)TOKEN_RBRACE && r.tok.kind != (int32_t)TOKEN_EOF) {
     if (guard++ > 256)
       return 0;
     if (r.tok.kind == (int32_t)TOKEN_ARROW) {
       arms++;
       parser_asm_lex_from_result_val_into(&lex, r);
-      lexer_next_into(&r, lex, source);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
       if (r.tok.kind == (int32_t)TOKEN_COMMA) {
         parser_asm_lex_from_result_val_into(&lex, r);
-        lexer_next_into(&r, lex, source);
+        lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
       }
       continue;
     }
     parser_asm_lex_from_result_val_into(&lex, r);
-    lexer_next_into(&r, lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   }
   if (out_arm_count)
     *out_arm_count = arms;
   return r.tok.kind == (int32_t)TOKEN_RBRACE ? 1 : 0;
 }
+#endif
 
 /**
  * 块内语句序粗探：let/const/return/break/continue 计数（审计扩面）。
@@ -2385,18 +2393,23 @@ int32_t parser_asm_stretch_block_bind_name_audit_c(const uint8_t *name, int32_t 
 /**
  * tier14：call 实参列表形态粗探 — 统计 '(' 后顶层逗号分隔段数。
  */
-int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
-                                                   int32_t *out_arg_count) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_call_args_shape_probe_c(void *lex_inout, void *source, int32_t *out_arg_count) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_lexer_result r;
   int32_t nargs;
   int32_t depth;
   int32_t guard;
-  if (!source)
-    return 0;
   nargs = 0;
   depth = 1;
   guard = 0;
-  lexer_next_into(&r, lex, source);
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   while (r.tok.kind != (int32_t)TOKEN_EOF && depth > 0) {
     if (guard++ > 128)
       return 0;
@@ -2407,7 +2420,7 @@ int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex, 
     if (depth == 1 && r.tok.kind == (int32_t)TOKEN_COMMA) {
       nargs++;
       parser_asm_lex_from_result_val_into(&lex, r);
-      lexer_next_into(&r, lex, source);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
       continue;
     }
     if (r.tok.kind == (int32_t)TOKEN_LPAREN || r.tok.kind == (int32_t)TOKEN_LBRACE
@@ -2416,12 +2429,13 @@ int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex, 
     else if (r.tok.kind == (int32_t)TOKEN_RPAREN || r.tok.kind == (int32_t)TOKEN_RBRACE)
       depth--;
     parser_asm_lex_from_result_val_into(&lex, r);
-    lexer_next_into(&r, lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   }
   if (out_arg_count)
     *out_arg_count = nargs;
   return depth == 1 ? 1 : 0;
 }
+#endif
 
 /**
  * tier15：diag 路径 function 头 + 函数名审计。
@@ -3913,7 +3927,7 @@ int32_t parser_asm_stretch_match_arms_body_audit_c(struct parser_asm_lexer lex, 
 
   if (!parser_asm_stretch_match_advance_to_arms_lex_c(lex, source, &arms_lex))
     return 0;
-  return parser_asm_stretch_match_arms_probe_c(arms_lex, source, 0);
+  return parser_asm_stretch_match_arms_probe_c(&arms_lex, source, 0);
 }
 
 /**
@@ -5310,7 +5324,7 @@ int32_t parser_asm_stretch_primary_call_deep_audit_c(struct parser_asm_lexer lex
   int32_t score;
 
   score = parser_asm_stretch_primary_expr_deep_audit_c(&lex, source);
-  score += parser_asm_stretch_call_args_shape_probe_c(lex, source, 0);
+  score += parser_asm_stretch_call_args_shape_probe_c(&lex, source, 0);
   score += parser_asm_stretch_paren_expr_head_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
@@ -5990,7 +6004,7 @@ int32_t parser_asm_stretch_match_subject_full_deep_audit_c(struct parser_asm_lex
 
   score = parser_asm_stretch_match_subject_deep_audit_c(lex, source);
   score += parser_asm_stretch_match_block_deep_audit_c(lex, source);
-  score += parser_asm_stretch_match_arms_probe_c(lex, source, 0);
+  score += parser_asm_stretch_match_arms_probe_c(&lex, source, 0);
   return score > 0 ? 1 : 0;
 }
 
@@ -6328,7 +6342,7 @@ int32_t parser_asm_stretch_match_arms_full_deep_audit_c(struct parser_asm_lexer 
   int32_t score;
 
   score = parser_asm_stretch_match_arms_body_audit_c(lex, source);
-  score += parser_asm_stretch_match_arms_probe_c(lex, source, 0);
+  score += parser_asm_stretch_match_arms_probe_c(&lex, source, 0);
   score += parser_asm_stretch_match_kw_audit_c(&lex, source);
   score += parser_asm_stretch_match_block_deep_audit_c(lex, source);
   return score > 0 ? 1 : 0;

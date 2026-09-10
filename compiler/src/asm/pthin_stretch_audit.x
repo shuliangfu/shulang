@@ -136,6 +136,7 @@ const TOKEN_DOT: i32 = 92;
 const TOKEN_PACKED: i32 = 21;
 const TOKEN_SOA: i32 = 22;
 const TOKEN_EXTERN: i32 = 54;
+const TOKEN_ARROW: i32 = 88;
 
 /**
  * Audit an `if` statement header: exactly `if (` opens a valid header.
@@ -5551,6 +5552,170 @@ export function parser_asm_stretch_collect_imports_buf_audit_c(lex: *u8, data: *
       return 0;
     }
     return parser_asm_stretch_toplevel_kind_peek_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated audit port parser_asm_stretch_match_arms_probe_c.
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.7) of the suite
+ * twin `parser_asm_stretch_match_arms_probe_c` — pointer ABI + by-value net semantics via the restore trio;
+ * writes `out_arm_count[0]` when the out pointer is non-null.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param out_arm_count *i32 — optional out slot; null skips the write
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_match_arms_probe_c(lex: *u8, source: *u8, out_arm_count: *i32): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let data2: *u8 = 0 as *u8;
+  let ts2: usize = 0;
+  let sln2: usize = 0;
+  let bhit: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let rc: i32 = 0;
+  let arms: i32 = 0;
+  let guard: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    arms = 0;
+    guard = 0;
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    while (kind != TOKEN_RBRACE && kind != TOKEN_EOF) {
+        guard = guard + 1;
+        if ((guard - 1) > 256) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        if (kind == TOKEN_ARROW) {
+            arms = arms + 1;
+            parser_asm_lex_step_kind_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+            if (kind == TOKEN_COMMA) {
+                parser_asm_lex_step_kind_c(lex, source);
+                kind = parser_asm_lex_peek_kind_c(lex, source);
+                idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+            }
+            continue;
+        }
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    }
+    if (out_arm_count != 0 as *i32) {
+      out_arm_count[0] = arms;
+    }
+      if (kind == TOKEN_RBRACE) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_call_args_shape_probe_c.
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.7) of the suite
+ * twin `parser_asm_stretch_call_args_shape_probe_c` — pointer ABI + by-value net semantics via the restore trio;
+ * writes `out_arg_count[0]` when the out pointer is non-null.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param out_arg_count *i32 — optional out slot; null skips the write
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_call_args_shape_probe_c(lex: *u8, source: *u8, out_arg_count: *i32): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let data2: *u8 = 0 as *u8;
+  let ts2: usize = 0;
+  let sln2: usize = 0;
+  let bhit: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let rc: i32 = 0;
+  let depth: i32 = 0;
+  let guard: i32 = 0;
+  let nargs: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    nargs = 0;
+    depth = 1;
+    guard = 0;
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    while (kind != TOKEN_EOF && depth > 0) {
+        guard = guard + 1;
+        if ((guard - 1) > 128) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        if (depth == 1 && kind == TOKEN_RPAREN) {
+          break;
+        }
+        if (depth == 1 && kind != TOKEN_COMMA && nargs == 0) {
+          nargs = 1;
+        }
+        if (depth == 1 && kind == TOKEN_COMMA) {
+            nargs = nargs + 1;
+            parser_asm_lex_step_kind_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+            continue;
+        }
+        if (kind == TOKEN_LPAREN || kind == TOKEN_LBRACE || kind == TOKEN_LBRACKET) {
+          depth = depth + 1;
+        } else if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACE) {
+          depth = depth - 1;
+        }
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    }
+    if (out_arg_count != 0 as *i32) {
+      out_arg_count[0] = nargs;
+    }
+      if (depth == 1) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
   }
   return 0;
 }

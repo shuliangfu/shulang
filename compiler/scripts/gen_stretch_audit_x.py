@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.6 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.7 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -14,6 +14,9 @@
 # v4.6: stack `int32_t kinds[N]` / `peek_kinds[N]` + `peek_kind_chain_c` out-array
 #   → scalar slots + in-place peek/step fill with mid-chain restore (C by-value
 #   net effect). Unlocks toplevel_kind_peek / diag_after_collect / chain_buf.
+#
+# v4.7: scalar out-param probes (`int32_t *out_*`) → .x `out: *i32` + `out[0]=`
+#   write (null-safe). Unlocks match_arms / call_args / struct_lit_fields etc.
 #
 # Outputs (in-place):
 #   src/asm/pthin_stretch_audit.x            — .x port appended
@@ -41,6 +44,7 @@ def parse_suite():
     lines = src.split("\n")
     funcs = {}
     buf_sigs = {}
+    out_sigs = {}  # name -> out param ident (int32_t *out_*)
     order = []
     i = 0
     while i < len(lines):
@@ -49,9 +53,12 @@ def parse_suite():
                      r"struct parser_asm_slice_u8 \*source\) \{$", l)
         sig_extra = 0
         is_buf = False
+        out_name = None
         if not m:
             m2 = (re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+),$", l)
-                  or re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), uint8_t \*data,$", l))
+                  or re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), uint8_t \*data,$", l)
+                  or re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
+                              r"struct parser_asm_slice_u8 \*source,$", l))
             if m2 and i + 1 < len(lines):
                 if re.match(r"^\s*struct parser_asm_slice_u8 \*source\) \{$", lines[i + 1]):
                     m = m2
@@ -70,23 +77,39 @@ def parse_suite():
                     m = m2
                     sig_extra = 2
                     is_buf = True
+                else:
+                    # v4.7: ..., source,\n int32_t *out_xxx) {
+                    mo = re.match(r"^\s*int32_t \*(out_\w+)\) \{$", lines[i + 1])
+                    if mo and "slice_u8 *source," in l:
+                        m = m2
+                        sig_extra = 1
+                        out_name = mo.group(1)
         if not m:
             m3 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
                           r"uint8_t \*data, int32_t len\) \{$", l)
             if m3:
                 m = m3
                 is_buf = True
+        if not m:
+            # single-line out-param: (lex, source, int32_t *out_xxx) {
+            m4 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
+                          r"struct parser_asm_slice_u8 \*source, int32_t \*(out_\w+)\) \{$", l)
+            if m4:
+                m = m4
+                out_name = m4.group(3)
         if m:
             j = i + 1 + sig_extra
             while lines[j] != "}":
                 j += 1
             funcs[m.group(1)] = lines[i + 1 + sig_extra : j]
             buf_sigs[m.group(1)] = is_buf
+            if out_name:
+                out_sigs[m.group(1)] = out_name
             order.append((i, j))
             i = j + 1
         else:
             i += 1
-    return src, lines, funcs, buf_sigs, order
+    return src, lines, funcs, buf_sigs, out_sigs, order
 
 
 def token_enum():
@@ -417,6 +440,31 @@ def translate(name, body, tokvals):
             if stmts[si + 1].strip() != "return 0;":
                 raise Refuse("complex null guard")
             si += 2
+            continue
+        # v4.7: if (out_xxx) *out_xxx = VAR;  (null-safe out write)
+        m = re.match(r"if \((out_\w+)\) \*\1 = (\w+);$", st)
+        if m:
+            oname, var = m.group(1), m.group(2)
+            emit(f"if ({oname} != 0 as *i32) {{")
+            emit(f"  {oname}[0] = {var};")
+            emit("}")
+            si += 1
+            continue
+        # v4.7: bare counter ops
+        m = re.match(r"(\w+)\+\+;$", st)
+        if m and m.group(1) in int_vars:
+            emit(f"{m.group(1)} = {m.group(1)} + 1;")
+            si += 1
+            continue
+        m = re.match(r"(\w+)--;$", st)
+        if m and m.group(1) in int_vars:
+            emit(f"{m.group(1)} = {m.group(1)} - 1;")
+            si += 1
+            continue
+        m = re.match(r"(\w+) = (\d+);$", st)
+        if m and m.group(1) in int_vars:
+            emit(f"{m.group(1)} = {m.group(2)};")
+            si += 1
             continue
         # v4.6: VAR = peek_kind_chain_c(lex, source, ARR, N);
         m = re.match(
@@ -842,8 +890,12 @@ def translate(name, body, tokvals):
             emit("}")
             si = j + 1
             continue
-        # v4.2: general kind while (A != X && A != Y / == ...) — non-membership loop
-        m = re.match(r"while \(((?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+(?: && r\w*\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+)*)\) \{$", st)
+        # v4.2/v4.7: general kind while (+ optional && depth relop N)
+        m = re.match(
+            r"while \(((?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+"
+            r"(?: && (?:r\w*\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+|depth [><=!]+ \d+))*"
+            r"|depth [><=!]+ \d+ && (?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+)\) \{$",
+            st)
         if m:
             cond_x, ntok = translate_cond(m.group(1), cur_results)
             used |= ntok
@@ -1270,6 +1322,21 @@ def translate_return(expr, cur_results):
             ],
             used,
         )
+    # v4.7: depth/int ternary (call_args etc.)
+    m = re.match(r"(depth|nargs|arms|nf|nv|nm|ni|score|nparams|guard) (==|!=|>|>=|<|<=) (\d+) \? (\d+) : (\d+)$", e)
+    if m:
+        return (
+            [
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      if ({m.group(1)} {m.group(2)} {m.group(3)}) {{",
+                f"        return {m.group(4)};",
+                "      }",
+                f"      return {m.group(5)};",
+            ],
+            used,
+        )
     raise Refuse(f"return expr: {e[:50]}")
 
 
@@ -1466,6 +1533,17 @@ def translate_block(block, cur_results, indent=2):
             used |= ntok
             out.append(f"{pad}if ({cond_x}) {{")
             out.append(f"{pad}  {m.group(3)} = {m.group(3)} + 1;")
+            if si + 1 < len(lines):
+                m2 = re.match(r"else if \((.+)\) (\w+)(\+\+|--);$", lines[si + 1].strip())
+                if m2:
+                    c2, nt2 = translate_cond(m2.group(1), cur_results)
+                    used |= nt2
+                    v2, op2 = m2.group(2), m2.group(3)
+                    out.append(f"{pad}}} else if ({c2}) {{")
+                    out.append(f"{pad}  {v2} = {v2} {'+ 1' if op2 == '++' else '- 1'};")
+                    out.append(f"{pad}}}")
+                    si += 2
+                    continue
             out.append(f"{pad}}}")
             si += 1
             continue
@@ -1501,6 +1579,57 @@ def translate_block(block, cur_results, indent=2):
             x2, ntok = translate_call(m.group(1), "lex", m.group(3))
             used |= ntok
             out.append(f"{pad}{strip_inout(x2)};")
+            si += 1
+            continue
+        # v4.7: out write / depth-- / VAR = N inside blocks
+        m = re.match(r"if \((out_\w+)\) \*\1 = (\w+);$", st)
+        if m:
+            out.append(f"{pad}if ({m.group(1)} != 0 as *i32) {{")
+            out.append(f"{pad}  {m.group(1)}[0] = {m.group(2)};")
+            out.append(f"{pad}}}")
+            si += 1
+            continue
+        m = re.match(r"(\w+)--;$", st)
+        if m:
+            out.append(f"{pad}{m.group(1)} = {m.group(1)} - 1;")
+            si += 1
+            continue
+        m = re.match(r"(\w+) = (\d+);$", st)
+        if m:
+            out.append(f"{pad}{m.group(1)} = {m.group(2)};")
+            si += 1
+            continue
+        # single-line if (depth == N && ...) VAR++/VAR = N / depth++/--
+        # (+ optional following else-if VAR--/VAR++)
+        m = re.match(r"if \((.+)\) (\w+)(\+\+|--);$", st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            var, op = m.group(2), m.group(3)
+            out.append(f"{pad}if ({cond_x}) {{")
+            out.append(f"{pad}  {var} = {var} {'+ 1' if op == '++' else '- 1'};")
+            # peek else-if sibling
+            if si + 1 < len(lines):
+                m2 = re.match(r"else if \((.+)\) (\w+)(\+\+|--);$", lines[si + 1].strip())
+                if m2:
+                    c2, nt2 = translate_cond(m2.group(1), cur_results)
+                    used |= nt2
+                    v2, op2 = m2.group(2), m2.group(3)
+                    out.append(f"{pad}}} else if ({c2}) {{")
+                    out.append(f"{pad}  {v2} = {v2} {'+ 1' if op2 == '++' else '- 1'};")
+                    out.append(f"{pad}}}")
+                    si += 2
+                    continue
+            out.append(f"{pad}}}")
+            si += 1
+            continue
+        m = re.match(r"if \((.+)\) (\w+) = (\d+);$", st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            out.append(f"{pad}if ({cond_x}) {{")
+            out.append(f"{pad}  {m.group(2)} = {m.group(3)};")
+            out.append(f"{pad}}}")
             si += 1
             continue
         raise Refuse(f"stmt in if-block: {st[:50]}")
@@ -1719,12 +1848,56 @@ export function {name}(lex: *u8, source: *u8): i32 {{
     return doc
 
 
+
+def emit_out_x(name, x_lines, docline, out_name, int_vars=()):
+    """Emit a B-minus .x port with a scalar out-param (`int32_t *out_*`)."""
+    int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if not v.endswith("_us"))
+    int_lets = "  let idptr: *u8 = 0 as *u8;\n  let rc: i32 = 0;\n" + int_lets
+    if "adv0_us" in int_vars:
+        int_lets = "  let adv0: usize = 0;\n" + int_lets
+    if "chain_pos_us" in int_vars:
+        int_lets = "  let chain_pos: usize = 0;\n" + int_lets
+    if "bhit_us" in int_vars:
+        int_lets = ("  let data2: *u8 = 0 as *u8;\n  let ts2: usize = 0;\n"
+                    "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets
+    return f"""/**
+ * {docline}
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.7) of the suite
+ * twin `{name}` — pointer ABI + by-value net semantics via the restore trio;
+ * writes `{out_name}[0]` when the out pointer is non-null.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param {out_name} *i32 — optional out slot; null skips the write
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function {name}(lex: *u8, source: *u8, {out_name}: *i32): i32 {{
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+{int_lets}  if (lex == 0 as *u8 || source == 0 as *u8) {{
+    return 0;
+  }}
+  unsafe {{
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+{chr(10).join(x_lines)}
+  }}
+  return 0;
+}}
+"""
+
+
 def main():
     names = sys.argv[1:]
     if not names or names[0] in ("-h", "--help"):
         print("usage: gen_stretch_audit_x.py name1 name2 ... (suite _c names)")
         return 2
-    src, lines, funcs, buf_sigs, order = parse_suite()
+    src, lines, funcs, buf_sigs, out_sigs, order = parse_suite()
     tokvals = token_enum()
     xsrc = open(XFILE).read()
     existing = set(re.findall(r"const (TOKEN_\w+):", xsrc))
@@ -1852,6 +2025,8 @@ def main():
             frags.append(emit_buf_thick_x(n, x_lines, ivars))
         elif buftail:
             frags.append(emit_buf_x(n, buftail, docmap[n]))
+        elif n in out_sigs:
+            frags.append(emit_out_x(n, x_lines, docmap[n], out_sigs[n], ivars))
         else:
             frags.append(emit_x(n, x_lines, docmap[n], ivars))
     for n, callee, is_b in list(deleg):
@@ -1919,16 +2094,24 @@ def main():
                         r"lexer_next_into(\1, \2, (struct parser_asm_slice_u8 *)source)", nb_txt)
         nb_txt = nb_txt.replace("source->data", "((struct parser_asm_slice_u8 *)source)->data")
         nb_txt = nb_txt.replace("source->length", "((struct parser_asm_slice_u8 *)source)->length")
+        outn = out_sigs.get(n)
+        if is_buf_def:
+            sig_h = f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len) {{\n"
+            guard = "  if (!lex_inout || !data || len <= 0)\n    return 0;\n"
+        elif outn:
+            sig_h = f"int32_t {n}(void *lex_inout, void *source, int32_t *{outn}) {{\n"
+            guard = "  if (!lex_inout || !source)\n    return 0;\n"
+        else:
+            sig_h = f"int32_t {n}(void *lex_inout, void *source) {{\n"
+            guard = "  if (!lex_inout || !source)\n    return 0;\n"
         shim = (
             "/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x\n"
             " * authority src/asm/pthin_stretch_audit.x provides the same symbol\n"
             " * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */\n"
             "#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X\n"
-            + (f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len) {{\n" if is_buf_def
-               else f"int32_t {n}(void *lex_inout, void *source) {{\n")
+            + sig_h
             + f"  struct parser_asm_lexer {param_name};\n"
-            + ("  if (!lex_inout || !data || len <= 0)\n    return 0;\n" if is_buf_def
-               else "  if (!lex_inout || !source)\n    return 0;\n")
+            + guard
             + f"  {param_name} = *(struct parser_asm_lexer *)lex_inout;\n"
             + nb_txt + "\n}\n#endif"
         )
@@ -1936,8 +2119,12 @@ def main():
     # 3b) ensure fwd decls exist for every generated function (hybrid callers)
     need = []
     for n, *_rest in list(gen) + list(deleg):
-        decl = (f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len);"
-                if buf_sigs.get(n) else f"int32_t {n}(void *lex_inout, void *source);")
+        if buf_sigs.get(n):
+            decl = f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len);"
+        elif n in out_sigs:
+            decl = f"int32_t {n}(void *lex_inout, void *source, int32_t *{out_sigs[n]});"
+        else:
+            decl = f"int32_t {n}(void *lex_inout, void *source);"
         if decl not in "\n".join(lines_s):
             need.append(decl)
     if need:
@@ -1970,6 +2157,21 @@ def main():
                     r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\w+,\s*uint8_t\s+\*data,\s*int32_t\s+len\);",
                     lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len);", t)
             # decl fixups (single- and multi-line, byval + inout forms)
+            if n in out_sigs:
+                on = out_sigs[n]
+                t = re.sub(
+                    r"(extern\s+)?int32_t\s+" + re.escape(n)
+                    + r"\(struct\s+parser_asm_lexer\s+\w+,\s*struct\s+parser_asm_slice_u8\s+\*source,\s*int32_t\s+\*"
+                    + re.escape(on) + r"\);",
+                    lambda m, n=n, on=on: (m.group(1) or "")
+                    + f"int32_t {n}(void *lex_inout, void *source, int32_t *{on});", t)
+                # multi-line decl: (... source,\n int32_t *out);
+                t = re.sub(
+                    r"(extern\s+)?int32_t\s+" + re.escape(n)
+                    + r"\(struct\s+parser_asm_lexer\s+\w+,\s*struct\s+parser_asm_slice_u8\s+\*source,\s*\n\s*int32_t\s+\*"
+                    + re.escape(on) + r"\);",
+                    lambda m, n=n, on=on: (m.group(1) or "")
+                    + f"int32_t {n}(void *lex_inout, void *source, int32_t *{on});", t)
             t = re.sub(
                 r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\w+,\s*struct\s+parser_asm_slice_u8\s+\*source\);",
                 lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, void *source);", t)

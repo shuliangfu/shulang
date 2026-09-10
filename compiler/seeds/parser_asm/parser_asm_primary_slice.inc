@@ -153,9 +153,7 @@ extern int32_t parser_asm_stretch_array_lit_head_audit_c(void *lex_inout, void *
 extern int32_t parser_asm_stretch_primary_suffix_chain_probe_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_field_access_name_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                             int32_t name_len);
-extern int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source,
-                                                          int32_t *out_arg_count);
+extern int32_t parser_asm_stretch_call_args_shape_probe_c(void *lex_inout, void *source, int32_t *out_arg_count);
 extern int32_t parser_asm_stretch_paren_expr_head_audit_c(void *lex_inout, void *source);
 extern int32_t pipeline_expr_append_call_arg(void *arena, int32_t expr_ref, int32_t arg_ref);
 /** wave452: store turbofish type-arg type_ref on CALL (sidecar pool). */
@@ -1271,7 +1269,7 @@ static void parser_asm_primary_ident_suffix_loop_c(void *arena, struct parser_as
       parser_asm_arena_expr_set_c(arena, idx_ref, ie);
       out->expr_ref = idx_ref;
     } else if (r->tok.kind == (int32_t)TOKEN_LPAREN) {
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_call_args_shape_probe_c(r->next_lex, source, 0));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_call_args_shape_probe_c(&r->next_lex, source, 0));
       callee_ref = out->expr_ref;
       *lex = r->next_lex;
       call_ref = ast_ast_arena_expr_alloc(arena);
