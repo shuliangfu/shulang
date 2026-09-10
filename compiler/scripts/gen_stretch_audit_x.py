@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.5 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.6 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -10,6 +10,10 @@
 #   (loops, saved-lexer backtracking, array params, buf params, out params,
 #   helper calls, lexer_result params) is REFUSED with a reason — never
 #   force-translated. Refused functions stay C and migrate by hand later.
+#
+# v4.6: stack `int32_t kinds[N]` / `peek_kinds[N]` + `peek_kind_chain_c` out-array
+#   → scalar slots + in-place peek/step fill with mid-chain restore (C by-value
+#   net effect). Unlocks toplevel_kind_peek / diag_after_collect / chain_buf.
 #
 # Outputs (in-place):
 #   src/asm/pthin_stretch_audit.x            — .x port appended
@@ -299,6 +303,50 @@ def join_logical(body):
     return out
 
 
+def rewrite_kind_slots(expr, kind_arrays):
+    """Rewrite kinds[i] / peek_kinds[i] → kinds_i scalar slots."""
+    def repl(m):
+        name, idx = m.group(1), int(m.group(2))
+        if name not in kind_arrays:
+            return m.group(0)
+        if idx >= kind_arrays[name]:
+            raise Refuse(f"kinds index OOB {name}[{idx}]")
+        return f"{name}_{idx}"
+    return re.sub(r"(\w+)\[(\d+)\]", repl, expr)
+
+
+def emit_peek_kind_chain_fill(emit, arr, max_n, int_vars, used):
+    """Inline peek_kind_chain_c: fill arr_0..arr_{N-1}, set arr_n, restore cursor.
+
+    Mirrors C by-value semantics (caller lex unchanged after the call). Uses a
+    mid-chain snapshot so prior advances in the same function stay intact.
+    PLATFORM: SHARED.
+    """
+    int_vars.update({f"{arr}_{i}" for i in range(max_n)})
+    int_vars.add(f"{arr}_n")
+    int_vars.add("chain_pos_us")
+    int_vars.add("chain_line")
+    int_vars.add("chain_col")
+    used.add("TOKEN_EOF")
+    emit("chain_pos = parser_asm_lex_pos_c(lex);")
+    emit("chain_line = parser_asm_lex_line_c(lex);")
+    emit("chain_col = parser_asm_lex_col_c(lex);")
+    for i in range(max_n):
+        emit(f"{arr}_{i} = 0;")
+    emit(f"{arr}_0 = parser_asm_lex_peek_kind_c(lex, source);")
+    emit(f"{arr}_n = 1;")
+    emit("parser_asm_lex_step_kind_c(lex, source);")
+    for i in range(1, max_n):
+        emit(f"if ({arr}_{i - 1} != TOKEN_EOF) {{")
+        emit(f"  {arr}_{i} = parser_asm_lex_peek_kind_c(lex, source);")
+        emit(f"  {arr}_n = {arr}_n + 1;")
+        emit("  parser_asm_lex_step_kind_c(lex, source);")
+        emit("}")
+    emit("parser_asm_lex_set_pos_c(lex, chain_pos);")
+    emit("parser_asm_lex_set_line_c(lex, chain_line);")
+    emit("parser_asm_lex_set_col_c(lex, chain_col);")
+
+
 def translate(name, body, tokvals):
     """C statement list → .x statement list (inside unsafe). Linear model:
     cursor = caller's lex; first lexer_next_into from `lex` = peek; each
@@ -313,6 +361,7 @@ def translate(name, body, tokvals):
     alias_current = set()  # lexer locals currently aliased to the cursor
     lexer_locals = set()
     helper_alias = None
+    kind_arrays = {}  # name -> N for stack kinds[N] / peek_kinds[N]
     BLOCK_HOIST_USED.clear()
 
     def emit(s):
@@ -337,6 +386,19 @@ def translate(name, body, tokvals):
             lexer_locals.add(m.group(1))
             si += 1
             continue
+        # v4.6: stack kinds[N] / peek_kinds[N] → scalar slots (no out-array ABI)
+        m = re.match(r"int32_t (\w+)\[(\d+)\];$", st)
+        if m:
+            aname, asz = m.group(1), int(m.group(2))
+            if asz <= 0 or asz > 8:
+                raise Refuse(f"kinds array size {asz}")
+            kind_arrays[aname] = asz
+            for i in range(asz):
+                int_vars.add(f"{aname}_{i}")
+            int_vars.add(f"{aname}_n")
+            int_vars.update({"chain_pos_us", "chain_line", "chain_col"})
+            si += 1
+            continue
         m = re.match(r"int32_t (\w+);$", st)
         if m:
             int_vars.add(m.group(1))
@@ -355,6 +417,120 @@ def translate(name, body, tokvals):
             if stmts[si + 1].strip() != "return 0;":
                 raise Refuse("complex null guard")
             si += 2
+            continue
+        # v4.6: VAR = peek_kind_chain_c(lex, source, ARR, N);
+        m = re.match(
+            r"(\w+) = parser_asm_stretch_peek_kind_chain_c\((?:lex|&?\w+), (?:source|&sl), (\w+), (\d+)\);$",
+            st)
+        if m and m.group(2) in kind_arrays:
+            var, arr, nmax = m.group(1), m.group(2), int(m.group(3))
+            if nmax != kind_arrays[arr]:
+                raise Refuse(f"peek_kind_chain N mismatch {nmax} vs {kind_arrays[arr]}")
+            emit_peek_kind_chain_fill(emit, arr, nmax, int_vars, used)
+            emit(f"{var} = {arr}_n;")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: score += peek_kind_chain_c(...);  (return count)
+        m = re.match(
+            r"(\w+) (\+=|=) parser_asm_stretch_peek_kind_chain_c\((?:lex|&?\w+), (?:source|&sl), (\w+), (\d+)\);$",
+            st)
+        if m and m.group(3) in kind_arrays:
+            var, op, arr, nmax = m.group(1), m.group(2), m.group(3), int(m.group(4))
+            if nmax != kind_arrays[arr]:
+                raise Refuse(f"peek_kind_chain N mismatch {nmax} vs {kind_arrays[arr]}")
+            emit_peek_kind_chain_fill(emit, arr, nmax, int_vars, used)
+            if op == "+=":
+                emit(f"{var} = {var} + {arr}_n;")
+            else:
+                emit(f"{var} = {arr}_n;")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: if (peek_kind_chain_c(...) > 0) score += kinds[0];  (joined)
+        m = re.match(
+            r"if \(parser_asm_stretch_peek_kind_chain_c\((?:lex|&?\w+), (?:source|&sl), (\w+), (\d+)\) > 0\) "
+            r"(\w+) \+= (\w+)\[(\d+)\];$",
+            st)
+        if m and m.group(1) in kind_arrays:
+            arr, nmax, var, arr2, idx = m.group(1), int(m.group(2)), m.group(3), m.group(4), int(m.group(5))
+            if arr != arr2 or nmax != kind_arrays[arr]:
+                raise Refuse("peek_kind_chain if-add shape")
+            emit_peek_kind_chain_fill(emit, arr, nmax, int_vars, used)
+            emit(f"if ({arr}_n > 0) {{")
+            emit(f"  {var} = {var} + {arr}_{idx};")
+            emit("}")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: if (peek_kind_chain_c(...) >= K) score += classify(...); (joined)
+        m = re.match(
+            r"if \(parser_asm_stretch_peek_kind_chain_c\((?:lex|&?\w+), (?:source|&sl), (\w+), (\d+)\) >= (\d+)\) "
+            r"(\w+) \+= parser_asm_stretch_classify_toplevel_c\((.+)\);$",
+            st)
+        if m and m.group(1) in kind_arrays:
+            arr, nmax, thresh, var, args = (
+                m.group(1), int(m.group(2)), m.group(3), m.group(4), m.group(5))
+            if nmax != kind_arrays[arr]:
+                raise Refuse("peek_kind_chain classify N mismatch")
+            emit_peek_kind_chain_fill(emit, arr, nmax, int_vars, used)
+            args_x = rewrite_kind_slots(args, kind_arrays)
+            args_x = re.sub(r"\(int32_t\)", "", args_x)
+            for tm in re.finditer(r"TOKEN_\w+", args_x):
+                used.add(tm.group(0))
+            emit(f"if ({arr}_n >= {thresh}) {{")
+            emit(f"  {var} = {var} + parser_asm_stretch_classify_toplevel_c({args_x});")
+            emit("}")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: score = kinds[0]; / score += kinds[0];
+        m = re.match(r"(\w+) (\+=|=) (\w+)\[(\d+)\];$", st)
+        if m and m.group(3) in kind_arrays:
+            var, op, arr, idx = m.group(1), m.group(2), m.group(3), int(m.group(4))
+            if idx >= kind_arrays[arr]:
+                raise Refuse(f"kinds index OOB {arr}[{idx}]")
+            slot = f"{arr}_{idx}"
+            if op == "+=":
+                emit(f"{var} = {var} + {slot};")
+            else:
+                emit(f"{var} = {slot};")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: if (n >= 2) score += classify_toplevel_c(kinds[0], ...);
+        m = re.match(
+            r"if \((\w+) >= (\d+)\) (\w+) \+= parser_asm_stretch_classify_toplevel_c\((.+)\);$",
+            st)
+        if m:
+            nvar, thresh, var, args = m.group(1), m.group(2), m.group(3), m.group(4)
+            args_x = rewrite_kind_slots(args, kind_arrays)
+            args_x = re.sub(r"\(int32_t\)", "", args_x)
+            for tm in re.finditer(r"TOKEN_\w+", args_x):
+                used.add(tm.group(0))
+            emit(f"if ({nvar} >= {thresh}) {{")
+            emit(f"  {var} = {var} + parser_asm_stretch_classify_toplevel_c({args_x});")
+            emit("}")
+            int_vars.add(var)
+            si += 1
+            continue
+        # v4.6: score += classify_toplevel_c(...); (standalone)
+        m = re.match(
+            r"(\w+) (\+=|=) parser_asm_stretch_classify_toplevel_c\((.+)\);$",
+            st)
+        if m:
+            var, op, args = m.group(1), m.group(2), m.group(3)
+            args_x = rewrite_kind_slots(args, kind_arrays)
+            args_x = re.sub(r"\(int32_t\)", "", args_x)
+            for tm in re.finditer(r"TOKEN_\w+", args_x):
+                used.add(tm.group(0))
+            call = f"parser_asm_stretch_classify_toplevel_c({args_x})"
+            if op == "+=":
+                emit(f"{var} = {var} + {call};")
+            else:
+                emit(f"{var} = {call};")
+            int_vars.add(var)
+            si += 1
             continue
         # lexer step
         m = re.match(r"lexer_next_into\(&(r\w*), ([^,]+), source\);$", st)
@@ -761,6 +937,27 @@ def translate(name, body, tokvals):
         m = re.match(r"return (.+);$", st)
         if m:
             expr = m.group(1)
+            # v4.6: return peek_kind_chain_c(...) > 0 ? 1 : 0;
+            mpk = re.match(
+                r"parser_asm_stretch_peek_kind_chain_c\((?:lex|&?\w+), (?:source|&sl), (\w+), (\d+)\) > 0 \? 1 : 0$",
+                expr)
+            if mpk and mpk.group(1) in kind_arrays:
+                arr, nmax = mpk.group(1), int(mpk.group(2))
+                if nmax != kind_arrays[arr]:
+                    raise Refuse("return peek_kind_chain N mismatch")
+                emit_peek_kind_chain_fill(emit, arr, nmax, int_vars, used)
+                emit("parser_asm_lex_set_pos_c(lex, pos0);")
+                emit("parser_asm_lex_set_line_c(lex, line0);")
+                emit("parser_asm_lex_set_col_c(lex, col0);")
+                emit(f"if ({arr}_n > 0) {{")
+                emit("  return 1;")
+                emit("}")
+                emit("return 0;")
+                si += 1
+                continue
+            # rewrite kinds[i] in remaining return exprs (score > 0 etc. already fine)
+            if kind_arrays and "[" in expr:
+                expr = rewrite_kind_slots(expr, kind_arrays)
             rlines, ntok = translate_return(expr, cur_results)
             used |= ntok
             x.extend(rlines)
@@ -912,6 +1109,9 @@ PURE_HELPERS = {
     "parser_asm_is_compound_assign_token_c": ("kind: i32", "i32"),
     "parser_asm_stretch_bind_name_validate_c": ("name: *u8, name_len: i32", "i32"),
     "parser_asm_stretch_ident_byte_ok_c": ("c: u8, is_first: i32", "i32"),
+    # suite/stretch.x pure classifier (C symbol kept for hybrid cold twin)
+    "parser_asm_stretch_classify_toplevel_c": (
+        "kind: i32, next_kind: i32, third_kind: i32", "i32"),
 }
 
 
@@ -1332,6 +1532,8 @@ PURE_HELPERS = {
     "parser_asm_is_compound_assign_token_c": ("kind: i32", "i32"),
     "parser_asm_stretch_bind_name_validate_c": ("name: *u8, name_len: i32", "i32"),
     "parser_asm_stretch_ident_byte_ok_c": ("c: u8, is_first: i32", "i32"),
+    "parser_asm_stretch_classify_toplevel_c": (
+        "kind: i32, next_kind: i32, third_kind: i32", "i32"),
 }
 
 
@@ -1434,6 +1636,8 @@ def emit_buf_thick_x(name, x_lines, int_vars=()):
     int_lets = "  let rc: i32 = 0;\n" + int_lets
     if "adv0_us" in int_vars:
         int_lets = "  let adv0: usize = 0;\n" + int_lets
+    if "chain_pos_us" in int_vars:
+        int_lets = "  let chain_pos: usize = 0;\n" + int_lets
     if "bhit_us" in int_vars:
         int_lets = ("  let data2: *u8 = 0 as *u8;\n  let ts2: usize = 0;\n"
                     "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets
@@ -1478,6 +1682,8 @@ def emit_x(name, x_lines, docline, int_vars=()):
     int_lets = "  let idptr: *u8 = 0 as *u8;\n  let rc: i32 = 0;\n" + int_lets
     if "adv0_us" in int_vars:
         int_lets = "  let adv0: usize = 0;\n" + int_lets
+    if "chain_pos_us" in int_vars:
+        int_lets = "  let chain_pos: usize = 0;\n" + int_lets
     if "bhit_us" in int_vars:
         int_lets = ("  let data2: *u8 = 0 as *u8;\n  let ts2: usize = 0;\n"
                     "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets

@@ -63,6 +63,19 @@ int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
       || kind == (int32_t)TOKEN_PIPE_EQ || kind == (int32_t)TOKEN_CARET_EQ || kind == (int32_t)TOKEN_LSHIFT_EQ
       || kind == (int32_t)TOKEN_RSHIFT_EQ;
 }
+/* Top-level coarse classification codes (suite enum; needed by classify helper). */
+enum {
+  STRETCH_TOP_UNKNOWN = 0,
+  STRETCH_TOP_IMPORT = 1,
+  STRETCH_TOP_CONST_BIND = 2,
+  STRETCH_TOP_FUNCTION = 3,
+  STRETCH_TOP_STRUCT = 4,
+  STRETCH_TOP_ENUM = 5,
+  STRETCH_TOP_EXTERN = 6,
+  STRETCH_TOP_LET = 7,
+  STRETCH_TOP_TRAIT = 8,
+  STRETCH_TOP_IMPL = 9
+};
 '''
 
 
@@ -72,6 +85,9 @@ SUITE_HELPER_SIGS = [
     "void parser_asm_stretch_skip_balanced_brackets_into_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_type_suffix_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(",
+    # v4.6: kinds[] audit c_ref twins call these suite helpers by name
+    "int32_t parser_asm_stretch_classify_toplevel_c(",
+    "int32_t parser_asm_stretch_peek_kind_chain_c(",
 ]
 
 

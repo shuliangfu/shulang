@@ -56,7 +56,7 @@ extern void parser_asm_copy_slice_to_name64_slice_c(struct parser_asm_slice_u8 *
 extern void parser_asm_lex_from_result_val_into(struct parser_asm_lexer *out, struct parser_asm_lexer_result r);
 extern struct parser_asm_lexer parser_asm_lexer_init_c(void);
 extern int32_t parser_asm_stretch_collect_imports_bind_audit_c(const uint8_t *bind, int32_t bind_len);
-extern int32_t parser_asm_stretch_collect_imports_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+extern int32_t parser_asm_stretch_collect_imports_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_collect_imports_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_collect_imports_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_collect_imports_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
@@ -66,7 +66,7 @@ extern void parser_asm_stretch_collect_imports_preamble_audit_c(struct parser_as
 extern int32_t parser_asm_stretch_const_import_kw_audit_c(int32_t after_assign_kind);
 extern int32_t parser_asm_stretch_diag_lex_after_imports_buf_audit_c(uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_diag_token_after_collect_imports_buf_audit_c(uint8_t *data, int32_t len);
-extern int32_t parser_asm_stretch_diag_toplevel_after_imports_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_diag_toplevel_after_imports_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_import_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apex_max_ultra_hyper_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_import_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apex_max_ultra_hyper_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_import_allversal_panversal_omniversal_hyperversal_metaversal_multiversal_intergalactic_galactic_celestial_divine_imperial_sovereign_omnipotent_universal_cosmic_eternal_infinite_transcendent_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apex_max_ultra_hyper_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
@@ -168,7 +168,7 @@ extern int32_t parser_asm_stretch_peek_kind_chain_c(struct parser_asm_lexer lex,
 extern int32_t parser_asm_stretch_skip_imports_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_imports_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_imports_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-extern int32_t parser_asm_stretch_toplevel_kind_peek_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_toplevel_kind_peek_audit_c(void *lex_inout, void *source);
 extern int32_t pipeline_module_import_alloc(void *module);
 extern void pipeline_module_import_set_binding_name(void *module, int32_t idx, uint8_t *bytes, int32_t len);
 extern void pipeline_module_import_set_kind(void *module, int32_t idx, int32_t kind);

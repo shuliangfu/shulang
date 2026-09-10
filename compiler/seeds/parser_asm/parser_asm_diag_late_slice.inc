@@ -17,7 +17,7 @@ struct parser_asm_lexer_result parser_asm_diag_after_imports_then_structs_slice_
     lex = parser_asm_skip_one_struct_slice_c(lex, source);
     lexer_next_into(&r, lex, source);
   }
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(&lex, source));
   return r;
 }
 

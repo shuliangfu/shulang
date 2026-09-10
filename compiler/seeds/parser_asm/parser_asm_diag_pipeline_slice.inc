@@ -32,7 +32,7 @@ int32_t parser_asm_diag_parse_one_after_collect_imports_slice_c(struct parser_as
   import_res.lex = lex;
   parser_asm_collect_imports_slice_c(lex, source, module, &import_res);
   lex = import_res.lex;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_after_collect_preamble_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_after_collect_preamble_audit_c(&lex, source));
   res = parser_asm_onefunc_wired_for_parse_c(lex);
   parser_parse_one_function_impl(&res, arena, lex, source);
   return res.ok ? 1 : 0;
@@ -815,7 +815,7 @@ int32_t parser_asm_parse_one_function_ok_for_pipeline_slice_c(void *arena, struc
     return 0;
   lex = parser_asm_lexer_init_c();
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_one_function_ok_for_pipeline_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(&lex, source));
   res = parser_asm_onefunc_wired_for_parse_c(lex);
   parser_parse_one_function_impl(&res, arena, lex, source);
   return res.ok ? 1 : 0;

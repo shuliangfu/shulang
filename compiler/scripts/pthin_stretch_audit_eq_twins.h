@@ -40,6 +40,19 @@ int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
       || kind == (int32_t)TOKEN_PIPE_EQ || kind == (int32_t)TOKEN_CARET_EQ || kind == (int32_t)TOKEN_LSHIFT_EQ
       || kind == (int32_t)TOKEN_RSHIFT_EQ;
 }
+/* Top-level coarse classification codes (suite enum; needed by classify helper). */
+enum {
+  STRETCH_TOP_UNKNOWN = 0,
+  STRETCH_TOP_IMPORT = 1,
+  STRETCH_TOP_CONST_BIND = 2,
+  STRETCH_TOP_FUNCTION = 3,
+  STRETCH_TOP_STRUCT = 4,
+  STRETCH_TOP_ENUM = 5,
+  STRETCH_TOP_EXTERN = 6,
+  STRETCH_TOP_LET = 7,
+  STRETCH_TOP_TRAIT = 8,
+  STRETCH_TOP_IMPL = 9
+};
 static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source,
                                                              const int32_t *kinds, int32_t num_kinds) {
@@ -175,6 +188,47 @@ struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(struct parser_a
   return lex;
 }
 
+int32_t parser_asm_stretch_classify_toplevel_c(int32_t kind, int32_t next_kind, int32_t third_kind) {
+  if (kind == (int32_t)TOKEN_IMPORT)
+    return STRETCH_TOP_IMPORT;
+  if (kind == (int32_t)TOKEN_FUNCTION)
+    return STRETCH_TOP_FUNCTION;
+  if (kind == (int32_t)TOKEN_STRUCT)
+    return STRETCH_TOP_STRUCT;
+  if (kind == (int32_t)TOKEN_ENUM)
+    return STRETCH_TOP_ENUM;
+  if (kind == (int32_t)TOKEN_EXTERN)
+    return STRETCH_TOP_EXTERN;
+  if (kind == (int32_t)TOKEN_LET)
+    return STRETCH_TOP_LET;
+  if (kind == (int32_t)TOKEN_TRAIT)
+    return STRETCH_TOP_TRAIT;
+  if (kind == (int32_t)TOKEN_IMPL)
+    return STRETCH_TOP_IMPL;
+  if (kind == (int32_t)TOKEN_CONST && next_kind == (int32_t)TOKEN_IDENT && third_kind == (int32_t)TOKEN_ASSIGN)
+    return STRETCH_TOP_CONST_BIND;
+  return STRETCH_TOP_UNKNOWN;
+}
+
+int32_t parser_asm_stretch_peek_kind_chain_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
+                                             int32_t *kinds, int32_t max_peek) {
+  struct parser_asm_lexer_result r;
+  int32_t n;
+  int32_t i;
+  if (!source || !kinds || max_peek <= 0)
+    return 0;
+  n = 0;
+  lexer_next_into(&r, lex, source);
+  kinds[n++] = r.tok.kind;
+  for (i = 1; i < max_peek; i++) {
+    if (r.tok.kind == (int32_t)TOKEN_EOF)
+      break;
+    lexer_next_into(&r, r.next_lex, source);
+    kinds[n++] = r.tok.kind;
+  }
+  return n;
+}
+
 /* Forward decls so twins may call each other regardless of suite order. */
 static int32_t c_ref_fn_param_list_audit(void *lex_inout, void *source);
 static int32_t c_ref_skip_return_type_audit(void *lex_inout, void *source);
@@ -194,6 +248,7 @@ static int32_t c_ref_function_header_audit(void *lex_inout, void *source);
 static int32_t c_ref_match_kw_audit(void *lex_inout, void *source);
 static int32_t c_ref_else_if_chain_audit(void *lex_inout, void *source);
 static int32_t c_ref_type_ref_peek_audit(void *lex_inout, void *source);
+static int32_t c_ref_toplevel_kind_peek_audit(void *lex_inout, void *source);
 static int32_t c_ref_return_stmt_audit(void *lex_inout, void *source);
 static int32_t c_ref_break_continue_audit(void *lex_inout, void *source, int32_t want_break);
 static int32_t c_ref_else_stmt_audit(void *lex_inout, void *source);
@@ -225,8 +280,10 @@ static int32_t c_ref_if_stmt_branch_audit(void *lex_inout, void *source);
 static int32_t c_ref_type_ref_deep_audit(void *lex_inout, void *source);
 static int32_t c_ref_diag_fn_header_audit(void *lex_inout, void *source);
 static int32_t c_ref_paren_expr_head_audit(void *lex_inout, void *source);
+static int32_t c_ref_diag_toplevel_after_imports_audit(void *lex_inout, void *source);
 static int32_t c_ref_diag_fn_param_sig_audit(void *lex_inout, void *source);
 static int32_t c_ref_try_skip_allow_paren_audit(void *lex_inout, void *source);
+static int32_t c_ref_diag_after_collect_preamble_audit(void *lex_inout, void *source);
 static int32_t c_ref_balanced_parens_depth_probe(void *lex_inout, void *source);
 static int32_t c_ref_diag_fn_return_type_audit(void *lex_inout, void *source);
 static int32_t c_ref_library_return_type_audit(void *lex_inout, void *source);
@@ -246,6 +303,7 @@ static int32_t c_ref_parse_one_extern_buf_audit(void *lex_inout, uint8_t *data, 
 static int32_t c_ref_balanced_parens_depth_probe_buf(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_skip_one_struct_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_skip_one_enum_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
+static int32_t c_ref_collect_imports_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_skip_one_if_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_skip_one_extern_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_try_skip_allow_paren_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
@@ -263,6 +321,7 @@ static int32_t c_ref_type_ref_deep_buf_audit(void *lex_inout, uint8_t *data, int
 static int32_t c_ref_async_fn_prefix_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_cond_int_as_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_primary_head_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
+static int32_t c_ref_peek_kind_chain_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_parse_cond_expr_audit(void *lex_inout, void *source);
 static int32_t c_ref_parse_cond_expr_buf_audit(void *lex_inout, uint8_t *data, int32_t len);
 static int32_t c_ref_body_let_bracket_deep_audit(void *lex_inout, void *source);
@@ -787,6 +846,26 @@ static int32_t c_ref_type_ref_peek_audit(void *lex_inout, void *source) {
     return 0;
   after = parser_asm_stretch_skip_type_suffix_c(r.next_lex, source);
   return after.pos != lex.pos ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_toplevel_kind_peek_audit_c. */
+static int32_t c_ref_toplevel_kind_peek_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t kinds[4];
+  int32_t n;
+  int32_t score;
+  n = parser_asm_stretch_peek_kind_chain_c(lex, source, kinds, 4);
+  if (n <= 0)
+    return 0;
+  score = kinds[0];
+  if (n >= 2)
+    score += parser_asm_stretch_classify_toplevel_c(kinds[0], kinds[1], n >= 3 ? kinds[2] : (int32_t)TOKEN_EOF);
+  return score > 0 ? 1 : 0;
 
 }
 
@@ -1389,6 +1468,17 @@ static int32_t c_ref_paren_expr_head_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_diag_toplevel_after_imports_audit_c. */
+static int32_t c_ref_diag_toplevel_after_imports_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  return c_ref_toplevel_kind_peek_audit(&lex, source);
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_diag_fn_param_sig_audit_c. */
 static int32_t c_ref_diag_fn_param_sig_audit(void *lex_inout, void *source) {
 
@@ -1414,6 +1504,22 @@ static int32_t c_ref_try_skip_allow_paren_audit(void *lex_inout, void *source) {
     return 0;
   lex = *(struct parser_asm_lexer *)lex_inout;
   return c_ref_paren_expr_head_audit(&lex, source);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_diag_after_collect_preamble_audit_c. */
+static int32_t c_ref_diag_after_collect_preamble_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t kinds[4];
+  int32_t score;
+  score = c_ref_diag_toplevel_after_imports_audit(&lex, source);
+  if (parser_asm_stretch_peek_kind_chain_c(lex, source, kinds, 4) > 0)
+    score += kinds[0];
+  return score;
 
 }
 
@@ -1711,6 +1817,22 @@ static int32_t c_ref_skip_one_enum_buf_audit(void *lex_inout, uint8_t *data, int
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_collect_imports_buf_audit_c. */
+static int32_t c_ref_collect_imports_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_slice_u8 sl;
+  if (!data || len <= 0)
+    return 0;
+  sl.data = data;
+  sl.length = (size_t)len;
+  return c_ref_toplevel_kind_peek_audit(&lex, &sl);
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_if_buf_audit_c. */
 static int32_t c_ref_skip_one_if_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
 
@@ -1980,6 +2102,24 @@ static int32_t c_ref_primary_head_buf_audit(void *lex_inout, uint8_t *data, int3
   sl.data = data;
   sl.length = (size_t)len;
   return c_ref_primary_head_audit(&lex, &sl);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_peek_kind_chain_buf_audit_c. */
+static int32_t c_ref_peek_kind_chain_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_slice_u8 sl;
+  int32_t kinds[6];
+
+  if (!data || len <= 0)
+    return 0;
+  sl.data = data;
+  sl.length = (size_t)len;
+  return parser_asm_stretch_peek_kind_chain_c(lex, &sl, kinds, 6) > 0 ? 1 : 0;
 
 }
 

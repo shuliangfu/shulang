@@ -955,7 +955,7 @@ void parser_asm_collect_imports_slice_c(struct parser_asm_lexer lex, struct pars
   {
     int32_t pending_cfg_skip_import = 0;
   for (;;) {
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_toplevel_kind_peek_audit_c(out->lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_toplevel_kind_peek_audit_c(&out->lex, source));
     lexer_next_into(&r, out->lex, source);
     lexer_next_into(&r2, r.next_lex, source);
     lexer_next_into(&r3, r2.next_lex, source);
@@ -1022,7 +1022,7 @@ void parser_asm_collect_imports_buf_c(struct parser_asm_lexer lex, uint8_t *data
   struct parser_asm_slice_u8 source;
   if (!data || !out)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_collect_imports_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_collect_imports_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_collect_imports_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_import_select_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_collect_imports_post_deep_buf_audit_c(lex, data, len));
@@ -1800,7 +1800,7 @@ int32_t parser_asm_diag_token_after_collect_imports_slice_c(struct parser_asm_sl
   {
     int32_t peek_kinds[6];
     PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_peek_kind_chain_c(lex, source, peek_kinds, 6));
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_toplevel_after_imports_audit_c(&lex, source));
   }
   lexer_next_into(&r, lex, source);
   return r.tok.kind;
