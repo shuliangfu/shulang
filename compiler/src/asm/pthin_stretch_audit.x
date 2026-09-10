@@ -53,6 +53,8 @@ export extern "C" function parser_asm_lex_wrap_buf_c(data: *u8, len: i32): *u8;
 /** Suite skip helpers via in-place adapters (C stays authority). */
 export extern "C" function parser_asm_lex_is_type_start_kind_c(kind: i32): i32;
 export extern "C" function parser_asm_lex_skip_balanced_brackets_inplace_c(lex_inout: *u8, source: *u8): void;
+/** In-place skip of a balanced (..) group (caller already consumed '('). */
+export extern "C" function parser_asm_lex_skip_balanced_parens_inplace_c(lex_inout: *u8, source: *u8): void;
 export extern "C" function parser_asm_lex_skip_type_suffix_inplace_c(lex_inout: *u8, source: *u8): void;
 export extern "C" function parser_asm_lex_skip_one_param_type_inplace_c(lex_inout: *u8, source: *u8): void;
 export extern "C" function parser_asm_is_compound_assign_token_c(kind: i32): i32;
@@ -129,6 +131,7 @@ const TOKEN_RUN: i32 = 57;
 const TOKEN_SLASH: i32 = 99;
 const TOKEN_SPAWN: i32 = 58;
 const TOKEN_IMPL: i32 = 50;
+const TOKEN_DOT: i32 = 92;
 
 /**
  * Audit an `if` statement header: exactly `if (` opens a valid header.
@@ -3577,6 +3580,78 @@ export function parser_asm_stretch_skip_one_impl_buf_audit_c(lex: *u8, data: *u8
       return 0;
     }
     return parser_asm_stretch_impl_header_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated audit port parser_asm_stretch_primary_suffix_chain_probe_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_primary_suffix_chain_probe_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_primary_suffix_chain_probe_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let guard: i32 = 0;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = 0;
+    guard = 0;
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    while (guard < 64) {
+      guard = guard + 1;
+        if (kind == TOKEN_DOT) {
+            score = score + 2;
+            parser_asm_lex_step_kind_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+            if (kind != TOKEN_IDENT) {
+              break;
+            }
+            idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);
+            parser_asm_stretch_bind_name_validate_c(idptr, idlen);
+            parser_asm_lex_step_kind_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        } else if (kind == TOKEN_LBRACKET) {
+            score = score + 2;
+            parser_asm_lex_step_kind_c(lex, source);
+            parser_asm_lex_skip_balanced_brackets_inplace_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        } else if (kind == TOKEN_LPAREN) {
+            score = score + 3;
+            parser_asm_lex_step_kind_c(lex, source);
+            parser_asm_lex_skip_balanced_parens_inplace_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        } else {
+            break;
+        }
+    }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return score;
   }
   return 0;
 }

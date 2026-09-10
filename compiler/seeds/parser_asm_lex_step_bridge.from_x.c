@@ -322,3 +322,20 @@ void *parser_asm_lex_wrap_buf_c(uint8_t *data, int32_t len) {
   sl->length = (size_t)len;
   return sl;
 }
+
+extern void parser_asm_skip_balanced_parens_into_slice_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
+                                                          struct parser_asm_slice_u8 *source);
+
+/**
+ * In-place skip of a balanced (..) group (caller already consumed '(').
+ * @param lex_inout *u8 — opaque lexer, advanced past the matching ')'
+ * @param source *u8 — opaque slice
+ * PLATFORM: SHARED.
+ */
+void parser_asm_lex_skip_balanced_parens_inplace_c(void *lex_inout, void *source) {
+  if (!lex_inout || !source)
+    return;
+  parser_asm_skip_balanced_parens_into_slice_c((struct parser_asm_lexer *)lex_inout,
+                                               *(struct parser_asm_lexer *)lex_inout,
+                                               (struct parser_asm_slice_u8 *)source);
+}

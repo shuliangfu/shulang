@@ -69,6 +69,41 @@ static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(struct parser_asm_lex
   }
 }
 
+void parser_asm_skip_balanced_parens_into_slice_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
+                                                  struct parser_asm_slice_u8 *source) {
+  int32_t depth = 1;
+  struct parser_asm_lexer_result r;
+  if (!out || !source)
+    return;
+  (void)0;
+  (void)0;
+  (void)0;
+  while (depth > 0) {
+    lexer_next_into(&r, lex, source);
+    if (r.tok.kind == (int32_t)TOKEN_LPAREN)
+      depth++;
+    else if (r.tok.kind == (int32_t)TOKEN_RPAREN) {
+      depth--;
+      if (depth == 0) {
+        out->pos = r.next_lex.pos;
+        out->line = r.next_lex.line;
+        out->col = r.next_lex.col;
+        return;
+      }
+    }
+    if (r.tok.kind == (int32_t)TOKEN_EOF) {
+      out->pos = lex.pos;
+      out->line = lex.line;
+      out->col = lex.col;
+      return;
+    }
+    parser_asm_lex_from_result_val_into(&lex, r);
+  }
+  out->pos = lex.pos;
+  out->line = lex.line;
+  out->col = lex.col;
+}
+
 void parser_asm_stretch_skip_balanced_brackets_into_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source) {
   int32_t depth;
@@ -927,6 +962,44 @@ static int32_t c_ref_array_lit_head_audit(void *lex_inout, void *source) {
   return r.tok.kind == (int32_t)TOKEN_RBRACKET || r.tok.kind == (int32_t)TOKEN_INT
          || r.tok.kind == (int32_t)TOKEN_IDENT || r.tok.kind == (int32_t)TOKEN_TRUE
          || r.tok.kind == (int32_t)TOKEN_FALSE ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_primary_suffix_chain_probe_c. */
+static int32_t c_ref_primary_suffix_chain_probe(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  int32_t score;
+  int32_t guard;
+  score = 0;
+  guard = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (guard++ < 64) {
+    if (r.tok.kind == (int32_t)TOKEN_DOT) {
+      score += 2;
+      lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+      if (r.tok.kind != (int32_t)TOKEN_IDENT)
+        break;
+      (void)parser_asm_stretch_bind_name_validate_c(((struct parser_asm_slice_u8 *)source)->data + r.token_start, r.tok.ident_len);
+      parser_asm_lex_from_result_val_into(&lex, r);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    } else if (r.tok.kind == (int32_t)TOKEN_LBRACKET) {
+      score += 2;
+      parser_asm_stretch_skip_balanced_brackets_into_c(&lex, r.next_lex, source);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    } else if (r.tok.kind == (int32_t)TOKEN_LPAREN) {
+      score += 3;
+      parser_asm_skip_balanced_parens_into_slice_c(&lex, r.next_lex, source);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    } else {
+      break;
+    }
+  }
+  return score;
 
 }
 

@@ -151,8 +151,7 @@ extern int32_t parser_asm_stretch_primary_call_deep_audit_c(struct parser_asm_le
 extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_array_lit_head_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_primary_suffix_chain_probe_c(struct parser_asm_lexer lex,
-                                                             struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_primary_suffix_chain_probe_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_field_access_name_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                             int32_t name_len);
 extern int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex,
@@ -2910,11 +2909,11 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
        */
       lex = out->next_lex;
       lexer_next_into(&r, lex, source);
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(lex, source));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(&lex, source));
       parser_asm_primary_ident_suffix_loop_c(arena, source, &lex, &r, out, 1);
       return;
     }
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(&lex, source));
     parser_asm_primary_ident_suffix_loop_c(arena, source, &lex, &r, out, 1);
     return;
   }
@@ -2937,7 +2936,7 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
     out->next_lex = r.next_lex;
     lex = r.next_lex;
     lexer_next_into(&r, lex, source);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(&lex, source));
     parser_asm_primary_ident_suffix_loop_c(arena, source, &lex, &r, out, 1);
     return;
   }
@@ -2955,7 +2954,7 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
      */
     lex = out->next_lex;
     lexer_next_into(&r, lex, source);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(&lex, source));
     parser_asm_primary_ident_suffix_loop_c(arena, source, &lex, &r, out, 1);
     return;
   }
@@ -2986,7 +2985,7 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
      */
     lex = out->next_lex;
     lexer_next_into(&r, lex, source);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_primary_suffix_chain_probe_c(&lex, source));
     parser_asm_primary_ident_suffix_loop_c(arena, source, &lex, &r, out, 1);
     return;
   }

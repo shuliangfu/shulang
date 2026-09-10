@@ -146,8 +146,7 @@ int32_t parser_asm_stretch_simd_builtin_audit_c(struct parser_asm_lexer_result r
 int32_t parser_asm_stretch_struct_lit_fields_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                      int32_t *out_field_count);
 int32_t parser_asm_stretch_array_lit_head_audit_c(void *lex_inout, void *source);
-int32_t parser_asm_stretch_primary_suffix_chain_probe_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_primary_suffix_chain_probe_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_field_access_name_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                      int32_t name_len);
 int32_t parser_asm_stretch_ternary_op_audit_c(void *lex_inout, void *source);

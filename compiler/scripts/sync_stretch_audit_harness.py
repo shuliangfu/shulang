@@ -68,6 +68,7 @@ int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
 
 SUITE_HELPER_SIGS = [
     "static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(",
+    "void parser_asm_skip_balanced_parens_into_slice_c(",
     "void parser_asm_stretch_skip_balanced_brackets_into_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_type_suffix_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(",
@@ -76,11 +77,22 @@ SUITE_HELPER_SIGS = [
 
 def suite_helper_defs(suite):
     out = []
+    extra = ""
     for sig in SUITE_HELPER_SIGS:
-        m = re.search(re.escape(sig) + r"[^\n]*$(.*?)^}$", suite, re.S | re.M)
+        m = re.search(r"^" + re.escape(sig) + r"[^\n]*$(.*?)^}$", suite, re.S | re.M)
+        if not m:
+            # try the lex_skip slice for non-static helpers living there
+            try:
+                extra_src = open("seeds/parser_asm/parser_asm_lex_skip_slice.inc").read()
+            except FileNotFoundError:
+                extra_src = ""
+            m = re.search(r"^" + re.escape(sig) + r"[^\n]*$(.*?)^}$", extra_src, re.S | re.M)
         if not m:
             raise SystemExit(f"helper def not found: {sig}")
-        out.append(m.group(0) + "\n")
+        body = m.group(0)
+        # strip audit-gate macros (daily no-op semantics) and their inner calls
+        body = re.sub(r"PARSER_ASM_STRETCH_AUDIT_CALL\([^;]*\);", "(void)0;", body)
+        out.append(body + "\n")
     return "\n".join(out)
 
 
