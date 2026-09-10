@@ -288,6 +288,48 @@ static int32_t c_ref_fn_sig_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_struct_modifiers_audit_c. */
+static int32_t c_ref_struct_modifiers_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer cur;
+  int32_t score;
+  int32_t guard;
+  score = 0;
+  guard = 0;
+  cur = lex;
+  for (;;) {
+    if (guard++ > 12)
+      break;
+    lexer_next_into(&r, cur, (struct parser_asm_slice_u8 *)source);
+    if (r.tok.kind == (int32_t)TOKEN_PACKED || r.tok.kind == (int32_t)TOKEN_SOA || r.tok.kind == (int32_t)TOKEN_ALIGN) {
+      score += 8;
+      cur = r.next_lex;
+      continue;
+    }
+    if (r.tok.kind == (int32_t)TOKEN_IDENT && r.tok.ident_len == 5 && ((struct parser_asm_slice_u8 *)source)->data && r.token_start + 4 < ((struct parser_asm_slice_u8 *)source)->length
+        && ((struct parser_asm_slice_u8 *)source)->data[r.token_start] == (uint8_t)'a' && ((struct parser_asm_slice_u8 *)source)->data[r.token_start + 1] == (uint8_t)'l'
+        && ((struct parser_asm_slice_u8 *)source)->data[r.token_start + 2] == (uint8_t)'l' && ((struct parser_asm_slice_u8 *)source)->data[r.token_start + 3] == (uint8_t)'o'
+        && ((struct parser_asm_slice_u8 *)source)->data[r.token_start + 4] == (uint8_t)'w') {
+      score += 4;
+      cur = r.next_lex;
+      lexer_next_into(&r, cur, (struct parser_asm_slice_u8 *)source);
+      if (r.tok.kind == (int32_t)TOKEN_LPAREN) {
+        parser_asm_skip_balanced_parens_into_slice_c(&cur, r.next_lex, source);
+        score += 4;
+      }
+      continue;
+    }
+    break;
+  }
+  return score;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_async_fn_prefix_audit_c. */
 static int32_t c_ref_async_fn_prefix_audit(void *lex_inout, void *source) {
 
@@ -1291,6 +1333,25 @@ static int32_t c_ref_balanced_parens_depth_probe_buf(void *lex_inout, uint8_t *d
   sl.data = data;
   sl.length = (size_t)len;
   return c_ref_balanced_parens_depth_probe(&lex, &sl);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_struct_buf_audit_c. */
+static int32_t c_ref_skip_one_struct_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_slice_u8 sl;
+  int32_t score;
+  if (!data || len <= 0)
+    return 0;
+  sl.data = data;
+  sl.length = (size_t)len;
+  score = c_ref_struct_modifiers_audit(&lex, &sl);
+  score += c_ref_struct_header_audit(&lex, &sl);
+  return score > 0 ? 1 : 0;
 
 }
 
