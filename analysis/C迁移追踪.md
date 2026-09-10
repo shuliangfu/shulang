@@ -105,7 +105,7 @@
 ### 开项
 
 - ✅ **7.2.1a** 入口素材迁移（70 件清单）— **清零（2026-09-10）**：终局＝**11 迁 `.x` 权威**（build_tool_main/crt0_mingw/pipeline_glue_link/runtime_process_args_thin/pipeline_wpo_typecheck_emit_bridge/typeck_lsp_io_stub/pipeline_wpo_strict_link_alias/driver_compile_asm_link_alias/pipeline_asm_run_all_alias/pipeline_run_x_link_alias/pipeline_asm_typecheck_alias）＋**1 回滚卡**（runtime_process_import_alias：Cap 头 static inline 无导出者，`.x` extern UNDF；重开条件＝exit 面获导出符号）＋**10 D 类**（编译期开关 4／机械再生伴随件 2／已有 `.x` 权威冷编产物 3／struct-by-value 消费 1）＋**4 声明型 seed-only**（非债）＋**0 残**。逐刀过程记录＝自举进度当日行（首刀 `8a7efbf7e` → 十二刀 `7f9f755dd`，含回滚 `a35a3072a`）。
-- 🟡 **7.2.1b** parser_asm_thin 主 debt＝suite audit 族 B-minus 量产 — **进行中：120/1,956 已迁（2026-09-10 末态；v4.4 守卫委托/inout 恢复）**
+- 🟡 **7.2.1b** parser_asm_thin 主 debt＝suite audit 族 B-minus 量产 — **进行中：128/1,956 已迁（2026-09-10 末态；v4.5 call-then-restore／if-return 字节链）**
 
   **债务底图（不变事实）**：主文件 4,555 行＋35 切片 73,854 行；pthin 24 `.x` 原为 237 行壳层 stub（真体全在 `.inc` C）；suite 1,965 审计＝33 叶子＋~1,800 层叠组合器；按值 `struct parser_asm_lexer/slice_u8` 传参 2,755 处＝ABI 障碍根。
 
@@ -116,14 +116,16 @@
   - [x] 三契约模板：按值（快照/恢复）／inout（**失败不写回**）／组合（opaque 贯通零本地 struct）
   - [x] 生成器 v3：线性链／kind 循环／kinds 内联／switch→if 链／score 算术／子审计调用／委托／buf 薄 shim；**不动点批跑**（依赖层自动解锁）＋越界即拒
   - [x] 等价 harness 全自动同步：82 用例双端 327,601 checks（含 buf/inout/flag 形态）
-  - [x] 已迁 120：手工 16＋生成器 104（v1→v4.4；纯委托守卫＋inout callee 恢复＋字节链双极性）
+  - [x] 已迁 128：手工 16＋生成器 112（v1→v4.5；call-then-restore＋if-return 字节链＋诚实 8 入库／19 语义红未入）
+  - [x] 生成器 v4.5：`if (COND) return` 接 hoist_byte_chain；多语句 `return CALLEE(&cursor)` 改为 call-then-restore（不再当纯委托）；条件 `&lex` 去 C 取址；buf shim `&?lex`；harness 孪生前向声明；不动点批跑
 
   **⬜ 剩余构成（按解锁序）**：
   - [x] 多-lexer 别名链＋单行 if-return＋guard 变体＋stale-idlen 修复（回退卡清零）（v3.1）
   - [x] 依赖墙根已拔（v4.2：cursor-advance/自增脱糖/通用 kind while）——剩余：非 static kinds[]（peek_kind_chain 族 ~4 函数）＋次级构造尾
+  - [x] v4.5 构造尾：if-return 字节链／call-then-restore／void-call `&r.next_lex`（array/slice bracket 语义红未入，模板已在）
   - [ ] 厚 buf 体 279（wrap 后走标准翻译，v3.1）
   - [ ] out 参族 9（`int32_t *out_*`；`.x` 经 `out[0]` 写可表达）
-  - [ ] 深链组合器（上三者解锁后不动点自动吞）
+  - [ ] 深链组合器（上三者解锁后不动点自动吞；v4.5 试迁 19 个 mega/full_deep harness 红＝callee 步进语义，未入）
 
   机制细节＝[7.2.1-parser-inc-port-ABI-RFC.md](7.2.1-parser-inc-port-ABI-RFC.md) §5a–5f；逐波记录＝自举进度当日行（试点 `8a9825dd6` → v3 `6d8e5d1fd`）。
 - 🟡 **7.2.2** parser_gen 去 pin — **产品冷权威 pin-first**（`XLANG_PARSER_FROM_X=0` 默认；tip assemble 仅显式 `=1`）；手术改须 seed+`.x` 同 commit  
