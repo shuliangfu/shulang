@@ -3,7 +3,7 @@
 > **用途**：终局债 **状态 only**（✅／🟡／⬜ + 短事实）。  
 > **禁止**：tip 流水账、wave／SHA 日记、双端日志、「证：…」长叙事。波次流水只写 [`自举进度.md`](自举进度.md) §6。  
 > **考古全文**（瘦身前）：[`archive/C迁移追踪-流水账归档-20260910.md`](archive/C迁移追踪-流水账归档-20260910.md) · 更早：[`archive/C迁移追踪-流水账归档-20260825.md`](archive/C迁移追踪-流水账归档-20260825.md)  
-> **刷新**：2026-09-10 · tip **`2c96ee330`** · 钉盘 **`5cac88d00`**
+> **刷新**：2026-09-10 · tip **`736960fe0`** · 钉盘 **`5cac88d00`**
 
 ### 维护约定
 
@@ -105,12 +105,13 @@
 
 ### 开项
 
-- 🟡 **7.2.1b** parser_asm suite audit B-minus — **133／1,956**  
+- 🟡 **7.2.1b** parser_asm suite audit B-minus — **135／1,956**  
   - [x] ABI＝B-minus（opaque＋lexer-step 桥；RFC §5）  
   - [x] 桥面／P9a／三契约／生成器 v1→v4.6／等价 harness  
   - [x] 栈 kinds[]／peek_kind_chain 根（toplevel_kind_peek 族）  
   - [ ] 厚 buf 体 ~279  
-  - [ ] out 参族 9  
+  - [x] out 参族根 2／9（match_arms／call_args；生成器 v4.7）
+  - [ ] out 参族余 7  
   - [ ] 深链组合器（mega／bracket 步进语义等；harness 红未入）  
   - 机制 → [`7.2.1-parser-inc-port-ABI-RFC.md`](7.2.1-parser-inc-port-ABI-RFC.md)；逐波 → 自举进度 §6  
 - 🟡 **7.2.2** parser_gen 去 pin — 产品默认 pin-first；`FROM_X=1` 仅显式 assemble  
