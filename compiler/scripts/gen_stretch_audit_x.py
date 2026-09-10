@@ -107,6 +107,10 @@ class Delegation(Exception):
 
 
 MIGRATED_EXPORTS_CACHE = set()
+INOUT_CALLEES = {
+    "parser_asm_stretch_fn_param_list_audit_c",
+    "parser_asm_stretch_skip_return_type_audit_c",
+}
 BLOCK_HOIST_USED = set()
 
 
@@ -123,7 +127,7 @@ def translate_call(callee, arg, flag=None, buf=False):
     if buf:
         return f"{callee}(lex, data, len)", set()
     tail = f", {flag}" if flag is not None else ""
-    return f"{callee}(lex, source{tail})", set()
+    return f"__INOUT__{callee}(lex, source{tail})", set()
 
 
 def translate_loop_body(block, cur_results):
@@ -436,7 +440,13 @@ def translate(name, body, tokvals):
             is_buf_call = "data, len" in st
             x2, ntok = translate_call(callee, arg, (m.group(5) if m.lastindex >= 5 else None), buf=is_buf_call)
             used |= ntok
-            if op == "+=":
+            if x2.startswith("__INOUT__"):
+                call = x2[len("__INOUT__"):]
+                emit(f"{var} = {call};")
+                emit("parser_asm_lex_set_pos_c(lex, pos0);")
+                emit("parser_asm_lex_set_line_c(lex, line0);")
+                emit("parser_asm_lex_set_col_c(lex, col0);")
+            elif op == "+=":
                 emit(f"{var} = {var} + {x2};")
             else:
                 emit(f"{var} = {x2};")
@@ -738,6 +748,9 @@ def tok_of(name):
 
 
 BYTE_CHAIN_RE = re.compile(
+    r"(?:!source->data \|\| )?(r\w*)\.token_start \+ (\d+) >= source->length"
+    r"((?: \|\| source->data\[\1\.token_start(?: \+ \d+)?\] != \(uint8_t\)'\w')+)")
+BYTE_CHAIN_RE2 = re.compile(
     r"source->data && (r\w*)\.token_start \+ (\d+) < source->length"
     r"((?: && source->data\[\1\.token_start(?: \+ \d+)?\] == \(uint8_t\)'\w')+)")
 
@@ -747,16 +760,39 @@ PAIR_RE = re.compile(
 )
 
 def hoist_byte_chain(cond, emit):
-    m = BYTE_CHAIN_RE.search(cond)
+    """Rewrite the guarded byte-compare chain (either polarity) into a temp."""
+    m = BYTE_CHAIN_RE.search(cond)   # negative: bounds-fail || bytes !=
+    negate = True
+    if not m:
+        m = BYTE_CHAIN_RE2.search(cond)  # positive: data && bounds && bytes ==
+        negate = False
     if not m:
         return cond, set()
     res, top_k, chain = m.group(1), int(m.group(2)), m.group(3)
-    pairs = [(int(k) if k else 0, ch) for k, ch in PAIR_RE.findall(chain)]
+    if negate:
+        pairs = re.findall(
+            r"source->data\[\w+\.token_start(?: \+ (\d+))?\] != \(uint8_t\)'(\w)'", chain)
+        emit("data2 = parser_asm_lex_source_data_c(source);")
+        emit("sln2 = parser_asm_lex_source_length_c(source);")
+        emit("ts2 = parser_asm_lex_peek_token_start_c(lex, source);")
+        emit("bhit = 0;")
+        emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2) {")
+        emit("  unsafe {")
+        cmps = [f"data2[ts2 + {(int(k) if k else 0)}] == {ord(ch)}" for k, ch in pairs]
+        emit("    if (" + " && ".join(cmps) + ") {")
+        emit("      bhit = 1;")
+        emit("    }")
+        emit("  }")
+        emit("}")
+        return cond[: m.start()] + "bhit == 1" + cond[m.end() :], set()
+    # positive form
+    pairs = re.findall(
+        r"source->data\[\w+\.token_start(?: \+ (\d+))?\] == \(uint8_t\)'(\w)'", chain)
     emit("data2 = parser_asm_lex_source_data_c(source);")
     emit("sln2 = parser_asm_lex_source_length_c(source);")
     emit("ts2 = parser_asm_lex_peek_token_start_c(lex, source);")
     emit("bhit = 0;")
-    cmps = [f"data2[ts2 + {kk}] == {ord(ch)}" for kk, ch in pairs]
+    cmps = [f"data2[ts2 + {(int(k) if k else 0)}] == {ord(ch)}" for k, ch in pairs]
     emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2) {")
     emit("  unsafe {")
     emit("    if (" + " && ".join(cmps) + ") {")
@@ -841,6 +877,9 @@ def translate_return(expr, cur_results):
             ],
             used,
         )
+    m = re.match(r"(parser_asm_stretch_\w+_c)\(&(?:lex|lex_at_if|\w+_lex|cur|body_lex|param_lex), source\)$", e)
+    if m:
+        raise Delegation(m.group(1))
     m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if), source(?:, (\d+))?\)$", e)
     if m and m.group(2) is None:
         raise Delegation(m.group(1))
@@ -884,6 +923,9 @@ def translate_return(expr, cur_results):
             used,
         )
     # score-expression returns: score / score + N / score + CALL(lex)
+    m = re.match(r"(parser_asm_stretch_\w+_c)\(&(?:lex|\w+), data, len\)$", e)
+    if m:
+        raise Delegation(m.group(1))
     m = re.match(r"(\w+) \+ (parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\)$", e)
     if m:
         x2, ntok = translate_call(m.group(2), m.group(3), buf=True)
@@ -1114,7 +1156,7 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
             si += 1
             continue
-        m = re.match(r"parser_asm_stretch_skip_balanced_brackets_into_c\(&lex, (r\w*)\.next_lex, source\);$", st)
+        m = re.match(r"parser_asm_stretch_skip_balanced_brackets_into_c\(&\w+, (r\w*)\.next_lex, source\);$", st)
         if m and m.group(1) in cur_results:
             out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
             out.append(f"{pad}parser_asm_lex_skip_balanced_brackets_inplace_c(lex, source);")
@@ -1231,12 +1273,32 @@ def gen_buf_function(name, body, tokvals, existing_consts):
     return x_lines, used, [], ivars, ("THICK",)
 
 
-def emit_buf_x(name, callee, docline):
-    """Thin buf shim: wrap + delegate to the slice-based .x audit."""
+def emit_buf_x(name, callee, docline, callee_is_buf=False):
+    if callee_is_buf:
+        return f"""/**
+ * {docline}
+ * Generated buf→buf port: passes (data,len) through to .
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param data *u8 — source bytes
+ * @param len i32 — byte length; <=0 returns 0
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
+  unsafe {{
+    if (data == 0 as *u8 || len <= 0) {{
+      return 0;
+    }}
+    return {callee}(lex, data, len);
+  }}
+  return 0;
+}}
+"""
     return f"""/**
  * {docline}
  * Generated buf-shim port: wraps (data,len) via the bridge ring and
- * delegates to the slice-based .x audit `{callee}`.
+ * delegates to the slice-based .x audit .
  * @param lex *u8 — opaque lexer (read-only net effect)
  * @param data *u8 — source bytes
  * @param len i32 — byte length; <=0 returns 0
@@ -1256,7 +1318,6 @@ export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
   return 0;
 }}
 """
-
 
 def emit_buf_thick_x(name, x_lines, int_vars=()):
     int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if not v.endswith("_us"))
@@ -1375,7 +1436,14 @@ def main():
             gen.append((n, x_lines, ivars, buftail))
             ok.append(n)
         except Delegation as d:
-            if str(d) in migrated_exports:
+            # pure delegation only: the body must be a single return statement
+            # (plus decls/null-guard); anything else has logic the port drops
+            stmts = [l.strip() for l in join_logical(funcs[n])
+                     if l.strip() and not l.strip().startswith(("struct ", "int32_t ", "if (!"))
+                     and l.strip() != "return 0;" and not l.strip().startswith("/*")]
+            if len(stmts) != 1 or not stmts[0].startswith("return "):
+                refused.append((n, f"guarded delegation (body has {len(stmts)} stmts)"))
+            elif str(d) in migrated_exports:
                 deleg.append((n, str(d), buf_sigs.get(n, False)))
                 ok.append(n)
             else:
@@ -1446,7 +1514,7 @@ def main():
             frags.append(emit_x(n, x_lines, docmap[n], ivars))
     for n, callee, is_b in list(deleg):
         if is_b:
-            frags.append(emit_buf_x(n, callee, f"Generated buf-shim port {n}."))
+            frags.append(emit_buf_x(n, callee, f"Generated buf-shim port {n}.", callee_is_buf=("_buf_" in callee or callee.endswith("_buf_c"))))
             continue
         frags.append(
             f"/**\n"

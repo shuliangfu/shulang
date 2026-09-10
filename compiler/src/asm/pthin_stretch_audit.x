@@ -4829,3 +4829,25 @@ export function parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(lex: *u
   }
   return 0;
 }
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated buf-shim port parser_asm_stretch_skip_one_enum_register_buf_audit_c.
+ * Generated buf→buf port: passes (data,len) through to .
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param data *u8 — source bytes
+ * @param len i32 — byte length; <=0 returns 0
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_skip_one_enum_register_buf_audit_c(lex: *u8, data: *u8, len: i32): i32 {
+  unsafe {
+    if (data == 0 as *u8 || len <= 0) {
+      return 0;
+    }
+    return parser_asm_stretch_skip_one_enum_buf_audit_c(lex, data, len);
+  }
+  return 0;
+}

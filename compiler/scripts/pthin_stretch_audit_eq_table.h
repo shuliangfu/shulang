@@ -89,6 +89,7 @@ extern int32_t parser_asm_stretch_return_stmt_full_deep_audit_c(void *lex_inout,
 extern int32_t parser_asm_stretch_return_stmt_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_imports_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_one_enum_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+extern int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_one_extern_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_one_function_full_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_one_if_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
@@ -297,6 +298,8 @@ static int32_t x_skip_imports_buf_audit(void *l, void *s, int32_t f) { (void)f; 
 static int32_t r_skip_imports_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_skip_imports_buf_audit(l, sl_->data, (int32_t)sl_->length); }
 static int32_t x_skip_one_enum_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return parser_asm_stretch_skip_one_enum_buf_audit_c(l, sl_->data, (int32_t)sl_->length); }
 static int32_t r_skip_one_enum_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_skip_one_enum_buf_audit(l, sl_->data, (int32_t)sl_->length); }
+static int32_t x_skip_one_enum_register_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return parser_asm_stretch_skip_one_enum_register_buf_audit_c(l, sl_->data, (int32_t)sl_->length); }
+static int32_t r_skip_one_enum_register_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_skip_one_enum_register_buf_audit(l, sl_->data, (int32_t)sl_->length); }
 static int32_t x_skip_one_extern_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return parser_asm_stretch_skip_one_extern_buf_audit_c(l, sl_->data, (int32_t)sl_->length); }
 static int32_t r_skip_one_extern_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_skip_one_extern_buf_audit(l, sl_->data, (int32_t)sl_->length); }
 static int32_t x_skip_one_function_full_buf_audit(void *l, void *s, int32_t f) { (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return parser_asm_stretch_skip_one_function_full_buf_audit_c(l, sl_->data, (int32_t)sl_->length); }
@@ -449,6 +452,7 @@ static const audit_case k_cases[] = {
     {"return_stmt_full_deep_buf_audit", r_return_stmt_full_deep_buf_audit, x_return_stmt_full_deep_buf_audit, 0, 0},
     {"skip_imports_buf_audit", r_skip_imports_buf_audit, x_skip_imports_buf_audit, 0, 0},
     {"skip_one_enum_buf_audit", r_skip_one_enum_buf_audit, x_skip_one_enum_buf_audit, 0, 0},
+    {"skip_one_enum_register_buf_audit", r_skip_one_enum_register_buf_audit, x_skip_one_enum_register_buf_audit, 0, 0},
     {"skip_one_extern_buf_audit", r_skip_one_extern_buf_audit, x_skip_one_extern_buf_audit, 0, 0},
     {"skip_one_function_full_buf_audit", r_skip_one_function_full_buf_audit, x_skip_one_function_full_buf_audit, 0, 0},
     {"skip_one_if_buf_audit", r_skip_one_if_buf_audit, x_skip_one_if_buf_audit, 0, 0},

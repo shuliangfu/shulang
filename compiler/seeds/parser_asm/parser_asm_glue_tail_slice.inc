@@ -1232,7 +1232,7 @@ void parser_skip_one_enum_register_into_buf_glue(void *module, struct parser_asm
   struct parser_asm_slice_u8 source;
   if (!out || !data)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_one_enum_register_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_one_enum_register_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_enum_body_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_enum_variants_body_from_header_buf_audit_c(lex, data, len));
   source.data = data;

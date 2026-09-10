@@ -1532,6 +1532,17 @@ static int32_t c_ref_try_skip_allow_paren_buf_audit(void *lex_inout, uint8_t *da
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_enum_register_buf_audit_c. */
+static int32_t c_ref_skip_one_enum_register_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  return c_ref_skip_one_enum_buf_audit(&lex, data, len);
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_imports_buf_audit_c. */
 static int32_t c_ref_skip_imports_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
 

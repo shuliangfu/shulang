@@ -30,6 +30,7 @@ enum {
 
 /** block_stmt 内嵌审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_skip_let_const_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
@@ -3199,9 +3200,18 @@ int32_t parser_asm_stretch_diag_lex_after_imports_buf_audit_c(uint8_t *data, int
 /**
  * tier21：skip_one_enum_register buf 路径前导审计。
  */
-int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   return parser_asm_stretch_skip_one_enum_buf_audit_c(&lex, data, len);
 }
+#endif
 
 /**
  * tier22：skip_imports buf 路径 import 语句审计。

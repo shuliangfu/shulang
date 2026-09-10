@@ -352,7 +352,7 @@ int32_t parser_asm_stretch_try_skip_allow_paren_buf_audit_c(void *lex_inout, uin
 int32_t parser_asm_stretch_allow_kw_paren_buf_audit_c(struct parser_asm_lexer_result r, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_lex_after_imports_audit_c(struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_diag_lex_after_imports_buf_audit_c(uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_skip_one_enum_register_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 
 int32_t parser_asm_stretch_skip_imports_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_enum_variants_body_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
