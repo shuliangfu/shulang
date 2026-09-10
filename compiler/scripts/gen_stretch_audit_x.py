@@ -46,7 +46,8 @@ def parse_suite():
         sig_extra = 0
         is_buf = False
         if not m:
-            m2 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+),$", l)
+            m2 = (re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+),$", l)
+                  or re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), uint8_t \*data,$", l))
             if m2 and i + 1 < len(lines):
                 if re.match(r"^\s*struct parser_asm_slice_u8 \*source\) \{$", lines[i + 1]):
                     m = m2
@@ -54,6 +55,16 @@ def parse_suite():
                 elif re.match(r"^\s*uint8_t \*data, int32_t len\) \{$", lines[i + 1]):
                     m = m2
                     sig_extra = 1
+                    is_buf = True
+                elif re.match(r"^\s*int32_t len\) \{$", lines[i + 1]):
+                    m = m2
+                    sig_extra = 1
+                    is_buf = True
+                elif (re.match(r"^\s*uint8_t \*data,$", lines[i + 1])
+                      and i + 2 < len(lines)
+                      and re.match(r"^\s*int32_t len\) \{$", lines[i + 2])):
+                    m = m2
+                    sig_extra = 2
                     is_buf = True
         if not m:
             m3 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
@@ -103,14 +114,14 @@ def lines_strip(l):
     return l.strip()
 
 
-def translate_call(callee, arg, flag=None):
+def translate_call(callee, arg, flag=None, buf=False):
     """A sub-audit call on the caller's lexer → .x call expr (checks migrated)."""
     if callee not in MIGRATED_EXPORTS_CACHE:
         raise Refuse(f"sub-call to unmigrated {callee}")
     if arg.lstrip("&") not in ("lex", "lex_at_if") and not arg.lstrip("&").endswith("_lex") and arg.lstrip("&") not in ("cur", "body_lex", "arms_lex", "after", "sel_lex"):
-        # conservative: allow known alias-local names; correctness guarded by
-        # the caller-site rule that the alias must be current
         raise Refuse(f"sub-call on non-cursor var {arg}")
+    if buf:
+        return f"{callee}(lex, data, len)", set()
     tail = f", {flag}" if flag is not None else ""
     return f"{callee}(lex, source{tail})", set()
 
@@ -418,10 +429,12 @@ def translate(name, body, tokvals):
         if st.startswith("else"):
             raise Refuse("else branch")
         # v2: score arithmetic from sub-audit calls or literals
-        m = re.match(r"(\w+) (\+=|=) (parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        m = re.match(r"(\w+) (\+=|=) (parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st) or \
+        re.match(r"(\w+) (\+=|=) (parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\);$", st)
         if m and m.group(1) in int_vars:
             var, op, callee, arg = m.group(1), m.group(2), m.group(3), m.group(4)
-            x2, ntok = translate_call(callee, arg, m.group(5))
+            is_buf_call = "data, len" in st
+            x2, ntok = translate_call(callee, arg, (m.group(5) if m.lastindex >= 5 else None), buf=is_buf_call)
             used |= ntok
             if op == "+=":
                 emit(f"{var} = {var} + {x2};")
@@ -438,6 +451,12 @@ def translate(name, body, tokvals):
         m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+|r\w*\.next_lex), source(?:, (\d+))?\);$", st)
         if m:
             arg = m.group(2)
+            if arg == "data":
+                x2, ntok = translate_call(m.group(1), "lex", buf=True)
+                used |= ntok
+                emit(f"{x2};")
+                si += 1
+                continue
             if arg.startswith("r"):  # rX.next_lex → step to that position first
                 emit("parser_asm_lex_step_kind_c(lex, source);")
                 arg = "lex"
@@ -865,6 +884,19 @@ def translate_return(expr, cur_results):
             used,
         )
     # score-expression returns: score / score + N / score + CALL(lex)
+    m = re.match(r"(\w+) \+ (parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\)$", e)
+    if m:
+        x2, ntok = translate_call(m.group(2), m.group(3), buf=True)
+        used |= ntok
+        return (
+            [
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      return {m.group(1)} + {x2};",
+            ],
+            used,
+        )
     m = re.match(r"(\w+)(?: \+ (\d+))?$", e)
     if m and m.group(1) not in ("0", "1"):
         var, add = m.group(1), m.group(2)
@@ -1061,7 +1093,8 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}{m.group(1)} = {m.group(1)} + 1;")
             si += 1
             continue
-        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st) or \
+        re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\);$", st)
         if m:
             x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
             used |= ntok
@@ -1152,6 +1185,9 @@ PURE_HELPERS = {
 
 def gen_x_function(name, body, tokvals, existing_consts, buftail_mode=False):
     if buftail_mode:
+        # buf→buf 委托链: CALLEE(lex, data, len) 标记为 BUFCALL 形态供 handler 识别
+        body = [re.sub(r"(parser_asm_stretch_\w+_c)\((lex|lex_at_if), data, len\)",
+                       r"\1(\2, data, len)", l) for l in body]
         body = [l.replace("&sl)", "source)").replace(", source);", ", source);")
                 for l in body]
         body = [re.sub(r"lexer_next_into\(&(r\w*), ([^,]+), source\)",

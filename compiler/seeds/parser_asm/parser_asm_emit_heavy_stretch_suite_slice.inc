@@ -30,6 +30,11 @@ enum {
 
 /** block_stmt 内嵌审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_diag_skip_let_const_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_ternary_assign_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_ternary_assign_mega_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_cast_unary_mega_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_expr_stmt_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
@@ -2843,8 +2848,15 @@ int32_t parser_asm_stretch_diag_skip_let_const_type_audit_c(void *lex_inout, voi
 /**
  * tier18：diag_skip_let_const buf 路径类型 token 审计。
  */
-int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_slice_u8 sl;
   if (!data || len <= 0)
     return 0;
@@ -2852,6 +2864,7 @@ int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(struct parser_as
   sl.length = (size_t)len;
   return parser_asm_stretch_diag_skip_let_const_type_audit_c(&lex, &sl);
 }
+#endif
 
 /**
  * tier18：impl 块内 function 项 return 类型头审计。
@@ -4922,8 +4935,15 @@ int32_t parser_asm_stretch_diag_skip_let_const_deep_audit_c(void *lex_inout, voi
 /**
  * tier31：diag_skip_let_const buf 深探。
  */
-int32_t parser_asm_stretch_diag_skip_let_const_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_diag_skip_let_const_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_slice_u8 sl;
 
   if (!data || len <= 0)
@@ -4932,6 +4952,7 @@ int32_t parser_asm_stretch_diag_skip_let_const_deep_buf_audit_c(struct parser_as
   sl.length = (size_t)len;
   return parser_asm_stretch_diag_skip_let_const_deep_audit_c(&lex, &sl);
 }
+#endif
 
 /**
  * tier31：trait/impl 体 buf 复合深探（方法体 + impl 项 + 头）。
@@ -5723,8 +5744,15 @@ int32_t parser_asm_stretch_ternary_assign_full_deep_audit_c(void *lex_inout, voi
 /**
  * tier35：ternary+assign 全链 buf 深探。
  */
-int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_slice_u8 sl;
 
   if (!data || len <= 0)
@@ -5733,6 +5761,7 @@ int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(struct parser_as
   sl.length = (size_t)len;
   return parser_asm_stretch_ternary_assign_full_deep_audit_c(&lex, &sl);
 }
+#endif
 
 /**
  * tier35：primary 表达式全链 slice 深探（primary deep + call deep + 方括号深度）。
@@ -7074,8 +7103,15 @@ int32_t parser_asm_stretch_ternary_assign_mega_full_deep_audit_c(void *lex_inout
 /**
  * tier39：ternary+assign mega 全链 buf 深探。
  */
-int32_t parser_asm_stretch_ternary_assign_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                   int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_ternary_assign_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_slice_u8 sl;
 
   if (!data || len <= 0)
@@ -7084,6 +7120,7 @@ int32_t parser_asm_stretch_ternary_assign_mega_full_deep_buf_audit_c(struct pars
   sl.length = (size_t)len;
   return parser_asm_stretch_ternary_assign_mega_full_deep_audit_c(&lex, &sl);
 }
+#endif
 
 /**
  * tier39：primary 表达式 mega 全链 slice 深探（primary expr full + primary mega + 后缀链）。
@@ -7205,8 +7242,15 @@ int32_t parser_asm_stretch_cast_unary_mega_full_deep_audit_c(void *lex_inout, vo
 /**
  * tier39：cast/unary mega 全链 buf 深探。
  */
-int32_t parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                 int32_t len) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_slice_u8 sl;
 
   if (!data || len <= 0)
@@ -7215,6 +7259,7 @@ int32_t parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(struct parser_a
   sl.length = (size_t)len;
   return parser_asm_stretch_cast_unary_mega_full_deep_audit_c(&lex, &sl);
 }
+#endif
 
 /**
  * tier39：语句控制 mega 全链 slice 深探（return full + loop control mega + break/continue）。

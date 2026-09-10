@@ -192,8 +192,7 @@ int32_t parser_asm_stretch_impl_type_for_trait_audit_c(struct parser_asm_lexer l
 int32_t parser_asm_stretch_extern_return_type_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_import_as_bind_audit_c(struct parser_asm_lexer_result r, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_diag_skip_let_const_type_audit_c(void *lex_inout, void *source);
-int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
-                                                                int32_t len);
+int32_t parser_asm_stretch_diag_skip_let_const_type_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_impl_fn_return_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_trait_method_paren_audit_c(void *lex_inout, void *source);
 
