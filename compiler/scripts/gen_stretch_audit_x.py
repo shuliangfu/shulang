@@ -127,6 +127,35 @@ def translate_loop_body(block, cur_results):
     out.append(f"      {var} = {var} + 1;")
     m1 = re.match(r"if \((\w+) > (\d+)\)$", lines[1])
     if not m1:
+        # compound bail: if (VAR > A || GUARD++ > B) return VAR;
+        mc = re.match(r"if \((\w+) > (\d+) \|\| (\w+)\+\+ > (\d+)\) return (\w+);$", lines[1])
+        if mc and len(lines) > 2 and lines[2] == f"return {mc.group(5)};":
+            var, lim, gv, glim, rv = mc.groups()
+            out = [f"      {var} = {var} + 1;",
+                   f"      if ({var} > {lim}) {{",
+                   "        parser_asm_lex_set_pos_c(lex, pos0);",
+                   "        parser_asm_lex_set_line_c(lex, line0);",
+                   "        parser_asm_lex_set_col_c(lex, col0);",
+                   f"        return {rv};",
+                   "      }",
+                   f"      {gv} = {gv} + 1;",
+                   f"      if ({gv} - 1 > {glim}) {{",
+                   "        parser_asm_lex_set_pos_c(lex, pos0);",
+                   "        parser_asm_lex_set_line_c(lex, line0);",
+                   "        parser_asm_lex_set_col_c(lex, col0);",
+                   f"        return {rv};",
+                   "      }"]
+            rest = lines[3:]
+            for t in rest:
+                if t == "parser_asm_lex_from_result_val_into(&lex, r);":
+                    out.append("      parser_asm_lex_step_kind_c(lex, source);")
+                    out.append("      kind = parser_asm_lex_peek_kind_c(lex, source);")
+                elif t == "lexer_next_into(&r, lex, source);":
+                    out.append("      kind = parser_asm_lex_peek_kind_c(lex, source);")
+                else:
+                    raise Refuse(f"compound loop tail: {t[:40]}")
+            return out, set()
+    if not m1:
         m1 = re.match(r"if \((\w+) > (\d+)\) return (\w+|\d+);$", " ".join(lines[1:2]))
         if m1:
             lines = lines[:1] + [f"if ({m1.group(1)} > {m1.group(2)})", f"return {m1.group(3)};"] + lines[2:]
@@ -451,6 +480,14 @@ def translate(name, body, tokvals):
         # the following lexer_next_from_alias is the peek refresh)
         m = re.match(r"parser_asm_lex_from_result_val_into\(&(\w+), (r\w*)\);$", st)
         if m and m.group(2) in cur_results and (m.group(1) in cursor_names or m.group(1) in lexer_locals):
+            emit("parser_asm_lex_step_kind_c(lex, source);")
+            alias_current = {m.group(1)}
+            cur_results = set()
+            si += 1
+            continue
+        # v3.2: LOCAL = rX.next_lex; (direct alias advance)
+        m = re.match(r"(\w+) = (r\w*)\.next_lex;$", st)
+        if m and m.group(2) in cur_results and m.group(1) in lexer_locals:
             emit("parser_asm_lex_step_kind_c(lex, source);")
             alias_current = {m.group(1)}
             cur_results = set()
@@ -797,14 +834,29 @@ def translate_block(block, cur_results, indent=2):
         if st == "lexer_next_into(&r2, r.next_lex, source);" or st == "lexer_next_into(&r, r.next_lex, source);":
             out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
             out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
+            out.append(f"{pad}idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
             continue
         m = re.match(r"parser_asm_lex_from_result_val_into\(&\w+, r\w*\);$", st)
         if m:
             out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
             continue
+        m = re.match(r"(\w+) = (r\w*)\.next_lex;$", st)
+        if m and m.group(1) not in int_vars:
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            continue
+        if st == "continue;":
+            out.append(f"{pad}continue;")
+            continue
+        # nested if-brace: recurse one level
+        m = re.match(r"if \((.+)\) \{$", st)
+        if m:
+            # gather nested block
+            pass  # handled by caller loop below
+
         m = re.match(r"lexer_next_into\(&r\w*, \w+, source\);$", st)
         if m:
             out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
+            out.append(f"{pad}idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
             continue
         m = re.match(r"(\w+)\+\+;$", st)
         if m:

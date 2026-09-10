@@ -412,6 +412,36 @@ static int32_t c_ref_trait_header_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_impl_header_audit_c. */
+static int32_t c_ref_impl_header_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer lex_cur;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_IMPL)
+    return 0;
+  parser_asm_lex_from_result_val_into(&lex_cur, r);
+  lexer_next_into(&r, lex_cur, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+    return 0;
+  parser_asm_lex_from_result_val_into(&lex_cur, r);
+  lexer_next_into(&r, lex_cur, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind == (int32_t)TOKEN_FOR) {
+    parser_asm_lex_from_result_val_into(&lex_cur, r);
+    lexer_next_into(&r, lex_cur, (struct parser_asm_slice_u8 *)source);
+    if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+      return 0;
+    parser_asm_lex_from_result_val_into(&lex_cur, r);
+    lexer_next_into(&r, lex_cur, (struct parser_asm_slice_u8 *)source);
+  }
+  return r.tok.kind == (int32_t)TOKEN_LBRACE ? 1 : 0;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_function_header_audit_c. */
 static int32_t c_ref_function_header_audit(void *lex_inout, void *source) {
 
@@ -1156,6 +1186,22 @@ static int32_t c_ref_skip_one_trait_buf_audit(void *lex_inout, uint8_t *data, in
   sl.data = data;
   sl.length = (size_t)len;
   return c_ref_trait_header_audit(&lex, &sl);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_impl_buf_audit_c. */
+static int32_t c_ref_skip_one_impl_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_slice_u8 sl;
+  if (!data || len <= 0)
+    return 0;
+  sl.data = data;
+  sl.length = (size_t)len;
+  return c_ref_impl_header_audit(&lex, &sl);
 
 }
 
