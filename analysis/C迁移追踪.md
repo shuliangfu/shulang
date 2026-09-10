@@ -105,7 +105,7 @@
 ### 开项
 
 - ✅ **7.2.1a** 入口素材迁移（70 件清单）— **清零（2026-09-10）**：终局＝**11 迁 `.x` 权威**（build_tool_main/crt0_mingw/pipeline_glue_link/runtime_process_args_thin/pipeline_wpo_typecheck_emit_bridge/typeck_lsp_io_stub/pipeline_wpo_strict_link_alias/driver_compile_asm_link_alias/pipeline_asm_run_all_alias/pipeline_run_x_link_alias/pipeline_asm_typecheck_alias）＋**1 回滚卡**（runtime_process_import_alias：Cap 头 static inline 无导出者，`.x` extern UNDF；重开条件＝exit 面获导出符号）＋**10 D 类**（编译期开关 4／机械再生伴随件 2／已有 `.x` 权威冷编产物 3／struct-by-value 消费 1）＋**4 声明型 seed-only**（非债）＋**0 残**。逐刀过程记录＝自举进度当日行（首刀 `8a7efbf7e` → 十二刀 `7f9f755dd`，含回滚 `a35a3072a`）。
-- 🟡 **7.2.1b** parser_asm_thin 主 debt＝suite audit 族 B-minus 量产 — **进行中：88/1,956 已迁（2026-09-10 末态；v3.1＋回退卡重开）**
+- 🟡 **7.2.1b** parser_asm_thin 主 debt＝suite audit 族 B-minus 量产 — **进行中：89/1,956 已迁（2026-09-10 末态；v4 递归块翻译器）**
 
   **债务底图（不变事实）**：主文件 4,555 行＋35 切片 73,854 行；pthin 24 `.x` 原为 237 行壳层 stub（真体全在 `.inc` C）；suite 1,965 审计＝33 叶子＋~1,800 层叠组合器；按值 `struct parser_asm_lexer/slice_u8` 传参 2,755 处＝ABI 障碍根。
 
@@ -116,11 +116,11 @@
   - [x] 三契约模板：按值（快照/恢复）／inout（**失败不写回**）／组合（opaque 贯通零本地 struct）
   - [x] 生成器 v3：线性链／kind 循环／kinds 内联／switch→if 链／score 算术／子审计调用／委托／buf 薄 shim；**不动点批跑**（依赖层自动解锁）＋越界即拒
   - [x] 等价 harness 全自动同步：82 用例双端 327,601 checks（含 buf/inout/flag 形态）
-  - [x] 已迁 88：手工 16＋生成器 72（v1→v3.1；impl 族回退卡已重开）
+  - [x] 已迁 89：手工 16＋生成器 73（v1→v4 递归块翻译器；if/else-if 链/break/parens 适配）
 
   **⬜ 剩余构成（按解锁序）**：
   - [x] 多-lexer 别名链＋单行 if-return＋guard 变体＋stale-idlen 修复（回退卡清零）（v3.1）
-  - [ ] 残余构造（复合体各需 2-3 构造）：字节比对链（struct_modifiers「allow」）／guard-break 循环／嵌套 if 块递归／backtrack 形态（extern_fn）／非 static kinds[]——**v4 卡：块翻译器升全递归语句树**
+  - [ ] 残余构造（复合体深尾）：字节比对链（struct_modifiers「allow」）／guard-break 循环／backtrack 形态（extern_fn）／非 static kinds[]——嵌套 if 递归已入（v4）
   - [ ] 厚 buf 体 279（wrap 后走标准翻译，v3.1）
   - [ ] out 参族 9（`int32_t *out_*`；`.x` 经 `out[0]` 写可表达）
   - [ ] 深链组合器（上三者解锁后不动点自动吞）
