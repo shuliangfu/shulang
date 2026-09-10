@@ -53,6 +53,47 @@ enum {
   STRETCH_TOP_TRAIT = 8,
   STRETCH_TOP_IMPL = 9
 };
+/* Stretch token aliases used by field-kind classifiers (≡ heavy_stretch_slice). */
+enum {
+  STRETCH_TOKEN_IDENT = 1,
+  STRETCH_TOKEN_ALIGN = 33
+};
+/* v4.8: kind classifiers + thin bind audits (single authority = bind_name_validate). */
+int32_t parser_asm_stretch_struct_field_name_kind_c(int32_t kind) {
+  if (kind == STRETCH_TOKEN_IDENT)
+    return 1;
+  if (kind == 17) /* TOKEN_PACKED legacy */
+    return 1;
+  if (kind == 18) /* TOKEN_SOA legacy */
+    return 1;
+  if (kind == (int32_t)TOKEN_TYPE)
+    return 1;
+  if (kind == (int32_t)TOKEN_PACKED)
+    return 1;
+  if (kind == (int32_t)TOKEN_SOA)
+    return 1;
+  if (kind == STRETCH_TOKEN_ALIGN)
+    return 1;
+  return 0;
+}
+int32_t parser_asm_stretch_struct_field_continues_kind_c(int32_t kind) {
+  return parser_asm_stretch_struct_field_name_kind_c(kind) != 0 || kind == STRETCH_TOKEN_ALIGN;
+}
+int32_t parser_asm_stretch_struct_field_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
+                                                     int32_t name_len) {
+  if (!source || name_len <= 0)
+    return 0;
+  return parser_asm_stretch_bind_name_validate_c(source->data + token_start, name_len);
+}
+int32_t parser_asm_stretch_enum_variant_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
+                                                     int32_t name_len) {
+  if (!source || name_len <= 0)
+    return 0;
+  return parser_asm_stretch_bind_name_validate_c(source->data + token_start, name_len);
+}
+int32_t parser_asm_stretch_enum_discriminant_kind_audit_c(int32_t kind) {
+  return kind == (int32_t)TOKEN_I32 || kind == (int32_t)TOKEN_I64 || kind == (int32_t)TOKEN_INT ? 1 : 0;
+}
 static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source,
                                                              const int32_t *kinds, int32_t num_kinds) {
@@ -233,6 +274,8 @@ int32_t parser_asm_stretch_peek_kind_chain_c(struct parser_asm_lexer lex, struct
 static int32_t c_ref_fn_param_list_audit(void *lex_inout, void *source);
 static int32_t c_ref_skip_return_type_audit(void *lex_inout, void *source);
 static int32_t c_ref_fn_sig_audit(void *lex_inout, void *source);
+static int32_t c_ref_struct_fields_probe(void *lex_inout, void *source, int32_t *out_field_count);
+static int32_t c_ref_enum_variants_probe(void *lex_inout, void *source, int32_t *out_variant_count);
 static int32_t c_ref_extern_fn_audit(void *lex_inout, void *source);
 static int32_t c_ref_struct_modifiers_audit(void *lex_inout, void *source);
 static int32_t c_ref_async_fn_prefix_audit(void *lex_inout, void *source);
@@ -476,6 +519,106 @@ static int32_t c_ref_fn_sig_audit(void *lex_inout, void *source) {
     return 0;
   lex_cur = r.next_lex;
   return c_ref_skip_return_type_audit(&lex_cur, source);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_struct_fields_probe_c. */
+static int32_t c_ref_struct_fields_probe(void *lex_inout, void *source, int32_t *out_field_count) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  int32_t nf;
+  int32_t guard;
+  nf = 0;
+  guard = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (r.tok.kind != (int32_t)TOKEN_RBRACE && r.tok.kind != (int32_t)TOKEN_EOF) {
+    if (guard++ > 256)
+      return 0;
+    if (r.tok.kind == (int32_t)TOKEN_ALIGN) {
+      (void)c_ref_struct_align_paren_audit(&lex, source);
+      parser_asm_lex_from_result_val_into(&lex, r);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+      if (r.tok.kind != (int32_t)TOKEN_LPAREN)
+        return 0;
+      parser_asm_skip_balanced_parens_into_slice_c(&lex, r.next_lex, source);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+      if (!parser_asm_stretch_struct_field_continues_kind_c(r.tok.kind))
+        return 0;
+      continue;
+    }
+    if (!parser_asm_stretch_struct_field_name_kind_c(r.tok.kind))
+      return 0;
+    (void)parser_asm_stretch_struct_field_bind_audit_c(source, r.token_start, r.tok.ident_len);
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    if (r.tok.kind != (int32_t)TOKEN_COLON)
+      return 0;
+    lex = parser_asm_stretch_skip_one_param_type_c(r.next_lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    if (r.tok.kind != (int32_t)TOKEN_SEMICOLON && r.tok.kind != (int32_t)TOKEN_COMMA
+        && r.tok.kind != (int32_t)TOKEN_RBRACE)
+      return 0;
+    nf++;
+    if (r.tok.kind == (int32_t)TOKEN_RBRACE)
+      break;
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  }
+  if (out_field_count)
+    *out_field_count = nf;
+  return r.tok.kind == (int32_t)TOKEN_RBRACE ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_enum_variants_probe_c. */
+static int32_t c_ref_enum_variants_probe(void *lex_inout, void *source, int32_t *out_variant_count) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  int32_t nv;
+  int32_t guard;
+  nv = 0;
+  guard = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (r.tok.kind != (int32_t)TOKEN_RBRACE && r.tok.kind != (int32_t)TOKEN_EOF) {
+    if (guard++ > 512)
+      return 0;
+    if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+      return 0;
+    (void)parser_asm_stretch_enum_variant_bind_audit_c(source, r.token_start, r.tok.ident_len);
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    if (r.tok.kind == (int32_t)TOKEN_ASSIGN) {
+      parser_asm_lex_from_result_val_into(&lex, r);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+      (void)parser_asm_stretch_enum_discriminant_kind_audit_c(r.tok.kind);
+      if (r.tok.kind != (int32_t)TOKEN_I32 && r.tok.kind != (int32_t)TOKEN_I64)
+        return 0;
+      parser_asm_lex_from_result_val_into(&lex, r);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+    }
+    if (r.tok.kind == (int32_t)TOKEN_COMMA) {
+      nv++;
+      parser_asm_lex_from_result_val_into(&lex, r);
+      lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+      continue;
+    }
+    if (r.tok.kind == (int32_t)TOKEN_RBRACE) {
+      nv++;
+      break;
+    }
+    return 0;
+  }
+  if (out_variant_count)
+    *out_variant_count = nv;
+  return 1;
 
 }
 

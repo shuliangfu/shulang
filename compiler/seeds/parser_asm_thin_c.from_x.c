@@ -207,10 +207,8 @@ void parser_asm_stretch_collect_imports_preamble_audit_c(struct parser_asm_lexer
                                                            struct parser_asm_lexer_result r2,
                                                            struct parser_asm_lexer_result r3,
                                                            struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_struct_fields_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
-                                                 int32_t *out_field_count);
-int32_t parser_asm_stretch_enum_variants_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
-                                                 int32_t *out_variant_count);
+int32_t parser_asm_stretch_struct_fields_probe_c(void *lex_inout, void *source, int32_t *out_field_count);
+int32_t parser_asm_stretch_enum_variants_probe_c(void *lex_inout, void *source, int32_t *out_variant_count);
 int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_struct_modifiers_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_async_fn_prefix_audit_c(void *lex_inout, void *source);

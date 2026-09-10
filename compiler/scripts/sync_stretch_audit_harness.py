@@ -77,6 +77,47 @@ enum {
   STRETCH_TOP_TRAIT = 8,
   STRETCH_TOP_IMPL = 9
 };
+/* Stretch token aliases used by field-kind classifiers (≡ heavy_stretch_slice). */
+enum {
+  STRETCH_TOKEN_IDENT = 1,
+  STRETCH_TOKEN_ALIGN = 33
+};
+/* v4.8: kind classifiers + thin bind audits (single authority = bind_name_validate). */
+int32_t parser_asm_stretch_struct_field_name_kind_c(int32_t kind) {
+  if (kind == STRETCH_TOKEN_IDENT)
+    return 1;
+  if (kind == 17) /* TOKEN_PACKED legacy */
+    return 1;
+  if (kind == 18) /* TOKEN_SOA legacy */
+    return 1;
+  if (kind == (int32_t)TOKEN_TYPE)
+    return 1;
+  if (kind == (int32_t)TOKEN_PACKED)
+    return 1;
+  if (kind == (int32_t)TOKEN_SOA)
+    return 1;
+  if (kind == STRETCH_TOKEN_ALIGN)
+    return 1;
+  return 0;
+}
+int32_t parser_asm_stretch_struct_field_continues_kind_c(int32_t kind) {
+  return parser_asm_stretch_struct_field_name_kind_c(kind) != 0 || kind == STRETCH_TOKEN_ALIGN;
+}
+int32_t parser_asm_stretch_struct_field_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
+                                                     int32_t name_len) {
+  if (!source || name_len <= 0)
+    return 0;
+  return parser_asm_stretch_bind_name_validate_c(source->data + token_start, name_len);
+}
+int32_t parser_asm_stretch_enum_variant_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
+                                                     int32_t name_len) {
+  if (!source || name_len <= 0)
+    return 0;
+  return parser_asm_stretch_bind_name_validate_c(source->data + token_start, name_len);
+}
+int32_t parser_asm_stretch_enum_discriminant_kind_audit_c(int32_t kind) {
+  return kind == (int32_t)TOKEN_I32 || kind == (int32_t)TOKEN_I64 || kind == (int32_t)TOKEN_INT ? 1 : 0;
+}
 '''
 
 

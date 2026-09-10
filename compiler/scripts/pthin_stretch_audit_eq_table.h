@@ -37,6 +37,7 @@ extern int32_t parser_asm_stretch_diag_toplevel_after_imports_audit_c(void *lex_
 extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_else_stmt_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_enum_header_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_enum_variants_probe_c(void *lex_inout, void *source, int32_t *out_variant_count);
 extern int32_t parser_asm_stretch_expr_addsub_binop_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_expr_binop_full_chain_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
@@ -113,6 +114,7 @@ extern int32_t parser_asm_stretch_skip_one_trait_buf_audit_c(void *lex_inout, ui
 extern int32_t parser_asm_stretch_skip_return_type_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_stmt_control_mega_full_deep_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_struct_align_paren_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_struct_fields_probe_c(void *lex_inout, void *source, int32_t *out_field_count);
 extern int32_t parser_asm_stretch_struct_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_struct_modifiers_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_ternary_assign_deep_audit_c(void *lex_inout, void *source);
@@ -210,6 +212,8 @@ static int32_t x_else_stmt_audit(void *l, void *s, int32_t f) { (void)f; return 
 static int32_t r_else_stmt_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_else_stmt_audit(l, s); }
 static int32_t x_enum_header_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_enum_header_audit_c(l, s); }
 static int32_t r_enum_header_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_enum_header_audit(l, s); }
+static int32_t x_enum_variants_probe(void *l, void *s, int32_t f) { int32_t slot = 0; int32_t rc = parser_asm_stretch_enum_variants_probe_c(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }
+static int32_t r_enum_variants_probe(void *l, void *s, int32_t f) { int32_t slot = 0; int32_t rc = c_ref_enum_variants_probe(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }
 static int32_t x_expr_addsub_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_addsub_binop_audit_c(l, s); }
 static int32_t r_expr_addsub_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_addsub_binop_audit(l, s); }
 static int32_t x_expr_binop_full_chain_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_binop_full_chain_audit_c(l, s); }
@@ -361,6 +365,8 @@ static int32_t x_stmt_control_mega_full_deep_audit(void *l, void *s, int32_t f) 
 static int32_t r_stmt_control_mega_full_deep_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_stmt_control_mega_full_deep_audit(l, s); }
 static int32_t x_struct_align_paren_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_struct_align_paren_audit_c(l, s); }
 static int32_t r_struct_align_paren_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_struct_align_paren_audit(l, s); }
+static int32_t x_struct_fields_probe(void *l, void *s, int32_t f) { int32_t slot = 0; int32_t rc = parser_asm_stretch_struct_fields_probe_c(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }
+static int32_t r_struct_fields_probe(void *l, void *s, int32_t f) { int32_t slot = 0; int32_t rc = c_ref_struct_fields_probe(l, s, f ? &slot : 0); return f ? ((rc & 0xffff) | (slot << 16)) : rc; }
 static int32_t x_struct_header_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_struct_header_audit_c(l, s); }
 static int32_t r_struct_header_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_struct_header_audit(l, s); }
 static int32_t x_struct_modifiers_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_struct_modifiers_audit_c(l, s); }
@@ -445,6 +451,8 @@ static const audit_case k_cases[] = {
     {"else_if_chain_audit", r_else_if_chain_audit, x_else_if_chain_audit, 0, 0},
     {"else_stmt_audit", r_else_stmt_audit, x_else_stmt_audit, 0, 0},
     {"enum_header_audit", r_enum_header_audit, x_enum_header_audit, 0, 0},
+    {"enum_variants_probe/null", r_enum_variants_probe, x_enum_variants_probe, 0, 0},
+    {"enum_variants_probe/slot", r_enum_variants_probe, x_enum_variants_probe, 1, 0},
     {"expr_addsub_binop_audit", r_expr_addsub_binop_audit, x_expr_addsub_binop_audit, 0, 0},
     {"expr_binop_full_chain_audit", r_expr_binop_full_chain_audit, x_expr_binop_full_chain_audit, 0, 0},
     {"expr_binop_full_chain_buf_audit", r_expr_binop_full_chain_buf_audit, x_expr_binop_full_chain_buf_audit, 0, 0},
@@ -523,6 +531,8 @@ static const audit_case k_cases[] = {
     {"skip_return_type_audit", r_skip_return_type_audit, x_skip_return_type_audit, 0, 1},
     {"stmt_control_mega_full_deep_audit", r_stmt_control_mega_full_deep_audit, x_stmt_control_mega_full_deep_audit, 0, 0},
     {"struct_align_paren_audit", r_struct_align_paren_audit, x_struct_align_paren_audit, 0, 0},
+    {"struct_fields_probe/null", r_struct_fields_probe, x_struct_fields_probe, 0, 0},
+    {"struct_fields_probe/slot", r_struct_fields_probe, x_struct_fields_probe, 1, 0},
     {"struct_header_audit", r_struct_header_audit, x_struct_header_audit, 0, 0},
     {"struct_modifiers_audit", r_struct_modifiers_audit, x_struct_modifiers_audit, 0, 0},
     {"ternary_assign_deep_audit", r_ternary_assign_deep_audit, x_ternary_assign_deep_audit, 0, 0},

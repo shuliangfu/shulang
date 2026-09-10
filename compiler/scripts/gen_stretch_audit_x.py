@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.7 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.8 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -17,6 +17,12 @@
 #
 # v4.7: scalar out-param probes (`int32_t *out_*`) → .x `out: *i32` + `out[0]=`
 #   write (null-safe). Unlocks match_arms / call_args / struct_lit_fields etc.
+#
+# v4.8: fold discarded name/bind audits onto the single authority
+#   `peek_ident_ptr + bind_name_validate` (G.7 — enum_variant_bind /
+#   struct_field_bind / function_name_audit are thin C wrappers of that
+#   path). Elide pure discarded kind audits. Wrap kind-only classifiers
+#   (`struct_field_name_kind` / `continues_kind`) as bool conditions.
 #
 # Outputs (in-place):
 #   src/asm/pthin_stretch_audit.x            — .x port appended
@@ -728,7 +734,7 @@ def translate(name, body, tokvals):
                 cur_results = set()
             x2, ntok = translate_call(m.group(1), arg, m.group(3))
             used |= ntok
-            emit(f"{x2};")
+            emit(f"{strip_inout(x2)};")
             si += 1
             continue
         # v2: bind_name_validate on the current ident
@@ -737,6 +743,13 @@ def translate(name, body, tokvals):
         if m and m.group(2) in cur_results and m.group(3) in cur_results:
             emit("idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);");
             emit("parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+            si += 1
+            continue
+        # v4.8: fold void bind/name audits; elide pure discarded kind audits
+        folded = try_emit_void_name_audit(st, "", cur_results)
+        if folded is not None:
+            for fl in folded:
+                emit(fl)
             si += 1
             continue
         # v2: helper adapter with discarded result (`after` unused later)
@@ -1140,6 +1153,13 @@ def translate_cond(cond, cur_results):
                lambda m: _wrap_helper(m, True), c)
     c = re.sub(r"(?<![\w!=])parser_asm_stretch_is_type_start_kind_c\([^()]*\)(?!\s*!=)",
                lambda m: _wrap_helper(m, False), c)
+    # v4.8: kind-only classifiers (pthin_stretch.x) → explicit bool
+    for kn in ("parser_asm_stretch_struct_field_name_kind_c",
+               "parser_asm_stretch_struct_field_continues_kind_c"):
+        c = re.sub(rf"(?<![\w!=])!{kn}\(([^()]*)\)",
+                   rf"({kn}(\1) == 0)", c)
+        c = re.sub(rf"(?<![\w!=]){kn}\(([^()]*)\)(?!\s*[=!])",
+                   rf"({kn}(\1) != 0)", c)
     for res in cur_results | {"r", "r2"}:
         c = c.replace(f"{res}.tok.kind", "kind")
         c = c.replace(f"{res}.tok.ident_len", "idlen")
@@ -1483,7 +1503,8 @@ def translate_block(block, cur_results, indent=2):
         if m:
             x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
             used |= ntok
-            out.append(f"{pad}{x2};")
+            # discard-call: strip the inout marker (same as &r.next_lex void path)
+            out.append(f"{pad}{strip_inout(x2)};")
             si += 1
             continue
         m = re.match(r"\(void\)(parser_asm_stretch_bind_name_validate_c)\(source->data \+ "
@@ -1491,6 +1512,12 @@ def translate_block(block, cur_results, indent=2):
         if m and m.group(2) in cur_results and m.group(3) in cur_results:
             out.append(f"{pad}idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);")
             out.append(f"{pad}parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+            si += 1
+            continue
+        # v4.8: fold void bind/name audits; elide pure discarded kind audits
+        folded = try_emit_void_name_audit(st, pad, cur_results)
+        if folded is not None:
+            out.extend(folded)
             si += 1
             continue
         if st in ("lexer_next_into(&r2, r.next_lex, source);", "lexer_next_into(&r, r.next_lex, source);"):
@@ -1663,7 +1690,48 @@ PURE_HELPERS = {
     "parser_asm_stretch_ident_byte_ok_c": ("c: u8, is_first: i32", "i32"),
     "parser_asm_stretch_classify_toplevel_c": (
         "kind: i32, next_kind: i32, third_kind: i32", "i32"),
+    # v4.8: kind classifiers already exported by pthin_stretch.x (C twin in
+    # heavy_stretch_slice.inc). Declared extern here so audit.x can call them.
+    "parser_asm_stretch_struct_field_name_kind_c": ("kind: i32", "i32"),
+    "parser_asm_stretch_struct_field_continues_kind_c": ("kind: i32", "i32"),
 }
+
+
+def try_emit_void_name_audit(st, pad, cur_results):
+    """Fold void-cast name/bind audits onto peek_ident_ptr + bind_name_validate.
+
+    C suite helpers `enum_variant_bind_audit` / `struct_field_bind_audit` /
+    `function_name_audit` are thin wrappers of `bind_name_validate` (G.7:
+    single authority — do not re-implement). Pure discarded kind audits
+    (e.g. enum_discriminant_kind_audit) have no net effect when void-cast
+    and are elided. Returns a list of .x lines, or None if `st` is not a
+    recognized name-audit form.
+    """
+    m = re.match(
+        r"\(void\)parser_asm_stretch_(?:enum_variant_bind_audit|struct_field_bind_audit)_c"
+        r"\(source, (r\w*)\.token_start, (r\w*)\.tok\.ident_len\);$",
+        st)
+    if m and m.group(1) in cur_results and m.group(2) in cur_results:
+        return [
+            f"{pad}idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);",
+            f"{pad}parser_asm_stretch_bind_name_validate_c(idptr, idlen);",
+        ]
+    m = re.match(
+        r"\(void\)parser_asm_stretch_function_name_audit_c"
+        r"\(source->data \+ (r\w*)\.token_start, (r\w*)\.tok\.ident_len\);$",
+        st)
+    if m and m.group(1) in cur_results and m.group(2) in cur_results:
+        return [
+            f"{pad}idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);",
+            f"{pad}parser_asm_stretch_bind_name_validate_c(idptr, idlen);",
+        ]
+    # Pure kind audit whose return is discarded — no observable net effect.
+    m = re.match(
+        r"\(void\)parser_asm_stretch_enum_discriminant_kind_audit_c\((r\w*)\.tok\.kind\);$",
+        st)
+    if m and m.group(1) in cur_results:
+        return []
+    return None
 
 
 def gen_x_function(name, body, tokvals, existing_consts, buftail_mode=False):
@@ -1862,7 +1930,7 @@ def emit_out_x(name, x_lines, docline, out_name, int_vars=()):
                     "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets
     return f"""/**
  * {docline}
- * B-minus generated out-param port (gen_stretch_audit_x.py v4.7) of the suite
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.8) of the suite
  * twin `{name}` — pointer ABI + by-value net semantics via the restore trio;
  * writes `{out_name}[0]` when the out pointer is non-null.
  * @param lex *u8 — opaque lexer (read-only net effect)

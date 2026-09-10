@@ -805,7 +805,7 @@ void parser_asm_skip_one_struct_into_slice_c(struct parser_asm_lexer *out, struc
     out->col = lex.col;
     return;
   }
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_fields_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_fields_probe_c(&r.next_lex, source, 0));
   parser_asm_skip_balanced_braces_into_slice_c(out, r.next_lex, source);
 }
 
@@ -849,7 +849,7 @@ void parser_asm_skip_one_enum_into_slice_c(struct parser_asm_lexer *out, struct 
     out->col = lex.col;
     return;
   }
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_enum_variants_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_enum_variants_probe_c(&r.next_lex, source, 0));
   parser_asm_skip_balanced_braces_into_slice_c(out, r.next_lex, source);
 }
 /*
