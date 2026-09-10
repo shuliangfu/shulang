@@ -30,6 +30,21 @@ enum {
 
 /** block_stmt 内嵌审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_addsub_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_mul_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_unary_prefix_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_shift_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_rel_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_eq_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_bitand_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_bitor_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_logand_binop_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_logor_binop_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_try_skip_allow_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_trait_method_return_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_extern_return_type_audit_c(void *lex_inout, void *source);
@@ -1682,43 +1697,57 @@ int32_t parser_asm_stretch_struct_layout_name_audit_c(const uint8_t *name, int32
 /**
  * tier12：term 层 mul/div/mod 二元链首 token 粗探（不消费 lex）。
  */
-int32_t parser_asm_stretch_expr_mul_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_mul_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_lexer_result r;
   int32_t n;
-  if (!source)
-    return 0;
   n = 0;
-  lexer_next_into(&r, lex, source);
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   while (r.tok.kind == (int32_t)TOKEN_STAR || r.tok.kind == (int32_t)TOKEN_SLASH
          || r.tok.kind == (int32_t)TOKEN_PERCENT) {
     n++;
     if (n > 32)
       return n;
     parser_asm_lex_from_result_val_into(&lex, r);
-    lexer_next_into(&r, lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   }
   return n;
 }
+#endif
 
 /**
  * tier12：addsub 层 +/- 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_addsub_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_addsub_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_lexer_result r;
   int32_t n;
-  if (!source)
-    return 0;
   n = 0;
-  lexer_next_into(&r, lex, source);
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   while (r.tok.kind == (int32_t)TOKEN_PLUS || r.tok.kind == (int32_t)TOKEN_MINUS) {
     n++;
     if (n > 32)
       return n;
     parser_asm_lex_from_result_val_into(&lex, r);
-    lexer_next_into(&r, lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   }
   return n;
 }
+#endif
 
 /**
  * tier12：onefunc buf function 名审计。
@@ -1783,66 +1812,138 @@ static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(struct parser_asm_lex
 /**
  * tier13：shift 层 << >> 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_shift_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_shift_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[2] = {(int32_t)TOKEN_LSHIFT, (int32_t)TOKEN_RSHIFT};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 2);
 }
+#endif
 
 /**
  * tier13：rel 层 </<=/>/>= 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_rel_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_rel_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[4] = {(int32_t)TOKEN_LT, (int32_t)TOKEN_LE, (int32_t)TOKEN_GT, (int32_t)TOKEN_GE};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 4);
 }
+#endif
 
 /**
  * tier13：compare 层 ==/!= 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_eq_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_eq_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[2] = {(int32_t)TOKEN_EQ, (int32_t)TOKEN_NE};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 2);
 }
+#endif
 
 /**
  * tier13：bitand 层 & 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_bitand_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_bitand_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[1] = {(int32_t)TOKEN_AMP};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
 }
+#endif
 
 /**
  * tier13：bitxor 层 ^ 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[1] = {(int32_t)TOKEN_CARET};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
 }
+#endif
 
 /**
  * tier13：bitor 层 | 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_bitor_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_bitor_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[1] = {(int32_t)TOKEN_PIPE};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
 }
+#endif
 
 /**
  * tier13：logand 层 && 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_logand_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_logand_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[1] = {(int32_t)TOKEN_AMPAMP};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
 }
+#endif
 
 /**
  * tier13：logor 层 || 二元链首 token 粗探。
  */
-int32_t parser_asm_stretch_expr_logor_binop_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_logor_binop_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   static const int32_t kinds[1] = {(int32_t)TOKEN_PIPEPIPE};
   return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
 }
+#endif
 
 /**
  * tier13：`as type` 后缀链粗探（不修改 out）。
@@ -1877,29 +1978,36 @@ int32_t parser_asm_stretch_as_suffix_chain_audit_c(struct parser_asm_lexer lex, 
 /**
  * tier13：一元前缀 await/run/spawn/-,!,& 粗探。
  */
-int32_t parser_asm_stretch_unary_prefix_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_unary_prefix_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   struct parser_asm_lexer_result r;
   struct parser_asm_lexer_result r2;
   int32_t depth;
-  if (!source)
-    return 0;
   depth = 0;
-  lexer_next_into(&r, lex, source);
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   while (r.tok.kind == (int32_t)TOKEN_AWAIT || r.tok.kind == (int32_t)TOKEN_RUN || r.tok.kind == (int32_t)TOKEN_SPAWN
          || r.tok.kind == (int32_t)TOKEN_MINUS || r.tok.kind == (int32_t)TOKEN_BANG) {
     depth++;
     if (depth > 16)
       return depth;
     parser_asm_lex_from_result_val_into(&lex, r);
-    lexer_next_into(&r, lex, source);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   }
   if (r.tok.kind == (int32_t)TOKEN_AMP) {
-    lexer_next_into(&r2, r.next_lex, source);
+    lexer_next_into(&r2, r.next_lex, (struct parser_asm_slice_u8 *)source);
     if (r2.tok.kind != (int32_t)TOKEN_AMP)
       depth++;
   }
   return depth;
 }
+#endif
 
 /**
  * tier13：if 表达式头审计（复用 if 语句头形态）。
@@ -3960,7 +4068,7 @@ int32_t parser_asm_stretch_primary_expr_deep_buf_audit_c(struct parser_asm_lexer
   sl.data = data;
   sl.length = (size_t)len;
   score = parser_asm_stretch_primary_head_buf_audit_c(lex, data, len);
-  score += parser_asm_stretch_unary_prefix_audit_c(lex, &sl);
+  score += parser_asm_stretch_unary_prefix_audit_c(&lex, &sl);
   score += parser_asm_stretch_primary_suffix_chain_probe_c(lex, &sl);
   score += parser_asm_stretch_as_suffix_chain_audit_c(lex, &sl);
   return score > 0 ? 1 : 0;
@@ -4006,7 +4114,7 @@ int32_t parser_asm_stretch_primary_expr_deep_audit_c(struct parser_asm_lexer lex
   int32_t score;
 
   score = parser_asm_stretch_primary_head_audit_c(&lex, source);
-  score += parser_asm_stretch_unary_prefix_audit_c(lex, source);
+  score += parser_asm_stretch_unary_prefix_audit_c(&lex, source);
   score += parser_asm_stretch_primary_suffix_chain_probe_c(lex, source);
   score += parser_asm_stretch_as_suffix_chain_audit_c(lex, source);
   return score > 0 ? 1 : 0;
@@ -4065,7 +4173,7 @@ int32_t parser_asm_stretch_parse_expr_prefix_chain_audit_c(struct parser_asm_lex
                                                            struct parser_asm_slice_u8 *source) {
   int32_t score;
 
-  score = parser_asm_stretch_unary_prefix_audit_c(lex, source);
+  score = parser_asm_stretch_unary_prefix_audit_c(&lex, source);
   score += parser_asm_stretch_primary_head_audit_c(&lex, source);
   score += parser_asm_stretch_as_suffix_chain_audit_c(lex, source);
   return score > 0 ? 1 : 0;
@@ -4250,15 +4358,23 @@ int32_t parser_asm_stretch_ternary_assign_deep_buf_audit_c(struct parser_asm_lex
 /**
  * tier30：expr 低层二元链 slice 深探（mul + addsub + shift）。
  */
-int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   int32_t score;
 
-  score = parser_asm_stretch_expr_mul_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_addsub_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_shift_binop_audit_c(lex, source);
+  score = parser_asm_stretch_expr_mul_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_addsub_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_shift_binop_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
+#endif
 
 /**
  * tier30：expr 低层二元链 buf 深探。
@@ -4270,7 +4386,7 @@ int32_t parser_asm_stretch_expr_binop_lower_chain_buf_audit_c(struct parser_asm_
     return 0;
   sl.data = data;
   sl.length = (size_t)len;
-  return parser_asm_stretch_expr_binop_lower_chain_audit_c(lex, &sl);
+  return parser_asm_stretch_expr_binop_lower_chain_audit_c(&lex, &sl);
 }
 
 /**
@@ -4327,17 +4443,25 @@ int32_t parser_asm_stretch_loop_stmt_body_buf_audit_c(struct parser_asm_lexer le
 /**
  * tier31：expr 上层二元链 slice 深探（rel + eq + bitand/xor/or）。
  */
-int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   int32_t score;
 
-  score = parser_asm_stretch_expr_rel_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_eq_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_bitand_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_bitxor_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_bitor_binop_audit_c(lex, source);
+  score = parser_asm_stretch_expr_rel_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_eq_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_bitand_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_bitxor_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_bitor_binop_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
+#endif
 
 /**
  * tier31：expr 上层二元链 buf 深探。
@@ -4349,20 +4473,28 @@ int32_t parser_asm_stretch_expr_binop_upper_chain_buf_audit_c(struct parser_asm_
     return 0;
   sl.data = data;
   sl.length = (size_t)len;
-  return parser_asm_stretch_expr_binop_upper_chain_audit_c(lex, &sl);
+  return parser_asm_stretch_expr_binop_upper_chain_audit_c(&lex, &sl);
 }
 
 /**
  * tier31：expr 逻辑二元链 slice 深探（logand + logor）。
  */
-int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   int32_t score;
 
-  score = parser_asm_stretch_expr_logand_binop_audit_c(lex, source);
-  score += parser_asm_stretch_expr_logor_binop_audit_c(lex, source);
+  score = parser_asm_stretch_expr_logand_binop_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_logor_binop_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
+#endif
 
 /**
  * tier31：expr 逻辑二元链 buf 深探。
@@ -4374,7 +4506,7 @@ int32_t parser_asm_stretch_expr_binop_mid_chain_buf_audit_c(struct parser_asm_le
     return 0;
   sl.data = data;
   sl.length = (size_t)len;
-  return parser_asm_stretch_expr_binop_mid_chain_audit_c(lex, &sl);
+  return parser_asm_stretch_expr_binop_mid_chain_audit_c(&lex, &sl);
 }
 
 /**
@@ -4501,15 +4633,23 @@ int32_t parser_asm_stretch_block_stmt_deep_buf_audit_c(struct parser_asm_lexer l
 /**
  * tier32：expr 全层二元链 slice 深探（lower + upper + mid）。
  */
-int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(struct parser_asm_lexer lex,
-                                                         struct parser_asm_slice_u8 *source) {
+/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x
+ * authority src/asm/pthin_stretch_audit.x provides the same symbol
+ * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
   int32_t score;
 
-  score = parser_asm_stretch_expr_binop_lower_chain_audit_c(lex, source);
-  score += parser_asm_stretch_expr_binop_upper_chain_audit_c(lex, source);
-  score += parser_asm_stretch_expr_binop_mid_chain_audit_c(lex, source);
+  score = parser_asm_stretch_expr_binop_lower_chain_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_binop_upper_chain_audit_c(&lex, source);
+  score += parser_asm_stretch_expr_binop_mid_chain_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
+#endif
 
 /**
  * tier32：expr 全层二元链 buf 深探。
@@ -4521,7 +4661,7 @@ int32_t parser_asm_stretch_expr_binop_full_chain_buf_audit_c(struct parser_asm_l
     return 0;
   sl.data = data;
   sl.length = (size_t)len;
-  return parser_asm_stretch_expr_binop_full_chain_audit_c(lex, &sl);
+  return parser_asm_stretch_expr_binop_full_chain_audit_c(&lex, &sl);
 }
 
 /**
@@ -4798,7 +4938,7 @@ int32_t parser_asm_stretch_skip_imports_deep_buf_audit_c(struct parser_asm_lexer
 int32_t parser_asm_stretch_expr_stmt_full_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
   int32_t score;
 
-  score = parser_asm_stretch_expr_binop_full_chain_audit_c(lex, source);
+  score = parser_asm_stretch_expr_binop_full_chain_audit_c(&lex, source);
   score += parser_asm_stretch_ternary_assign_deep_audit_c(lex, source);
   score += parser_asm_stretch_parse_expr_prefix_chain_audit_c(lex, source);
   return score > 0 ? 1 : 0;
@@ -4951,7 +5091,7 @@ int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm_lexer 
 
   score = parser_asm_stretch_parse_cond_expr_audit_c(&lex, source);
   score += parser_asm_stretch_parse_expr_prefix_chain_audit_c(lex, source);
-  score += parser_asm_stretch_expr_binop_lower_chain_audit_c(lex, source);
+  score += parser_asm_stretch_expr_binop_lower_chain_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
 
@@ -5161,7 +5301,7 @@ int32_t parser_asm_stretch_ternary_assign_full_deep_audit_c(struct parser_asm_le
 
   score = parser_asm_stretch_ternary_assign_deep_audit_c(lex, source);
   score += parser_asm_stretch_expr_stmt_full_audit_c(lex, source);
-  score += parser_asm_stretch_expr_binop_full_chain_audit_c(lex, source);
+  score += parser_asm_stretch_expr_binop_full_chain_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
 
@@ -5336,7 +5476,7 @@ int32_t parser_asm_stretch_cast_unary_full_deep_audit_c(struct parser_asm_lexer 
                                                         struct parser_asm_slice_u8 *source) {
   int32_t score;
 
-  score = parser_asm_stretch_unary_prefix_audit_c(lex, source);
+  score = parser_asm_stretch_unary_prefix_audit_c(&lex, source);
   score += parser_asm_stretch_as_suffix_chain_audit_c(lex, source);
   score += parser_asm_stretch_primary_head_audit_c(&lex, source);
   score += parser_asm_stretch_type_ref_peek_audit_c(lex, source);
@@ -5681,7 +5821,7 @@ int32_t parser_asm_stretch_expr_binop_mega_full_deep_audit_c(struct parser_asm_l
                                                              struct parser_asm_slice_u8 *source) {
   int32_t score;
 
-  score = parser_asm_stretch_expr_binop_full_chain_audit_c(lex, source);
+  score = parser_asm_stretch_expr_binop_full_chain_audit_c(&lex, source);
   score += parser_asm_stretch_primary_expr_full_deep_audit_c(lex, source);
   score += parser_asm_stretch_cast_unary_full_deep_audit_c(lex, source);
   score += parser_asm_stretch_ternary_assign_full_deep_audit_c(lex, source);
@@ -6567,7 +6707,7 @@ int32_t parser_asm_stretch_cast_unary_mega_full_deep_audit_c(struct parser_asm_l
 
   score = parser_asm_stretch_cast_unary_full_deep_audit_c(lex, source);
   score += parser_asm_stretch_expr_stmt_mega_full_deep_audit_c(lex, source);
-  score += parser_asm_stretch_unary_prefix_audit_c(lex, source);
+  score += parser_asm_stretch_unary_prefix_audit_c(&lex, source);
   return score > 0 ? 1 : 0;
 }
 

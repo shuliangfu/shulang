@@ -99,6 +99,71 @@ def translate_call(callee, arg, flag=None):
     return f"{callee}(lex, source{tail})", set()
 
 
+def translate_loop_body(block, cur_results):
+    """Uniform kind-loop body: VAR++; if (VAR > N) return VAR|0; advance; refresh."""
+    used = set()
+    out = []
+    # counter pattern: two/three/four lines
+    lines = [l.strip() for l in block if l.strip()]
+    m0 = re.match(r"(\w+)\+\+;$", lines[0])
+    if not (m0 and len(lines) >= 2):
+        raise Refuse(f"loop body head: {lines[0][:40] if lines else 'empty'}")
+    var = m0.group(1)
+    out.append(f"      {var} = {var} + 1;")
+    m1 = re.match(r"if \((\w+) > (\d+)\)$", lines[1])
+    if not m1:
+        m1 = re.match(r"if \((\w+) > (\d+)\) return (\w+|\d+);$", " ".join(lines[1:2]))
+        if m1:
+            lines = lines[:1] + [f"if ({m1.group(1)} > {m1.group(2)})", f"return {m1.group(3)};"] + lines[2:]
+    if m1 and m1.group(1) == var:
+        if lines[2] in ("return %s;" % var, "return 0;"):
+            out.append(f"      if ({var} > {m1.group(2)}) {{")
+            out.append("        parser_asm_lex_set_pos_c(lex, pos0);")
+            out.append("        parser_asm_lex_set_line_c(lex, line0);")
+            out.append("        parser_asm_lex_set_col_c(lex, col0);")
+            out.append(f"        return {lines[2].replace('return ', '').rstrip(';')};")
+            out.append("      }")
+            rest = lines[3:]
+        else:
+            raise Refuse("loop bail form")
+    else:
+        rest = lines[1:]
+    for t in rest:
+        if t == "parser_asm_lex_from_result_val_into(&lex, r);":
+            out.append("      parser_asm_lex_step_kind_c(lex, source);")
+            out.append("      kind = parser_asm_lex_peek_kind_c(lex, source);")
+            continue
+        if t == "lexer_next_into(&r, lex, source);":
+            out.append("      kind = parser_asm_lex_peek_kind_c(lex, source);")
+            continue
+        raise Refuse(f"loop body stmt: {t[:40]}")
+    return out, used
+
+
+def translate_guard_loop(block, cur_results):
+    """for(;;) { if (guard++ > N) ...; <standard statements> } → while(guard<=N){guard++;...}"""
+    used = set()
+    lines = [l.strip() for l in block if l.strip()]
+    m = re.match(r"if \((\w+)\+\+ > (\d+)\) return (\w+|\d+);$", lines[0])
+    if m:
+        gvar, limit = m.group(1), m.group(2)
+        lines = [f"if ({gvar}++ > {limit})", f"return {m.group(3)};"] + lines[1:]
+    m = re.match(r"if \((\w+)\+\+ > (\d+)\)$", lines[0])
+    if not (m and lines[1] in ("return 0;", "return guard;", "return %s;" % m.group(1))):
+        raise Refuse("guard loop head")
+    gvar, limit = m.group(1), m.group(2)
+    out = [f"    while ({gvar} <= {limit}) {{", f"      {gvar} = {gvar} + 1;"]
+    body_x, ntok = translate_block(block[2:], cur_results, indent=3)
+    used |= ntok
+    out.extend(body_x)
+    out.append("    }")
+    out.append("    parser_asm_lex_set_pos_c(lex, pos0);")
+    out.append("    parser_asm_lex_set_line_c(lex, line0);")
+    out.append("    parser_asm_lex_set_col_c(lex, col0);")
+    out.append("    return 0;")
+    return out, used
+
+
 def translate_switch(groups):
     """Case groups → if/else-if chain over `kind`."""
     used = set()
@@ -135,6 +200,25 @@ def translate_switch(groups):
     return out, used
 
 
+def join_logical(body):
+    """Merge continuation lines: a logical statement ends at a line whose
+    stripped form ends with ; { or } (or is a case/default label)."""
+    out = []
+    buf = []
+    for l in body:
+        if not l.strip() and not buf:
+            out.append(l)
+            continue
+        buf.append(l)
+        t = " ".join(x.strip() for x in buf).strip()
+        if t.endswith(";") or t.endswith("{") or t.endswith("}") or t.endswith(":"):
+            out.append(" ".join(x.strip() for x in buf))
+            buf = []
+    if buf:
+        out.append(" ".join(x.strip() for x in buf))
+    return out
+
+
 def translate(name, body, tokvals):
     """C statement list → .x statement list (inside unsafe). Linear model:
     cursor = caller's lex; first lexer_next_into from `lex` = peek; each
@@ -145,6 +229,10 @@ def translate(name, body, tokvals):
     advanced = set()  # result vars whose .next_lex is "the cursor position"
     first_step_done = False
     cur_results = set()  # result vars holding the CURRENT token
+    cursor_names = {"lex"}
+    # accept any by-value lexer param name as the cursor (lex_at_if etc.)
+    for ln in body[:0]:
+        pass
 
     def emit(s):
         x.append("    " + s)
@@ -153,7 +241,7 @@ def translate(name, body, tokvals):
         return "kind"
 
     si = 0
-    stmts = body
+    stmts = join_logical(body)
     while si < len(stmts):
         st = stmts[si].strip()
         # blank / decls
@@ -174,6 +262,9 @@ def translate(name, body, tokvals):
             si += 1
             continue
         # null source guard (template covers it)
+        if st == "if (!source) return 0;":
+            si += 1
+            continue
         if st == "if (!source)":
             if stmts[si + 1].strip() != "return 0;":
                 raise Refuse("complex null guard")
@@ -256,9 +347,14 @@ def translate(name, body, tokvals):
             si += 1
             continue
         # v2: discarded sub-audit call
-        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+|r\w*\.next_lex), source(?:, (\d+))?\);$", st)
         if m:
-            x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
+            arg = m.group(2)
+            if arg.startswith("r"):  # rX.next_lex → step to that position first
+                emit("parser_asm_lex_step_kind_c(lex, source);")
+                arg = "lex"
+                cur_results = set()
+            x2, ntok = translate_call(m.group(1), arg, m.group(3))
             used |= ntok
             emit(f"{x2};")
             si += 1
@@ -279,6 +375,88 @@ def translate(name, body, tokvals):
             emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
             cur_results = set()
             si += 1
+            continue
+        # v2.1: kinds-array delegator (delegates to expr_binop_kinds_probe with a
+        # static kind list) → inline the probe's uniform loop, OR-cond unrolled
+        m = re.match(r"static const int32_t kinds\[\d+\] = \{((?:\(int32_t\)TOKEN_\w+(?:, )?)+)\};$", st)
+        if m:
+            kinds = re.findall(r"TOKEN_\w+", m.group(1))
+            if si + 1 < len(stmts):
+                nxt = stmts[si + 1].strip()
+                m2 = re.match(r"return parser_asm_stretch_expr_binop_kinds_probe_c\(lex, source, kinds, \d+\);$", nxt)
+                if m2:
+                    used |= set(kinds)
+                    cond = " || ".join(f"kind == {k}" for k in kinds)
+                    emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
+                    emit(f"while ({cond}) {{")
+                    emit("  n = n + 1;")
+                    emit("  if (n > 32) {")
+                    emit("    parser_asm_lex_set_pos_c(lex, pos0);")
+                    emit("    parser_asm_lex_set_line_c(lex, line0);")
+                    emit("    parser_asm_lex_set_col_c(lex, col0);")
+                    emit("    return n;")
+                    emit("  }")
+                    emit("  parser_asm_lex_step_kind_c(lex, source);")
+                    emit("  kind = parser_asm_lex_peek_kind_c(lex, source);")
+                    emit("}")
+                    emit("parser_asm_lex_set_pos_c(lex, pos0);")
+                    emit("parser_asm_lex_set_line_c(lex, line0);")
+                    emit("parser_asm_lex_set_col_c(lex, col0);")
+                    emit("return n;")
+                    int_vars.add("n")
+                    si += 2
+                    continue
+            raise Refuse("kinds array without probe delegation")
+        # v2.1: from_result advance (≡ step + refresh)
+        m = re.match(r"parser_asm_lex_from_result_val_into\(&(\w+), (r\w*)\);$", st)
+        if m and m.group(2) in cur_results and m.group(1) in cursor_names:
+            emit("parser_asm_lex_step_kind_c(lex, source);")
+            emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
+            if any(f"{m.group(2)}.tok.ident_len" in s2 for s2 in stmts):
+                emit("idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
+            cur_results = set()
+            si += 1
+            continue
+        # v2.1: kind-membership while loop (uniform counter pattern)
+        m = re.match(r"while \((r\w*)\.tok\.kind == (.+)\) \{$", st)
+        if m and m.group(1) in cur_results:
+            cond_rest = m.group(2)
+            # loop body until lone '}'
+            j = si + 1
+            depth = 1
+            body_l = []
+            while depth > 0:
+                t = stmts[j].strip()
+                depth += t.count("{") - t.count("}")
+                if depth == 0:
+                    break
+                body_l.append(stmts[j])
+                j += 1
+            cond_x, ntok = translate_cond(f"{m.group(1)}.tok.kind == " + cond_rest, cur_results)
+            used |= ntok
+            body_x, ntok2 = translate_loop_body(body_l, cur_results)
+            used |= ntok2
+            emit(f"while ({cond_x}) {{")
+            x.extend(body_x)
+            emit("}")
+            si = j + 1
+            continue
+        # v2.1: guard bail loop for (;;) { if (guard++ > N) return 0; ... }
+        if st == "for (;;) {":
+            j = si + 1
+            depth = 1
+            body_l = []
+            while depth > 0:
+                t = stmts[j].strip()
+                depth += t.count("{") - t.count("}")
+                if depth == 0:
+                    break
+                body_l.append(stmts[j])
+                j += 1
+            body_x, ntok2 = translate_guard_loop(body_l, cur_results)
+            used |= ntok2
+            x.extend(body_x)
+            si = j + 1
             continue
         # v2: switch on the current token kind → if/else chain
         m = re.match(r"switch \((r\w*)\.tok\.kind\) \{$", st)
@@ -361,9 +539,37 @@ def translate_return(expr, cur_results):
     used = set()
     e = expr.strip()
     # delegation: return CALLEE(ARG, source);  where ARG is lex/&lex/lex_at_if...
-    m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if), source\)$", e)
-    if m:
+    m = re.match(r"(parser_asm_stretch_\w+_c)\((r\w*)\.next_lex, source(?:, (\d+))?\)$", e)
+    if m and m.group(2) in cur_results:
+        x2, ntok = translate_call(m.group(1), "lex", m.group(3))
+        used |= ntok
+        return (
+            [
+                "      parser_asm_lex_step_kind_c(lex, source);",
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      return {x2};",
+            ],
+            used,
+        )
+    m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if), source(?:, (\d+))?\)$", e)
+    if m and m.group(2) is None:
         raise Delegation(m.group(1))
+    m2 = re.match(r"(\w+) \+ (parser_asm_stretch_\w+_c)\((r\w*)\.next_lex, source(?:, (\d+))?\)$", e)
+    if m2 and m2.group(3) in cur_results:
+        x2, ntok = translate_call(m2.group(2), "lex", m2.group(4))
+        used |= ntok
+        return (
+            [
+                "      parser_asm_lex_step_kind_c(lex, source);",
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      return {m2.group(1)} + {x2};",
+            ],
+            used,
+        )
     # pure-call ternary: return HELPER(args) ? 1 : 0;
     m = re.match(r"(\w+)\(([^()]*)\) \? 1 : 0$", e)
     if m and m.group(1) in PURE_HELPERS:
@@ -475,6 +681,23 @@ def translate_block(block, cur_results, indent=2):
         if m and m.group(2) in cur_results and m.group(3) in cur_results:
             out.append(f"{pad}idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);")
             out.append(f"{pad}parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+            continue
+        if st == "lexer_next_into(&r2, r.next_lex, source);" or st == "lexer_next_into(&r, r.next_lex, source);":
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
+            continue
+        m = re.match(r"(\w+)\+\+;$", st)
+        if m:
+            out.append(f"{pad}{m.group(1)} = {m.group(1)} + 1;")
+            continue
+        # nested single-stmt if: if (rX.tok.kind COND) VAR++;
+        m = re.match(r"if \((r\w*)\.tok\.kind (.+?)\) (\w+)\+\+;$", st)
+        if m:
+            cond_x, ntok = translate_cond(f"{m.group(1)}.tok.kind {m.group(2)}", {m.group(1)})
+            used |= ntok
+            out.append(f"{pad}if ({cond_x}) {{")
+            out.append(f"{pad}  {m.group(3)} = {m.group(3)} + 1;")
+            out.append(f"{pad}}}")
             continue
         raise Refuse(f"stmt in if-block: {st[:50]}")
     return out, used

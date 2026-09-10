@@ -59,8 +59,7 @@ void parser_asm_expr_set_common_zeros_c(struct parser_asm_ast_expr *e);
 /* parser_asm_lex_from_result_val_into: provided by P1 lex_skip (non-static) */
 struct parser_asm_ast_expr parser_asm_arena_expr_get_c(void *arena, int32_t ref);
 
-extern int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(struct parser_asm_lexer lex,
-                                                                 struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_expr_binop_mega_full_deep_audit_c(struct parser_asm_lexer lex,
                                                                   struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_expr_ultra_mega_full_deep_audit_c(struct parser_asm_lexer lex,
@@ -147,32 +146,19 @@ extern int32_t parser_asm_stretch_expr_peak_summit_apexversal_maxversal_wholever
                                                                   struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_expr_stmt_mega_full_deep_audit_c(struct parser_asm_lexer lex,
                                                                   struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(struct parser_asm_lexer lex,
-                                                                struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(struct parser_asm_lexer lex,
-                                                                 struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(struct parser_asm_lexer lex,
-                                                               struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_mul_binop_audit_c(struct parser_asm_lexer lex,
-                                                         struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_addsub_binop_audit_c(struct parser_asm_lexer lex,
-                                                            struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_shift_binop_audit_c(struct parser_asm_lexer lex,
-                                                           struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_rel_binop_audit_c(struct parser_asm_lexer lex,
-                                                         struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_eq_binop_audit_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_bitand_binop_audit_c(struct parser_asm_lexer lex,
-                                                            struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(struct parser_asm_lexer lex,
-                                                            struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_bitor_binop_audit_c(struct parser_asm_lexer lex,
-                                                           struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_logand_binop_audit_c(struct parser_asm_lexer lex,
-                                                            struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_expr_logor_binop_audit_c(struct parser_asm_lexer lex,
-                                                           struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_mul_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_addsub_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_shift_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_rel_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_eq_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitand_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitor_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_logand_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_logor_binop_audit_c(void *lex_inout, void *source);
 
 /** 分配二元节点并写入 left/right/kind。 */
 static int32_t parser_asm_binop_wrap_c(void *arena, struct parser_asm_parse_expr_result *out, int32_t kind,
@@ -261,8 +247,8 @@ void parser_asm_parse_term_into_slice_c(void *arena, struct parser_asm_lexer lex
   parser_parse_cast_into(arena, lex, source, out);
   if (!out->ok)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_lower_chain_audit_c(out->next_lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_mul_binop_audit_c(out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_lower_chain_audit_c(&out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_mul_binop_audit_c(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -300,7 +286,7 @@ void parser_asm_parse_addsub_into_slice_c(void *arena, struct parser_asm_lexer l
   parser_parse_term_into(arena, lex, source, out);
   if (!out->ok)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_addsub_binop_audit_c(out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_addsub_binop_audit_c(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -336,7 +322,7 @@ void parser_asm_parse_shift_into_slice_c(void *arena, struct parser_asm_lexer le
   parser_parse_addsub_into(arena, lex, source, out);
   if (!out->ok)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_shift_binop_audit_c(out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_shift_binop_audit_c(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -373,8 +359,8 @@ void parser_asm_parse_relcompare_into_slice_c(void *arena, struct parser_asm_lex
   parser_parse_shift_into(arena, lex, source, out);
   if (!out->ok)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_upper_chain_audit_c(out->next_lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_rel_binop_audit_c(out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_upper_chain_audit_c(&out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_rel_binop_audit_c(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -414,7 +400,7 @@ void parser_asm_parse_compare_into_slice_c(void *arena, struct parser_asm_lexer 
   parser_parse_relcompare_into(arena, lex, source, out);
   if (!out->ok)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_eq_binop_audit_c(out->next_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_eq_binop_audit_c(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -445,8 +431,8 @@ static void parser_asm_binop_single_tok_chain_c(void *arena, struct parser_asm_l
                                                 int32_t expr_kind,
                                                 void (*lower)(void *, struct parser_asm_lexer, struct parser_asm_slice_u8 *,
                                                               struct parser_asm_parse_expr_result *),
-                                                int32_t (*audit_fn)(struct parser_asm_lexer,
-                                                                    struct parser_asm_slice_u8 *)) {
+                                                int32_t (*audit_fn)(void *,
+                                                                    void *)) { /* B-minus pointer ABI */
   struct parser_asm_lexer_result r;
   struct parser_asm_lexer lex_cur;
   int32_t left_ref;
@@ -461,7 +447,7 @@ static void parser_asm_binop_single_tok_chain_c(void *arena, struct parser_asm_l
    * every bitand…logor expression. Keep the call only when the gate is on.
    * PLATFORM: SHARED — same gate as sibling term/addsub/shift/rel/eq. */
   if (audit_fn)
-    PARSER_ASM_STRETCH_AUDIT_CALL(audit_fn(out->next_lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(audit_fn(&out->next_lex, source));
   lex_cur = out->next_lex;
   for (;;) {
     parser_asm_binop_lex_peek_into(&r, lex_cur, source);
@@ -504,7 +490,7 @@ void parser_asm_parse_bitor_into_slice_c(void *arena, struct parser_asm_lexer le
 /** parse_logand_into：bitor ( && bitor )*。 */
 void parser_asm_parse_logand_into_slice_c(void *arena, struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                           struct parser_asm_parse_expr_result *out) {
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_mid_chain_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_mid_chain_audit_c(&lex, source));
   parser_asm_binop_single_tok_chain_c(arena, lex, source, out, (int32_t)TOKEN_AMPAMP, PARSER_ASM_EXPR_LOGAND,
                                       parser_parse_bitor_into, parser_asm_stretch_expr_logand_binop_audit_c);
 }
@@ -512,7 +498,7 @@ void parser_asm_parse_logand_into_slice_c(void *arena, struct parser_asm_lexer l
 /** parse_logor_into：logand ( || logand )*。 */
 void parser_asm_parse_logor_into_slice_c(void *arena, struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                          struct parser_asm_parse_expr_result *out) {
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_full_chain_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_full_chain_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_binop_mega_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_stmt_mega_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_expr_ultra_mega_full_deep_audit_c(lex, source));

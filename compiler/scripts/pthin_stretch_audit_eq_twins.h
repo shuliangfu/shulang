@@ -40,6 +40,35 @@ int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
       || kind == (int32_t)TOKEN_PIPE_EQ || kind == (int32_t)TOKEN_CARET_EQ || kind == (int32_t)TOKEN_LSHIFT_EQ
       || kind == (int32_t)TOKEN_RSHIFT_EQ;
 }
+static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(struct parser_asm_lexer lex,
+                                                             struct parser_asm_slice_u8 *source,
+                                                             const int32_t *kinds, int32_t num_kinds) {
+  struct parser_asm_lexer_result r;
+  int32_t n;
+  int32_t i;
+  int32_t hit;
+  if (!source || !kinds || num_kinds <= 0)
+    return 0;
+  n = 0;
+  lexer_next_into(&r, lex, source);
+  for (;;) {
+    hit = 0;
+    for (i = 0; i < num_kinds; i++) {
+      if (r.tok.kind == kinds[i]) {
+        hit = 1;
+        break;
+      }
+    }
+    if (!hit)
+      return n;
+    n++;
+    if (n > 32)
+      return n;
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, source);
+  }
+}
+
 void parser_asm_stretch_skip_balanced_brackets_into_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source) {
   int32_t depth;
@@ -637,6 +666,51 @@ static int32_t c_ref_primary_head_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_mul_binop_audit_c. */
+static int32_t c_ref_expr_mul_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  int32_t n;
+  n = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (r.tok.kind == (int32_t)TOKEN_STAR || r.tok.kind == (int32_t)TOKEN_SLASH
+         || r.tok.kind == (int32_t)TOKEN_PERCENT) {
+    n++;
+    if (n > 32)
+      return n;
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  }
+  return n;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_addsub_binop_audit_c. */
+static int32_t c_ref_expr_addsub_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  int32_t n;
+  n = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (r.tok.kind == (int32_t)TOKEN_PLUS || r.tok.kind == (int32_t)TOKEN_MINUS) {
+    n++;
+    if (n > 32)
+      return n;
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  }
+  return n;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_panic_kw_audit_c. */
 static int32_t c_ref_panic_kw_audit(void *lex_inout, void *source) {
 
@@ -650,6 +724,131 @@ static int32_t c_ref_panic_kw_audit(void *lex_inout, void *source) {
     return 0;
   lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.kind == (int32_t)TOKEN_LPAREN || r.tok.kind == (int32_t)TOKEN_SEMICOLON ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_shift_binop_audit_c. */
+static int32_t c_ref_expr_shift_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[2] = {(int32_t)TOKEN_LSHIFT, (int32_t)TOKEN_RSHIFT};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 2);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_rel_binop_audit_c. */
+static int32_t c_ref_expr_rel_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[4] = {(int32_t)TOKEN_LT, (int32_t)TOKEN_LE, (int32_t)TOKEN_GT, (int32_t)TOKEN_GE};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 4);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_eq_binop_audit_c. */
+static int32_t c_ref_expr_eq_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[2] = {(int32_t)TOKEN_EQ, (int32_t)TOKEN_NE};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 2);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_bitand_binop_audit_c. */
+static int32_t c_ref_expr_bitand_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[1] = {(int32_t)TOKEN_AMP};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_bitxor_binop_audit_c. */
+static int32_t c_ref_expr_bitxor_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[1] = {(int32_t)TOKEN_CARET};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_bitor_binop_audit_c. */
+static int32_t c_ref_expr_bitor_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[1] = {(int32_t)TOKEN_PIPE};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_logand_binop_audit_c. */
+static int32_t c_ref_expr_logand_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[1] = {(int32_t)TOKEN_AMPAMP};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_logor_binop_audit_c. */
+static int32_t c_ref_expr_logor_binop_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  static const int32_t kinds[1] = {(int32_t)TOKEN_PIPEPIPE};
+  return parser_asm_stretch_expr_binop_kinds_probe_c(lex, source, kinds, 1);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_unary_prefix_audit_c. */
+static int32_t c_ref_unary_prefix_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer_result r2;
+  int32_t depth;
+  depth = 0;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  while (r.tok.kind == (int32_t)TOKEN_AWAIT || r.tok.kind == (int32_t)TOKEN_RUN || r.tok.kind == (int32_t)TOKEN_SPAWN
+         || r.tok.kind == (int32_t)TOKEN_MINUS || r.tok.kind == (int32_t)TOKEN_BANG) {
+    depth++;
+    if (depth > 16)
+      return depth;
+    parser_asm_lex_from_result_val_into(&lex, r);
+    lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  }
+  if (r.tok.kind == (int32_t)TOKEN_AMP) {
+    lexer_next_into(&r2, r.next_lex, (struct parser_asm_slice_u8 *)source);
+    if (r2.tok.kind != (int32_t)TOKEN_AMP)
+      depth++;
+  }
+  return depth;
 
 }
 
@@ -927,6 +1126,71 @@ static int32_t c_ref_balanced_brackets_depth_probe(void *lex_inout, void *source
 
   lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.kind != (int32_t)TOKEN_RBRACKET ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_binop_lower_chain_audit_c. */
+static int32_t c_ref_expr_binop_lower_chain_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_expr_mul_binop_audit(&lex, source);
+  score += c_ref_expr_addsub_binop_audit(&lex, source);
+  score += c_ref_expr_shift_binop_audit(&lex, source);
+  return score > 0 ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_binop_upper_chain_audit_c. */
+static int32_t c_ref_expr_binop_upper_chain_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_expr_rel_binop_audit(&lex, source);
+  score += c_ref_expr_eq_binop_audit(&lex, source);
+  score += c_ref_expr_bitand_binop_audit(&lex, source);
+  score += c_ref_expr_bitxor_binop_audit(&lex, source);
+  score += c_ref_expr_bitor_binop_audit(&lex, source);
+  return score > 0 ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_binop_mid_chain_audit_c. */
+static int32_t c_ref_expr_binop_mid_chain_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_expr_logand_binop_audit(&lex, source);
+  score += c_ref_expr_logor_binop_audit(&lex, source);
+  return score > 0 ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_expr_binop_full_chain_audit_c. */
+static int32_t c_ref_expr_binop_full_chain_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_expr_binop_lower_chain_audit(&lex, source);
+  score += c_ref_expr_binop_upper_chain_audit(&lex, source);
+  score += c_ref_expr_binop_mid_chain_audit(&lex, source);
+  return score > 0 ? 1 : 0;
 
 }
 

@@ -67,6 +67,7 @@ int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
 
 
 SUITE_HELPER_SIGS = [
+    "static int32_t parser_asm_stretch_expr_binop_kinds_probe_c(",
     "void parser_asm_stretch_skip_balanced_brackets_into_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_type_suffix_c(",
     "struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(",

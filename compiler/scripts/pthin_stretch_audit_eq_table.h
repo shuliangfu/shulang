@@ -15,6 +15,20 @@ extern int32_t parser_asm_stretch_diag_skip_let_const_type_audit_c(void *lex_ino
 extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_else_stmt_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_enum_header_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_addsub_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_full_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_mid_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_binop_upper_chain_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitand_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitor_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_eq_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_logand_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_logor_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_mul_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_rel_binop_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_expr_shift_binop_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_extern_return_type_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_fn_param_list_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
@@ -44,6 +58,7 @@ extern int32_t parser_asm_stretch_trait_method_paren_audit_c(void *lex_inout, vo
 extern int32_t parser_asm_stretch_trait_method_return_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_try_skip_allow_deep_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_try_skip_allow_paren_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_unary_prefix_audit_c(void *lex_inout, void *source);
 
 static int32_t x_assign_op_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_assign_op_audit_c(l, s); }
 static int32_t r_assign_op_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_assign_op_audit(l, s); }
@@ -76,6 +91,34 @@ static int32_t x_else_stmt_audit(void *l, void *s, int32_t f) { (void)f; return 
 static int32_t r_else_stmt_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_else_stmt_audit(l, s); }
 static int32_t x_enum_header_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_enum_header_audit_c(l, s); }
 static int32_t r_enum_header_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_enum_header_audit(l, s); }
+static int32_t x_expr_addsub_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_addsub_binop_audit_c(l, s); }
+static int32_t r_expr_addsub_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_addsub_binop_audit(l, s); }
+static int32_t x_expr_binop_full_chain_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_binop_full_chain_audit_c(l, s); }
+static int32_t r_expr_binop_full_chain_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_binop_full_chain_audit(l, s); }
+static int32_t x_expr_binop_lower_chain_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_binop_lower_chain_audit_c(l, s); }
+static int32_t r_expr_binop_lower_chain_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_binop_lower_chain_audit(l, s); }
+static int32_t x_expr_binop_mid_chain_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_binop_mid_chain_audit_c(l, s); }
+static int32_t r_expr_binop_mid_chain_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_binop_mid_chain_audit(l, s); }
+static int32_t x_expr_binop_upper_chain_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_binop_upper_chain_audit_c(l, s); }
+static int32_t r_expr_binop_upper_chain_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_binop_upper_chain_audit(l, s); }
+static int32_t x_expr_bitand_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_bitand_binop_audit_c(l, s); }
+static int32_t r_expr_bitand_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_bitand_binop_audit(l, s); }
+static int32_t x_expr_bitor_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_bitor_binop_audit_c(l, s); }
+static int32_t r_expr_bitor_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_bitor_binop_audit(l, s); }
+static int32_t x_expr_bitxor_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_bitxor_binop_audit_c(l, s); }
+static int32_t r_expr_bitxor_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_bitxor_binop_audit(l, s); }
+static int32_t x_expr_eq_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_eq_binop_audit_c(l, s); }
+static int32_t r_expr_eq_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_eq_binop_audit(l, s); }
+static int32_t x_expr_logand_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_logand_binop_audit_c(l, s); }
+static int32_t r_expr_logand_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_logand_binop_audit(l, s); }
+static int32_t x_expr_logor_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_logor_binop_audit_c(l, s); }
+static int32_t r_expr_logor_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_logor_binop_audit(l, s); }
+static int32_t x_expr_mul_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_mul_binop_audit_c(l, s); }
+static int32_t r_expr_mul_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_mul_binop_audit(l, s); }
+static int32_t x_expr_rel_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_rel_binop_audit_c(l, s); }
+static int32_t r_expr_rel_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_rel_binop_audit(l, s); }
+static int32_t x_expr_shift_binop_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_expr_shift_binop_audit_c(l, s); }
+static int32_t r_expr_shift_binop_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_expr_shift_binop_audit(l, s); }
 static int32_t x_extern_return_type_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_extern_return_type_audit_c(l, s); }
 static int32_t r_extern_return_type_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_extern_return_type_audit(l, s); }
 static int32_t x_fn_param_list_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_fn_param_list_audit_c(l, s); }
@@ -133,6 +176,8 @@ static int32_t x_try_skip_allow_deep_audit(void *l, void *s, int32_t f) { (void)
 static int32_t r_try_skip_allow_deep_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_try_skip_allow_deep_audit(l, s); }
 static int32_t x_try_skip_allow_paren_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_try_skip_allow_paren_audit_c(l, s); }
 static int32_t r_try_skip_allow_paren_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_try_skip_allow_paren_audit(l, s); }
+static int32_t x_unary_prefix_audit(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_unary_prefix_audit_c(l, s); }
+static int32_t r_unary_prefix_audit(void *l, void *s, int32_t f) { (void)f; return c_ref_unary_prefix_audit(l, s); }
 
 static const audit_case k_cases[] = {
     {"assign_op_audit", r_assign_op_audit, x_assign_op_audit, 0, 0},
@@ -152,6 +197,20 @@ static const audit_case k_cases[] = {
     {"else_if_chain_audit", r_else_if_chain_audit, x_else_if_chain_audit, 0, 0},
     {"else_stmt_audit", r_else_stmt_audit, x_else_stmt_audit, 0, 0},
     {"enum_header_audit", r_enum_header_audit, x_enum_header_audit, 0, 0},
+    {"expr_addsub_binop_audit", r_expr_addsub_binop_audit, x_expr_addsub_binop_audit, 0, 0},
+    {"expr_binop_full_chain_audit", r_expr_binop_full_chain_audit, x_expr_binop_full_chain_audit, 0, 0},
+    {"expr_binop_lower_chain_audit", r_expr_binop_lower_chain_audit, x_expr_binop_lower_chain_audit, 0, 0},
+    {"expr_binop_mid_chain_audit", r_expr_binop_mid_chain_audit, x_expr_binop_mid_chain_audit, 0, 0},
+    {"expr_binop_upper_chain_audit", r_expr_binop_upper_chain_audit, x_expr_binop_upper_chain_audit, 0, 0},
+    {"expr_bitand_binop_audit", r_expr_bitand_binop_audit, x_expr_bitand_binop_audit, 0, 0},
+    {"expr_bitor_binop_audit", r_expr_bitor_binop_audit, x_expr_bitor_binop_audit, 0, 0},
+    {"expr_bitxor_binop_audit", r_expr_bitxor_binop_audit, x_expr_bitxor_binop_audit, 0, 0},
+    {"expr_eq_binop_audit", r_expr_eq_binop_audit, x_expr_eq_binop_audit, 0, 0},
+    {"expr_logand_binop_audit", r_expr_logand_binop_audit, x_expr_logand_binop_audit, 0, 0},
+    {"expr_logor_binop_audit", r_expr_logor_binop_audit, x_expr_logor_binop_audit, 0, 0},
+    {"expr_mul_binop_audit", r_expr_mul_binop_audit, x_expr_mul_binop_audit, 0, 0},
+    {"expr_rel_binop_audit", r_expr_rel_binop_audit, x_expr_rel_binop_audit, 0, 0},
+    {"expr_shift_binop_audit", r_expr_shift_binop_audit, x_expr_shift_binop_audit, 0, 0},
     {"extern_return_type_audit", r_extern_return_type_audit, x_extern_return_type_audit, 0, 0},
     {"fn_param_list_audit", r_fn_param_list_audit, x_fn_param_list_audit, 0, 1},
     {"fn_sig_audit", r_fn_sig_audit, x_fn_sig_audit, 0, 0},
@@ -182,4 +241,5 @@ static const audit_case k_cases[] = {
     {"trait_method_return_audit", r_trait_method_return_audit, x_trait_method_return_audit, 0, 0},
     {"try_skip_allow_deep_audit", r_try_skip_allow_deep_audit, x_try_skip_allow_deep_audit, 0, 0},
     {"try_skip_allow_paren_audit", r_try_skip_allow_paren_audit, x_try_skip_allow_paren_audit, 0, 0},
+    {"unary_prefix_audit", r_unary_prefix_audit, x_unary_prefix_audit, 0, 0},
 };
