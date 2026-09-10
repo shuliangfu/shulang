@@ -222,6 +222,7 @@ tmp/
 temp/
 # prove_x_o.sh 诊断工件（L1/L2 验证产物，不提交）
 tests/probes/prove_x_o/
+compiler/tests/probes/pthin_stretch_audit/
 *.tmp
 *.temp
 # 根目录测试编译 scratch 二进制/输出
