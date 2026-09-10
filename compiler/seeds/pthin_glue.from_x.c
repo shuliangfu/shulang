@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Cap residual 9.5.3: glue_tail_slice.inc stderr debug prints via Cap IO
+ * write (xlang_io_write) — the main TU got this include when the Cap change
+ * landed; this hybrid seed TU was missed, so its cc failed and the g05 hybrid
+ * lane silently fell back to the full seed. Same include, same authority. */
+#include <xlang_io_cap.h>
 
 #include "parser_asm_stretch_audit_gate.h"
 #include "token.h"

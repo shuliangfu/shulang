@@ -10,6 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Cap residual 9.5.3: skip_tl_slice.inc stderr debug via xlang_io_write. */
+#include <xlang_io_cap.h>
 
 #include "parser_asm_stretch_audit_gate.h"
 #include "token.h"
@@ -184,6 +186,167 @@ extern void pipeline_onefunc_param_name_copy32(uint8_t *pool, int32_t i, uint8_t
 extern int32_t pipeline_onefunc_param_name_len(uint8_t *pool, int32_t i);
 extern int32_t pipeline_onefunc_param_type_ref(uint8_t *pool, int32_t i);
 extern void pipeline_onefunc_set_param_type_ref(uint8_t *out, int32_t pidx, int32_t ty);
+
+/* wave473 onefunc arena path prerequisites: skip_tl_slice.inc's tail (the
+ * parse-one-function + fill-block-from-res subsystem) grew these struct /
+ * enum / extern dependencies while the main TU picked them up from earlier
+ * slices (library/type_ref/block_from_res + TU body). This hybrid TU starved
+ * silently and the g05 P12 lane fell back to the full seed. Mirrors must stay
+ * field-for-field identical to their authorities (same commit on any layout
+ * change): ast_Block ≡ library_slice.inc:14, ast_Expr ≡ thin_c.from_x.c:4049,
+ * onefunc_result ≡ thin_c.from_x.c:147, TypeKind enum ≡ type_ref_slice.inc:64,
+ * arena/fill externs ≡ block_from_res_slice.inc:10 / library_slice.inc:55. */
+struct ast_Block {
+  int32_t const_base;
+  int32_t num_consts;
+  int32_t let_base;
+  int32_t num_lets;
+  int32_t num_early_lets;
+  int32_t loop_base;
+  int32_t num_loops;
+  int32_t for_loop_base;
+  int32_t num_for_loops;
+  int32_t if_base;
+  int32_t num_if_stmts;
+  int32_t region_base;
+  int32_t num_regions;
+  int32_t defer_base;
+  int32_t num_defers;
+  int32_t labeled_base;
+  int32_t num_labeled_stmts;
+  int32_t expr_stmt_base;
+  int32_t num_expr_stmts;
+  int32_t final_expr_ref;
+  int32_t stmt_order_base;
+  int32_t num_stmt_order;
+  int32_t parent_block_ref;
+};
+struct ast_Expr {
+  int32_t kind;
+  int32_t resolved_type_ref;
+  int32_t line;
+  int32_t col;
+  int64_t int_val;
+  double float_val;
+  uint8_t var_name[128];
+  int32_t var_name_len;
+  int32_t binop_left_ref;
+  int32_t binop_right_ref;
+  int32_t unary_operand_ref;
+  int32_t if_cond_ref;
+  int32_t if_then_ref;
+  int32_t if_else_ref;
+  int32_t block_ref;
+  int32_t match_matched_ref;
+  int32_t match_arm_base;
+  int32_t match_num_arms;
+  int32_t field_access_base_ref;
+  uint8_t field_access_field_name[128];
+  int32_t field_access_field_len;
+  int32_t field_access_is_enum_variant;
+  int32_t field_access_offset;
+  int32_t field_access_soa_stride;
+  int32_t index_base_ref;
+  int32_t index_index_ref;
+  int32_t index_base_is_slice;
+  int32_t call_callee_ref;
+  int32_t call_arg_base;
+  int32_t call_num_args;
+  int32_t call_num_type_args;
+  int32_t method_call_base_ref;
+  uint8_t method_call_name[128];
+  int32_t method_call_name_len;
+  int32_t method_call_arg_base;
+  int32_t method_call_num_args;
+  int32_t const_folded_val;
+  int32_t const_folded_valid;
+  int32_t index_proven_in_bounds;
+  uint8_t struct_lit_struct_name[128];
+  int32_t struct_lit_struct_name_len;
+  int32_t struct_lit_field_base;
+  int32_t struct_lit_num_fields;
+  int32_t array_lit_elem_base;
+  int32_t array_lit_num_elems;
+  int32_t float_bits_lo;
+  int32_t float_bits_hi;
+  int32_t enum_variant_tag;
+  int32_t as_operand_ref;
+  int32_t as_target_type_ref;
+  int32_t call_resolved_func_index;
+  int32_t call_resolved_dep_index;
+};
+struct parser_asm_onefunc_result {
+  int32_t ok;
+  struct parser_asm_lexer next_lex;
+  uint8_t name[128];
+  int32_t name_len;
+  int32_t num_params;
+  int32_t num_generic_params;
+  int32_t num_consts;
+  int32_t num_lets;
+  int32_t has_if_expr;
+  int32_t if_cond_true;
+  int32_t if_then_val;
+  int32_t if_else_val;
+  int32_t if_cond_expr_ref;
+  int32_t has_mul;
+  int32_t mul_right_val;
+  int32_t has_binop;
+  int32_t binop_right_val;
+  int32_t binop_left_param_idx;
+  int32_t binop_right_param_idx;
+  int32_t has_unary_neg;
+  int32_t return_val;
+  int32_t has_call_expr;
+  uint8_t call_callee_name[128];
+  int32_t call_callee_len;
+  uint8_t return_var_name[128];
+  int32_t return_var_name_len;
+  int32_t return_expr_ref;
+  int32_t has_final_expr;
+  int32_t has_explicit_return_kw;
+  int32_t call_num_args;
+  int32_t num_loops;
+  int32_t num_for_loops;
+  int32_t num_if_stmts;
+  int32_t num_src_stmt_order;
+  int32_t num_src_body_expr_stmts;
+  int32_t func_return_type_ref;
+};
+enum {
+  PARSER_ASM_TYPE_I32 = 0,
+  PARSER_ASM_TYPE_BOOL = 1,
+  PARSER_ASM_TYPE_U8 = 2,
+  PARSER_ASM_TYPE_U32 = 3,
+  PARSER_ASM_TYPE_U64 = 4,
+  PARSER_ASM_TYPE_I64 = 5,
+  PARSER_ASM_TYPE_USIZE = 6,
+  PARSER_ASM_TYPE_ISIZE = 7,
+  PARSER_ASM_TYPE_NAMED = 8,
+  PARSER_ASM_TYPE_PTR = 9,
+  PARSER_ASM_TYPE_ARRAY = 10,
+  PARSER_ASM_TYPE_SLICE = 11,
+  PARSER_ASM_TYPE_LINEAR = 12,
+  PARSER_ASM_TYPE_VECTOR = 13,
+  PARSER_ASM_TYPE_F32 = 14,
+  PARSER_ASM_TYPE_F64 = 15,
+  PARSER_ASM_TYPE_VOID = 16,
+  PARSER_ASM_TYPE_DYN = 17,
+  /* 10.3.1 TYPE_FN — G.7 ≡ type_ref_slice.inc / ast.x. */
+  PARSER_ASM_TYPE_FN = 18
+};
+extern int32_t ast_ast_arena_block_alloc(void *arena);
+extern struct ast_Block ast_ast_arena_block_get(void *arena, int32_t ref);
+extern void ast_ast_arena_block_set(void *arena, int32_t ref, struct ast_Block b);
+extern int32_t ast_ast_arena_expr_alloc(void *arena);
+extern struct ast_Expr ast_ast_arena_expr_get(void *arena, int32_t ref);
+extern void ast_ast_arena_expr_set(void *arena, int32_t ref, struct ast_Expr e);
+extern int32_t parser_asm_fill_block_const_let_from_res_c(void *arena, int32_t block_ref,
+                                                          struct parser_asm_onefunc_result *res,
+                                                          int32_t type_ref);
+/* lex_skip family (P1 lane provides the definition). */
+void parser_asm_skip_generic_angle_list_into_slice_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
+                                                     struct parser_asm_slice_u8 *source);
 
 #include "parser_asm_skip_tl_slice.inc"
 

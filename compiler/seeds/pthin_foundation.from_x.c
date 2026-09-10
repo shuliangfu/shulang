@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* Cap residual 9.5.3: foundation_slice.inc expr-watch debug via xlang_io_write. */
+#include <xlang_io_cap.h>
 
 #include "token.h"
 
