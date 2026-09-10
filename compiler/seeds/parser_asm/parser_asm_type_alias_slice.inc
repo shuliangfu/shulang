@@ -22,8 +22,7 @@ extern int32_t pipeline_module_type_alias_alloc(void *module);
 extern void pipeline_module_type_alias_set(void *module, int32_t idx, uint8_t *name, int32_t name_len,
                                            int32_t target_type_ref);
 extern int32_t parser_asm_stretch_function_name_audit_c(const uint8_t *name, int32_t name_len);
-extern int32_t parser_asm_stretch_type_ref_deep_audit_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_type_ref_deep_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_parse_type_ref_for_arena_into_slice_c(void *arena, struct parser_asm_lexer lex,
                                                                 struct parser_asm_slice_u8 *source,
                                                                 struct parser_asm_lexer *out_lex);
@@ -68,7 +67,7 @@ void parser_asm_parse_one_type_alias_into_slice_c(void *arena, void *module, str
   if (r.tok.kind != (int32_t)TOKEN_ASSIGN)
     return;
   parser_lex_from_lexer_result_ptr_into(&lex, &r);
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(&lex, source));
   target_ref = parser_asm_parse_type_ref_for_arena_into_slice_c(arena, lex, source, &lex);
   if (target_ref == 0)
     return;

@@ -70,7 +70,7 @@ int32_t parser_asm_diag_fail_at_token_kind_slice_c(struct parser_asm_slice_u8 *s
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_LPAREN)
     return r.tok.kind;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_param_sig_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_param_sig_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_deep_audit_c(lex, source));
   parser_asm_lex_from_result_val_into(&lex, r);
   lexer_next_into(&r, lex, source);

@@ -76,8 +76,7 @@ extern int32_t parser_asm_parse_one_function_library_scan_slice_c(
     struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
     struct parser_asm_library_parse_scan_result *result);
 extern int32_t parser_asm_struct_layout_name_exists_arr_c(void *module, uint8_t *nm, int32_t nlen);
-extern int32_t parser_asm_stretch_library_fn_shape_audit_c(struct parser_asm_lexer lex,
-                                                           struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_library_fn_shape_audit_c(void *lex_inout, void *source);
 
 /** 与 parser.x ast.expr_init_match_enum 一致：清零 match 占位字段。 */
 static void parser_asm_lib_expr_init_match_c(struct ast_Expr *e) {
@@ -126,7 +125,7 @@ struct parser_asm_library_parse_result parser_asm_parse_one_function_library_sli
   fail = parser_asm_library_fail_c(lex);
   if (!arena || !module || !source)
     return fail;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(&lex, source));
   memset(&scan, 0, sizeof(scan));
   if (parser_asm_parse_one_function_library_scan_slice_c(lex, source, &scan) == 0) {
     fail.next_lex = scan.next_lex;

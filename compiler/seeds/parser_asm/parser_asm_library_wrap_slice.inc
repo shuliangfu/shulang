@@ -9,7 +9,7 @@ void parser_asm_parse_one_function_library_into_slice_c(struct parser_asm_librar
                                                         struct parser_asm_slice_u8 *source) {
   if (!out)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_mega_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_ultra_mega_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_super_mega_full_deep_audit_c(lex, source));
@@ -769,8 +769,8 @@ struct parser_asm_library_parse_result parser_asm_parse_one_function_library_buf
   struct parser_asm_slice_u8 source;
   if (!data)
     return (struct parser_asm_library_parse_result){0};
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_buf_audit_c(lex, data, len));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_buf_audit_c(&lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_full_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_full_deep_buf_audit_c(lex, data, len));
@@ -1551,7 +1551,7 @@ int32_t parser_asm_parse_one_function_library_scan_slice_c(struct parser_asm_lex
   result->ok = 0;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_scan_deep_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_fn_shape_audit_c(&lex, source));
   memset(&r, 0, sizeof(r));
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_FUNCTION) {
@@ -1630,7 +1630,7 @@ int32_t parser_asm_parse_one_function_library_scan_slice_c(struct parser_asm_lex
     return 0;
   }
   parser_asm_lex_from_lr_next_c(&lex, &r);
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_return_type_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_library_return_type_audit_c(&lex, source));
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_COLON) {
     result->next_lex = lex;

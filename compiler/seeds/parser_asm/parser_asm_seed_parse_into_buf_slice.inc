@@ -47,7 +47,7 @@ extern int32_t parser_parse_peek_function_name_buf_glue(struct parser_asm_lexer 
 extern int32_t parser_diag_fail_at_token_kind_buf_glue(uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_type_ref_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
                                                                       int32_t len);
-extern int32_t parser_asm_stretch_type_ref_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+extern int32_t parser_asm_stretch_type_ref_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_type_ref_bracket_composite_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
                                                                        int32_t len);
 extern int32_t parser_asm_stretch_parse_into_buf_loop_toplevel_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
@@ -4071,7 +4071,7 @@ struct parser_asm_seed_parse_into_result parser_asm_seed_parse_into_buf_c(void *
                                                                                    r.tok.kind == (int32_t)TOKEN_CONST ? 1 : 0));
       PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_toplevel_totversal_allversal_panversal_omniversal_hyperversal_metaversal_multiversal_intergalactic_galactic_celestial_divine_imperial_sovereign_omnipotent_universal_cosmic_eternal_infinite_transcendent_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apexversal_maxversal_wholeversal_completeversal_fullversal_everyversal_totversal_allversal_panversal_omniversal_hyperversal_metaversal_multiversal_intergalactic_galactic_celestial_divine_imperial_sovereign_omnipotent_universal_cosmic_eternal_infinite_transcendent_absolute_ultimate_supreme_crown_pinnacle_zenith_peak_summit_apex_max_ultra_hyper_mega_full_deep_buf_audit_c(r.next_lex, data, len,
                                                                                    r.tok.kind == (int32_t)TOKEN_CONST ? 1 : 0));
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_buf_audit_c(r.next_lex, data, len));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_buf_audit_c(&r.next_lex, data, len));
       PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_full_deep_buf_audit_c(r.next_lex, data, len));
       PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_mega_full_deep_buf_audit_c(r.next_lex, data, len));
       PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_bracket_composite_buf_audit_c(r.next_lex, data, len));

@@ -91,8 +91,7 @@ extern int32_t ast_ast_arena_type_alloc(void *arena);
 extern struct ast_Type ast_arena_type_get(void *arena, int32_t ref);
 extern void ast_arena_type_set(void *arena, int32_t ref, struct ast_Type t);
 extern int32_t pipeline_type_ensure_by_kind_ord(void *arena, int32_t kind_ord);
-extern int32_t parser_asm_stretch_type_ref_deep_audit_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_type_ref_deep_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_type_ref_mega_full_deep_audit_c(struct parser_asm_lexer lex,
                                                                   struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_vector_type_ident_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
@@ -610,7 +609,7 @@ static int32_t parser_asm_parse_type_ref_impl_c(void *arena, struct parser_asm_l
   int32_t qn_len_tr;
   if (!source || !out_lex)
     return 0;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_mega_full_deep_audit_c(lex, source));
   lexer_next_into(&r, lex, source);
   /*

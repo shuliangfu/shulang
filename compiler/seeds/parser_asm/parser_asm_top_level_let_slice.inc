@@ -34,8 +34,7 @@ extern int32_t asm_module_top_level_let_name_exists(void *module, uint8_t *name,
 extern int32_t parser_asm_stretch_top_level_let_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                         int32_t is_const);
 extern int32_t parser_asm_stretch_function_name_audit_c(const uint8_t *name, int32_t name_len);
-extern int32_t parser_asm_stretch_type_ref_deep_audit_c(struct parser_asm_lexer lex,
-                                                        struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_type_ref_deep_audit_c(void *lex_inout, void *source);
 /** 与 function/struct 字段共用：支持 u8[N]、*T、slice 等完整类型语法。 */
 extern int32_t parser_asm_parse_type_ref_for_arena_into_slice_c(void *arena, struct parser_asm_lexer lex,
                                                                 struct parser_asm_slice_u8 *source,
@@ -108,7 +107,7 @@ void parser_asm_parse_one_top_level_let_into_slice_c(void *arena, void *module, 
   type_ref = 0;
   if (r.tok.kind == (int32_t)TOKEN_COLON) {
     parser_lex_from_lexer_result_ptr_into(&lex, &r);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_type_ref_deep_audit_c(&lex, source));
     type_ref = parser_asm_parse_type_ref_for_arena_into_slice_c(arena, lex, source, &lex);
     if (type_ref == 0)
       return;

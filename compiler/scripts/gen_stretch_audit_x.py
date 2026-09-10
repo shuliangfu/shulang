@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v1 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.5 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -122,12 +122,32 @@ def translate_call(callee, arg, flag=None, buf=False):
     """A sub-audit call on the caller's lexer → .x call expr (checks migrated)."""
     if callee not in MIGRATED_EXPORTS_CACHE:
         raise Refuse(f"sub-call to unmigrated {callee}")
-    if arg.lstrip("&") not in ("lex", "lex_at_if") and not arg.lstrip("&").endswith("_lex") and arg.lstrip("&") not in ("cur", "body_lex", "arms_lex", "after", "sel_lex"):
+    an = arg.lstrip("&")
+    if (an not in ("lex", "lex_at_if", "cur", "body_lex", "arms_lex", "after",
+                   "sel_lex", "lex_cur", "param_lex")
+            and not an.endswith("_lex")):
         raise Refuse(f"sub-call on non-cursor var {arg}")
     if buf:
         return f"{callee}(lex, data, len)", set()
     tail = f", {flag}" if flag is not None else ""
     return f"__INOUT__{callee}(lex, source{tail})", set()
+
+
+def strip_inout(x2):
+    return x2[len("__INOUT__"):] if x2.startswith("__INOUT__") else x2
+
+
+def restore_after_call_lines(call_expr):
+    """Call at the current in-place cursor, then restore the by-value trio.
+    Callee snapshots on entry so it sees the advanced cursor; restore after
+    the call puts the caller's lexer back (by-value net semantics)."""
+    return [
+        f"      rc = {call_expr};",
+        "      parser_asm_lex_set_pos_c(lex, pos0);",
+        "      parser_asm_lex_set_line_c(lex, line0);",
+        "      parser_asm_lex_set_col_c(lex, col0);",
+        "      return rc;",
+    ]
 
 
 def translate_loop_body(block, cur_results):
@@ -375,13 +395,24 @@ def translate(name, body, tokvals):
                 si += 1
                 continue
             raise Refuse(f"step from non-cursor var {srcvar}")
-        # v3.1: single-line if (COND) return EXPR;
+        # v4.5: helper-advanced cursor moved? score += N (joined single-line)
+        m = re.match(r"if \((\w+)\.pos != (r\w*)\.next_lex\.pos\) (\w+) \+= (\d+);$", st)
+        if m and m.group(2) in cur_results:
+            emit("if (parser_asm_lex_pos_c(lex) != adv0) {")
+            emit(f"  {m.group(3)} = {m.group(3)} + {m.group(4)};")
+            emit("}")
+            int_vars.add("adv0_us")
+            BLOCK_HOIST_USED.add("adv0")
+            si += 1
+            continue
         m = re.match(r"if \((.+)\) return (.+);$", st)
         if m:
             hoist2 = []
             cond_d = desugar_increments(m.group(1), lambda l: hoist2.append(l))
+            cond_d, _ = hoist_byte_chain(cond_d, lambda l: hoist2.append(l))
             for hl in hoist2:
-                out.append(pad + hl)
+                emit(hl)
+            int_vars.update({"data2_us", "ts2_us", "sln2_us", "bhit_us"})
             cond_x, ntok = translate_cond(cond_d, cur_results)
             used |= ntok
             rlines, ntok2 = translate_return(m.group(2), cur_results)
@@ -735,6 +766,22 @@ def translate(name, body, tokvals):
             x.extend(rlines)
             si += 1
             continue
+        # v4.5: (void)CALLEE(&r.next_lex, source) — consume current token then call
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\(&(r\w*)\.next_lex, source(?:, (\d+))?\);$", st)
+        if m and m.group(2) in cur_results:
+            emit("parser_asm_lex_step_kind_c(lex, source);")
+            x2, ntok = translate_call(m.group(1), "lex", m.group(3))
+            used |= ntok
+            emit(strip_inout(x2) + ";")
+            si += 1
+            continue
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        if m:
+            x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
+            used |= ntok
+            emit(strip_inout(x2) + ";")
+            si += 1
+            continue
         raise Refuse(f"unhandled statement: {st[:60]}")
     if BLOCK_HOIST_USED:
         int_vars.update({"data2_us", "ts2_us", "sln2_us", "bhit_us"})
@@ -750,6 +797,9 @@ def tok_of(name):
 BYTE_CHAIN_RE = re.compile(
     r"(?:!source->data \|\| )?(r\w*)\.token_start \+ (\d+) >= source->length"
     r"((?: \|\| source->data\[\1\.token_start(?: \+ \d+)?\] != \(uint8_t\)'\w')+)")
+BYTE_CHAIN_RE3 = re.compile(
+    r"((?:source->data\[r\w*\.token_start(?: \+ \d+)?\] != \(uint8_t\)'\w+'\s*\|\|\s*)+"
+    r"source->data\[r\w*\.token_start(?: \+ \d+)?\] != \(uint8_t\)'\w+')")
 BYTE_CHAIN_RE2 = re.compile(
     r"source->data && (r\w*)\.token_start \+ (\d+) < source->length"
     r"((?: && source->data\[\1\.token_start(?: \+ \d+)?\] == \(uint8_t\)'\w')+)")
@@ -760,45 +810,43 @@ PAIR_RE = re.compile(
 )
 
 def hoist_byte_chain(cond, emit):
-    """Rewrite the guarded byte-compare chain (either polarity) into a temp."""
-    m = BYTE_CHAIN_RE.search(cond)   # negative: bounds-fail || bytes !=
+    """Rewrite the guarded byte-compare chain (either polarity) into a temp.
+    Flat emission: no nested unsafe (the whole function body is already
+    inside one unsafe block; .x lexer rejects deep nesting)."""
     negate = True
+    m = BYTE_CHAIN_RE.search(cond)
     if not m:
-        m = BYTE_CHAIN_RE2.search(cond)  # positive: data && bounds && bytes ==
+        m3 = BYTE_CHAIN_RE3.search(cond)
+        if m3:
+            chain = m3.group(1)
+            ks = [int(k) if k else 0 for k in re.findall(r"token_start(?: \+ (\d+))?\]", chain)]
+            top_k = max(ks) if ks else 0
+            pairs = re.findall(
+                r"source->data\[\w+\.token_start(?: \+ (\d+))?\] != \(uint8_t\)'(\w)'", chain)
+            emit("data2 = parser_asm_lex_source_data_c(source);")
+            emit("sln2 = parser_asm_lex_source_length_c(source);")
+            emit("ts2 = parser_asm_lex_peek_token_start_c(lex, source);")
+            emit("bhit = 0;")
+            cmps = [f"data2[ts2 + {(int(k) if k else 0)}] == {ord(ch)}" for k, ch in pairs]
+            emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2 && " + " && ".join(cmps) + ") {")
+            emit("  bhit = 1;")
+            emit("}")
+            return cond[: m3.start()] + "bhit == 1" + cond[m3.end() :], set()
+        m = BYTE_CHAIN_RE2.search(cond)
         negate = False
     if not m:
         return cond, set()
     res, top_k, chain = m.group(1), int(m.group(2)), m.group(3)
-    if negate:
-        pairs = re.findall(
-            r"source->data\[\w+\.token_start(?: \+ (\d+))?\] != \(uint8_t\)'(\w)'", chain)
-        emit("data2 = parser_asm_lex_source_data_c(source);")
-        emit("sln2 = parser_asm_lex_source_length_c(source);")
-        emit("ts2 = parser_asm_lex_peek_token_start_c(lex, source);")
-        emit("bhit = 0;")
-        emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2) {")
-        emit("  unsafe {")
-        cmps = [f"data2[ts2 + {(int(k) if k else 0)}] == {ord(ch)}" for k, ch in pairs]
-        emit("    if (" + " && ".join(cmps) + ") {")
-        emit("      bhit = 1;")
-        emit("    }")
-        emit("  }")
-        emit("}")
-        return cond[: m.start()] + "bhit == 1" + cond[m.end() :], set()
-    # positive form
+    op = "!=" if negate else "=="
     pairs = re.findall(
-        r"source->data\[\w+\.token_start(?: \+ (\d+))?\] == \(uint8_t\)'(\w)'", chain)
+        r"source->data\[\w+\.token_start(?: \+ (\d+))?\] " + op + r" \(uint8_t\)'(\w)'", chain)
     emit("data2 = parser_asm_lex_source_data_c(source);")
     emit("sln2 = parser_asm_lex_source_length_c(source);")
     emit("ts2 = parser_asm_lex_peek_token_start_c(lex, source);")
     emit("bhit = 0;")
     cmps = [f"data2[ts2 + {(int(k) if k else 0)}] == {ord(ch)}" for k, ch in pairs]
-    emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2) {")
-    emit("  unsafe {")
-    emit("    if (" + " && ".join(cmps) + ") {")
-    emit("      bhit = 1;")
-    emit("    }")
-    emit("  }")
+    emit("if (data2 != 0 as *u8 && ts2 + " + str(top_k) + " < sln2 && " + " && ".join(cmps) + ") {")
+    emit("  bhit = 1;")
     emit("}")
     return cond[: m.start()] + "bhit == 1" + cond[m.end() :], set()
 
@@ -825,6 +873,10 @@ def translate_cond(cond, cur_results):
     # plain sub-audit call in condition → (CALLEE(lex, source) != 0)
     c = re.sub(r"(?<![!=\w])\(?parser_asm_stretch_(?!is_type_start)(\w+)_c\)?\((&?\w+), source\)(?!\s*[=!])",
                r"(parser_asm_stretch_\1_c(lex, source) != 0)", c)
+    # CALLEE(&lex, source) == 0 / != 0: drop C-address-of (the (?! [=!])
+    # lookahead above skips this form). .x has no '&' on pointer args.
+    c = re.sub(r"parser_asm_stretch_(\w+_c)\(&\w+, source\)",
+               r"parser_asm_stretch_\1(lex, source)", c)
     # alias position compares (helper-advanced checks)
     c = re.sub(r"(\w+)\.pos != lex\.pos", r"parser_asm_lex_pos_c(lex) != pos0", c)
     c = re.sub(r"(\w+)\.pos != (r\w*)\.next_lex\.pos", r"parser_asm_lex_pos_c(lex) != adv0", c)
@@ -842,9 +894,14 @@ def translate_cond(cond, cur_results):
     for res in cur_results | {"r", "r2"}:
         c = c.replace(f"{res}.tok.kind", "kind")
         c = c.replace(f"{res}.tok.ident_len", "idlen")
-    if ".tok." in c or ".next_lex" in c or "source->" in c:
-        # maybe references a non-current result var
+    if ".tok." in c or ".next_lex" in c:
         raise Refuse(f"cond on stale result: {cond[:50]}")
+    # bounds-only guard (no bytes): map directly
+    mb = re.fullmatch(r"!?source->data \|\| (r\w*)\.token_start \+ (\d+) >= source->length", c)
+    if mb:
+        return f"(parser_asm_lex_source_data_c(source) == 0 as *u8 || parser_asm_lex_peek_token_start_c(lex, source) + {mb.group(2)} >= parser_asm_lex_source_length_c(source))", set()
+    if "source->data[" in c or "source->length" in c:
+        raise Refuse(f"byte chain unhoisted: {cond[:50]}")
     for m in re.finditer(r"TOKEN_\w+", c):
         used.add(m.group(0))
     return c.strip(), used
@@ -877,12 +934,31 @@ def translate_return(expr, cur_results):
             ],
             used,
         )
-    m = re.match(r"(parser_asm_stretch_\w+_c)\(&(?:lex|lex_at_if|\w+_lex|cur|body_lex|param_lex), source\)$", e)
+    m = re.match(r"parser_asm_stretch_bind_name_validate_c\(source->data \+ (r\w*)\.token_start, (r\w*)\.tok\.ident_len\)$", e)
+    if m and m.group(1) in cur_results and m.group(2) in cur_results:
+        return (
+            [
+                "      idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);",
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                "      return parser_asm_stretch_bind_name_validate_c(idptr, idlen);",
+            ],
+            set(),
+        )
+    # v4.5: return CALLEE(&cursor, source) is a real call at the in-place
+    # cursor, NOT a pure-delegation (that would drop preceding guards — v4.4
+    # honesty). Emit call-then-restore; translate_call refuses unmigrated.
+    m = re.match(r"(parser_asm_stretch_\w+_c)\(&(?:lex|lex_at_if|\w+_lex|cur|body_lex|param_lex|lex_cur), source(?:, (\d+))?\)$", e)
     if m:
-        raise Delegation(m.group(1))
-    m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if), source(?:, (\d+))?\)$", e)
-    if m and m.group(2) is None:
-        raise Delegation(m.group(1))
+        x2, ntok = translate_call(m.group(1), "lex", m.group(2))
+        used |= ntok
+        return restore_after_call_lines(strip_inout(x2)), used
+    m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if|lex_cur|param_lex), source(?:, (\d+))?\)$", e)
+    if m:
+        x2, ntok = translate_call(m.group(1), "lex", m.group(2))
+        used |= ntok
+        return restore_after_call_lines(strip_inout(x2)), used
     m2 = re.match(r"(\w+) \+ (parser_asm_stretch_\w+_c)\((r\w*)\.next_lex, source(?:, (\d+))?\)$", e)
     if m2 and m2.group(3) in cur_results:
         x2, ntok = translate_call(m2.group(2), "lex", m2.group(4))
@@ -1193,6 +1269,40 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}}}")
             si += 1
             continue
+        # v4.5: if (after.pos != r.next_lex.pos) score += N;
+        m = re.match(r"if \((\w+)\.pos != (r\w*)\.next_lex\.pos\) (\w+) \+= (\d+);$", st)
+        if m:
+            out.append(f"{pad}if (parser_asm_lex_pos_c(lex) != adv0) {{")
+            out.append(f"{pad}  {m.group(3)} = {m.group(3)} + {m.group(4)};")
+            out.append(f"{pad}}}")
+            BLOCK_HOIST_USED.add("adv0")
+            si += 1
+            continue
+        m = re.match(r"if \((.+)\) return (.+);$", st)
+        if m:
+            hoist2 = []
+            cond_d = desugar_increments(m.group(1), lambda l: hoist2.append(l))
+            cond_d, _ = hoist_byte_chain(cond_d, lambda l: hoist2.append(l))
+            for hl in hoist2:
+                out.append(pad + hl)
+            cond_x, ntok = translate_cond(cond_d, cur_results)
+            used |= ntok
+            rlines, ntok2 = translate_return(m.group(2), cur_results)
+            used |= ntok2
+            out.append(f"{pad}if ({cond_x}) {{")
+            for l in rlines:
+                out.append(pad + "  " + l.strip())
+            out.append(f"{pad}}}")
+            si += 1
+            continue
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\(&(r\w*)\.next_lex, source(?:, (\d+))?\);$", st)
+        if m:
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            x2, ntok = translate_call(m.group(1), "lex", m.group(3))
+            used |= ntok
+            out.append(f"{pad}{strip_inout(x2)};")
+            si += 1
+            continue
         raise Refuse(f"stmt in if-block: {st[:50]}")
     return out, used
 
@@ -1248,7 +1358,7 @@ def gen_buf_function(name, body, tokvals, existing_consts):
     m = re.fullmatch(
         r"\s*struct parser_asm_slice_u8 sl;\s*if \(!data \|\| len <= 0\)\s*return 0;\s*"
         r"sl\.data = data;\s*sl\.length = \(size_t\)len;\s*"
-        r"return (parser_asm_stretch_\w+_c)\(&\w+, &sl\);\s*", txt)
+        r"return (parser_asm_stretch_\w+_c)\(&?\w+, &sl\);\s*", txt)
     if m:
         raise Delegation(m.group(1))
     # thick: strip the standard prologue then translate the remainder with
@@ -1321,6 +1431,7 @@ export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
 
 def emit_buf_thick_x(name, x_lines, int_vars=()):
     int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if not v.endswith("_us"))
+    int_lets = "  let rc: i32 = 0;\n" + int_lets
     if "adv0_us" in int_vars:
         int_lets = "  let adv0: usize = 0;\n" + int_lets
     if "bhit_us" in int_vars:
@@ -1364,7 +1475,7 @@ export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
 
 def emit_x(name, x_lines, docline, int_vars=()):
     int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if not v.endswith("_us"))
-    int_lets = "  let idptr: *u8 = 0 as *u8;\n" + int_lets
+    int_lets = "  let idptr: *u8 = 0 as *u8;\n  let rc: i32 = 0;\n" + int_lets
     if "adv0_us" in int_vars:
         int_lets = "  let adv0: usize = 0;\n" + int_lets
     if "bhit_us" in int_vars:
@@ -1418,38 +1529,62 @@ def main():
     migrated_exports = set(re.findall(r"export function (parser_asm_stretch_\w+_c)", xsrc))
     MIGRATED_EXPORTS_CACHE.clear()
     MIGRATED_EXPORTS_CACHE.update(migrated_exports)
-    for n in names:
-        if n not in funcs:
-            refused.append((n, "not found / non-byval signature"))
-            continue
-        is_buf = buf_sigs.get(n, False)
-        try:
-            if is_buf:
-                x_lines, used, missing, ivars, buftail = gen_buf_function(
-                    n, funcs[n], tokvals, existing)
-            else:
-                x_lines, used, missing, ivars = gen_x_function(n, funcs[n], tokvals, existing)
-                buftail = None
-            for t in missing:
-                existing.add(t)
-            all_missing.extend(missing)
-            gen.append((n, x_lines, ivars, buftail))
-            ok.append(n)
-        except Delegation as d:
-            # pure delegation only: the body must be a single return statement
-            # (plus decls/null-guard); anything else has logic the port drops
-            stmts = [l.strip() for l in join_logical(funcs[n])
-                     if l.strip() and not l.strip().startswith(("struct ", "int32_t ", "if (!"))
-                     and l.strip() != "return 0;" and not l.strip().startswith("/*")]
-            if len(stmts) != 1 or not stmts[0].startswith("return "):
-                refused.append((n, f"guarded delegation (body has {len(stmts)} stmts)"))
-            elif str(d) in migrated_exports:
-                deleg.append((n, str(d), buf_sigs.get(n, False)))
+    pending = list(names)
+    BUF_PROLOGUE = {"sl.data = data;", "sl.length = (size_t)len;"}
+    while pending:
+        still = []
+        progress = False
+        round_refused = []
+        for n in pending:
+            if n not in funcs:
+                refused.append((n, "not found / non-byval signature"))
+                continue
+            is_buf = buf_sigs.get(n, False)
+            try:
+                if is_buf:
+                    x_lines, used, missing, ivars, buftail = gen_buf_function(
+                        n, funcs[n], tokvals, existing)
+                else:
+                    x_lines, used, missing, ivars = gen_x_function(n, funcs[n], tokvals, existing)
+                    buftail = None
+                for t in missing:
+                    existing.add(t)
+                all_missing.extend(missing)
+                gen.append((n, x_lines, ivars, buftail))
                 ok.append(n)
-            else:
-                refused.append((n, f"delegation to unmigrated {d}"))
-        except Refuse as e:
-            refused.append((n, str(e)))
+                MIGRATED_EXPORTS_CACHE.add(n)
+                migrated_exports.add(n)
+                progress = True
+            except Delegation as d:
+                # pure delegation only: single return after decls/null-guard/
+                # buf-shim sl prologue. Anything else has logic the thin port
+                # would drop (v4.4 honesty — LPAREN-guarded diag_fn_param_sig).
+                stmts = [l.strip() for l in join_logical(funcs[n])
+                         if l.strip() and not l.strip().startswith(("struct ", "int32_t ", "if (!"))
+                         and l.strip() != "return 0;" and not l.strip().startswith("/*")
+                         and l.strip() not in BUF_PROLOGUE]
+                if len(stmts) != 1 or not stmts[0].startswith("return "):
+                    refused.append((n, f"guarded delegation (body has {len(stmts)} stmts)"))
+                elif str(d) in migrated_exports:
+                    deleg.append((n, str(d), buf_sigs.get(n, False)))
+                    ok.append(n)
+                    MIGRATED_EXPORTS_CACHE.add(n)
+                    migrated_exports.add(n)
+                    progress = True
+                else:
+                    still.append(n)
+                    round_refused.append((n, f"delegation to unmigrated {d}"))
+            except Refuse as e:
+                msg = str(e)
+                if "unmigrated" in msg:
+                    still.append(n)
+                    round_refused.append((n, msg))
+                else:
+                    refused.append((n, msg))
+        if not progress:
+            refused.extend(round_refused)
+            break
+        pending = still
 
     if not gen and not deleg:
         print("nothing generated")
@@ -1477,7 +1612,8 @@ def main():
 
     # 1b) pure-helper externs used by generated bodies
     used_helpers = sorted(
-        h for h in PURE_HELPERS if any(h in line for item in gen for line in item[1])
+        h for h in PURE_HELPERS
+        if h not in xsrc and any(h in line for item in gen for line in item[1])
     )
     if used_helpers:
         lines_x = xsrc.split("\n")
