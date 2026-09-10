@@ -157,7 +157,7 @@ void parser_asm_skip_balanced_parens_into_slice_c(struct parser_asm_lexer *out, 
   if (!out || !source)
     return;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_parens_depth_probe_c(&lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_full_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_full_deep_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_mega_full_deep_audit_c(lex, source));
   while (depth > 0) {
     lexer_next_into(&r, lex, source);
@@ -484,7 +484,7 @@ void parser_asm_skip_balanced_braces_into_slice_c(struct parser_asm_lexer *out, 
   if (!out || !source)
     return;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_braces_depth_probe_c(&lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_full_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_full_deep_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_balanced_delim_mega_full_deep_audit_c(lex, source));
   while (depth > 0) {
     lexer_next_into(&r, lex, source);

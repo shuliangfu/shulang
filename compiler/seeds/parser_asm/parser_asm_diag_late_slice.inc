@@ -56,7 +56,7 @@ int32_t parser_asm_diag_fail_at_token_kind_slice_c(struct parser_asm_slice_u8 *s
   if (r.tok.kind != (int32_t)TOKEN_FUNCTION)
     return r.tok.kind;
   parser_asm_lex_from_result_val_into(&lex, r);
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_header_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_header_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_mega_full_deep_audit_c(lex, source));
   parser_asm_lex_from_result_val_into(&lex, r);
@@ -76,7 +76,7 @@ int32_t parser_asm_diag_fail_at_token_kind_slice_c(struct parser_asm_slice_u8 *s
   lexer_next_into(&r, lex, source);
   if (r.tok.kind == (int32_t)TOKEN_RPAREN) {
     parser_asm_lex_from_result_val_into(&lex, r);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_return_type_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_return_type_audit_c(&lex, source));
     lexer_next_into(&r, lex, source);
   } else {
     while (r.tok.kind == (int32_t)TOKEN_IDENT) {
@@ -123,7 +123,7 @@ int32_t parser_asm_diag_fail_at_token_kind_slice_c(struct parser_asm_slice_u8 *s
     if (r.tok.kind != (int32_t)TOKEN_RPAREN)
       return r.tok.kind;
     parser_asm_lex_from_result_val_into(&lex, r);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_return_type_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_fn_return_type_audit_c(&lex, source));
     lexer_next_into(&r, lex, source);
   }
   if (r.tok.kind != (int32_t)TOKEN_COLON)

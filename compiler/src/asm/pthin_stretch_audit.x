@@ -45,6 +45,8 @@ export extern "C" function parser_asm_lex_peek_token_start_c(lex: *u8, source: *
 export extern "C" function parser_asm_lex_source_data_c(source: *u8): *u8;
 /** Read the source slice's length. */
 export extern "C" function parser_asm_lex_source_length_c(source: *u8): usize;
+/** Peek the next token's ident pointer (points into source bytes; IDENT only). */
+export extern "C" function parser_asm_lex_peek_ident_ptr_c(lex: *u8, source: *u8): *u8;
 
 /** Suite skip helpers via in-place adapters (C stays authority). */
 export extern "C" function parser_asm_lex_is_type_start_kind_c(kind: i32): i32;
@@ -52,6 +54,7 @@ export extern "C" function parser_asm_lex_skip_balanced_brackets_inplace_c(lex_i
 export extern "C" function parser_asm_lex_skip_type_suffix_inplace_c(lex_inout: *u8, source: *u8): void;
 export extern "C" function parser_asm_lex_skip_one_param_type_inplace_c(lex_inout: *u8, source: *u8): void;
 export extern "C" function parser_asm_is_compound_assign_token_c(kind: i32): i32;
+export extern "C" function parser_asm_stretch_bind_name_validate_c(name: *u8, name_len: i32): i32;
 
 // Lexer canonical TokenKind values (enum token_TokenKind indices; authority
 // include/token.h == seeds/lexer_gen.linux.x86_64.c, verified identical 133
@@ -98,6 +101,10 @@ const TOKEN_INT: i32 = 80;
 const TOKEN_QUESTION: i32 = 127;
 const TOKEN_RBRACE: i32 = 85;
 const TOKEN_TRAIT: i32 = 49;
+const TOKEN_AT: i32 = 129;
+const TOKEN_FALSE: i32 = 76;
+const TOKEN_FLOAT: i32 = 81;
+const TOKEN_TRUE: i32 = 75;
 
 /**
  * Audit an `if` statement header: exactly `if (` opens a valid header.
@@ -1548,6 +1555,486 @@ export function parser_asm_stretch_let_in_block_audit_c(lex: *u8, source: *u8): 
 export function parser_asm_stretch_if_expr_branch_audit_c(lex: *u8, source: *u8): i32 {
   unsafe {
     return parser_asm_stretch_if_header_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated audit port parser_asm_stretch_primary_head_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_primary_head_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_primary_head_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = 0;
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind == TOKEN_INT || kind == TOKEN_FLOAT) {
+      score = score + 1;
+    } else if (kind == TOKEN_TRUE || kind == TOKEN_FALSE) {
+      score = score + 1;
+    } else if (kind == TOKEN_IDENT) {
+      idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);
+      parser_asm_stretch_bind_name_validate_c(idptr, idlen);
+      score = score + 2;
+    } else if (kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET) {
+      score = score + 1;
+    } else if (kind == TOKEN_IF) {
+      parser_asm_stretch_if_header_audit_c(lex, source);
+      score = score + 3;
+    } else if (kind == TOKEN_MATCH) {
+      parser_asm_stretch_match_kw_audit_c(lex, source);
+      score = score + 3;
+    } else if (kind == TOKEN_PANIC) {
+      score = score + 2;
+    } else if (kind == TOKEN_AT) {
+      score = score + 2;
+    } else if (kind == TOKEN_BREAK) {
+      parser_asm_stretch_break_continue_audit_c(lex, source, 1);
+      score = score + 1;
+    } else if (kind == TOKEN_CONTINUE) {
+      parser_asm_stretch_break_continue_audit_c(lex, source, 0);
+      score = score + 1;
+    }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return score;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_diag_fn_header_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_diag_fn_header_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_diag_fn_header_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = parser_asm_stretch_function_header_audit_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind != TOKEN_FUNCTION) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return score;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind == TOKEN_IDENT && idlen > 0) {
+        idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);
+        parser_asm_stretch_bind_name_validate_c(idptr, idlen);
+    }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return score + 1;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_diag_fn_return_type_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_diag_fn_return_type_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_diag_fn_return_type_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_COLON) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind == TOKEN_STAR) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+    }
+    if (kind == TOKEN_LBRACKET) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+    }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if ((parser_asm_lex_is_type_start_kind_c(kind) != 0)) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_diag_skip_let_const_type_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_diag_skip_let_const_type_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_diag_skip_let_const_type_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_COLON) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind == TOKEN_STAR) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+    }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if ((parser_asm_lex_is_type_start_kind_c(kind) != 0)) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_skip_one_if_else_chain_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_skip_one_if_else_chain_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_skip_one_if_else_chain_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = parser_asm_stretch_else_if_chain_audit_c(lex, source);
+    score = score + parser_asm_stretch_else_stmt_audit_c(lex, source);
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if (score > 0) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_parse_cond_expr_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_parse_cond_expr_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_parse_cond_expr_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = parser_asm_stretch_cond_int_as_audit_c(lex, source);
+    score = score + parser_asm_stretch_paren_expr_head_audit_c(lex, source);
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if (score > 0) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_balanced_delim_full_deep_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_balanced_delim_full_deep_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_balanced_delim_full_deep_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = parser_asm_stretch_balanced_parens_depth_probe_c(lex, source);
+    score = score + parser_asm_stretch_balanced_braces_depth_probe_c(lex, source);
+    score = score + parser_asm_stretch_balanced_brackets_depth_probe_c(lex, source);
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if (score > 0) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_try_skip_allow_paren_audit_c forwards to parser_asm_stretch_paren_expr_head_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_try_skip_allow_paren_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_paren_expr_head_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_trait_method_paren_audit_c forwards to parser_asm_stretch_paren_expr_head_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_trait_method_paren_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_paren_expr_head_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated audit port parser_asm_stretch_try_skip_allow_deep_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_try_skip_allow_deep_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_try_skip_allow_deep_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let score: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    score = parser_asm_stretch_try_skip_allow_paren_audit_c(lex, source);
+    score = score + parser_asm_stretch_balanced_parens_depth_probe_c(lex, source);
+    score = score + parser_asm_stretch_balanced_braces_depth_probe_c(lex, source);
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      if (score > 0) {
+        return 1;
+      }
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_trait_method_return_audit_c forwards to parser_asm_stretch_diag_fn_return_type_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_trait_method_return_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_diag_fn_return_type_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_extern_return_type_audit_c forwards to parser_asm_stretch_diag_fn_return_type_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_extern_return_type_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_diag_fn_return_type_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_impl_fn_return_audit_c forwards to parser_asm_stretch_diag_fn_return_type_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_impl_fn_return_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_diag_fn_return_type_audit_c(lex, source);
+  }
+  return 0;
+}
+
+/**
+ * Generated delegation port: parser_asm_stretch_body_skip_let_const_type_audit_c forwards to parser_asm_stretch_diag_skip_let_const_type_audit_c.
+ * Pointer ABI + by-value net semantics (callee restores).
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_body_skip_let_const_type_audit_c(lex: *u8, source: *u8): i32 {
+  unsafe {
+    return parser_asm_stretch_diag_skip_let_const_type_audit_c(lex, source);
   }
   return 0;
 }

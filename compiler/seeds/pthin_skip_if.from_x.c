@@ -112,7 +112,7 @@ extern int32_t parser_asm_stretch_parse_cond_expr_deep_buf_audit_c(struct parser
 extern int32_t parser_asm_stretch_skip_one_if_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_skip_one_if_core_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_skip_one_if_core_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-extern int32_t parser_asm_stretch_skip_one_if_else_chain_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_skip_one_if_else_chain_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_skip_one_if_else_chain_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t pipeline_module_enum_alloc(void *module);
 extern uint8_t pipeline_module_enum_name_byte_at(void *module, int32_t idx, int32_t off);

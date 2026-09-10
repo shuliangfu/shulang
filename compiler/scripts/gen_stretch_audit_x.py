@@ -82,6 +82,59 @@ class Delegation(Exception):
 
 
 
+MIGRATED_EXPORTS_CACHE = set()
+
+
+def lines_strip(l):
+    return l.strip()
+
+
+def translate_call(callee, arg, flag=None):
+    """A sub-audit call on the caller's lexer → .x call expr (checks migrated)."""
+    if callee not in MIGRATED_EXPORTS_CACHE:
+        raise Refuse(f"sub-call to unmigrated {callee}")
+    if arg.lstrip("&") not in ("lex", "lex_at_if"):
+        raise Refuse(f"sub-call on non-cursor var {arg}")
+    tail = f", {flag}" if flag is not None else ""
+    return f"{callee}(lex, source{tail})", set()
+
+
+def translate_switch(groups):
+    """Case groups → if/else-if chain over `kind`."""
+    used = set()
+    out = []
+    for gi, (kinds, body) in enumerate(groups):
+        if not kinds and not body:
+            continue  # empty default
+        cond = " || ".join(f"kind == {k}" for k in kinds)
+        for k in kinds:
+            used.add(k)
+        head = f"if ({cond}) {{" if gi == 0 else f"}} else if ({cond}) {{"
+        out.append("    " + head)
+        for raw in body:
+            t = raw.strip()
+            m = re.match(r"(\w+) \+= (\d+);$", t)
+            if m:
+                out.append(f"      {m.group(1)} = {m.group(1)} + {m.group(2)};")
+                continue
+            m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", t)
+            if m:
+                x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
+                used |= ntok
+                out.append(f"      {x2};")
+                continue
+            m = re.match(r"\(void\)(parser_asm_stretch_bind_name_validate_c)\(source->data \+ "
+                         r"(r\w*)\.token_start, (r\w*)\.tok\.ident_len\);$", t)
+            if m:
+                out.append("      idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);")
+                out.append("      parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+                continue
+            raise Refuse(f"switch body stmt: {t[:50]}")
+    if out:
+        out.append("    }")
+    return out, used
+
+
 def translate(name, body, tokvals):
     """C statement list → .x statement list (inside unsafe). Linear model:
     cursor = caller's lex; first lexer_next_into from `lex` = peek; each
@@ -113,7 +166,6 @@ def translate(name, body, tokvals):
         m = re.match(r"int32_t (\w+);$", st)
         if m:
             int_vars.add(m.group(1))
-            x.append(f"  let {m.group(1)}: i32 = 0;")
             si += 1
             continue
         m = re.match(r"(\w+) = 0;$", st)
@@ -177,7 +229,7 @@ def translate(name, body, tokvals):
                         break
                     block.append(stmts[j])
                     j += 1
-            body_x, ntok2 = translate_block_returns(block, cur_results, tokvals)
+            body_x, ntok2 = translate_block(block, cur_results, indent=2)
             used |= ntok2
             emit(f"if ({cond_x}) {{")
             x.extend(body_x)
@@ -186,6 +238,76 @@ def translate(name, body, tokvals):
             continue
         if st.startswith("else"):
             raise Refuse("else branch")
+        # v2: score arithmetic from sub-audit calls or literals
+        m = re.match(r"(\w+) (\+=|=) (parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        if m and m.group(1) in int_vars:
+            var, op, callee, arg = m.group(1), m.group(2), m.group(3), m.group(4)
+            x2, ntok = translate_call(callee, arg, m.group(5))
+            used |= ntok
+            if op == "+=":
+                emit(f"{var} = {var} + {x2};")
+            else:
+                emit(f"{var} = {x2};")
+            si += 1
+            continue
+        m = re.match(r"(\w+) \+= (\d+);$", st)
+        if m and m.group(1) in int_vars:
+            emit(f"{m.group(1)} = {m.group(1)} + {m.group(2)};")
+            si += 1
+            continue
+        # v2: discarded sub-audit call
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        if m:
+            x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
+            used |= ntok
+            emit(f"{x2};")
+            si += 1
+            continue
+        # v2: bind_name_validate on the current ident
+        m = re.match(r"\(void\)(parser_asm_stretch_bind_name_validate_c)\(source->data \+ "
+                     r"(r\w*)\.token_start, (r\w*)\.tok\.ident_len\);$", st)
+        if m and m.group(2) in cur_results and m.group(3) in cur_results:
+            emit("idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);");
+            emit("parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+            si += 1
+            continue
+        # v2: helper adapter with discarded result (`after` unused later)
+        m = re.match(r"parser_asm_stretch_skip_balanced_brackets_into_c\(&\w+, (r\w*)\.next_lex, source\);$", st)
+        if m and m.group(1) in cur_results:
+            emit("parser_asm_lex_step_kind_c(lex, source);")
+            emit("parser_asm_lex_skip_balanced_brackets_inplace_c(lex, source);")
+            emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
+            cur_results = set()
+            si += 1
+            continue
+        # v2: switch on the current token kind → if/else chain
+        m = re.match(r"switch \((r\w*)\.tok\.kind\) \{$", st)
+        if m and m.group(1) in cur_results:
+            j = si + 1
+            groups = []  # [([kinds], [body lines])]
+            while stmts[j].strip() != "}":
+                t = stmts[j].strip()
+                cm = re.match(r"case \(int32_t\)(TOKEN_\w+):$", t)
+                if cm:
+                    if groups and not groups[-1][1]:
+                        groups[-1][0].append(cm.group(1))  # fallthrough group
+                    else:
+                        groups.append(([cm.group(1)], []))
+                elif t == "default:":
+                    if not groups or groups[-1][1]:
+                        groups.append(([], []))  # default marker (empty kinds)
+                elif t == "break;":
+                    pass
+                else:
+                    if not groups:
+                        raise Refuse(f"switch stmt before case: {t[:40]}")
+                    groups[-1][1].append(stmts[j])
+                j += 1
+            sw_lines, ntok = translate_switch(groups)
+            used |= ntok
+            x.extend(sw_lines)
+            si = j + 1
+            continue
         # plain return
         m = re.match(r"return (.+);$", st)
         if m:
@@ -196,7 +318,7 @@ def translate(name, body, tokvals):
             si += 1
             continue
         raise Refuse(f"unhandled statement: {st[:60]}")
-    return x, used
+    return x, used, int_vars
 
 
 def tok_of(name):
@@ -208,6 +330,13 @@ def translate_cond(cond, cur_results):
     used = set()
     c = cond
     c = re.sub(r"\(int32_t\)", "", c)
+    # suite helper names → bridge faces callable from .x
+    # bare int-returning helper call as condition → wrap with != 0
+    # (.x: if condition must be bool, no implicit int-to-bool)
+    c = re.sub(r"(?<![\w!!=])parser_asm_stretch_is_type_start_kind_c\([^()]*\)(?!\s*!=)",
+               lambda m: "(" + m.group(0).replace(
+                   "parser_asm_stretch_is_type_start_kind_c",
+                   "parser_asm_lex_is_type_start_kind_c") + " != 0)", c)
     for res in cur_results | {"r", "r2"}:
         c = c.replace(f"{res}.tok.kind", "kind")
         c = c.replace(f"{res}.tok.ident_len", "idlen")
@@ -260,6 +389,33 @@ def translate_return(expr, cur_results):
             ],
             used,
         )
+    # score-expression returns: score / score + N / score + CALL(lex)
+    m = re.match(r"(\w+)(?: \+ (\d+))?$", e)
+    if m and m.group(1) not in ("0", "1"):
+        var, add = m.group(1), m.group(2)
+        expr = var if not add else f"{var} + {add}"
+        return (
+            [
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      return {expr};",
+            ],
+            used,
+        )
+    m = re.match(r"(\w+) \+ (parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\)$", e)
+    if m:
+        x2, ntok = translate_call(m.group(2), m.group(3), m.group(4))
+        used |= ntok
+        return (
+            [
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      return {m.group(1)} + {x2};",
+            ],
+            used,
+        )
     tern = re.match(r"(.+)\? 1 : 0$", e)
     if tern:
         cond, ntok = translate_cond(tern.group(1), cur_results)
@@ -289,30 +445,51 @@ def translate_return(expr, cur_results):
     raise Refuse(f"return expr: {e[:50]}")
 
 
-def translate_block_returns(block, cur_results, tokvals):
-    """Statements inside an if-block (v1: only plain returns)."""
+def translate_block(block, cur_results, indent=2):
+    """Statements inside an if-branch: returns (with restore), score ops,
+    discarded sub-audit calls, bind-validate on current ident."""
     used = set()
     out = []
+    pad = "    " * indent
     for raw in block:
         st = raw.strip()
         m = re.match(r"return (.+);$", st)
-        if not m:
-            raise Refuse(f"non-return stmt in if-block: {st[:50]}")
-        rlines, ntok = translate_return(m.group(1), cur_results)
-        used |= ntok
-        for l in rlines:
-            out.append("  " + l)
+        if m:
+            rlines, ntok = translate_return(m.group(1), cur_results)
+            used |= ntok
+            for l in rlines:
+                out.append(pad + l.strip() if l.strip() else l)
+            continue
+        m = re.match(r"(\w+) \+= (\d+);$", st)
+        if m:
+            out.append(f"{pad}{m.group(1)} = {m.group(1)} + {m.group(2)};")
+            continue
+        m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
+        if m:
+            x2, ntok = translate_call(m.group(1), m.group(2), m.group(3))
+            used |= ntok
+            out.append(f"{pad}{x2};")
+            continue
+        m = re.match(r"\(void\)(parser_asm_stretch_bind_name_validate_c)\(source->data \+ "
+                     r"(r\w*)\.token_start, (r\w*)\.tok\.ident_len\);$", st)
+        if m and m.group(2) in cur_results and m.group(3) in cur_results:
+            out.append(f"{pad}idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);")
+            out.append(f"{pad}parser_asm_stretch_bind_name_validate_c(idptr, idlen);")
+            continue
+        raise Refuse(f"stmt in if-block: {st[:50]}")
     return out, used
 
 
 def gen_x_function(name, body, tokvals, existing_consts):
-    lines, used = translate(name, body, tokvals)
+    lines, used, int_vars = translate(name, body, tokvals)
     # completeness pre-check: append missing TOKEN_* consts (wave-3 lesson)
     missing = sorted(t for t in used if t not in existing_consts)
-    return lines, used, missing
+    return lines, used, missing, int_vars
 
 
-def emit_x(name, x_lines, docline):
+def emit_x(name, x_lines, docline, int_vars=()):
+    int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars))
+    int_lets = "  let idptr: *u8 = 0 as *u8;\n" + int_lets
     doc = f"""/**
  * {docline}
  * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
@@ -330,7 +507,7 @@ export function {name}(lex: *u8, source: *u8): i32 {{
   let col0: i32 = 0;
   let kind: i32 = 0;
   let idlen: i32 = 0;
-  if (lex == 0 as *u8 || source == 0 as *u8) {{
+{int_lets}  if (lex == 0 as *u8 || source == 0 as *u8) {{
     return 0;
   }}
   unsafe {{
@@ -359,16 +536,18 @@ def main():
     all_missing = []
     # set of .x-migrated exports (hand + generated) for delegation unlocking
     migrated_exports = set(re.findall(r"export function (parser_asm_stretch_\w+_c)", xsrc))
+    MIGRATED_EXPORTS_CACHE.clear()
+    MIGRATED_EXPORTS_CACHE.update(migrated_exports)
     for n in names:
         if n not in funcs:
             refused.append((n, "not found / non-byval signature"))
             continue
         try:
-            x_lines, used, missing = gen_x_function(n, funcs[n], tokvals, existing)
+            x_lines, used, missing, ivars = gen_x_function(n, funcs[n], tokvals, existing)
             for t in missing:
                 existing.add(t)
             all_missing.extend(missing)
-            gen.append((n, x_lines))
+            gen.append((n, x_lines, ivars))
             ok.append(n)
         except Delegation as d:
             if str(d) in migrated_exports:
@@ -385,9 +564,26 @@ def main():
             print(f"  REFUSED {n}: {why}")
         return 1
 
+    # 1a) bridge externs used by generated bodies but not yet declared
+    BRIDGE_EXTERNS = {
+        "parser_asm_lex_peek_ident_ptr_c": "lex: *u8, source: *u8): *u8",
+        "parser_asm_lex_source_data_c": "source: *u8): *u8",
+        "parser_asm_lex_source_length_c": "source: *u8): usize",
+    }
+    for bname, bsig in BRIDGE_EXTERNS.items():
+        if bname in xsrc:
+            continue
+        if any(bname in line for item in gen for line in item[1]):
+            lines_x = xsrc.split("\n")
+            lastext = max(i for i, l in enumerate(lines_x) if l.startswith("export extern"))
+            lines_x.insert(lastext + 1,
+                           f'export extern "C" function {bname}({bsig};')
+            xsrc = "\n".join(lines_x)
+            print("bridge extern added:", bname)
+
     # 1b) pure-helper externs used by generated bodies
     used_helpers = sorted(
-        h for h in PURE_HELPERS if any(h in line for _, fl in gen for line in fl)
+        h for h in PURE_HELPERS if any(h in line for item in gen for line in item[1])
     )
     if used_helpers:
         lines_x = xsrc.split("\n")
@@ -414,10 +610,9 @@ def main():
     # 2) append generated .x functions
     frags = []
     docmap = {}
-    for n, x_lines in gen:
-        # pull the C docblock line above the def for a short description
+    for n, x_lines, ivars in gen:
         docmap[n] = f"Generated audit port {n}."
-        frags.append(emit_x(n, x_lines, docmap[n]))
+        frags.append(emit_x(n, x_lines, docmap[n], ivars))
     for n, callee in deleg:
         frags.append(
             f"/**\n"
@@ -442,7 +637,7 @@ def main():
 
     # 3) C twins → gated pointer ABI (line-anchored splice, wave-2 proven)
     lines_s = open(SUITE).read().split("\n")
-    for n, _ in gen + deleg:
+    for n, *_rest in list(gen) + list(deleg):
         body = funcs[n]
         # locate def block (single- or multi-line signature)
         si_l = sig_extra = None
@@ -477,6 +672,8 @@ def main():
         nb_txt = "\n".join(nb)
         nb_txt = re.sub(r"lexer_next_into\((&r\w*), ([^,]+), source\)",
                         r"lexer_next_into(\1, \2, (struct parser_asm_slice_u8 *)source)", nb_txt)
+        nb_txt = nb_txt.replace("source->data", "((struct parser_asm_slice_u8 *)source)->data")
+        nb_txt = nb_txt.replace("source->length", "((struct parser_asm_slice_u8 *)source)->length")
         shim = (
             "/* B-minus twin (7.2.1, generated): hybrid lane compiles this out; .x\n"
             " * authority src/asm/pthin_stretch_audit.x provides the same symbol\n"
@@ -490,6 +687,13 @@ def main():
             + nb_txt + "\n}\n#endif"
         )
         lines_s[si_l : ei_l + 1] = shim.split("\n")
+    # 3b) ensure fwd decls exist for every generated function (hybrid callers)
+    need = [n for n, *_ in list(gen) + list(deleg)
+            if f"int32_t {n}(void *lex_inout, void *source);" not in "\n".join(lines_s)]
+    if need:
+        anchor_line = "int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);"
+        ai = lines_s.index(anchor_line)
+        lines_s[ai + 1 : ai + 1] = [f"int32_t {n}(void *lex_inout, void *source);" for n in need]
     open(SUITE, "w").write("\n".join(lines_s))
 
     # 4) decl + call-site sync across seeds/slices (wave 1-3 proven pattern)

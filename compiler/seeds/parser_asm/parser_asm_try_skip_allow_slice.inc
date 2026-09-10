@@ -19,8 +19,8 @@ struct parser_asm_try_skip_allow_result parser_asm_try_skip_allow_padding_struct
     struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
   struct parser_asm_lexer_result lr;
   struct parser_asm_try_skip_allow_result out;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_paren_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_paren_audit_c(&lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_mega_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_ultra_mega_full_deep_audit_c(lex, source));

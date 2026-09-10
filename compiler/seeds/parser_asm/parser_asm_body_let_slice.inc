@@ -15,8 +15,7 @@ struct parser_asm_parse_expr_result {
 
 extern void parse_expr_into(void *arena, struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                             struct parser_asm_parse_expr_result *out);
-extern int32_t parser_asm_stretch_parse_cond_expr_audit_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_parse_cond_expr_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_body_let_bracket_deep_audit_c(struct parser_asm_lexer lex,
@@ -66,7 +65,7 @@ void parser_asm_parse_cond_expr_into_slice_c(void *arena, struct parser_asm_lexe
   size_t int_start;
   if (!arena || !source || !out)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_audit_c(lex_start, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_audit_c(&lex_start, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_audit_c(lex_start, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_cond_int_as_audit_c(&lex_start, source));
   lexer_next_into(&rpeek, lex_start, source);

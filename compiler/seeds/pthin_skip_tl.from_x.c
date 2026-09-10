@@ -105,7 +105,7 @@ extern int32_t parser_asm_stretch_enum_variants_probe_c(struct parser_asm_lexer 
 extern int32_t parser_asm_stretch_extern_fn_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_extern_param_bind_audit_c(const uint8_t *name, int32_t name_len);
 extern int32_t parser_asm_stretch_extern_param_count_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t *out_param_count);
-extern int32_t parser_asm_stretch_extern_return_type_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_extern_return_type_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_impl_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_impl_items_body_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_impl_items_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t *out_item_count);

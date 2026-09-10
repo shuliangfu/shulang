@@ -2,15 +2,16 @@
  *
  * Proves every .x port in src/asm/pthin_stretch_audit.x is behaviorally
  * identical to its gated C twin in the suite slice: same return value on the
- * same lexer state AND the caller's lexer untouched after the call (by-value
- * net semantics). Drives all audit functions on identical lexer states —
- * synthetic sources at every token offset, plus real .x files (argv) at every
- * token offset (capped) — through a table of (C reference twin, .x version)
- * pairs; 3-arg audits run with each flag polarity.
+ * same lexer state AND (by-value contracts) the caller's lexer untouched /
+ * (inout contracts) both twins leave the caller at the same end state.
  *
- * Lexer authority under test: seeds/lexer_gen.linux.x86_64.c pin (same T-symbol
- * face as product lexer_x.o). Struct mirrors follow the layout-mirror
- * discipline (field-for-field identical to the lexer authority structs).
+ * The twin set (twins.h) and the dispatch table (table.h) are AUTO-GENERATED
+ * by scripts/sync_stretch_audit_harness.py from the migrated surface — run it
+ * after every generator wave; this file is the stable shell.
+ *
+ * Lexer authority under test: seeds/lexer_gen.linux.x86_64.c pin (same
+ * T-symbol face as product lexer_x.o). Struct mirrors follow the
+ * layout-mirror discipline (field-for-field identical to the lexer authority).
  *
  * PLATFORM: SHARED (built+run on Darwin and Ubuntu by the driver script).
  */
@@ -53,37 +54,6 @@ struct parser_asm_lexer_result {
 extern void lexer_next_into(struct parser_asm_lexer_result *out, struct parser_asm_lexer lex,
                             struct parser_asm_slice_u8 *source);
 
-/* .x ports under test (pointer ABI, B-minus). */
-extern int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_loop_header_audit_c(void *lex_inout, void *source, int32_t expect_while);
-extern int32_t parser_asm_stretch_break_continue_audit_c(void *lex_inout, void *source, int32_t want_break);
-extern int32_t parser_asm_stretch_else_stmt_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_let_const_decl_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_enum_header_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_match_kw_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_return_stmt_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_import_stmt_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_fn_param_list_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_skip_return_type_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_function_header_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_struct_header_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_async_fn_prefix_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_trait_header_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_cond_int_as_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_let_in_block_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_label_stmt_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_assign_stmt_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_ternary_op_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_paren_expr_head_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_balanced_parens_depth_probe_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_struct_align_paren_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_balanced_braces_depth_probe_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_balanced_brackets_depth_probe_c(void *lex_inout, void *source);
-
 /* Pin .c extern stubs (only reached on cfg-attr / malformed-literal paths the
  * harness corpus never exercises; stubs keep the link self-contained). */
 char *link_abi_getenv(const char *name) { return getenv(name); }
@@ -102,96 +72,10 @@ void diag_report_with_code(void *ctx, const char *code, int32_t line, int32_t co
 }
 int32_t lexer_parser_slice_from_buf(void) { return 0; }
 
-/* lex_skip family primitive used by the import_stmt twin (def below). */
-void parser_asm_lex_from_result_val_into(struct parser_asm_lexer *out, struct parser_asm_lexer_result r);
-
-/* --- reference twins (generated from the suite slice; refresh in the same
- * commit whenever a suite twin changes) --- */
+/* Reference twins + helper authority copies (generated). */
 #include "pthin_stretch_audit_eq_twins.h"
 
-/* Authority twin of parser_asm_lex_from_result_val_into (lex_skip slice:9);
- * the import_stmt C twin calls it — verbatim semantics, refresh together). */
-void parser_asm_lex_from_result_val_into(struct parser_asm_lexer *out, struct parser_asm_lexer_result r) {
-  if (!out)
-    return;
-  out->pos = r.next_lex.pos;
-  out->line = r.next_lex.line;
-  out->col = r.next_lex.col;
-}
-
-/* 2-arg to uniform 3-arg shims (dispatch table needs one fn type). */
-#define AUDIT2_SHIM(cname) \
-  static int32_t x_##cname(void *l, void *s, int32_t f) { (void)f; return cname(l, s); }
-AUDIT2_SHIM(parser_asm_stretch_if_header_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_else_stmt_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_else_if_chain_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_let_const_decl_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_enum_header_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_match_kw_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_return_stmt_audit_c)
-AUDIT2_SHIM(parser_asm_stretch_import_stmt_audit_c)
-static int32_t x_loop_header(void *l, void *s, int32_t f) { return parser_asm_stretch_loop_header_audit_c(l, s, f); }
-static int32_t x_break_continue(void *l, void *s, int32_t f) { return parser_asm_stretch_break_continue_audit_c(l, s, f); }
-#define CREF2_SHIM(cname) \
-  static int32_t r_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
-CREF2_SHIM(if_header)
-CREF2_SHIM(else_stmt)
-CREF2_SHIM(else_if_chain)
-CREF2_SHIM(let_const_decl)
-CREF2_SHIM(enum_header)
-CREF2_SHIM(match_kw)
-CREF2_SHIM(return_stmt)
-CREF2_SHIM(import_stmt)
-static int32_t r_loop_header(void *l, void *s, int32_t f) { return c_ref_loop_header(l, s, f); }
-static int32_t r_break_continue(void *l, void *s, int32_t f) { return c_ref_break_continue(l, s, f); }
-#define AUDIT2_SHIM2(cname) \
-  static int32_t x2_##cname(void *l, void *s, int32_t f) { (void)f; return cname(l, s); }
-AUDIT2_SHIM2(parser_asm_stretch_fn_sig_audit_c)
-AUDIT2_SHIM2(parser_asm_stretch_function_header_audit_c)
-#define CREF2_SHIM2(cname) \
-  static int32_t r2_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
-CREF2_SHIM2(fn_sig)
-CREF2_SHIM2(function_header)
-static int32_t xi_fn_param_list(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_fn_param_list_audit_c(l, s); }
-static int32_t xi_skip_return_type(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_skip_return_type_audit_c(l, s); }
-static int32_t ri_fn_param_list(void *l, void *s, int32_t f) { (void)f; return c_ref_fn_param_list(l, s); }
-static int32_t ri_skip_return_type(void *l, void *s, int32_t f) { (void)f; return c_ref_skip_return_type(l, s); }
-#define AUDIT2_SHIM3(cname) \
-  static int32_t x3_##cname(void *l, void *s, int32_t f) { (void)f; return cname(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_struct_header_audit_c)
-AUDIT2_SHIM3(parser_asm_stretch_panic_kw_audit_c)
-#define CREF2_SHIM3(cname) \
-  static int32_t r3_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
-CREF2_SHIM3(struct_header)
-CREF2_SHIM3(panic_kw)
-AUDIT2_SHIM3(parser_asm_stretch_async_fn_prefix_audit_c)
-static int32_t r3_async_fn_prefix(void *l, void *s, int32_t f) { (void)f; return c_ref_async_fn_prefix_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_trait_header_audit_c)
-static int32_t r3_trait_header(void *l, void *s, int32_t f) { (void)f; return c_ref_trait_header_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_cond_int_as_audit_c)
-static int32_t r3_cond_int_as(void *l, void *s, int32_t f) { (void)f; return c_ref_cond_int_as_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_let_in_block_audit_c)
-static int32_t r3_let_in_block(void *l, void *s, int32_t f) { (void)f; return c_ref_let_in_block_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_label_stmt_audit_c)
-static int32_t r3_label_stmt(void *l, void *s, int32_t f) { (void)f; return c_ref_label_stmt_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_assign_stmt_audit_c)
-static int32_t r3_assign_stmt(void *l, void *s, int32_t f) { (void)f; return c_ref_assign_stmt_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_if_expr_branch_audit_c)
-static int32_t r3_if_expr_branch(void *l, void *s, int32_t f) { (void)f; return c_ref_if_expr_branch_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_ternary_op_audit_c)
-static int32_t r3_ternary_op(void *l, void *s, int32_t f) { (void)f; return c_ref_ternary_op_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_paren_expr_head_audit_c)
-static int32_t r3_paren_expr_head(void *l, void *s, int32_t f) { (void)f; return c_ref_paren_expr_head_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_balanced_parens_depth_probe_c)
-static int32_t r3_balanced_parens_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_parens_depth_probe_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_struct_align_paren_audit_c)
-static int32_t r3_struct_align_paren(void *l, void *s, int32_t f) { (void)f; return c_ref_struct_align_paren_audit_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_balanced_braces_depth_probe_c)
-static int32_t r3_balanced_braces_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_braces_depth_probe_c(l, s); }
-AUDIT2_SHIM3(parser_asm_stretch_balanced_brackets_depth_probe_c)
-static int32_t r3_balanced_brackets_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_brackets_depth_probe_c(l, s); }
-
-/* --- dispatch table --- */
+/* --- dispatch (generated: externs + shims + k_cases) --- */
 typedef int32_t (*audit_fn)(void *lex_inout, void *source, int32_t flag);
 
 typedef struct {
@@ -202,49 +86,19 @@ typedef struct {
   int inout; /* 1: inout contract — compare post-call lexer states */
 } audit_case;
 
-static const audit_case k_cases[] = {
-    {"if_header", r_if_header, x_parser_asm_stretch_if_header_audit_c, 0, 0},
-    {"loop_header/w", r_loop_header, x_loop_header, 1, 0},
-    {"loop_header/f", r_loop_header, x_loop_header, 0, 0},
-    {"break_continue/b", r_break_continue, x_break_continue, 1, 0},
-    {"break_continue/c", r_break_continue, x_break_continue, 0, 0},
-    {"else_stmt", r_else_stmt, x_parser_asm_stretch_else_stmt_audit_c, 0, 0},
-    {"else_if_chain", r_else_if_chain, x_parser_asm_stretch_else_if_chain_audit_c, 0, 0},
-    {"let_const_decl", r_let_const_decl, x_parser_asm_stretch_let_const_decl_audit_c, 0, 0},
-    {"enum_header", r_enum_header, x_parser_asm_stretch_enum_header_audit_c, 0, 0},
-    {"match_kw", r_match_kw, x_parser_asm_stretch_match_kw_audit_c, 0, 0},
-    {"return_stmt", r_return_stmt, x_parser_asm_stretch_return_stmt_audit_c, 0, 0},
-    {"import_stmt", r_import_stmt, x_parser_asm_stretch_import_stmt_audit_c, 0, 0},
-    {"fn_param_list", ri_fn_param_list, xi_fn_param_list, 0, 1},
-    {"skip_return_type", ri_skip_return_type, xi_skip_return_type, 0, 1},
-    {"fn_sig", r2_fn_sig, x2_parser_asm_stretch_fn_sig_audit_c, 0, 0},
-    {"function_header", r2_function_header, x2_parser_asm_stretch_function_header_audit_c, 0, 0},
-    {"struct_header", r3_struct_header, x3_parser_asm_stretch_struct_header_audit_c, 0, 0},
-    {"panic_kw", r3_panic_kw, x3_parser_asm_stretch_panic_kw_audit_c, 0, 0},
-    {"async_fn_prefix", r3_async_fn_prefix, x3_parser_asm_stretch_async_fn_prefix_audit_c, 0, 0},
-    {"trait_header", r3_trait_header, x3_parser_asm_stretch_trait_header_audit_c, 0, 0},
-    {"cond_int_as", r3_cond_int_as, x3_parser_asm_stretch_cond_int_as_audit_c, 0, 0},
-    {"let_in_block", r3_let_in_block, x3_parser_asm_stretch_let_in_block_audit_c, 0, 0},
-    {"label_stmt", r3_label_stmt, x3_parser_asm_stretch_label_stmt_audit_c, 0, 0},
-    {"assign_stmt", r3_assign_stmt, x3_parser_asm_stretch_assign_stmt_audit_c, 0, 0},
-    {"if_expr_branch", r3_if_expr_branch, x3_parser_asm_stretch_if_expr_branch_audit_c, 0, 0},
-    {"ternary_op", r3_ternary_op, x3_parser_asm_stretch_ternary_op_audit_c, 0, 0},
-    {"paren_expr_head", r3_paren_expr_head, x3_parser_asm_stretch_paren_expr_head_audit_c, 0, 0},
-    {"balanced_parens_depth_probe", r3_balanced_parens_depth_probe, x3_parser_asm_stretch_balanced_parens_depth_probe_c, 0, 0},
-    {"struct_align_paren", r3_struct_align_paren, x3_parser_asm_stretch_struct_align_paren_audit_c, 0, 0},
-    {"balanced_braces_depth_probe", r3_balanced_braces_depth_probe, x3_parser_asm_stretch_balanced_braces_depth_probe_c, 0, 0},
-    {"balanced_brackets_depth_probe", r3_balanced_brackets_depth_probe, x3_parser_asm_stretch_balanced_brackets_depth_probe_c, 0, 0},
-};
+#include "pthin_stretch_audit_eq_table.h"
+
 static int g_fail = 0;
 static long g_checks = 0;
 
-/** Compare one (C ref, .x) pair on one lexer state; verify no caller movement. */
+/** Compare one (C ref, .x) pair on one lexer state; verify contract. */
 static void check_one(const audit_case *ac, struct parser_asm_lexer lex,
                       struct parser_asm_slice_u8 *src) {
   struct parser_asm_lexer for_c = lex;
   struct parser_asm_lexer for_x = lex;
   int32_t rc_c;
   int32_t rc_x;
+  if (getenv("EQ_TRACE")) fprintf(stderr, "[trace] %s pos=%zu\n", ac->name, lex.pos);
   rc_c = ac->c_ref(&for_c, src, ac->flag);
   rc_x = ac->x_ver(&for_x, src, ac->flag);
   g_checks++;
@@ -308,39 +162,23 @@ int main(int argc, char **argv) {
       "const y: u8 = 2;", "let : i32",            "enum E { }",   "enum { }",
       "enum E",           "match v { 1 => 2 }",   "match v;",     "match",
       "return;",          "return 1 + 2;",        "return",       "import a.b;",
-      "import a.b as c;", "import ;",             "import",       "function f(a: i32) : i32 { 1 }",
-      "function g(x: i32, y: *u8) : [u8] { }",
-      "async function h() : **u8 { }",
-      "function bad(,) : i32 { }",
-      "function noparens",
-      "function f() : { }",
-      "async function q() { }",
-      "trait T { }",
-      "impl T for S { }",
-      "x as i32",
-      "1 as u8 as i32",
-      "loop: label",
-      "x = 1;",
-      "x += 2;",
-      "while (a) { }",
-      "{ }",
-      "[1, 2]",
-      "align(16) struct A { }",
-      "(a + b)",
-      "struct S { }",
-      "struct S",
-      "panic(msg)",
-      "panic;",
-      "panic",
-      "function f() { }",
+      "import a.b as c;", "import ;",             "import",       "function f() { }",
       "\n\nif (a)\n{",   "let x\n:\ni32",        "return\n1;",
+      "async function q() { }", "trait T { }",    "impl T for S { }",
+      "x as i32",         "1 as u8 as i32",       "loop: label",  "x = 1;",
+      "x += 2;",          "{ }",                  "[1, 2]",       "align(16) struct A { }",
+      "(a + b)",          "struct S { }",         "struct S",     "panic(msg)",
+      "panic;",           "panic",                "*u8",          "[u8; 4]",
+      "fn(a: i32) -> i32 { }", "1 + 2 * 3 - 4 / 5 % 6", "a && b || !c",
+      "<< >> & | ^",      "x.y.z[0]",             "f(1, g(2))",   "@attr fn",
+      "unsafe { }",       "match x { _ => 0, }",  "spawn f()",    "await f()",
   };
   size_t i;
   int f;
   for (i = 0; i < sizeof(k_synth) / sizeof(k_synth[0]); i++) {
     char tag[32];
     snprintf(tag, sizeof(tag), "synth%zu", i);
-    battery(tag, k_synth[i], strlen(k_synth[i]), 64);
+    battery(tag, k_synth[i], strlen(k_synth[i]) + 1, 64); /* +1: NUL sentinel in slice (lexer authority contract: index < length) */
   }
   for (f = 1; f < argc; f++) {
     FILE *fp = fopen(argv[f], "rb");
@@ -364,7 +202,7 @@ int main(int argc, char **argv) {
     }
     fclose(fp);
     buf[sz] = 0;
-    battery(argv[f], buf, (size_t)sz, 2500);
+    battery(argv[f], buf, (size_t)sz + 1, 1200); /* +1: NUL sentinel */
     free(buf);
   }
   /* Null-guard parity: every pair must answer 0 without dereferencing. */

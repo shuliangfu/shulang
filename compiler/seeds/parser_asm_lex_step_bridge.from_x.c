@@ -281,3 +281,20 @@ void parser_asm_lex_skip_one_param_type_inplace_c(void *lex_inout, void *source)
   *(struct parser_asm_lexer *)lex_inout = parser_asm_stretch_skip_one_param_type_c(
       *(struct parser_asm_lexer *)lex_inout, (struct parser_asm_slice_u8 *)source);
 }
+
+/**
+ * Peek the NEXT token's ident pointer (points into the source bytes; only
+ * meaningful when the token is an IDENT). Lets .x call name validators that
+ * take a raw byte pointer + length without seeing any struct.
+ * @param lex *u8 — opaque struct parser_asm_lexer* (read-only)
+ * @param source *u8 — opaque struct parser_asm_slice_u8*
+ * @return *u8 — next token's ident pointer (null when args null)
+ * PLATFORM: SHARED.
+ */
+uint8_t *parser_asm_lex_peek_ident_ptr_c(void *lex, void *source) {
+  struct parser_asm_lexer_result r;
+  if (!lex || !source)
+    return 0;
+  lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.ident;
+}
