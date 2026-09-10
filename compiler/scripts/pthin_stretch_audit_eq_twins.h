@@ -502,3 +502,218 @@ static int32_t c_ref_panic_kw(void *lex_inout, void *source) {
   return r.tok.kind == (int32_t)TOKEN_LPAREN || r.tok.kind == (int32_t)TOKEN_SEMICOLON ? 1 : 0;
 
 }
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_async_fn_prefix_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_async_fn_prefix_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer_result r2;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_ASYNC)
+    return 0;
+  lexer_next_into(&r2, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r2.tok.kind == (int32_t)TOKEN_FUNCTION ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_trait_header_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_trait_header_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_TRAIT)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind == (int32_t)TOKEN_LBRACE ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_cond_int_as_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_cond_int_as_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer_result r2;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_INT && r.tok.kind != (int32_t)TOKEN_I32)
+    return 0;
+  lexer_next_into(&r2, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r2.tok.kind == (int32_t)TOKEN_AS ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_let_in_block_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_let_in_block_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  return parser_asm_stretch_let_const_decl_audit_c(&lex, source);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_label_stmt_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_label_stmt_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind == (int32_t)TOKEN_COLON ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_assign_stmt_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_assign_stmt_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len <= 0)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind == (int32_t)TOKEN_ASSIGN ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_if_expr_branch_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_if_expr_branch_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex_at_if;
+  if (!lex_inout || !source)
+    return 0;
+  lex_at_if = *(struct parser_asm_lexer *)lex_inout;
+  return parser_asm_stretch_if_header_audit_c(&lex_at_if, source);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_ternary_op_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_ternary_op_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind == (int32_t)TOKEN_QUESTION ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_paren_expr_head_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_paren_expr_head_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_LPAREN)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind != (int32_t)TOKEN_RPAREN ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_struct_align_paren_audit_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_struct_align_paren_audit_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer_result r2;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_ALIGN)
+    return 0;
+  lexer_next_into(&r2, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r2.tok.kind == (int32_t)TOKEN_LPAREN ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_balanced_parens_depth_probe_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_balanced_parens_depth_probe_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind != (int32_t)TOKEN_RPAREN ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_balanced_braces_depth_probe_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_balanced_braces_depth_probe_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind != (int32_t)TOKEN_RBRACE ? 1 : 0;
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for
+ * parser_asm_stretch_balanced_brackets_depth_probe_c (suite slice; refresh in the same commit). */
+static int32_t c_ref_balanced_brackets_depth_probe_c(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind != (int32_t)TOKEN_RBRACKET ? 1 : 0;
+
+}
+
+/* Authority twin of parser_asm_is_compound_assign_token_c (lex_skip slice:530;
+ * called by the assign_op .x port via extern — refresh together). */
+int32_t parser_asm_is_compound_assign_token_c(int32_t kind) {
+  return kind == (int32_t)TOKEN_PLUS_EQ || kind == (int32_t)TOKEN_MINUS_EQ || kind == (int32_t)TOKEN_STAR_EQ
+      || kind == (int32_t)TOKEN_SLASH_EQ || kind == (int32_t)TOKEN_PERCENT_EQ || kind == (int32_t)TOKEN_AMP_EQ
+      || kind == (int32_t)TOKEN_PIPE_EQ || kind == (int32_t)TOKEN_CARET_EQ || kind == (int32_t)TOKEN_LSHIFT_EQ
+      || kind == (int32_t)TOKEN_RSHIFT_EQ;
+}

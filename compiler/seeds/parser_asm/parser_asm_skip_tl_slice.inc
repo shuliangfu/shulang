@@ -5397,7 +5397,7 @@ void parser_asm_skip_one_trait_into_slice_c(struct parser_asm_lexer *out, struct
    * wave421: prefer token path so we can register method names. Byte raw skip
    * only when token path cannot start (defensive).
    */
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_header_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_header_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_impl_type_deep_audit_c(lex, source));
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_TRAIT) {

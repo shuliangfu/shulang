@@ -70,6 +70,19 @@ extern int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_function_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_struct_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_async_fn_prefix_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_trait_header_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_cond_int_as_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_let_in_block_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_label_stmt_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_assign_stmt_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_ternary_op_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_paren_expr_head_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_balanced_parens_depth_probe_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_struct_align_paren_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_balanced_braces_depth_probe_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_balanced_brackets_depth_probe_c(void *lex_inout, void *source);
 
 /* Pin .c extern stubs (only reached on cfg-attr / malformed-literal paths the
  * harness corpus never exercises; stubs keep the link self-contained). */
@@ -151,6 +164,32 @@ AUDIT2_SHIM3(parser_asm_stretch_panic_kw_audit_c)
   static int32_t r3_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
 CREF2_SHIM3(struct_header)
 CREF2_SHIM3(panic_kw)
+AUDIT2_SHIM3(parser_asm_stretch_async_fn_prefix_audit_c)
+static int32_t r3_async_fn_prefix(void *l, void *s, int32_t f) { (void)f; return c_ref_async_fn_prefix_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_trait_header_audit_c)
+static int32_t r3_trait_header(void *l, void *s, int32_t f) { (void)f; return c_ref_trait_header_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_cond_int_as_audit_c)
+static int32_t r3_cond_int_as(void *l, void *s, int32_t f) { (void)f; return c_ref_cond_int_as_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_let_in_block_audit_c)
+static int32_t r3_let_in_block(void *l, void *s, int32_t f) { (void)f; return c_ref_let_in_block_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_label_stmt_audit_c)
+static int32_t r3_label_stmt(void *l, void *s, int32_t f) { (void)f; return c_ref_label_stmt_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_assign_stmt_audit_c)
+static int32_t r3_assign_stmt(void *l, void *s, int32_t f) { (void)f; return c_ref_assign_stmt_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_if_expr_branch_audit_c)
+static int32_t r3_if_expr_branch(void *l, void *s, int32_t f) { (void)f; return c_ref_if_expr_branch_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_ternary_op_audit_c)
+static int32_t r3_ternary_op(void *l, void *s, int32_t f) { (void)f; return c_ref_ternary_op_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_paren_expr_head_audit_c)
+static int32_t r3_paren_expr_head(void *l, void *s, int32_t f) { (void)f; return c_ref_paren_expr_head_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_balanced_parens_depth_probe_c)
+static int32_t r3_balanced_parens_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_parens_depth_probe_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_struct_align_paren_audit_c)
+static int32_t r3_struct_align_paren(void *l, void *s, int32_t f) { (void)f; return c_ref_struct_align_paren_audit_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_balanced_braces_depth_probe_c)
+static int32_t r3_balanced_braces_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_braces_depth_probe_c(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_balanced_brackets_depth_probe_c)
+static int32_t r3_balanced_brackets_depth_probe(void *l, void *s, int32_t f) { (void)f; return c_ref_balanced_brackets_depth_probe_c(l, s); }
 
 /* --- dispatch table --- */
 typedef int32_t (*audit_fn)(void *lex_inout, void *source, int32_t flag);
@@ -182,6 +221,19 @@ static const audit_case k_cases[] = {
     {"function_header", r2_function_header, x2_parser_asm_stretch_function_header_audit_c, 0, 0},
     {"struct_header", r3_struct_header, x3_parser_asm_stretch_struct_header_audit_c, 0, 0},
     {"panic_kw", r3_panic_kw, x3_parser_asm_stretch_panic_kw_audit_c, 0, 0},
+    {"async_fn_prefix", r3_async_fn_prefix, x3_parser_asm_stretch_async_fn_prefix_audit_c, 0, 0},
+    {"trait_header", r3_trait_header, x3_parser_asm_stretch_trait_header_audit_c, 0, 0},
+    {"cond_int_as", r3_cond_int_as, x3_parser_asm_stretch_cond_int_as_audit_c, 0, 0},
+    {"let_in_block", r3_let_in_block, x3_parser_asm_stretch_let_in_block_audit_c, 0, 0},
+    {"label_stmt", r3_label_stmt, x3_parser_asm_stretch_label_stmt_audit_c, 0, 0},
+    {"assign_stmt", r3_assign_stmt, x3_parser_asm_stretch_assign_stmt_audit_c, 0, 0},
+    {"if_expr_branch", r3_if_expr_branch, x3_parser_asm_stretch_if_expr_branch_audit_c, 0, 0},
+    {"ternary_op", r3_ternary_op, x3_parser_asm_stretch_ternary_op_audit_c, 0, 0},
+    {"paren_expr_head", r3_paren_expr_head, x3_parser_asm_stretch_paren_expr_head_audit_c, 0, 0},
+    {"balanced_parens_depth_probe", r3_balanced_parens_depth_probe, x3_parser_asm_stretch_balanced_parens_depth_probe_c, 0, 0},
+    {"struct_align_paren", r3_struct_align_paren, x3_parser_asm_stretch_struct_align_paren_audit_c, 0, 0},
+    {"balanced_braces_depth_probe", r3_balanced_braces_depth_probe, x3_parser_asm_stretch_balanced_braces_depth_probe_c, 0, 0},
+    {"balanced_brackets_depth_probe", r3_balanced_brackets_depth_probe, x3_parser_asm_stretch_balanced_brackets_depth_probe_c, 0, 0},
 };
 static int g_fail = 0;
 static long g_checks = 0;
@@ -262,6 +314,19 @@ int main(int argc, char **argv) {
       "function bad(,) : i32 { }",
       "function noparens",
       "function f() : { }",
+      "async function q() { }",
+      "trait T { }",
+      "impl T for S { }",
+      "x as i32",
+      "1 as u8 as i32",
+      "loop: label",
+      "x = 1;",
+      "x += 2;",
+      "while (a) { }",
+      "{ }",
+      "[1, 2]",
+      "align(16) struct A { }",
+      "(a + b)",
       "struct S { }",
       "struct S",
       "panic(msg)",

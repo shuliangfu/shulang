@@ -201,8 +201,7 @@ struct parser_asm_lexer parser_asm_realign_lex_after_if_arm_c(struct parser_asm_
   return parser_asm_parser_rewind_lex_for_following_stmt_c(lex_cur, peek);
 }
 
-extern int32_t parser_asm_stretch_if_stmt_branch_audit_c(struct parser_asm_lexer lex_at_if,
-                                                         struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_if_stmt_branch_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_if_stmt_deep_audit_c(struct parser_asm_lexer lex_at_if,
                                                        struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_else_mega_full_deep_audit_c(struct parser_asm_lexer lex_at_if,
@@ -319,7 +318,7 @@ static int32_t parser_asm_parse_if_stmt_into_slice_c(void *arena, struct parser_
   struct parser_asm_lexer elif_lex;
   if (!arena || !source || !out_cond || !out_then || !out_else || !lex_out)
     return 0;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_branch_audit_c(lex_at_if, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_branch_audit_c(&lex_at_if, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_deep_audit_c(lex_at_if, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_else_mega_full_deep_audit_c(lex_at_if, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_control_flow_ultra_mega_full_deep_audit_c(lex_at_if, source));

@@ -27,8 +27,7 @@ extern int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm
                                                              struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_expr_deep_audit_c(struct parser_asm_lexer lex_at_if,
                                                        struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_if_expr_branch_audit_c(struct parser_asm_lexer lex_at_if,
-                                                         struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 
 /** expr_set_common_zeros：与 parser.x 字段清零顺序一致。 */
@@ -116,7 +115,7 @@ void parser_asm_parse_if_expr_into_c(void *arena, struct parser_asm_lexer lex_at
   if (!arena || !source || !out)
     return;
   out->ok = 0;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_branch_audit_c(lex_at_if, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_branch_audit_c(&lex_at_if, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_deep_audit_c(lex_at_if, source));
   lexer_next_into(&r, lex_at_if, source);
   if (r.tok.kind == (int32_t)TOKEN_IF)

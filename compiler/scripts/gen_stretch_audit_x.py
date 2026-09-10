@@ -40,13 +40,20 @@ def parse_suite():
     i = 0
     while i < len(lines):
         l = lines[i]
-        m = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\((struct parser_asm_lexer lex, "
-                     r"struct parser_asm_slice_u8 \*source)\) \{$", l)
+        m = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
+                     r"struct parser_asm_slice_u8 \*source\) \{$", l)
+        sig_extra = 0
+        if not m:
+            m2 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+),$", l)
+            if m2 and i + 1 < len(lines) and re.match(
+                    r"^\s*struct parser_asm_slice_u8 \*source\) \{$", lines[i + 1]):
+                m = m2
+                sig_extra = 1
         if m:
-            j = i + 1
+            j = i + 1 + sig_extra
             while lines[j] != "}":
                 j += 1
-            funcs[m.group(1)] = lines[i + 1 : j]
+            funcs[m.group(1)] = lines[i + 1 + sig_extra : j]
             order.append((i, j))
             i = j + 1
         else:
@@ -68,6 +75,11 @@ def token_enum():
 
 class Refuse(Exception):
     pass
+
+
+class Delegation(Exception):
+    """Body is a pure delegation to another (already .x-migrated) audit."""
+
 
 
 def translate(name, body, tokvals):
@@ -207,10 +219,47 @@ def translate_cond(cond, cur_results):
     return c.strip(), used
 
 
+PURE_HELPERS = {
+    # pure scalar helpers the .x side may extern directly (no struct params)
+    "parser_asm_is_compound_assign_token_c": ("kind: i32", "i32"),
+    "parser_asm_stretch_bind_name_validate_c": ("name: *u8, name_len: i32", "i32"),
+    "parser_asm_stretch_ident_byte_ok_c": ("c: u8, is_first: i32", "i32"),
+}
+
+
 def translate_return(expr, cur_results):
     """return EXPR → restore trio + computed return (2-4 lines)."""
     used = set()
     e = expr.strip()
+    # delegation: return CALLEE(ARG, source);  where ARG is lex/&lex/lex_at_if...
+    m = re.match(r"(parser_asm_stretch_\w+_c)\((?:&?lex|&?lex_at_if), source\)$", e)
+    if m:
+        raise Delegation(m.group(1))
+    # pure-call ternary: return HELPER(args) ? 1 : 0;
+    m = re.match(r"(\w+)\(([^()]*)\) \? 1 : 0$", e)
+    if m and m.group(1) in PURE_HELPERS:
+        fn, args = m.group(1), m.group(2)
+        ax = []
+        for a in args.split(","):
+            a = a.strip()
+            a = a.replace("r.tok.kind", "kind").replace("r2.tok.kind", "kind")
+            a = re.sub(r"^&", "", a)
+            ax.append(a)
+        sig_args = " ".join(
+            f"p{i}" for i in range(len(ax))
+        )
+        return (
+            [
+                "      parser_asm_lex_set_pos_c(lex, pos0);",
+                "      parser_asm_lex_set_line_c(lex, line0);",
+                "      parser_asm_lex_set_col_c(lex, col0);",
+                f"      if ({fn}({', '.join(ax)}) != 0) {{",
+                "        return 1;",
+                "      }",
+                "      return 0;",
+            ],
+            used,
+        )
     tern = re.match(r"(.+)\? 1 : 0$", e)
     if tern:
         cond, ntok = translate_cond(tern.group(1), cur_results)
@@ -306,8 +355,10 @@ def main():
     xsrc = open(XFILE).read()
     existing = set(re.findall(r"const (TOKEN_\w+):", xsrc))
 
-    ok, refused, gen = [], [], []
+    ok, refused, gen, deleg = [], [], [], []
     all_missing = []
+    # set of .x-migrated exports (hand + generated) for delegation unlocking
+    migrated_exports = set(re.findall(r"export function (parser_asm_stretch_\w+_c)", xsrc))
     for n in names:
         if n not in funcs:
             refused.append((n, "not found / non-byval signature"))
@@ -319,14 +370,35 @@ def main():
             all_missing.extend(missing)
             gen.append((n, x_lines))
             ok.append(n)
+        except Delegation as d:
+            if str(d) in migrated_exports:
+                deleg.append((n, str(d)))
+                ok.append(n)
+            else:
+                refused.append((n, f"delegation to unmigrated {d}"))
         except Refuse as e:
             refused.append((n, str(e)))
 
-    if not gen:
+    if not gen and not deleg:
         print("nothing generated")
         for n, why in refused:
             print(f"  REFUSED {n}: {why}")
         return 1
+
+    # 1b) pure-helper externs used by generated bodies
+    used_helpers = sorted(
+        h for h in PURE_HELPERS if any(h in line for _, fl in gen for line in fl)
+    )
+    if used_helpers:
+        lines_x = xsrc.split("\n")
+        lastext = max(i for i, l in enumerate(lines_x) if l.startswith("export extern"))
+        add = [
+            f'export extern "C" function {h}({PURE_HELPERS[h][0]}): {PURE_HELPERS[h][1]};'
+            for h in used_helpers
+        ]
+        lines_x[lastext + 1 : lastext + 1] = add
+        xsrc = "\n".join(lines_x)
+        print("helper externs added:", ", ".join(used_helpers))
 
     # 1) append missing constants after the last TOKEN_* const line
     if all_missing:
@@ -346,21 +418,49 @@ def main():
         # pull the C docblock line above the def for a short description
         docmap[n] = f"Generated audit port {n}."
         frags.append(emit_x(n, x_lines, docmap[n]))
-    xsrc = xsrc.rstrip("\n") + "\n\n/* ── generated leaves (gen_stretch_audit_x.py v1) ── */\n\n" + "\n".join(frags)
+    for n, callee in deleg:
+        frags.append(
+            f"/**\n"
+            f" * Generated delegation port: {n} forwards to {callee}.\n"
+            f" * Pointer ABI + by-value net semantics (callee restores).\n"
+            f" * @param lex *u8 — opaque lexer (read-only net effect)\n"
+            f" * @param source *u8 — opaque slice\n"
+            f" * @return i32 — callee verdict\n"
+            f" * PLATFORM: SHARED.\n"
+            f" */\n"
+            f"#[no_mangle]\n"
+            f"export function {n}(lex: *u8, source: *u8): i32 {{\n"
+            f"  unsafe {{\n"
+            f"    return {callee}(lex, source);\n"
+            f"  }}\n"
+            f"  return 0;\n"
+            f"}}\n"
+        )
+    if frags:
+        xsrc = xsrc.rstrip("\n") + "\n\n/* ── generated (gen_stretch_audit_x.py) ── */\n\n" + "\n".join(frags)
     open(XFILE, "w").write(xsrc)
 
     # 3) C twins → gated pointer ABI (line-anchored splice, wave-2 proven)
     lines_s = open(SUITE).read().split("\n")
-    for n, _ in gen:
+    for n, _ in gen + deleg:
         body = funcs[n]
-        # locate def block: sig line index + body lines + closing '}' line
-        sig = f"int32_t {n}(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {{"
-        try:
-            si_l = lines_s.index(sig)
-        except ValueError:
+        # locate def block (single- or multi-line signature)
+        si_l = sig_extra = None
+        for i2, l in enumerate(lines_s):
+            if l.startswith(f"int32_t {n}(struct parser_asm_lexer "):
+                if l.rstrip().endswith("{"):
+                    si_l, sig_extra = i2, 0
+                elif (i2 + 1 < len(lines_s)
+                      and lines_s[i2 + 1].rstrip().endswith("{")
+                      and not l.rstrip().endswith(";")):
+                    si_l, sig_extra = i2, 1
+                if si_l is not None:
+                    break
+        if si_l is None:
             print(f"FATAL: def line missing for {n}"); sys.exit(1)
-        ei_l = si_l + 1 + len(body)  # index of closing '}'
-        assert lines_s[ei_l] == "}", n
+        param_name = lines_s[si_l].split("(")[1].split(",")[0].replace("struct parser_asm_lexer", "").strip()
+        ei_l = si_l + 1 + sig_extra + len(body)  # index of closing '}'
+        assert lines_s[ei_l] == "}", (n, lines_s[ei_l])
         # transformed body: strip decls + guard (indent-aware), cast source uses
         nb = []
         skip_ret = False
@@ -383,10 +483,10 @@ def main():
             " * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */\n"
             "#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X\n"
             f"int32_t {n}(void *lex_inout, void *source) {{\n"
-            "  struct parser_asm_lexer lex;\n"
+            f"  struct parser_asm_lexer {param_name};\n"
             "  if (!lex_inout || !source)\n"
             "    return 0;\n"
-            "  lex = *(struct parser_asm_lexer *)lex_inout;\n"
+            f"  {param_name} = *(struct parser_asm_lexer *)lex_inout;\n"
             + nb_txt + "\n}\n#endif"
         )
         lines_s[si_l : ei_l + 1] = shim.split("\n")
@@ -406,8 +506,17 @@ def main():
             t = re.sub(
                 r"(extern\s+)?int32_t " + re.escape(n) + r"\(struct parser_asm_lexer lex, struct parser_asm_slice_u8 \*source\);",
                 lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, void *source);", t)
-            for var in ("lex", "lex_at_if", "lex_cur", "elif_lex", "fn_lex", "lex_after", "saved_lex"):
-                t = t.replace(f"{n}({var},", f"{n}(&{var},")
+            # generic: call sites with a by-value first arg (not &x, not a decl)
+            t = re.sub(
+                re.escape(n) + r"\((?!&|struct|void )([^,()]+),",
+                lambda m: f"{n}(&{m.group(1)},", t)
+            # decl fixups (single- and multi-line, byval + inout forms)
+            t = re.sub(
+                r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\w+,\s*struct\s+parser_asm_slice_u8\s+\*source\);",
+                lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, void *source);", t)
+            t = re.sub(
+                r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\*inout_lex,\s*struct\s+parser_asm_slice_u8\s+\*source\);",
+                lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, void *source);", t)
             if t != orig:
                 open(fp, "w").write(t)
 

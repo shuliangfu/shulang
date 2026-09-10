@@ -150,8 +150,7 @@ extern int32_t parser_asm_stretch_primary_expr_deep_audit_c(struct parser_asm_le
 extern int32_t parser_asm_stretch_primary_call_deep_audit_c(struct parser_asm_lexer lex,
                                                             struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
-extern int32_t parser_asm_stretch_if_expr_branch_audit_c(struct parser_asm_lexer lex_at_if,
-                                                       struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_array_lit_head_audit_c(struct parser_asm_lexer lex,
                                                          struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_primary_suffix_chain_probe_c(struct parser_asm_lexer lex,
@@ -161,8 +160,7 @@ extern int32_t parser_asm_stretch_field_access_name_audit_c(struct parser_asm_sl
 extern int32_t parser_asm_stretch_call_args_shape_probe_c(struct parser_asm_lexer lex,
                                                           struct parser_asm_slice_u8 *source,
                                                           int32_t *out_arg_count);
-extern int32_t parser_asm_stretch_paren_expr_head_audit_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_paren_expr_head_audit_c(void *lex_inout, void *source);
 extern int32_t pipeline_expr_append_call_arg(void *arena, int32_t expr_ref, int32_t arg_ref);
 /** wave452: store turbofish type-arg type_ref on CALL (sidecar pool). */
 extern int32_t pipeline_expr_append_call_type_arg(void *arena, int32_t expr_ref, int32_t type_ref);
@@ -2923,7 +2921,7 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
     return;
   }
   if (r.tok.kind == (int32_t)TOKEN_LPAREN) {
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_paren_expr_head_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_paren_expr_head_audit_c(&lex, source));
     parser_asm_lex_from_result_val_into(&lex, r);
     parse_expr_into(arena, lex, source, out);
     if (!out->ok)
@@ -2965,7 +2963,7 @@ void parser_asm_parse_primary_into_slice_c(void *arena, struct parser_asm_lexer 
   }
   if (r.tok.kind == (int32_t)TOKEN_IF) {
     if_lex = parser_asm_lex_at_token_from_result_c(r);
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_branch_audit_c(if_lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_branch_audit_c(&if_lex, source));
     parser_parse_if_expr_into(arena, if_lex, source, 0, out);
     return;
   }

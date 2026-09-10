@@ -68,7 +68,7 @@ void parser_asm_parse_cond_expr_into_slice_c(void *arena, struct parser_asm_lexe
     return;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_audit_c(lex_start, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_audit_c(lex_start, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_cond_int_as_audit_c(lex_start, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_cond_int_as_audit_c(&lex_start, source));
   lexer_next_into(&rpeek, lex_start, source);
   if (rpeek.tok.kind == (int32_t)TOKEN_INT) {
     int_start = rpeek.token_start;
