@@ -12,7 +12,7 @@ struct parser_asm_lexer_result parser_asm_diag_after_imports_then_structs_slice_
   }
   lexer_next_into(&r, lex, source);
   while (r.tok.kind == (int32_t)TOKEN_STRUCT) {
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_header_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_header_audit_c(&lex, source));
     PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_struct_fields_body_audit_c(lex, source));
     lex = parser_asm_skip_one_struct_slice_c(lex, source);
     lexer_next_into(&r, lex, source);

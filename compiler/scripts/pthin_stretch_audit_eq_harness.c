@@ -68,6 +68,8 @@ extern int32_t parser_asm_stretch_fn_param_list_audit_c(void *lex_inout, void *s
 extern int32_t parser_asm_stretch_skip_return_type_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_function_header_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_struct_header_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
 
 /* Pin .c extern stubs (only reached on cfg-attr / malformed-literal paths the
  * harness corpus never exercises; stubs keep the link self-contained). */
@@ -141,6 +143,14 @@ static int32_t xi_fn_param_list(void *l, void *s, int32_t f) { (void)f; return p
 static int32_t xi_skip_return_type(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_skip_return_type_audit_c(l, s); }
 static int32_t ri_fn_param_list(void *l, void *s, int32_t f) { (void)f; return c_ref_fn_param_list(l, s); }
 static int32_t ri_skip_return_type(void *l, void *s, int32_t f) { (void)f; return c_ref_skip_return_type(l, s); }
+#define AUDIT2_SHIM3(cname) \
+  static int32_t x3_##cname(void *l, void *s, int32_t f) { (void)f; return cname(l, s); }
+AUDIT2_SHIM3(parser_asm_stretch_struct_header_audit_c)
+AUDIT2_SHIM3(parser_asm_stretch_panic_kw_audit_c)
+#define CREF2_SHIM3(cname) \
+  static int32_t r3_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
+CREF2_SHIM3(struct_header)
+CREF2_SHIM3(panic_kw)
 
 /* --- dispatch table --- */
 typedef int32_t (*audit_fn)(void *lex_inout, void *source, int32_t flag);
@@ -170,6 +180,8 @@ static const audit_case k_cases[] = {
     {"skip_return_type", ri_skip_return_type, xi_skip_return_type, 0, 1},
     {"fn_sig", r2_fn_sig, x2_parser_asm_stretch_fn_sig_audit_c, 0, 0},
     {"function_header", r2_function_header, x2_parser_asm_stretch_function_header_audit_c, 0, 0},
+    {"struct_header", r3_struct_header, x3_parser_asm_stretch_struct_header_audit_c, 0, 0},
+    {"panic_kw", r3_panic_kw, x3_parser_asm_stretch_panic_kw_audit_c, 0, 0},
 };
 static int g_fail = 0;
 static long g_checks = 0;
@@ -250,6 +262,11 @@ int main(int argc, char **argv) {
       "function bad(,) : i32 { }",
       "function noparens",
       "function f() : { }",
+      "struct S { }",
+      "struct S",
+      "panic(msg)",
+      "panic;",
+      "panic",
       "function f() { }",
       "\n\nif (a)\n{",   "let x\n:\ni32",        "return\n1;",
   };

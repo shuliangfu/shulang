@@ -149,7 +149,7 @@ extern int32_t parser_asm_stretch_primary_expr_deep_audit_c(struct parser_asm_le
                                                             struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_primary_call_deep_audit_c(struct parser_asm_lexer lex,
                                                             struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_panic_kw_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_panic_kw_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_if_expr_branch_audit_c(struct parser_asm_lexer lex_at_if,
                                                        struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_array_lit_head_audit_c(struct parser_asm_lexer lex,
