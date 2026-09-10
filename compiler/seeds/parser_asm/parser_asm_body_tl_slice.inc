@@ -1056,7 +1056,7 @@ void parser_asm_body_skip_let_const_then_if_into_slice_c(struct parser_asm_lexer
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_body_skip_let_const_type_audit_c(lex, source));
   parser_asm_diag_skip_let_const_into_slice_c(out, lex, source);
   while (out->tok.kind == (int32_t)TOKEN_IF) {
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_header_audit_c(out->next_lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_header_audit_c(&out->next_lex, source));
     parser_asm_skip_one_if_statement_into_slice_c(out, out->next_lex, source);
   }
 }

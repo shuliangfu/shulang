@@ -84,7 +84,7 @@ int32_t parser_asm_stretch_block_stmt_kind_probe_c(struct parser_asm_lexer lex, 
                                                    int32_t *out_stmt_score);
 int32_t parser_asm_stretch_top_level_let_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                  int32_t is_const);
-int32_t parser_asm_stretch_if_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_loop_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                int32_t expect_while);
 int32_t parser_asm_stretch_let_const_decl_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);

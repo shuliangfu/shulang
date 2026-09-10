@@ -29,7 +29,7 @@ enum {
 };
 
 /** block_stmt 内嵌审计前向声明（定义在本文件后部）。 */
-int32_t parser_asm_stretch_if_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_loop_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                int32_t expect_while);
 int32_t parser_asm_stretch_match_kw_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
@@ -919,7 +919,7 @@ int32_t parser_asm_stretch_block_stmt_kind_probe_c(struct parser_asm_lexer lex, 
       (void)parser_asm_stretch_match_kw_audit_c(lex, source);
     } else if (r.tok.kind == (int32_t)TOKEN_IF) {
       score += 2;
-      (void)parser_asm_stretch_if_header_audit_c(lex, source);
+      (void)parser_asm_stretch_if_header_audit_c(&lex, source);
     } else if (r.tok.kind == (int32_t)TOKEN_WHILE) {
       score += 2;
       (void)parser_asm_stretch_loop_stmt_body_audit_c(lex, source, 1);
@@ -942,17 +942,24 @@ int32_t parser_asm_stretch_block_stmt_kind_probe_c(struct parser_asm_lexer lex, 
 
 /**
  * if 语句头审计：当前 lex 须在 IF，下一 token 须为 '('。
+ * B-minus twin（7.2.1 RFC §5c）：hybrid lane 以 XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+ * 编掉本定义，同符号由 .x 权威 src/asm/pthin_stretch_audit.x 提供（同 commit 同语义，
+ * pointer ABI + 按值净语义＝本地拷贝）。冷/默认 lane 本 C 孪生为唯一定义。
  */
-int32_t parser_asm_stretch_if_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X
+int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
   struct parser_asm_lexer_result r;
-  if (!source)
+  if (!lex_inout || !source)
     return 0;
-  lexer_next_into(&r, lex, source);
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   if (r.tok.kind != (int32_t)TOKEN_IF)
     return 0;
-  lexer_next_into(&r, r.next_lex, source);
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.kind == (int32_t)TOKEN_LPAREN ? 1 : 0;
 }
+#endif
 
 /**
  * while/for 循环头审计：关键字后须为 '('。
@@ -1477,7 +1484,7 @@ int32_t parser_asm_stretch_primary_head_audit_c(struct parser_asm_lexer lex, str
     score += 1;
     break;
   case (int32_t)TOKEN_IF:
-    (void)parser_asm_stretch_if_header_audit_c(lex, source);
+    (void)parser_asm_stretch_if_header_audit_c(&lex, source);
     score += 3;
     break;
   case (int32_t)TOKEN_MATCH:
@@ -1741,7 +1748,7 @@ int32_t parser_asm_stretch_unary_prefix_audit_c(struct parser_asm_lexer lex, str
  */
 int32_t parser_asm_stretch_if_expr_branch_audit_c(struct parser_asm_lexer lex_at_if,
                                                   struct parser_asm_slice_u8 *source) {
-  return parser_asm_stretch_if_header_audit_c(lex_at_if, source);
+  return parser_asm_stretch_if_header_audit_c(&lex_at_if, source);
 }
 
 /**
@@ -1915,7 +1922,7 @@ int32_t parser_asm_stretch_assign_op_audit_c(struct parser_asm_lexer lex, struct
  */
 int32_t parser_asm_stretch_if_stmt_branch_audit_c(struct parser_asm_lexer lex_at_if,
                                                   struct parser_asm_slice_u8 *source) {
-  return parser_asm_stretch_if_header_audit_c(lex_at_if, source);
+  return parser_asm_stretch_if_header_audit_c(&lex_at_if, source);
 }
 
 /**
@@ -2537,7 +2544,7 @@ int32_t parser_asm_stretch_skip_one_if_buf_audit_c(struct parser_asm_lexer lex, 
     return 0;
   sl.data = data;
   sl.length = (size_t)len;
-  return parser_asm_stretch_if_header_audit_c(lex, &sl);
+  return parser_asm_stretch_if_header_audit_c(&lex, &sl);
 }
 
 /**
@@ -3012,7 +3019,7 @@ static int32_t parser_asm_stretch_if_advance_to_body_lex_c(struct parser_asm_lex
 
   if (!source || !out_body_lex)
     return 0;
-  (void)parser_asm_stretch_if_header_audit_c(lex, source);
+  (void)parser_asm_stretch_if_header_audit_c(&lex, source);
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_IF)
     return 0;
@@ -3837,7 +3844,7 @@ int32_t parser_asm_stretch_skip_one_if_core_deep_audit_c(struct parser_asm_lexer
   struct parser_asm_lexer_result r;
   int32_t score;
 
-  score = parser_asm_stretch_if_header_audit_c(lex, source);
+  score = parser_asm_stretch_if_header_audit_c(&lex, source);
   lexer_next_into(&r, lex, source);
   if (r.tok.kind == (int32_t)TOKEN_IF)
     lexer_next_into(&r, r.next_lex, source);
@@ -4071,7 +4078,7 @@ int32_t parser_asm_stretch_if_expr_deep_audit_c(struct parser_asm_lexer lex_at_i
 
   score = parser_asm_stretch_if_expr_branch_audit_c(lex_at_if, source);
   score += parser_asm_stretch_else_if_chain_audit_c(lex_at_if, source);
-  score += parser_asm_stretch_if_header_audit_c(lex_at_if, source);
+  score += parser_asm_stretch_if_header_audit_c(&lex_at_if, source);
   lexer_next_into(&r, lex_at_if, source);
   if (r.tok.kind == (int32_t)TOKEN_IF)
     lexer_next_into(&r, r.next_lex, source);
@@ -4218,7 +4225,7 @@ int32_t parser_asm_stretch_if_stmt_deep_audit_c(struct parser_asm_lexer lex_at_i
 
   score = parser_asm_stretch_if_stmt_branch_audit_c(lex_at_if, source);
   score += parser_asm_stretch_if_body_deep_audit_c(lex_at_if, source);
-  score += parser_asm_stretch_if_header_audit_c(lex_at_if, source);
+  score += parser_asm_stretch_if_header_audit_c(&lex_at_if, source);
   lexer_next_into(&r, lex_at_if, source);
   if (r.tok.kind == (int32_t)TOKEN_IF)
     lexer_next_into(&r, r.next_lex, source);

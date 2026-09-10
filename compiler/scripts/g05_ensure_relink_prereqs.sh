@@ -219,6 +219,11 @@ g05_try_x_to_o() {
     echo '#include <stdlib.h>'
     echo '#include <string.h>'
     echo '#include <stdio.h>'
+    # G05_X_O_WEAK perl marks defs XLANG_WEAK; the define authority is this
+    # header (PLATFORM: SHARED — Darwin ld + Ubuntu ld.bfd both honor the
+    # __attribute__((weak)) branch). P9a stretch_audit was the first lane to
+    # reach the -E fallback with weak marking on (PEL always won pure-asm).
+    echo '#include <xlang_weak.h>'
     # Cap residual 10.7.2 (slice18): Track L -E may embed CRASH_EVIDENCE snprintf;
     # redirect at compile face (same authority as driver_leaf_x_to_o prologue).
     # PLATFORM: SHARED — Cap header under compiler/include.
@@ -745,6 +750,9 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
   _pthin_p7_seed=seeds/pthin_simd.from_x.c
   _pthin_p8_seed=seeds/pthin_seed_parse.from_x.c
   _pthin_p9_seed=seeds/pthin_stretch.from_x.c
+  # G-02f-318a / 7.2.1 B-minus pilot (RFC §5c): stretch-audit .x thin + lexer-step bridge
+  _pthin_p9a_x=src/asm/pthin_stretch_audit.x
+  _pthin_p9a_bridge=seeds/parser_asm_lex_step_bridge.from_x.c
   _pthin_p10_seed=seeds/pthin_glue.from_x.c
   _pthin_p11_seed=seeds/pthin_imports.from_x.c
   _pthin_p12_seed=seeds/pthin_skip_tl.from_x.c
@@ -771,6 +779,8 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
       || { [ -f "$_pthin_p7_seed" ] && [ "$_pthin_p7_seed" -nt parser_asm_thin_glue.o ]; } \
       || { [ -f "$_pthin_p8_seed" ] && [ "$_pthin_p8_seed" -nt parser_asm_thin_glue.o ]; } \
       || { [ -f "$_pthin_p9_seed" ] && [ "$_pthin_p9_seed" -nt parser_asm_thin_glue.o ]; } \
+      || { [ -f "$_pthin_p9a_x" ] && [ "$_pthin_p9a_x" -nt parser_asm_thin_glue.o ]; } \
+      || { [ -f "$_pthin_p9a_bridge" ] && [ "$_pthin_p9a_bridge" -nt parser_asm_thin_glue.o ]; } \
       || { [ -f "$_pthin_p10_seed" ] && [ "$_pthin_p10_seed" -nt parser_asm_thin_glue.o ]; } \
       || { [ -f "$_pthin_p11_seed" ] && [ "$_pthin_p11_seed" -nt parser_asm_thin_glue.o ]; } \
       || { [ -f "$_pthin_p12_seed" ] && [ "$_pthin_p12_seed" -nt parser_asm_thin_glue.o ]; } \
@@ -814,6 +824,8 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
         _pthin_p6_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p6.XXXXXX") || true
         _pthin_p7_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p7.XXXXXX") || true
         _pthin_p9_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p9.XXXXXX") || true
+        _pthin_p9a_thin_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p9a_thin.XXXXXX") || true
+        _pthin_p9a_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p9a.XXXXXX") || true
         _pthin_p10_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p10.XXXXXX") || true
         _pthin_p11_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p11.XXXXXX") || true
         _pthin_p12_o=$(mktemp "${TMPDIR:-/tmp}/g05_pthin_p12.XXXXXX") || true
@@ -838,6 +850,7 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
         _pthin_p6_ok=0
         _pthin_p7_ok=0
         _pthin_p9_ok=0
+        _pthin_p9a_ok=0
         _pthin_p10_ok=0
         _pthin_p11_ok=0
         _pthin_p12_ok=0
@@ -949,10 +962,29 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
             echo "g05_ensure: P7 simd ← $_pthin_p7_seed (G-02f-288 seed slice)"
           fi
         fi
+        # G-02f-318a / 7.2.1 B-minus pilot (RFC §5c): stretch-audit .x thin + bridge.
+        # Runs BEFORE P9 so its define gates the suite C twin out of the P9 seed TU
+        # AND (via rest_defs) out of the rest TU; on any failure both fall back to
+        # the seed C twin with no define — single authority per lane either way.
+        # PLATFORM: SHARED
+        _pthin_p9_extra=""
+        if [ -n "$_pthin_p9a_thin_o" ] && [ -n "$_pthin_p9a_o" ] && [ -f "$_pthin_p9a_x" ] \
+          && [ -f "$_pthin_p9a_bridge" ]; then
+          if G05_X_O_WEAK=1 g05_try_x_to_o "$_pthin_p9a_x" "$_pthin_p9a_thin_o" \
+             && $CC $BASE_CFLAGS -I. -Iinclude -Isrc -Isrc/asm -Iseeds/parser_asm \
+                  -c -o "$_pthin_p9a_o" "$_pthin_p9a_bridge"; then
+            _pthin_p9a_ok=1
+            _pthin_p9_extra="-DXLANG_PTHIN_STRETCH_AUDIT_FROM_X"
+            _pthin_rest_defs="$_pthin_rest_defs -DXLANG_PTHIN_STRETCH_AUDIT_FROM_X"
+            echo "g05_ensure: P9a stretch_audit ← $_pthin_p9a_x + $_pthin_p9a_bridge (7.2.1 B-minus)"
+          else
+            echo "g05_ensure: P9a stretch_audit .x thin failed; seed C twin stays" >&2
+          fi
+        fi
         if [ -n "$_pthin_p9_o" ] && [ -f "$_pthin_p9_seed" ]; then
           # shellcheck disable=SC2086
           if $CC $BASE_CFLAGS -I. -Iinclude -Isrc -Isrc/lexer -Isrc/asm -Iseeds/parser_asm \
-               -c -o "$_pthin_p9_o" "$_pthin_p9_seed"; then
+               $_pthin_p9_extra -c -o "$_pthin_p9_o" "$_pthin_p9_seed"; then
             _pthin_p9_ok=1
             _pthin_rest_defs="$_pthin_rest_defs -DXLANG_PTHIN_STRETCH_FROM_X"
             echo "g05_ensure: P9 stretch+suite ← $_pthin_p9_seed (G-02f-318 seed slice)"
@@ -1110,6 +1142,9 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
         if [ "$_pthin_p9_ok" = "1" ]; then
           _pthin_link="$_pthin_link $_pthin_p9_o"
         fi
+        if [ "$_pthin_p9a_ok" = "1" ]; then
+          _pthin_link="$_pthin_link $_pthin_p9a_thin_o $_pthin_p9a_o"
+        fi
         if [ "$_pthin_p11_ok" = "1" ]; then
           _pthin_link="$_pthin_link $_pthin_p11_o"
         fi
@@ -1182,7 +1217,7 @@ if [ "${G05_SKIP_HOT_REBUILD:-}" != "1" ]; then
         if [ "$_pthin_done" = "0" ]; then
           echo "g05_ensure: parser thin P1–P7+P9–P20 hybrid failed; fallback full seed" >&2
         fi
-        rm -f "$_pthin_p1_o" "$_pthin_p2_o" "$_pthin_p3_o" "$_pthin_p4p_o" "$_pthin_p4u_o" "$_pthin_p4b_o" "$_pthin_p4as_o" "$_pthin_p4t_o" "$_pthin_p5_o" "$_pthin_p6_o" "$_pthin_p7_o" "$_pthin_p9_o" "$_pthin_p10_o" "$_pthin_p11_o" "$_pthin_p12_o" "$_pthin_p13_o" "$_pthin_p14_o" "$_pthin_p15_o" "$_pthin_p16_o" "$_pthin_p17_o" "$_pthin_p18_o" "$_pthin_p19_o" "$_pthin_p20_o" "$_pthin_rest_o"
+        rm -f "$_pthin_p1_o" "$_pthin_p2_o" "$_pthin_p3_o" "$_pthin_p4p_o" "$_pthin_p4u_o" "$_pthin_p4b_o" "$_pthin_p4as_o" "$_pthin_p4t_o" "$_pthin_p5_o" "$_pthin_p6_o" "$_pthin_p7_o" "$_pthin_p9_o" "$_pthin_p9a_thin_o" "$_pthin_p9a_o" "$_pthin_p10_o" "$_pthin_p11_o" "$_pthin_p12_o" "$_pthin_p13_o" "$_pthin_p14_o" "$_pthin_p15_o" "$_pthin_p16_o" "$_pthin_p17_o" "$_pthin_p18_o" "$_pthin_p19_o" "$_pthin_p20_o" "$_pthin_rest_o"
       fi
       if [ "$_pthin_done" = "0" ]; then
         echo "g05_ensure: parser_asm_thin_glue.o ← thin seed (G-02f-10)"

@@ -77,17 +77,20 @@ void diag_report_with_code(void *ctx, const char *code, int32_t line, int32_t co
 }
 int32_t lexer_parser_slice_from_buf(void) { return 0; }
 
-/* Reference twin — verbatim copy of the by-value C authority at
- * seeds/parser_asm/parser_asm_emit_heavy_stretch_suite_slice.inc:946
- * (refresh this copy in the same commit whenever the suite twin changes). */
-static int32_t c_ref_if_header(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source) {
+/* Reference twin — verbatim copy of the gated C authority in
+ * seeds/parser_asm/parser_asm_emit_heavy_stretch_suite_slice.inc
+ * (parser_asm_stretch_if_header_audit_c, the #ifndef non-hybrid branch;
+ * refresh this copy in the same commit whenever the suite twin changes). */
+static int32_t c_ref_if_header(void *lex_inout, void *source) {
+  struct parser_asm_lexer lex;
   struct parser_asm_lexer_result r;
-  if (!source)
+  if (!lex_inout || !source)
     return 0;
-  lexer_next_into(&r, lex, source);
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
   if (r.tok.kind != (int32_t)TOKEN_IF)
     return 0;
-  lexer_next_into(&r, r.next_lex, source);
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.kind == (int32_t)TOKEN_LPAREN ? 1 : 0;
 }
 
@@ -100,7 +103,7 @@ static void check_one(const char *tag, struct parser_asm_lexer lex, struct parse
   struct parser_asm_lexer for_x = lex;
   int32_t rc_c;
   int32_t rc_x;
-  rc_c = c_ref_if_header(for_c, src);
+  rc_c = c_ref_if_header(&for_c, src);
   rc_x = parser_asm_stretch_if_header_audit_c(&for_x, src);
   g_checks++;
   if (rc_c != rc_x) {
@@ -114,8 +117,12 @@ static void check_one(const char *tag, struct parser_asm_lexer lex, struct parse
            lex.col, for_x.pos, for_x.line, for_x.col);
     g_fail++;
   }
-  /* The C twin is by-value: the caller's struct is trivially untouched, so
-   * rc agreement + .x immobility is the complete equivalence contract. */
+  if (memcmp(&for_c, &lex, sizeof(lex)) != 0) {
+    printf("FAIL %s: c ref moved caller lexer (%zu/%d/%d -> %zu/%d/%d)\n", tag, lex.pos, lex.line,
+           lex.col, for_c.pos, for_c.line, for_c.col);
+    g_fail++;
+  }
+  /* Both twins promise by-value net semantics: caller's lexer untouched. */
 }
 
 /** Run the battery at every token offset of one source buffer. */
@@ -189,7 +196,7 @@ int main(int argc, char **argv) {
       printf("FAIL null-source guard (.x)\n");
       g_fail++;
     }
-    if (c_ref_if_header(lex, 0) != 0) {
+    if (c_ref_if_header(&lex, 0) != 0) {
       printf("FAIL null-source guard (c ref)\n");
       g_fail++;
     }

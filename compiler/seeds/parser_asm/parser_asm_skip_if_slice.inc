@@ -141,7 +141,7 @@ void parser_asm_skip_one_if_statement_into_slice_c(struct parser_asm_lexer_resul
   struct parser_asm_lexer lex_cur;
   if (!out || !source)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_header_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_header_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_body_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_body_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_deep_audit_c(lex, source));

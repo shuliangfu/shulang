@@ -103,7 +103,7 @@ extern int32_t parser_asm_stretch_if_control_mega_full_deep_audit_c(struct parse
 extern int32_t parser_asm_stretch_if_control_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex_at_if, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_if_else_chain_full_deep_audit_c(struct parser_asm_lexer lex_at_if, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_else_chain_full_deep_buf_audit_c(struct parser_asm_lexer lex_at_if, uint8_t *data, int32_t len);
-extern int32_t parser_asm_stretch_if_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_if_stmt_body_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_stmt_body_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_if_stmt_deep_audit_c(struct parser_asm_lexer lex_at_if, struct parser_asm_slice_u8 *source);

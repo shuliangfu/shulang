@@ -67,22 +67,25 @@ export function parser_asm_stretch_if_header_audit_c(lex: *u8, source: *u8): i32
   if (lex == 0 as *u8 || source == 0 as *u8) {
     return 0;
   }
-  pos0 = parser_asm_lex_pos_c(lex);
-  line0 = parser_asm_lex_line_c(lex);
-  col0 = parser_asm_lex_col_c(lex);
-  kind = parser_asm_lex_step_kind_c(lex, source);
-  if (kind != TOKEN_IF) {
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_IF) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_step_kind_c(lex, source);
     parser_asm_lex_set_pos_c(lex, pos0);
     parser_asm_lex_set_line_c(lex, line0);
     parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_LPAREN) {
+      return 1;
+    }
     return 0;
-  }
-  kind = parser_asm_lex_step_kind_c(lex, source);
-  parser_asm_lex_set_pos_c(lex, pos0);
-  parser_asm_lex_set_line_c(lex, line0);
-  parser_asm_lex_set_col_c(lex, col0);
-  if (kind == TOKEN_LPAREN) {
-    return 1;
   }
   return 0;
 }
