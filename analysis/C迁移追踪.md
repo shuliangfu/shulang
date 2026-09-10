@@ -105,14 +105,14 @@
 
 ### 开项
 
-- 🟡 **7.2.1b** parser_asm suite audit B-minus — **141／1,956**  
+- 🟡 **7.2.1b** parser_asm suite audit B-minus — **144／1,956**  
   - [x] ABI＝B-minus（opaque＋lexer-step 桥；RFC §5）  
-  - [x] 桥面／P9a／三契约／生成器 v1→v4.9／等价 harness  
+  - [x] 桥面／P9a／三契约／生成器 v1→v5.0／等价 harness  
   - [x] 栈 kinds[]／peek_kind_chain 根（toplevel_kind_peek 族）  
   - [ ] 厚 buf 体 ~279  
-  - [x] out 参族累计 8／9（＋impl_items／block_stmt／extern_param／struct_lit；生成器 v4.7–v4.9）
-  - [ ] out 参族余 1（trait_methods：`&r.next_lex` void-audit＋skip 双步进墙）  
-  - [ ] 深链组合器（mega／bracket 步进语义等；harness 红未入）  
+  - [x] out 参族 9／9（＋trait_methods；生成器 v5.0 elide void `&r.next_lex`）  
+  - [x] array／slice bracket 头粗探（同波双步进根修解锁）  
+  - [ ] 深链组合器（mega／其余 deep score 等；harness 红未入）  
   - 机制 → [`7.2.1-parser-inc-port-ABI-RFC.md`](7.2.1-parser-inc-port-ABI-RFC.md)；逐波 → 自举进度 §6  
 - 🟡 **7.2.2** parser_gen 去 pin — 产品默认 pin-first；`FROM_X=1` 仅显式 assemble  
 - ⬜ **7.2.1** parser seed 物理删（史诗；依赖 7.2.1b／8.3）  
@@ -269,7 +269,7 @@
 ### 推荐推进序（非流水）
 
 1. 日常软刀／PC 底盘（非 mega；须点名才动 check／mega）  
-2. 🟡 **7.2.1b** B-minus 续（厚 buf／out 参／深链）＋ **BC + 8.3**  
+2. 🟡 **7.2.1b** B-minus 续（厚 buf／深链；out 参 9／9 已收）＋ **BC + 8.3**  
 3. ⬜ **7.2.1／7.2.2** parser seed 物理删／去 pin  
 4. 🟡 **阶段 10** 残（NT／MSVC／qemu／Win 实机）  
 5. ⬜ **阶段 12–13** 最小 seed · 全路径零 cc · v2==v3 · 公告  
