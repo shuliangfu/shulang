@@ -46,10 +46,17 @@ export extern "C" function parser_asm_lex_source_data_c(source: *u8): *u8;
 /** Read the source slice's length. */
 export extern "C" function parser_asm_lex_source_length_c(source: *u8): usize;
 
+/** Suite skip helpers via in-place adapters (C stays authority). */
+export extern "C" function parser_asm_lex_is_type_start_kind_c(kind: i32): i32;
+export extern "C" function parser_asm_lex_skip_balanced_brackets_inplace_c(lex_inout: *u8, source: *u8): void;
+export extern "C" function parser_asm_lex_skip_type_suffix_inplace_c(lex_inout: *u8, source: *u8): void;
+export extern "C" function parser_asm_lex_skip_one_param_type_inplace_c(lex_inout: *u8, source: *u8): void;
+
 // Lexer canonical TokenKind values (enum token_TokenKind indices; authority
 // include/token.h == seeds/lexer_gen.linux.x86_64.c, verified identical 133
 // entries — see pthin_stretch.x for the rest of the constant set).
 const TOKEN_EOF: i32 = 0;
+const TOKEN_FUNCTION: i32 = 1;
 const TOKEN_LET: i32 = 2;
 const TOKEN_CONST: i32 = 3;
 const TOKEN_IF: i32 = 4;
@@ -67,6 +74,20 @@ const TOKEN_LPAREN: i32 = 82;
 const TOKEN_LBRACE: i32 = 84;
 const TOKEN_COLON: i32 = 91;
 const TOKEN_SEMICOLON: i32 = 95;
+const TOKEN_RPAREN: i32 = 83;
+const TOKEN_LBRACKET: i32 = 86;
+const TOKEN_RBRACKET: i32 = 87;
+const TOKEN_COMMA: i32 = 90;
+const TOKEN_STAR: i32 = 98;
+const TOKEN_I32: i32 = 60;
+const TOKEN_BOOL: i32 = 61;
+const TOKEN_U8: i32 = 62;
+const TOKEN_U32: i32 = 63;
+const TOKEN_U64: i32 = 64;
+const TOKEN_I64: i32 = 65;
+const TOKEN_USIZE: i32 = 66;
+const TOKEN_VOID: i32 = 79;
+const TOKEN_ASYNC: i32 = 55;
 
 /**
  * Audit an `if` statement header: exactly `if (` opens a valid header.
@@ -590,6 +611,270 @@ export function parser_asm_stretch_import_stmt_audit_c(lex: *u8, source: *u8): i
     parser_asm_lex_set_pos_c(lex, pos0);
     parser_asm_lex_set_line_c(lex, line0);
     parser_asm_lex_set_col_c(lex, col0);
+    return 0;
+  }
+  return 0;
+}
+
+/* ── function-signature audit cluster (B-minus wave 3) ────────────────────
+ * Two inout-ABI audits (fn_param_list / skip_return_type keep the caller's
+ * lexer advanced on success — inout contract, no restore) and two by-value
+ * audits (fn_sig / function_header — snapshot/restore trio). Composed calls
+ * thread the opaque pointer through; no local lexer struct is ever needed. */
+
+/**
+ * Scan a parameter list `(name: type, ...)` starting just after '('.
+ * Inout contract (≡ suite twin): on success the caller's lexer is left just
+ * after the closing ')'; on any failure the caller's lexer is left UNCHANGED
+ * (the C twin only writes back on success).
+ * Port of the suite twin `parser_asm_stretch_fn_param_list_audit_c`.
+ * @param lex_inout *u8 — opaque lexer, advanced past ')' on success
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff the list is well-formed (or empty `()`)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_fn_param_list_audit_c(lex_inout: *u8, source: *u8): i32 {
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let guard: i32 = 0;
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  if (lex_inout == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex_inout);
+    line0 = parser_asm_lex_line_c(lex_inout);
+    col0 = parser_asm_lex_col_c(lex_inout);
+    kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+    if (kind == TOKEN_RPAREN) {
+      parser_asm_lex_step_kind_c(lex_inout, source);
+      return 1;
+    }
+    while (guard <= 128) {
+      guard = guard + 1;
+      idlen = parser_asm_lex_peek_ident_len_c(lex_inout, source);
+      if (kind != TOKEN_IDENT || idlen <= 0 || idlen > 63) {
+        parser_asm_lex_set_pos_c(lex_inout, pos0);
+        parser_asm_lex_set_line_c(lex_inout, line0);
+        parser_asm_lex_set_col_c(lex_inout, col0);
+        return 0;
+      }
+      parser_asm_lex_step_kind_c(lex_inout, source);
+      kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+      if (kind != TOKEN_COLON) {
+        parser_asm_lex_set_pos_c(lex_inout, pos0);
+        parser_asm_lex_set_line_c(lex_inout, line0);
+        parser_asm_lex_set_col_c(lex_inout, col0);
+        return 0;
+      }
+      parser_asm_lex_step_kind_c(lex_inout, source);
+      parser_asm_lex_skip_one_param_type_inplace_c(lex_inout, source);
+      kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+      if (kind == TOKEN_RPAREN) {
+        parser_asm_lex_step_kind_c(lex_inout, source);
+        return 1;
+      }
+      if (kind != TOKEN_COMMA) {
+        parser_asm_lex_set_pos_c(lex_inout, pos0);
+        parser_asm_lex_set_line_c(lex_inout, line0);
+        parser_asm_lex_set_col_c(lex_inout, col0);
+        return 0;
+      }
+      parser_asm_lex_step_kind_c(lex_inout, source);
+      kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+    }
+    parser_asm_lex_set_pos_c(lex_inout, pos0);
+    parser_asm_lex_set_line_c(lex_inout, line0);
+    parser_asm_lex_set_col_c(lex_inout, col0);
+    return 0;
+  }
+  return 0;
+}
+
+/**
+ * Skip a return-type token sequence (after ':') up to '{'. Inout contract
+ * (≡ suite twin): on success the caller's lexer is advanced to the '{' and
+ * KEPT there; on any failure the caller's lexer is left UNCHANGED (the C
+ * twin only writes back on success). '*' skips itself, a type-start skips
+ * its suffix, '[' skips a balanced group, any other token fails.
+ * Port of the suite twin `parser_asm_stretch_skip_return_type_audit_c`.
+ * @param lex_inout *u8 — opaque lexer (advanced on success only)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff a '{' is reached within the guard budget
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_skip_return_type_audit_c(lex_inout: *u8, source: *u8): i32 {
+  let kind: i32 = 0;
+  let guard: i32 = 0;
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  if (lex_inout == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex_inout);
+    line0 = parser_asm_lex_line_c(lex_inout);
+    col0 = parser_asm_lex_col_c(lex_inout);
+    kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+    while (kind != TOKEN_LBRACE && kind != TOKEN_EOF) {
+      if (guard > 96) {
+        parser_asm_lex_set_pos_c(lex_inout, pos0);
+        parser_asm_lex_set_line_c(lex_inout, line0);
+        parser_asm_lex_set_col_c(lex_inout, col0);
+        return 0;
+      }
+      guard = guard + 1;
+      if (kind == TOKEN_STAR) {
+        parser_asm_lex_step_kind_c(lex_inout, source);
+        kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+        continue;
+      }
+      if (parser_asm_lex_is_type_start_kind_c(kind) != 0) {
+        parser_asm_lex_step_kind_c(lex_inout, source);
+        parser_asm_lex_skip_type_suffix_inplace_c(lex_inout, source);
+        kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+        continue;
+      }
+      if (kind == TOKEN_LBRACKET) {
+        parser_asm_lex_step_kind_c(lex_inout, source);
+        parser_asm_lex_skip_balanced_brackets_inplace_c(lex_inout, source);
+        kind = parser_asm_lex_peek_kind_c(lex_inout, source);
+        continue;
+      }
+      parser_asm_lex_set_pos_c(lex_inout, pos0);
+      parser_asm_lex_set_line_c(lex_inout, line0);
+      parser_asm_lex_set_col_c(lex_inout, col0);
+      return 0;
+    }
+    if (kind != TOKEN_LBRACE) {
+      parser_asm_lex_set_pos_c(lex_inout, pos0);
+      parser_asm_lex_set_line_c(lex_inout, line0);
+      parser_asm_lex_set_col_c(lex_inout, col0);
+      return 0;
+    }
+    return 1;
+  }
+  return 0;
+}
+
+#[no_mangle]
+export function parser_asm_stretch_fn_sig_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let ok: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_step_kind_c(lex, source);
+    if (kind != TOKEN_FUNCTION) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind != TOKEN_IDENT || idlen <= 0) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_LPAREN) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    if (parser_asm_stretch_fn_param_list_audit_c(lex, source) == 0) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_COLON) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    ok = parser_asm_stretch_skip_return_type_audit_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    return ok;
+  }
+  return 0;
+}
+
+/**
+ * Audit a function header with optional async prefix: `[async] function name (`.
+ * By-value net semantics via the restore trio.
+ * Port of the suite twin `parser_asm_stretch_function_header_audit_c`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — 1 iff `[async] function <ident> (` opens the header
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_function_header_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind == TOKEN_ASYNC) {
+      parser_asm_lex_step_kind_c(lex, source);
+      kind = parser_asm_lex_peek_kind_c(lex, source);
+    }
+    if (kind != TOKEN_FUNCTION) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    if (kind != TOKEN_IDENT || idlen <= 0) {
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    parser_asm_lex_set_pos_c(lex, pos0);
+    parser_asm_lex_set_line_c(lex, line0);
+    parser_asm_lex_set_col_c(lex, col0);
+    if (kind == TOKEN_LPAREN) {
+      return 1;
+    }
     return 0;
   }
   return 0;

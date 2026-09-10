@@ -64,6 +64,10 @@ extern int32_t parser_asm_stretch_enum_header_audit_c(void *lex_inout, void *sou
 extern int32_t parser_asm_stretch_match_kw_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_return_stmt_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_import_stmt_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_fn_param_list_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_skip_return_type_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_function_header_audit_c(void *lex_inout, void *source);
 
 /* Pin .c extern stubs (only reached on cfg-attr / malformed-literal paths the
  * harness corpus never exercises; stubs keep the link self-contained). */
@@ -125,6 +129,18 @@ CREF2_SHIM(return_stmt)
 CREF2_SHIM(import_stmt)
 static int32_t r_loop_header(void *l, void *s, int32_t f) { return c_ref_loop_header(l, s, f); }
 static int32_t r_break_continue(void *l, void *s, int32_t f) { return c_ref_break_continue(l, s, f); }
+#define AUDIT2_SHIM2(cname) \
+  static int32_t x2_##cname(void *l, void *s, int32_t f) { (void)f; return cname(l, s); }
+AUDIT2_SHIM2(parser_asm_stretch_fn_sig_audit_c)
+AUDIT2_SHIM2(parser_asm_stretch_function_header_audit_c)
+#define CREF2_SHIM2(cname) \
+  static int32_t r2_##cname(void *l, void *s, int32_t f) { (void)f; return c_ref_##cname(l, s); }
+CREF2_SHIM2(fn_sig)
+CREF2_SHIM2(function_header)
+static int32_t xi_fn_param_list(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_fn_param_list_audit_c(l, s); }
+static int32_t xi_skip_return_type(void *l, void *s, int32_t f) { (void)f; return parser_asm_stretch_skip_return_type_audit_c(l, s); }
+static int32_t ri_fn_param_list(void *l, void *s, int32_t f) { (void)f; return c_ref_fn_param_list(l, s); }
+static int32_t ri_skip_return_type(void *l, void *s, int32_t f) { (void)f; return c_ref_skip_return_type(l, s); }
 
 /* --- dispatch table --- */
 typedef int32_t (*audit_fn)(void *lex_inout, void *source, int32_t flag);
@@ -134,21 +150,26 @@ typedef struct {
   audit_fn c_ref;
   audit_fn x_ver;
   int32_t flag;
+  int inout; /* 1: inout contract — compare post-call lexer states */
 } audit_case;
 
 static const audit_case k_cases[] = {
-    {"if_header", r_if_header, x_parser_asm_stretch_if_header_audit_c, 0},
-    {"loop_header/w", r_loop_header, x_loop_header, 1},
-    {"loop_header/f", r_loop_header, x_loop_header, 0},
-    {"break_continue/b", r_break_continue, x_break_continue, 1},
-    {"break_continue/c", r_break_continue, x_break_continue, 0},
-    {"else_stmt", r_else_stmt, x_parser_asm_stretch_else_stmt_audit_c, 0},
-    {"else_if_chain", r_else_if_chain, x_parser_asm_stretch_else_if_chain_audit_c, 0},
-    {"let_const_decl", r_let_const_decl, x_parser_asm_stretch_let_const_decl_audit_c, 0},
-    {"enum_header", r_enum_header, x_parser_asm_stretch_enum_header_audit_c, 0},
-    {"match_kw", r_match_kw, x_parser_asm_stretch_match_kw_audit_c, 0},
-    {"return_stmt", r_return_stmt, x_parser_asm_stretch_return_stmt_audit_c, 0},
-    {"import_stmt", r_import_stmt, x_parser_asm_stretch_import_stmt_audit_c, 0},
+    {"if_header", r_if_header, x_parser_asm_stretch_if_header_audit_c, 0, 0},
+    {"loop_header/w", r_loop_header, x_loop_header, 1, 0},
+    {"loop_header/f", r_loop_header, x_loop_header, 0, 0},
+    {"break_continue/b", r_break_continue, x_break_continue, 1, 0},
+    {"break_continue/c", r_break_continue, x_break_continue, 0, 0},
+    {"else_stmt", r_else_stmt, x_parser_asm_stretch_else_stmt_audit_c, 0, 0},
+    {"else_if_chain", r_else_if_chain, x_parser_asm_stretch_else_if_chain_audit_c, 0, 0},
+    {"let_const_decl", r_let_const_decl, x_parser_asm_stretch_let_const_decl_audit_c, 0, 0},
+    {"enum_header", r_enum_header, x_parser_asm_stretch_enum_header_audit_c, 0, 0},
+    {"match_kw", r_match_kw, x_parser_asm_stretch_match_kw_audit_c, 0, 0},
+    {"return_stmt", r_return_stmt, x_parser_asm_stretch_return_stmt_audit_c, 0, 0},
+    {"import_stmt", r_import_stmt, x_parser_asm_stretch_import_stmt_audit_c, 0, 0},
+    {"fn_param_list", ri_fn_param_list, xi_fn_param_list, 0, 1},
+    {"skip_return_type", ri_skip_return_type, xi_skip_return_type, 0, 1},
+    {"fn_sig", r2_fn_sig, x2_parser_asm_stretch_fn_sig_audit_c, 0, 0},
+    {"function_header", r2_function_header, x2_parser_asm_stretch_function_header_audit_c, 0, 0},
 };
 static int g_fail = 0;
 static long g_checks = 0;
@@ -167,6 +188,16 @@ static void check_one(const audit_case *ac, struct parser_asm_lexer lex,
     printf("FAIL %s: rc mismatch c=%d x=%d (pos=%zu line=%d col=%d)\n", ac->name, rc_c, rc_x,
            lex.pos, lex.line, lex.col);
     g_fail++;
+    return;
+  }
+  if (ac->inout) {
+    /* inout contract: both twins must leave the caller's lexer at the SAME
+     * end state — compare the two directly (advancement allowed). */
+    if (memcmp(&for_c, &for_x, sizeof(lex)) != 0) {
+      printf("FAIL %s: inout end-state mismatch c=(%zu/%d/%d) x=(%zu/%d/%d)\n", ac->name,
+             for_c.pos, for_c.line, for_c.col, for_x.pos, for_x.line, for_x.col);
+      g_fail++;
+    }
     return;
   }
   if (memcmp(&for_x, &lex, sizeof(lex)) != 0) {
@@ -213,7 +244,13 @@ int main(int argc, char **argv) {
       "const y: u8 = 2;", "let : i32",            "enum E { }",   "enum { }",
       "enum E",           "match v { 1 => 2 }",   "match v;",     "match",
       "return;",          "return 1 + 2;",        "return",       "import a.b;",
-      "import a.b as c;", "import ;",             "import",       "function f() { }",
+      "import a.b as c;", "import ;",             "import",       "function f(a: i32) : i32 { 1 }",
+      "function g(x: i32, y: *u8) : [u8] { }",
+      "async function h() : **u8 { }",
+      "function bad(,) : i32 { }",
+      "function noparens",
+      "function f() : { }",
+      "function f() { }",
       "\n\nif (a)\n{",   "let x\n:\ni32",        "return\n1;",
   };
   size_t i;

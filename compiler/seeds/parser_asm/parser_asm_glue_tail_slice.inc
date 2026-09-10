@@ -223,7 +223,7 @@ void parser_asm_skip_one_function_full_into_slice_c(struct parser_asm_lexer *out
   if (!out || !source)
     return;
   dbg_skip = getenv("XLANG_DEBUG_SKIP_FUNC");
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_function_header_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_function_header_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_async_fn_prefix_audit_c(lex, source));
   /**
    * 读 lex 处首 token 再判 TOKEN_FUNCTION；stretch 扩段曾挤掉此 lexer_next_into，
@@ -240,7 +240,7 @@ void parser_asm_skip_one_function_full_into_slice_c(struct parser_asm_lexer *out
     parser_asm_skip_one_extern_into_slice_c(out, lex, source);
     return;
   }
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_fn_sig_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_fn_sig_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_onefunc_slice_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_async_fn_sig_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_fn_sig_full_deep_audit_c(lex, source));

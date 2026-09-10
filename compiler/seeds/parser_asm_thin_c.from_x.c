@@ -211,7 +211,7 @@ int32_t parser_asm_stretch_struct_fields_probe_c(struct parser_asm_lexer lex, st
                                                  int32_t *out_field_count);
 int32_t parser_asm_stretch_enum_variants_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
                                                  int32_t *out_variant_count);
-int32_t parser_asm_stretch_fn_sig_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_fn_sig_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_struct_modifiers_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_async_fn_prefix_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_match_arms_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source,
@@ -234,7 +234,7 @@ int32_t parser_asm_stretch_import_select_list_audit_c(struct parser_asm_lexer *i
 int32_t parser_asm_stretch_struct_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_trait_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_impl_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_function_header_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_function_header_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_skip_allow_modifiers_c(struct parser_asm_lexer *inout_lex,
                                                   struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_import_path_post_audit_c(uint8_t *path_buf, int32_t path_len,
@@ -245,8 +245,7 @@ int32_t parser_asm_stretch_toplevel_kind_peek_audit_c(struct parser_asm_lexer le
 int32_t parser_asm_stretch_match_kw_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_else_if_chain_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_type_ref_peek_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_skip_return_type_audit_c(struct parser_asm_lexer *inout_lex,
-                                                     struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_skip_return_type_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_break_continue_audit_c(void *lex_inout, void *source, int32_t want_break);
 int32_t parser_asm_stretch_else_stmt_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_import_dot_segment_audit_c(struct parser_asm_lexer_result r,

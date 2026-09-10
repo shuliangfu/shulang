@@ -218,3 +218,66 @@ size_t parser_asm_lex_peek_token_start_c(void *lex, void *source) {
   lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
   return r.token_start;
 }
+
+/* --- in-place adapters over the suite skip helpers (7.2.1 B-minus wave 3) ---
+ * The helpers keep C authority (their many not-yet-ported C callers stay);
+ * these adapters give .x the in-place face: advance the caller's opaque lexer
+ * by the helper's result. Single implementation per helper (G.7). */
+extern int32_t parser_asm_stretch_is_type_start_kind_c(int32_t kind);
+extern void parser_asm_stretch_skip_balanced_brackets_into_c(struct parser_asm_lexer *out, struct parser_asm_lexer lex,
+                                                             struct parser_asm_slice_u8 *source);
+extern struct parser_asm_lexer parser_asm_stretch_skip_type_suffix_c(struct parser_asm_lexer lex,
+                                                                     struct parser_asm_slice_u8 *source);
+extern struct parser_asm_lexer parser_asm_stretch_skip_one_param_type_c(struct parser_asm_lexer lex,
+                                                                        struct parser_asm_slice_u8 *source);
+
+/**
+ * Forward the suite's scalar/ident type-start predicate (single authority).
+ * @param kind i32 — token kind
+ * @return i32 — 1 if the kind may start a type (excl. * and [])
+ * PLATFORM: SHARED.
+ */
+int32_t parser_asm_lex_is_type_start_kind_c(int32_t kind) {
+  return parser_asm_stretch_is_type_start_kind_c(kind);
+}
+
+/**
+ * In-place skip of a balanced [..] group (caller already consumed '[').
+ * @param lex_inout *u8 — opaque lexer, advanced past the matching ']'
+ * @param source *u8 — opaque slice
+ * PLATFORM: SHARED.
+ */
+void parser_asm_lex_skip_balanced_brackets_inplace_c(void *lex_inout, void *source) {
+  struct parser_asm_lexer after;
+  if (!lex_inout || !source)
+    return;
+  parser_asm_stretch_skip_balanced_brackets_into_c(&after, *(struct parser_asm_lexer *)lex_inout,
+                                                   (struct parser_asm_slice_u8 *)source);
+  *(struct parser_asm_lexer *)lex_inout = after;
+}
+
+/**
+ * In-place skip of a type suffix (* and nested [] after a type start).
+ * @param lex_inout *u8 — opaque lexer, advanced past the suffix
+ * @param source *u8 — opaque slice
+ * PLATFORM: SHARED.
+ */
+void parser_asm_lex_skip_type_suffix_inplace_c(void *lex_inout, void *source) {
+  if (!lex_inout || !source)
+    return;
+  *(struct parser_asm_lexer *)lex_inout = parser_asm_stretch_skip_type_suffix_c(
+      *(struct parser_asm_lexer *)lex_inout, (struct parser_asm_slice_u8 *)source);
+}
+
+/**
+ * In-place skip of one parameter's type part (from the type start token).
+ * @param lex_inout *u8 — opaque lexer, advanced past the type
+ * @param source *u8 — opaque slice
+ * PLATFORM: SHARED.
+ */
+void parser_asm_lex_skip_one_param_type_inplace_c(void *lex_inout, void *source) {
+  if (!lex_inout || !source)
+    return;
+  *(struct parser_asm_lexer *)lex_inout = parser_asm_stretch_skip_one_param_type_c(
+      *(struct parser_asm_lexer *)lex_inout, (struct parser_asm_slice_u8 *)source);
+}
