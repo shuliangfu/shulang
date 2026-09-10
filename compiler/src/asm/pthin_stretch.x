@@ -530,3 +530,123 @@ export function parser_asm_stretch_bind_name_validate_c(name: *u8, len: i32): i3
   }
   return 1;
 }
+
+// --- Suite real-logic functions (Route C extension: pure-scalar domain) ---
+// Ported from parser_asm_emit_heavy_stretch_suite_slice.inc (28,517 lines,
+// 1,989 functions). These 2 are among the 22 "real logic" functions that
+// take no struct-by-value params — pure scalar/pointer domain, same Route C
+// proof as the lite slice above. The 1,956 audit probes and the remaining
+// 20 real-logic functions use lexer/lexer_result/slice_u8 by value and are
+// blocked on the RFC ABI decision (B-minus scalar decomposition or B struct).
+
+// Top-level declaration coarse classification codes (suite enum).
+const STRETCH_TOP_UNKNOWN: i32 = 0;
+const STRETCH_TOP_IMPORT: i32 = 1;
+const STRETCH_TOP_CONST_BIND: i32 = 2;
+const STRETCH_TOP_FUNCTION: i32 = 3;
+const STRETCH_TOP_STRUCT: i32 = 4;
+const STRETCH_TOP_ENUM: i32 = 5;
+const STRETCH_TOP_EXTERN_CODE: i32 = 6;
+const STRETCH_TOP_LET: i32 = 7;
+const STRETCH_TOP_TRAIT: i32 = 8;
+const STRETCH_TOP_IMPL: i32 = 9;
+// Lexer canonical TokenKind values (enum token_TokenKind indices from
+// seeds/lexer_gen.linux.x86_64.c — the pin authority).
+const TOKEN_EOF: i32 = 0;
+const TOKEN_FUNCTION: i32 = 1;
+const TOKEN_LET: i32 = 2;
+const TOKEN_CONST: i32 = 3;
+const TOKEN_STRUCT: i32 = 19;
+const TOKEN_ENUM: i32 = 47;
+const TOKEN_TRAIT: i32 = 49;
+const TOKEN_IMPL: i32 = 50;
+const TOKEN_IMPORT: i32 = 53;
+const TOKEN_EXTERN: i32 = 54;
+const TOKEN_IDENT: i32 = 59;
+const TOKEN_ASSIGN: i32 = 117;
+
+/**
+ * Top-level declaration coarse classification (collect_imports /
+ * parse_into main loop). Pure 3-scalar domain — no struct params.
+ * @param kind i32 — current token kind
+ * @param next_kind i32 — lookahead token kind
+ * @param third_kind i32 — third token kind
+ * @return i32 — STRETCH_TOP_* classification
+ * PLATFORM: SHARED.
+ */
+export function parser_asm_stretch_classify_toplevel_c(kind: i32, next_kind: i32, third_kind: i32): i32 {
+  if (kind == TOKEN_IMPORT) {
+    return STRETCH_TOP_IMPORT;
+  }
+  if (kind == TOKEN_FUNCTION) {
+    return STRETCH_TOP_FUNCTION;
+  }
+  if (kind == TOKEN_STRUCT) {
+    return STRETCH_TOP_STRUCT;
+  }
+  if (kind == TOKEN_ENUM) {
+    return STRETCH_TOP_ENUM;
+  }
+  if (kind == TOKEN_EXTERN) {
+    return STRETCH_TOP_EXTERN_CODE;
+  }
+  if (kind == TOKEN_LET) {
+    return STRETCH_TOP_LET;
+  }
+  if (kind == TOKEN_TRAIT) {
+    return STRETCH_TOP_TRAIT;
+  }
+  if (kind == TOKEN_IMPL) {
+    return STRETCH_TOP_IMPL;
+  }
+  if (kind == TOKEN_CONST && next_kind == TOKEN_IDENT && third_kind == TOKEN_ASSIGN) {
+    return STRETCH_TOP_CONST_BIND;
+  }
+  return STRETCH_TOP_UNKNOWN;
+}
+
+/**
+ * Import path quality score: sum of segment lengths + 4 per dot
+ * separator. A trailing/leading dot or invalid byte scores 0.
+ * @param path *u8 — import path bytes
+ * @param path_len i32 — byte length; <= 0 returns 0
+ * @return i32 — quality score (higher = more specific)
+ * PLATFORM: SHARED.
+ */
+export function parser_asm_stretch_import_path_score_c(path: *u8, path_len: i32): i32 {
+  let i: i32 = 0;
+  let seg: i32 = 0;
+  let score: i32 = 0;
+  let seg_len: i32 = 0;
+  if (path == 0 as *u8 || path_len <= 0) {
+    return 0;
+  }
+  while (i < path_len) {
+    let c: u8 = 0;
+    unsafe { c = path[i]; }
+    if (c == 46) {
+      if (seg_len <= 0) {
+        return 0;
+      }
+      score = score + seg_len;
+      seg = seg + 1;
+      seg_len = 0;
+      i = i + 1;
+      continue;
+    }
+    if (parser_asm_stretch_import_path_validate_c(path, path_len) == 0) {
+      return 0;
+    }
+    seg_len = seg_len + 1;
+    if (seg_len > 63) {
+      return 0;
+    }
+    i = i + 1;
+  }
+  if (seg_len <= 0) {
+    return 0;
+  }
+  score = score + seg_len;
+  seg = seg + 1;
+  return score + seg * 4;
+}
