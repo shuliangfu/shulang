@@ -785,8 +785,8 @@ struct parser_asm_try_skip_allow_result parser_asm_try_skip_allow_padding_struct
     struct parser_asm_lexer lex, uint8_t *data, int32_t len) {
   struct parser_asm_lexer_result lr;
   struct parser_asm_try_skip_allow_result out;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_paren_buf_audit_c(lex, data, len));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_paren_buf_audit_c(&lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_full_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_mega_full_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_ultra_mega_full_deep_buf_audit_c(lex, data, len));
@@ -1573,7 +1573,7 @@ void parser_asm_parse_into_try_skip_allow_into_buf_c(struct parser_asm_try_skip_
   struct parser_asm_try_skip_allow_result res;
   if (!out)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_buf_audit_c(r.next_lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_try_skip_allow_deep_buf_audit_c(&r.next_lex, data, len));
   if (r.tok.kind != (int32_t)TOKEN_IDENT || r.tok.ident_len != 5) {
     parser_asm_write_try_skip_allow_result(out, lex, 0);
     return;

@@ -397,7 +397,7 @@ int32_t parser_asm_parse_peek_function_name_buf_c(struct parser_asm_lexer lex, u
   size_t name_start;
   if (!data || !out)
     return 0;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_peek_function_name_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_peek_function_name_buf_audit_c(&lex, data, len));
   r = lexer_next_buf(lex, data, len);
   if (r.tok.kind != (int32_t)TOKEN_FUNCTION)
     return 0;

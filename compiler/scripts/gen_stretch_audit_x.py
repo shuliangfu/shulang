@@ -36,6 +36,7 @@ def parse_suite():
     src = open(SUITE).read()
     lines = src.split("\n")
     funcs = {}
+    buf_sigs = {}
     order = []
     i = 0
     while i < len(lines):
@@ -43,22 +44,34 @@ def parse_suite():
         m = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
                      r"struct parser_asm_slice_u8 \*source\) \{$", l)
         sig_extra = 0
+        is_buf = False
         if not m:
             m2 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+),$", l)
-            if m2 and i + 1 < len(lines) and re.match(
-                    r"^\s*struct parser_asm_slice_u8 \*source\) \{$", lines[i + 1]):
-                m = m2
-                sig_extra = 1
+            if m2 and i + 1 < len(lines):
+                if re.match(r"^\s*struct parser_asm_slice_u8 \*source\) \{$", lines[i + 1]):
+                    m = m2
+                    sig_extra = 1
+                elif re.match(r"^\s*uint8_t \*data, int32_t len\) \{$", lines[i + 1]):
+                    m = m2
+                    sig_extra = 1
+                    is_buf = True
+        if not m:
+            m3 = re.match(r"^int32_t (parser_asm_stretch_\w+_c)\(struct parser_asm_lexer (\w+), "
+                          r"uint8_t \*data, int32_t len\) \{$", l)
+            if m3:
+                m = m3
+                is_buf = True
         if m:
             j = i + 1 + sig_extra
             while lines[j] != "}":
                 j += 1
             funcs[m.group(1)] = lines[i + 1 + sig_extra : j]
+            buf_sigs[m.group(1)] = is_buf
             order.append((i, j))
             i = j + 1
         else:
             i += 1
-    return src, lines, funcs, order
+    return src, lines, funcs, buf_sigs, order
 
 
 def token_enum():
@@ -703,11 +716,57 @@ def translate_block(block, cur_results, indent=2):
     return out, used
 
 
-def gen_x_function(name, body, tokvals, existing_consts):
+def gen_x_function(name, body, tokvals, existing_consts, buftail_mode=False):
+    if buftail_mode:
+        body = [l.replace("&sl)", "source)").replace(", source);", ", source);")
+                for l in body]
+        body = [re.sub(r"lexer_next_into\(&(r\w*), ([^,]+), source\)",
+                       r"lexer_next_into(\1, \2, source)", l) for l in body]
     lines, used, int_vars = translate(name, body, tokvals)
     # completeness pre-check: append missing TOKEN_* consts (wave-3 lesson)
     missing = sorted(t for t in used if t not in existing_consts)
     return lines, used, missing, int_vars
+
+
+def gen_buf_function(name, body, tokvals, existing_consts):
+    """buf-signature audit: strip the sl-construction prologue, translate the
+    rest with source = wrap(data,len). Pure shims return (…, buftail=callee)."""
+    txt = "\n".join(body)
+    # pure shim: sl decl + guard + assigns + return CALLEE(&lex, &sl);
+    m = re.fullmatch(
+        r"\s*struct parser_asm_slice_u8 sl;\s*if \(!data \|\| len <= 0\)\s*return 0;\s*"
+        r"sl\.data = data;\s*sl\.length = \(size_t\)len;\s*"
+        r"return (parser_asm_stretch_\w+_c)\(&\w+, &sl\);\s*", txt)
+    if m:
+        raise Delegation(m.group(1))
+    raise Refuse("thick buf body (v3.1 scope)")
+
+
+def emit_buf_x(name, callee, docline):
+    """Thin buf shim: wrap + delegate to the slice-based .x audit."""
+    return f"""/**
+ * {docline}
+ * Generated buf-shim port: wraps (data,len) via the bridge ring and
+ * delegates to the slice-based .x audit `{callee}`.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param data *u8 — source bytes
+ * @param len i32 — byte length; <=0 returns 0
+ * @return i32 — callee verdict
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
+  let source: *u8 = 0 as *u8;
+  unsafe {{
+    source = parser_asm_lex_wrap_buf_c(data, len);
+    if (source == 0 as *u8) {{
+      return 0;
+    }}
+    return {callee}(lex, source);
+  }}
+  return 0;
+}}
+"""
 
 
 def emit_x(name, x_lines, docline, int_vars=()):
@@ -750,7 +809,7 @@ def main():
     if not names or names[0] in ("-h", "--help"):
         print("usage: gen_stretch_audit_x.py name1 name2 ... (suite _c names)")
         return 2
-    src, lines, funcs, order = parse_suite()
+    src, lines, funcs, buf_sigs, order = parse_suite()
     tokvals = token_enum()
     xsrc = open(XFILE).read()
     existing = set(re.findall(r"const (TOKEN_\w+):", xsrc))
@@ -765,16 +824,22 @@ def main():
         if n not in funcs:
             refused.append((n, "not found / non-byval signature"))
             continue
+        is_buf = buf_sigs.get(n, False)
         try:
-            x_lines, used, missing, ivars = gen_x_function(n, funcs[n], tokvals, existing)
+            if is_buf:
+                x_lines, used, missing, ivars, buftail = gen_buf_function(
+                    n, funcs[n], tokvals, existing)
+            else:
+                x_lines, used, missing, ivars = gen_x_function(n, funcs[n], tokvals, existing)
+                buftail = None
             for t in missing:
                 existing.add(t)
             all_missing.extend(missing)
-            gen.append((n, x_lines, ivars))
+            gen.append((n, x_lines, ivars, buftail))
             ok.append(n)
         except Delegation as d:
             if str(d) in migrated_exports:
-                deleg.append((n, str(d)))
+                deleg.append((n, str(d), buf_sigs.get(n, False)))
                 ok.append(n)
             else:
                 refused.append((n, f"delegation to unmigrated {d}"))
@@ -790,6 +855,7 @@ def main():
     # 1a) bridge externs used by generated bodies but not yet declared
     BRIDGE_EXTERNS = {
         "parser_asm_lex_peek_ident_ptr_c": "lex: *u8, source: *u8): *u8",
+        "parser_asm_lex_wrap_buf_c": "data: *u8, len: i32): *u8",
         "parser_asm_lex_source_data_c": "source: *u8): *u8",
         "parser_asm_lex_source_length_c": "source: *u8): usize",
     }
@@ -833,10 +899,17 @@ def main():
     # 2) append generated .x functions
     frags = []
     docmap = {}
-    for n, x_lines, ivars in gen:
+    for n, x_lines, ivars, buftail in gen:
         docmap[n] = f"Generated audit port {n}."
-        frags.append(emit_x(n, x_lines, docmap[n], ivars))
-    for n, callee in deleg:
+        if buftail:
+            frags.append(emit_buf_x(n, buftail, docmap[n]))
+        else:
+            sig_extra = ""
+            frags.append(emit_x(n, x_lines, docmap[n], ivars))
+    for n, callee, is_b in list(deleg):
+        if is_b:
+            frags.append(emit_buf_x(n, callee, f"Generated buf-shim port {n}."))
+            continue
         frags.append(
             f"/**\n"
             f" * Generated delegation port: {n} forwards to {callee}.\n"
@@ -860,7 +933,7 @@ def main():
 
     # 3) C twins → gated pointer ABI (line-anchored splice, wave-2 proven)
     lines_s = open(SUITE).read().split("\n")
-    for n, *_rest in list(gen) + list(deleg):
+    for n, *_rest in list(gen) + [(d[0], d[1]) for d in deleg]:
         body = funcs[n]
         # locate def block (single- or multi-line signature)
         si_l = sig_extra = None
@@ -874,6 +947,7 @@ def main():
                     si_l, sig_extra = i2, 1
                 if si_l is not None:
                     break
+        is_buf_def = n in buf_sigs and buf_sigs[n]
         if si_l is None:
             print(f"FATAL: def line missing for {n}"); sys.exit(1)
         param_name = lines_s[si_l].split("(")[1].split(",")[0].replace("struct parser_asm_lexer", "").strip()
@@ -902,21 +976,26 @@ def main():
             " * authority src/asm/pthin_stretch_audit.x provides the same symbol\n"
             " * (pointer ABI + by-value net semantics). Cold lane keeps this twin. */\n"
             "#ifndef XLANG_PTHIN_STRETCH_AUDIT_FROM_X\n"
-            f"int32_t {n}(void *lex_inout, void *source) {{\n"
-            f"  struct parser_asm_lexer {param_name};\n"
-            "  if (!lex_inout || !source)\n"
-            "    return 0;\n"
-            f"  {param_name} = *(struct parser_asm_lexer *)lex_inout;\n"
+            + (f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len) {{\n" if is_buf_def
+               else f"int32_t {n}(void *lex_inout, void *source) {{\n")
+            + f"  struct parser_asm_lexer {param_name};\n"
+            + ("  if (!lex_inout || !data || len <= 0)\n    return 0;\n" if is_buf_def
+               else "  if (!lex_inout || !source)\n    return 0;\n")
+            + f"  {param_name} = *(struct parser_asm_lexer *)lex_inout;\n"
             + nb_txt + "\n}\n#endif"
         )
         lines_s[si_l : ei_l + 1] = shim.split("\n")
     # 3b) ensure fwd decls exist for every generated function (hybrid callers)
-    need = [n for n, *_ in list(gen) + list(deleg)
-            if f"int32_t {n}(void *lex_inout, void *source);" not in "\n".join(lines_s)]
+    need = []
+    for n, *_rest in list(gen) + list(deleg):
+        decl = (f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len);"
+                if buf_sigs.get(n) else f"int32_t {n}(void *lex_inout, void *source);")
+        if decl not in "\n".join(lines_s):
+            need.append(decl)
     if need:
         anchor_line = "int32_t parser_asm_stretch_if_header_audit_c(void *lex_inout, void *source);"
         ai = lines_s.index(anchor_line)
-        lines_s[ai + 1 : ai + 1] = [f"int32_t {n}(void *lex_inout, void *source);" for n in need]
+        lines_s[ai + 1 : ai + 1] = need
     open(SUITE, "w").write("\n".join(lines_s))
 
     # 4) decl + call-site sync across seeds/slices (wave 1-3 proven pattern)
@@ -924,6 +1003,7 @@ def main():
     files = ["seeds/parser_asm_thin_c.from_x.c", "seeds/pthin_stretch.from_x.c"] \
             + glob.glob("seeds/pthin_*.from_x.c") + glob.glob("seeds/parser_asm/*.inc")
     for n in ok:
+        is_buf_def = buf_sigs.get(n, False)
         for fp in files:
             try:
                 t = open(fp).read()
@@ -937,6 +1017,10 @@ def main():
             t = re.sub(
                 re.escape(n) + r"\((?!&|struct|void )([^,()]+),",
                 lambda m: f"{n}(&{m.group(1)},", t)
+            if is_buf_def:
+                t = re.sub(
+                    r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\w+,\s*uint8_t\s+\*data,\s*int32_t\s+len\);",
+                    lambda m, n=n: (m.group(1) or "") + f"int32_t {n}(void *lex_inout, uint8_t *data, int32_t len);", t)
             # decl fixups (single- and multi-line, byval + inout forms)
             t = re.sub(
                 r"(extern\s+)?int32_t\s+" + re.escape(n) + r"\(struct\s+parser_asm_lexer\s+\w+,\s*struct\s+parser_asm_slice_u8\s+\*source\);",

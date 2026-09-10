@@ -298,3 +298,27 @@ uint8_t *parser_asm_lex_peek_ident_ptr_c(void *lex, void *source) {
   lexer_next_into(&r, *(struct parser_asm_lexer *)lex, (struct parser_asm_slice_u8 *)source);
   return r.tok.ident;
 }
+
+/**
+ * Wrap a raw (data, len) buffer as an opaque slice pointer for the .x side.
+ * Uses a depth-16 ring of scratch slices: the compiler pipeline is
+ * single-threaded and audit delegation nests ≤16 deep, so each nested wrap
+ * gets its own slot and callers' wrapped pointers stay valid across nested
+ * calls. Null data / non-positive len returns null (callers treat as guard).
+ * @param data *u8 — source bytes
+ * @param len i32 — byte length
+ * @return *u8 — opaque struct parser_asm_slice_u8* (ring slot)
+ * PLATFORM: SHARED.
+ */
+static struct parser_asm_slice_u8 g_lex_wrap_scratch[16];
+static int g_lex_wrap_i;
+void *parser_asm_lex_wrap_buf_c(uint8_t *data, int32_t len) {
+  struct parser_asm_slice_u8 *sl;
+  if (!data || len <= 0)
+    return (void *)0;
+  sl = &g_lex_wrap_scratch[g_lex_wrap_i];
+  g_lex_wrap_i = (g_lex_wrap_i + 1) & 15;
+  sl->data = data;
+  sl->length = (size_t)len;
+  return sl;
+}

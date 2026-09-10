@@ -52,7 +52,7 @@ extern int32_t parser_asm_stretch_type_ref_bracket_composite_buf_audit_c(struct 
                                                                        int32_t len);
 extern int32_t parser_asm_stretch_parse_into_buf_loop_toplevel_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
                                                                            int32_t len);
-extern int32_t parser_asm_stretch_async_fn_prefix_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+extern int32_t parser_asm_stretch_async_fn_prefix_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 extern int32_t parser_asm_stretch_parse_into_function_branch_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
                                                                               int32_t len);
 extern int32_t parser_asm_stretch_parse_into_preamble_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
@@ -3778,7 +3778,7 @@ struct parser_asm_seed_parse_into_result parser_asm_seed_parse_into_buf_c(void *
     func_is_async = 0;
     if (r.tok.kind == (int32_t)TOKEN_ASYNC) {
       func_is_async = 1;
-      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_async_fn_prefix_buf_audit_c(iter_start, data, len));
+      PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_async_fn_prefix_buf_audit_c(&iter_start, data, len));
       parser_lex_from_next_into_glue(&lex, r);
       lex_at_function = lex;
       r = lexer_next_buf(lex, data, len);

@@ -82,7 +82,7 @@ struct parser_asm_lexer parser_asm_skip_imports_buf_c(struct parser_asm_lexer le
   struct parser_asm_slice_u8 source;
   if (!data || len <= 0)
     return lex;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_imports_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_imports_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_imports_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_import_stmt_full_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_import_path_full_deep_buf_audit_c(lex, data, len));

@@ -91,9 +91,14 @@ def main():
     # 1) migrated exports (2-arg audits; flag audits detected by param count)
     exports = re.findall(r"export function (parser_asm_stretch_\w+_c)\(", xsrc)
     flag3 = set()
+    buf3 = set()
     for m in re.finditer(r"export function (parser_asm_stretch_\w+_c)\(([^)]*)\): i32 \{", xsrc):
-        if m.group(2).count(",") == 2:
-            flag3.add(m.group(1))
+        params = m.group(2)
+        if params.count(",") == 2:
+            if "data: *u8" in params and "len: i32" in params:
+                buf3.add(m.group(1))
+            else:
+                flag3.add(m.group(1))
 
     # 2) twins from the suite (gated pointer-ABI bodies)
     twins = []
@@ -109,16 +114,24 @@ def main():
         base = name[len("parser_asm_stretch_"):-2]  # strip prefix and _c
         fm = re.search(name + r"\(void \*lex_inout, void \*source, int32_t (\w+)\)", suite)
         flagname = fm.group(1) if fm else "flag"
-        twin_extra = f", int32_t {flagname}" if name in flag3 else ""
+        if name in buf3:
+            twin_extra = ", uint8_t *data, int32_t len"
+        elif name in flag3:
+            twin_extra = f", int32_t {flagname}"
+        else:
+            twin_extra = ""
         body = body.replace(f"{name}(", f"c_ref_{base}(", 0)  # no self-calls
         # internal calls to other migrated audits → c_ref_ forms
         for other in exports:
             if other != name:
                 body = body.replace(f"{other}(", f"c_ref_{other[len('parser_asm_stretch_'):-2]}(")
+        sig_line = (f"static int32_t c_ref_{base}(void *lex_inout, uint8_t *data, int32_t len) {{\n"
+                    if name in buf3 else
+                    f"static int32_t c_ref_{base}(void *lex_inout, void *source{twin_extra}) {{\n")
         twins.append(
             f"/* Reference twin — verbatim copy of the gated C authority for {name}. */\n"
-            f"static int32_t c_ref_{base}(void *lex_inout, void *source{twin_extra}) {{\n"
-            f"{body}\n}}\n"
+            + sig_line
+            + f"{body}\n}}\n"
         )
     missing = [n for n in exports if n not in have]
     if missing:
@@ -134,7 +147,9 @@ def main():
     rows = []
     for name in sorted(exports):
         base = name[len("parser_asm_stretch_"):-2]
-        if name in flag3:
+        if name in buf3:
+            rows.append(f'    {{"{base}", r_{base}, x_{base}, 0, 0}},')
+        elif name in flag3:
             rows.append(f'    {{"{base}/1", c_ref_{base}, x_{base}, 1, 0}},')
             rows.append(f'    {{"{base}/0", c_ref_{base}, x_{base}, 0, 0}},')
         else:
@@ -143,7 +158,12 @@ def main():
     shims = []
     for name in sorted(exports):
         base = name[len("parser_asm_stretch_"):-2]
-        if name in flag3:
+        if name in buf3:
+            shims.append(
+                f"static int32_t x_{base}(void *l, void *s, int32_t f) {{ (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return {name}(l, sl_->data, (int32_t)sl_->length); }}")
+            shims.append(
+                f"static int32_t r_{base}(void *l, void *s, int32_t f) {{ (void)f; struct parser_asm_slice_u8 *sl_ = (struct parser_asm_slice_u8 *)s; if (!sl_) return 0; return c_ref_{base}(l, sl_->data, (int32_t)sl_->length); }}")
+        elif name in flag3:
             shims.append(
                 f"static int32_t x_{base}(void *l, void *s, int32_t f) {{ return {name}(l, s, f); }}")
         else:
@@ -153,7 +173,9 @@ def main():
                 f"static int32_t r_{base}(void *l, void *s, int32_t f) {{ (void)f; return c_ref_{base}(l, s); }}")
     externs = []
     for name in sorted(exports):
-        if name in flag3:
+        if name in buf3:
+            externs.append(f"extern int32_t {name}(void *lex_inout, uint8_t *data, int32_t len);")
+        elif name in flag3:
             externs.append(f"extern int32_t {name}(void *lex_inout, void *source, int32_t flag);")
         else:
             externs.append(f"extern int32_t {name}(void *lex_inout, void *source);")
