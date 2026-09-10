@@ -7588,7 +7588,7 @@ void parser_asm_skip_one_impl_into_slice_c(struct parser_asm_lexer *out, struct 
   /* wave439: stash full-file source for generic-bound scan. */
   xlang_generic_bound_stash_source_c(source);
   memset(first_nm, 0, sizeof(first_nm));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_impl_header_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_impl_header_audit_c(&lex, source));
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_IMPL) {
     out->pos = lex.pos;

@@ -106,7 +106,9 @@ def translate_call(callee, arg, flag=None):
     """A sub-audit call on the caller's lexer → .x call expr (checks migrated)."""
     if callee not in MIGRATED_EXPORTS_CACHE:
         raise Refuse(f"sub-call to unmigrated {callee}")
-    if arg.lstrip("&") not in ("lex", "lex_at_if"):
+    if arg.lstrip("&") not in ("lex", "lex_at_if") and not arg.lstrip("&").endswith("_lex") and arg.lstrip("&") not in ("cur", "body_lex", "arms_lex", "after", "sel_lex"):
+        # conservative: allow known alias-local names; correctness guarded by
+        # the caller-site rule that the alias must be current
         raise Refuse(f"sub-call on non-cursor var {arg}")
     tail = f", {flag}" if flag is not None else ""
     return f"{callee}(lex, source{tail})", set()
@@ -243,9 +245,9 @@ def translate(name, body, tokvals):
     first_step_done = False
     cur_results = set()  # result vars holding the CURRENT token
     cursor_names = {"lex"}
-    # accept any by-value lexer param name as the cursor (lex_at_if etc.)
-    for ln in body[:0]:
-        pass
+    alias_current = set()  # lexer locals currently aliased to the cursor
+    lexer_locals = set()
+    helper_alias = None
 
     def emit(s):
         x.append("    " + s)
@@ -262,6 +264,11 @@ def translate(name, body, tokvals):
             si += 1
             continue
         if st.startswith("struct parser_asm_lexer_result "):
+            si += 1
+            continue
+        m = re.match(r"struct parser_asm_lexer (\w+);$", st)
+        if m:
+            lexer_locals.add(m.group(1))
             si += 1
             continue
         m = re.match(r"int32_t (\w+);$", st)
@@ -298,6 +305,13 @@ def translate(name, body, tokvals):
                 continue
             if srcvar == "lex" and first_step_done:
                 raise Refuse("second step from original lex (backtrack)")
+            if srcvar in alias_current:
+                emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
+                if reads_ident:
+                    emit("idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
+                cur_results = {res}
+                si += 1
+                continue
             m2 = re.match(r"(r\w*)\.next_lex$", srcvar)
             if m2 and m2.group(1) in cur_results:
                 emit("parser_asm_lex_step_kind_c(lex, source);")
@@ -308,6 +322,19 @@ def translate(name, body, tokvals):
                 si += 1
                 continue
             raise Refuse(f"step from non-cursor var {srcvar}")
+        # v3.1: single-line if (COND) return EXPR;
+        m = re.match(r"if \((.+)\) return (.+);$", st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            rlines, ntok2 = translate_return(m.group(2), cur_results)
+            used |= ntok2
+            emit(f"if ({cond_x}) {{")
+            for l in rlines:
+                x.append("  " + l)
+            emit("}")
+            si += 1
+            continue
         # if conditions on the current token (braced block or single stmt)
         m = re.match(r"if \((.+)\) \{$", st)
         single = False
@@ -420,15 +447,76 @@ def translate(name, body, tokvals):
                     si += 2
                     continue
             raise Refuse("kinds array without probe delegation")
-        # v2.1: from_result advance (≡ step + refresh)
+        # v2.1/v3.1: from_result advance into cursor param or alias (≡ step;
+        # the following lexer_next_from_alias is the peek refresh)
         m = re.match(r"parser_asm_lex_from_result_val_into\(&(\w+), (r\w*)\);$", st)
-        if m and m.group(2) in cur_results and m.group(1) in cursor_names:
+        if m and m.group(2) in cur_results and (m.group(1) in cursor_names or m.group(1) in lexer_locals):
             emit("parser_asm_lex_step_kind_c(lex, source);")
-            emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
-            if any(f"{m.group(2)}.tok.ident_len" in s2 for s2 in stmts):
-                emit("idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
+            alias_current = {m.group(1)}
             cur_results = set()
             si += 1
+            continue
+        # v3.2: LOCAL = lex; (alias seeded at cursor start)
+        m = re.match(r'(\w+) = (lex|lex_at_if);$', st)
+        if m and m.group(1) in lexer_locals:
+            alias_current = {m.group(1)}
+            si += 1
+            continue
+        # v3.1: alias assigned from a helper's return (skip_type_suffix etc.)
+        m = re.match(r"(\w+) = parser_asm_stretch_(skip_type_suffix|skip_one_param_type)_c\((r\w*)\.next_lex, source\);$", st)
+        if m and m.group(3) in cur_results and m.group(1) in lexer_locals:
+            emit("parser_asm_lex_step_kind_c(lex, source);")
+            emit("adv0 = parser_asm_lex_pos_c(lex);")
+            int_vars.add("adv0_us")
+            emit(f"parser_asm_lex_{m.group(2)}_inplace_c(lex, source);")
+            alias_current = {m.group(1)}
+            helper_alias = (m.group(1), m.group(3))
+            cur_results = set()
+            si += 1
+            continue
+        # v3.1: after.pos != lex.pos compare (helper advanced past start?)
+        m = re.match(r"if \((\w+)\.pos != lex\.pos\) return (\d+);$", st)
+        if m and helper_alias and helper_alias[0] == m.group(1):
+            emit("if (parser_asm_lex_pos_c(lex) != pos0) {")
+            emit("  parser_asm_lex_set_pos_c(lex, pos0);")
+            emit("  parser_asm_lex_set_line_c(lex, line0);")
+            emit("  parser_asm_lex_set_col_c(lex, col0);")
+            emit(f"  return {m.group(2)};")
+            emit("}")
+            si += 1
+            continue
+        # v3.1: after.pos != rX.next_lex.pos compare (helper advanced?)
+        m = re.match(r"if \((\w+)\.pos != (r\w*)\.next_lex\.pos\) return (\d+);$", st)
+        if m and helper_alias and helper_alias[0] == m.group(1) and helper_alias[1] == m.group(2):
+            emit("if (parser_asm_lex_pos_c(lex) != adv0) {")
+            emit("  parser_asm_lex_set_pos_c(lex, pos0);")
+            emit("  parser_asm_lex_set_line_c(lex, line0);")
+            emit("  parser_asm_lex_set_col_c(lex, col0);")
+            emit(f"  return {m.group(3)};")
+            emit("}")
+            si += 1
+            continue
+        # v3.1: while (guard++ < N) { ... } guard variant
+        m = re.match(r"while \((\w+)\+\+ < (\d+)\) \{$", st)
+        if m:
+            j = si + 1
+            depth = 1
+            body_l = []
+            while depth > 0:
+                t = stmts[j].strip()
+                depth += t.count("{") - t.count("}")
+                if depth == 0:
+                    break
+                body_l.append(stmts[j])
+                j += 1
+            gvar, limit = m.group(1), m.group(2)
+            body_x, ntok2 = translate_block(body_l, cur_results, indent=2)
+            used |= ntok2
+            emit(f"while ({gvar} < {limit}) {{")
+            emit(f"  {gvar} = {gvar} + 1;")
+            x.extend(body_x)
+            emit("}")
+            si = j + 1
             continue
         # v2.1: kind-membership while loop (uniform counter pattern)
         m = re.match(r"while \((r\w*)\.tok\.kind == (.+)\) \{$", st)
@@ -522,12 +610,20 @@ def translate_cond(cond, cur_results):
     c = cond
     c = re.sub(r"\(int32_t\)", "", c)
     # suite helper names → bridge faces callable from .x
-    # bare int-returning helper call as condition → wrap with != 0
+    # alias position compares (helper-advanced checks)
+    c = re.sub(r"(\w+)\.pos != lex\.pos", r"parser_asm_lex_pos_c(lex) != pos0", c)
+    c = re.sub(r"(\w+)\.pos != (r\w*)\.next_lex\.pos", r"parser_asm_lex_pos_c(lex) != adv0", c)
+    # int-returning helper calls as conditions → explicit bool
     # (.x: if condition must be bool, no implicit int-to-bool)
-    c = re.sub(r"(?<![\w!!=])parser_asm_stretch_is_type_start_kind_c\([^()]*\)(?!\s*!=)",
-               lambda m: "(" + m.group(0).replace(
-                   "parser_asm_stretch_is_type_start_kind_c",
-                   "parser_asm_lex_is_type_start_kind_c") + " != 0)", c)
+    def _wrap_helper(mm, neg):
+        inner = mm.group(0)[1:] if neg else mm.group(0)
+        inner = inner.replace("parser_asm_stretch_is_type_start_kind_c",
+                              "parser_asm_lex_is_type_start_kind_c")
+        return f"({inner} {'== 0' if neg else '!= 0'})"
+    c = re.sub(r"(?<![\w!=])!parser_asm_stretch_is_type_start_kind_c\([^()]*\)",
+               lambda m: _wrap_helper(m, True), c)
+    c = re.sub(r"(?<![\w!=])parser_asm_stretch_is_type_start_kind_c\([^()]*\)(?!\s*!=)",
+               lambda m: _wrap_helper(m, False), c)
     for res in cur_results | {"r", "r2"}:
         c = c.replace(f"{res}.tok.kind", "kind")
         c = c.replace(f"{res}.tok.ident_len", "idlen")
@@ -641,12 +737,15 @@ def translate_return(expr, cur_results):
         used |= ntok
         return (
             [
+                f"      if ({cond}) {{",
+                "        parser_asm_lex_set_pos_c(lex, pos0);",
+                "        parser_asm_lex_set_line_c(lex, line0);",
+                "        parser_asm_lex_set_col_c(lex, col0);",
+                "        return 1;",
+                "      }",
                 "      parser_asm_lex_set_pos_c(lex, pos0);",
                 "      parser_asm_lex_set_line_c(lex, line0);",
                 "      parser_asm_lex_set_col_c(lex, col0);",
-                f"      if ({cond}) {{",
-                "        return 1;",
-                "      }",
                 "      return 0;",
             ],
             used,
@@ -699,6 +798,14 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
             out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
             continue
+        m = re.match(r"parser_asm_lex_from_result_val_into\(&\w+, r\w*\);$", st)
+        if m:
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            continue
+        m = re.match(r"lexer_next_into\(&r\w*, \w+, source\);$", st)
+        if m:
+            out.append(f"{pad}kind = parser_asm_lex_peek_kind_c(lex, source);")
+            continue
         m = re.match(r"(\w+)\+\+;$", st)
         if m:
             out.append(f"{pad}{m.group(1)} = {m.group(1)} + 1;")
@@ -710,6 +817,26 @@ def translate_block(block, cur_results, indent=2):
             used |= ntok
             out.append(f"{pad}if ({cond_x}) {{")
             out.append(f"{pad}  {m.group(3)} = {m.group(3)} + 1;")
+            out.append(f"{pad}}}")
+            continue
+        m = re.match(r"if \((\w+)\.pos != lex\.pos\) return (\d+);$", st)
+        if m:
+            out.append(f"{pad}if (parser_asm_lex_pos_c(lex) != pos0) {{")
+            out.append(f"{pad}  parser_asm_lex_set_pos_c(lex, pos0);")
+            out.append(f"{pad}  parser_asm_lex_set_line_c(lex, line0);")
+            out.append(f"{pad}  parser_asm_lex_set_col_c(lex, col0);")
+            out.append(f"{pad}  return {m.group(2)};")
+            out.append(f"{pad}}}")
+            continue
+        m = re.match(r"if \((.+)\) return (.+);$", st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            rlines, ntok2 = translate_return(m.group(2), cur_results)
+            used |= ntok2
+            out.append(f"{pad}if ({cond_x}) {{")
+            for l in rlines:
+                out.append(pad + "  " + l.strip())
             out.append(f"{pad}}}")
             continue
         raise Refuse(f"stmt in if-block: {st[:50]}")
@@ -739,7 +866,26 @@ def gen_buf_function(name, body, tokvals, existing_consts):
         r"return (parser_asm_stretch_\w+_c)\(&\w+, &sl\);\s*", txt)
     if m:
         raise Delegation(m.group(1))
-    raise Refuse("thick buf body (v3.1 scope)")
+    # thick: strip the standard prologue then translate the remainder with
+    # source = wrapped(data,len); &sl sub-calls map to source
+    # tolerant strip: drop the five prologue lines wherever they sit
+    rem = []
+    drop_next_ret = False
+    for l in txt.split("\n"):
+        t = l.strip()
+        if t == "if (!data || len <= 0)":
+            drop_next_ret = True
+            continue
+        if drop_next_ret and t == "return 0;":
+            drop_next_ret = False
+            continue
+        drop_next_ret = False
+        if (t == "struct parser_asm_slice_u8 sl;" or t == "sl.data = data;"
+                or t == "sl.length = (size_t)len;"):
+            continue
+        rem.append(l)
+    x_lines, used, _missing, ivars = gen_x_function(name, rem, tokvals, existing_consts, buftail_mode=True)
+    return x_lines, used, [], ivars, ("THICK",)
 
 
 def emit_buf_x(name, callee, docline):
@@ -769,9 +915,51 @@ export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
 """
 
 
+def emit_buf_thick_x(name, x_lines, int_vars=()):
+    int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if v != "adv0_us")
+    if "adv0_us" in int_vars:
+        int_lets = "  let adv0: usize = 0;\n" + int_lets
+    return f"""/**
+ * Generated thick-buf port of `{name}`: wraps (data,len) via the bridge ring,
+ * then runs the translated audit body over the opaque slice.
+ * @param lex *u8 — opaque lexer (read-only net effect via restore trio)
+ * @param data *u8 — source bytes
+ * @param len i32 — byte length; <=0 returns 0
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function {name}(lex: *u8, data: *u8, len: i32): i32 {{
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let source: *u8 = 0 as *u8;
+{int_lets}  if (lex == 0 as *u8 || data == 0 as *u8 || len <= 0) {{
+    return 0;
+  }}
+  unsafe {{
+    source = parser_asm_lex_wrap_buf_c(data, len);
+    if (source == 0 as *u8) {{
+      return 0;
+    }}
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+{chr(10).join(x_lines)}
+  }}
+  return 0;
+}}
+"""
+
+
 def emit_x(name, x_lines, docline, int_vars=()):
-    int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars))
+    int_lets = "".join(f"  let {v}: i32 = 0;\n" for v in sorted(int_vars) if v != "adv0_us")
     int_lets = "  let idptr: *u8 = 0 as *u8;\n" + int_lets
+    if "adv0_us" in int_vars:
+        int_lets = "  let adv0: usize = 0;\n" + int_lets
     doc = f"""/**
  * {docline}
  * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
@@ -901,10 +1089,11 @@ def main():
     docmap = {}
     for n, x_lines, ivars, buftail in gen:
         docmap[n] = f"Generated audit port {n}."
-        if buftail:
+        if buftail == ("THICK",):
+            frags.append(emit_buf_thick_x(n, x_lines, ivars))
+        elif buftail:
             frags.append(emit_buf_x(n, buftail, docmap[n]))
         else:
-            sig_extra = ""
             frags.append(emit_x(n, x_lines, docmap[n], ivars))
     for n, callee, is_b in list(deleg):
         if is_b:

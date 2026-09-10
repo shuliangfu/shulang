@@ -485,6 +485,25 @@ static int32_t c_ref_else_if_chain_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_type_ref_peek_audit_c. */
+static int32_t c_ref_type_ref_peek_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  struct parser_asm_lexer after;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind == (int32_t)TOKEN_STAR)
+    return 1;
+  if (!parser_asm_stretch_is_type_start_kind_c(r.tok.kind))
+    return 0;
+  after = parser_asm_stretch_skip_type_suffix_c(r.next_lex, source);
+  return after.pos != lex.pos ? 1 : 0;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_return_stmt_audit_c. */
 static int32_t c_ref_return_stmt_audit(void *lex_inout, void *source) {
 
@@ -863,6 +882,24 @@ static int32_t c_ref_if_expr_branch_audit(void *lex_inout, void *source) {
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_array_lit_head_audit_c. */
+static int32_t c_ref_array_lit_head_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_lexer_result r;
+  lexer_next_into(&r, lex, (struct parser_asm_slice_u8 *)source);
+  if (r.tok.kind != (int32_t)TOKEN_LBRACKET)
+    return 0;
+  lexer_next_into(&r, r.next_lex, (struct parser_asm_slice_u8 *)source);
+  return r.tok.kind == (int32_t)TOKEN_RBRACKET || r.tok.kind == (int32_t)TOKEN_INT
+         || r.tok.kind == (int32_t)TOKEN_IDENT || r.tok.kind == (int32_t)TOKEN_TRUE
+         || r.tok.kind == (int32_t)TOKEN_FALSE ? 1 : 0;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_ternary_op_audit_c. */
 static int32_t c_ref_ternary_op_audit(void *lex_inout, void *source) {
 
@@ -1229,6 +1266,27 @@ static int32_t c_ref_body_skip_let_const_type_audit(void *lex_inout, void *sourc
 
 }
 
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_function_full_buf_audit_c. */
+static int32_t c_ref_skip_one_function_full_buf_audit(void *lex_inout, uint8_t *data, int32_t len) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !data || len <= 0)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  struct parser_asm_slice_u8 sl;
+  int32_t score;
+
+  if (!data || len <= 0)
+    return 0;
+  sl.data = data;
+  sl.length = (size_t)len;
+  score = c_ref_function_header_audit(&lex, &sl);
+  score += c_ref_async_fn_prefix_audit(&lex, &sl);
+  score += c_ref_fn_sig_audit(&lex, &sl);
+  return score > 0 ? 1 : 0;
+
+}
+
 /* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_skip_one_if_else_chain_audit_c. */
 static int32_t c_ref_skip_one_if_else_chain_audit(void *lex_inout, void *source) {
 
@@ -1341,6 +1399,21 @@ static int32_t c_ref_parse_cond_expr_buf_audit(void *lex_inout, uint8_t *data, i
   sl.data = data;
   sl.length = (size_t)len;
   return c_ref_parse_cond_expr_audit(&lex, &sl);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_body_let_bracket_deep_audit_c. */
+static int32_t c_ref_body_let_bracket_deep_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_array_lit_head_audit(&lex, source);
+  score += c_ref_let_in_block_audit(&lex, source);
+  return score > 0 ? 1 : 0;
 
 }
 
@@ -1473,6 +1546,22 @@ static int32_t c_ref_expr_binop_mid_chain_buf_audit(void *lex_inout, uint8_t *da
   sl.data = data;
   sl.length = (size_t)len;
   return c_ref_expr_binop_mid_chain_audit(&lex, &sl);
+
+}
+
+/* Reference twin — verbatim copy of the gated C authority for parser_asm_stretch_diag_skip_let_const_deep_audit_c. */
+static int32_t c_ref_diag_skip_let_const_deep_audit(void *lex_inout, void *source) {
+
+  struct parser_asm_lexer lex;
+  if (!lex_inout || !source)
+    return 0;
+  lex = *(struct parser_asm_lexer *)lex_inout;
+  int32_t score;
+
+  score = c_ref_diag_skip_let_const_type_audit(&lex, source);
+  score += c_ref_body_let_bracket_deep_audit(&lex, source);
+  score += c_ref_let_in_block_audit(&lex, source);
+  return score > 0 ? 1 : 0;
 
 }
 

@@ -240,7 +240,7 @@ void parser_asm_diag_skip_let_const_into_slice_c(struct parser_asm_lexer_result 
                                                  struct parser_asm_slice_u8 *source) {
   if (!out || !source)
     return;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_skip_let_const_deep_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_skip_let_const_deep_audit_c(&lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_diag_skip_let_full_deep_audit_c(lex, source));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_let_const_decl_audit_c(&lex, source));
   lexer_next_into(out, lex, source);

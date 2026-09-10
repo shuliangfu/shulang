@@ -18,8 +18,7 @@ extern void parse_expr_into(void *arena, struct parser_asm_lexer lex, struct par
 extern int32_t parser_asm_stretch_parse_cond_expr_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm_lexer lex,
                                                              struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_body_let_bracket_deep_audit_c(struct parser_asm_lexer lex,
-                                                                struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_body_let_bracket_deep_audit_c(void *lex_inout, void *source);
 
 /**
  * let 初值 `[..] op [..]`：自 `[` 起点 parse_expr_into，更新 lex/r；成功返回 expr ref，失败 0。
@@ -36,8 +35,8 @@ int32_t parser_asm_parse_body_let_bracket_compound_init_ref_slice_c(void *arena,
   arr_lex.pos = bracket_start;
   arr_lex.line = lex.line;
   arr_lex.col = lex.col;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_body_let_bracket_deep_audit_c(arr_lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_array_lit_head_audit_c(arr_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_body_let_bracket_deep_audit_c(&arr_lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_array_lit_head_audit_c(&arr_lex, source));
   memset(&arr_binop_res, 0, sizeof(arr_binop_res));
   arr_binop_res.next_lex = arr_lex;
   parse_expr_into(arena, arr_lex, source, &arr_binop_res);
