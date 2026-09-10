@@ -334,6 +334,13 @@ def translate(name, body, tokvals):
                 cur_results = {res}
                 si += 1
                 continue
+            if srcvar in alias_current:
+                emit("kind = parser_asm_lex_peek_kind_c(lex, source);")
+                if reads_ident:
+                    emit("idlen = parser_asm_lex_peek_ident_len_c(lex, source);")
+                cur_results = {res}
+                si += 1
+                continue
             if srcvar == "lex" and first_step_done:
                 raise Refuse("second step from original lex (backtrack)")
             if srcvar in alias_current:
@@ -356,7 +363,11 @@ def translate(name, body, tokvals):
         # v3.1: single-line if (COND) return EXPR;
         m = re.match(r"if \((.+)\) return (.+);$", st)
         if m:
-            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            hoist2 = []
+            cond_d = desugar_increments(m.group(1), lambda l: hoist2.append(l))
+            for hl in hoist2:
+                out.append(pad + hl)
+            cond_x, ntok = translate_cond(cond_d, cur_results)
             used |= ntok
             rlines, ntok2 = translate_return(m.group(2), cur_results)
             used |= ntok2
@@ -375,6 +386,7 @@ def translate(name, body, tokvals):
         if m:
             cond = m.group(1)
             hoisted = []
+            cond = desugar_increments(cond, lambda l: hoisted.append(l))
             cond, _ = hoist_byte_chain(cond, lambda l: hoisted.append(l))
             cond_x, ntok = translate_cond(cond, cur_results)
             used |= ntok
@@ -519,7 +531,8 @@ def translate(name, body, tokvals):
         m = re.match(r"parser_asm_lex_from_result_val_into\(&(\w+), (r\w*)\);$", st)
         if m and m.group(2) in cur_results and (m.group(1) in cursor_names or m.group(1) in lexer_locals):
             emit("parser_asm_lex_step_kind_c(lex, source);")
-            alias_current = {m.group(1)}
+            alias_current = {m.group(1)} | (cursor_names if m.group(1) in cursor_names else set())
+            first_step_done = True  # cursor advanced; peek-from-cursor is refresh
             cur_results = set()
             si += 1
             continue
@@ -589,6 +602,28 @@ def translate(name, body, tokvals):
             used |= ntok2
             emit(f"while ({gvar} < {limit}) {{")
             emit(f"  {gvar} = {gvar} + 1;")
+            x.extend(body_x)
+            emit("}")
+            si = j + 1
+            continue
+        # v4.2: general kind while (A != X && A != Y / == ...) — non-membership loop
+        m = re.match(r"while \(((?:r\w*)\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+(?: && r\w*\.tok\.kind [!=]= \(int32_t\)TOKEN_\w+)*)\) \{$", st)
+        if m:
+            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            used |= ntok
+            j = si + 1
+            depth = 1
+            body_l = []
+            while depth > 0:
+                t = stmts[j].strip()
+                depth += t.count("{") - t.count("}")
+                if depth == 0:
+                    break
+                body_l.append(stmts[j])
+                j += 1
+            emit(f"while ({cond_x}) {{")
+            body_x, ntok2 = translate_block(body_l, cur_results, indent=2)
+            used |= ntok2
             x.extend(body_x)
             emit("}")
             si = j + 1
@@ -674,6 +709,8 @@ def translate(name, body, tokvals):
         raise Refuse(f"unhandled statement: {st[:60]}")
     if BLOCK_HOIST_USED:
         int_vars.update({"data2_us", "ts2_us", "sln2_us", "bhit_us"})
+        if "adv0" in BLOCK_HOIST_USED:
+            int_vars.add("adv0_us")
     return x, used, int_vars
 
 
@@ -711,12 +748,28 @@ def hoist_byte_chain(cond, emit):
     return cond[: m.start()] + "bhit == 1" + cond[m.end() :], set()
 
 
+def desugar_increments(cond, emit):
+    """Rewrite VAR++ in conditions: emit the increment before, compare the old
+    value as VAR - 1 (post-increment semantics)."""
+    def _repl(m):
+        var = m.group(1)
+        emit(f"{var} = {var} + 1;")
+        return f"({var} - 1)"
+    return re.sub(r"(\w+)\+\+", _repl, cond)
+
+
 def translate_cond(cond, cur_results):
     """C condition on current-token fields → .x condition."""
     used = set()
     c = cond
     c = re.sub(r"\(int32_t\)", "", c)
     # suite helper names → bridge faces callable from .x
+    # negated sub-audit call in condition: !CALLEE(&alias, source) → (CALLEE(lex, source) == 0)
+    c = re.sub(r"!\(?parser_asm_stretch_(\w+)_c\)?\((&?\w+), source\)",
+               r"(parser_asm_stretch_\1_c(lex, source) == 0)", c)
+    # plain sub-audit call in condition → (CALLEE(lex, source) != 0)
+    c = re.sub(r"(?<![!=\w])\(?parser_asm_stretch_(?!is_type_start)(\w+)_c\)?\((&?\w+), source\)(?!\s*[=!])",
+               r"(parser_asm_stretch_\1_c(lex, source) != 0)", c)
     # alias position compares (helper-advanced checks)
     c = re.sub(r"(\w+)\.pos != lex\.pos", r"parser_asm_lex_pos_c(lex) != pos0", c)
     c = re.sub(r"(\w+)\.pos != (r\w*)\.next_lex\.pos", r"parser_asm_lex_pos_c(lex) != adv0", c)
@@ -887,7 +940,8 @@ def translate_block(block, cur_results, indent=2):
         if m:
             arms = []
             hoisted = []
-            cond_r, _ = hoist_byte_chain(m.group(1), lambda l: hoisted.append(l))
+            cond_r = desugar_increments(m.group(1), lambda l: hoisted.append(l))
+            cond_r, _ = hoist_byte_chain(cond_r, lambda l: hoisted.append(l))
             cond_x, ntok = translate_cond(cond_r, cur_results)
             used |= ntok
             for hl in hoisted:
@@ -941,9 +995,14 @@ def translate_block(block, cur_results, indent=2):
             si += 1
             continue
         # single-line if (COND) return / VAR++ / nested forms
+        # single-line if (COND) return / VAR++ / nested forms
         m = re.match(r"if \((.+)\) return (.+);$", st)
         if m:
-            cond_x, ntok = translate_cond(m.group(1), cur_results)
+            hoist2 = []
+            cond_d = desugar_increments(m.group(1), lambda l: hoist2.append(l))
+            for hl in hoist2:
+                out.append(pad + hl)
+            cond_x, ntok = translate_cond(cond_d, cur_results)
             used |= ntok
             rlines, ntok2 = translate_return(m.group(2), cur_results)
             used |= ntok2
@@ -969,6 +1028,14 @@ def translate_block(block, cur_results, indent=2):
             continue
         if st == "continue;":
             out.append(f"{pad}continue;")
+            si += 1
+            continue
+        m = re.match(r"(\w+) = parser_asm_stretch_(skip_type_suffix|skip_one_param_type)_c\((r\w*)\.next_lex, source\);$", st)
+        if m and m.group(3) in cur_results:
+            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
+            out.append(f"{pad}adv0 = parser_asm_lex_pos_c(lex);")
+            out.append(f"{pad}parser_asm_lex_{m.group(2)}_inplace_c(lex, source);")
+            BLOCK_HOIST_USED.add("adv0")
             si += 1
             continue
         m = re.match(r"(\w+) = (r\w*)\.next_lex;$", st)

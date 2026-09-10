@@ -72,7 +72,7 @@ struct parser_asm_lexer_result parser_asm_skip_one_if_core_buf_c(struct parser_a
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_cond_int_as_buf_audit_c(&lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_one_if_core_deep_buf_audit_c(lex, data, len));
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_stmt_deep_buf_audit_c(lex, data, len));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_buf_audit_c(lex, data, len));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_buf_audit_c(&lex, data, len));
   r = lexer_next_buf(lex, data, len);
   if (r.tok.kind != (int32_t)TOKEN_LPAREN)
     return r;

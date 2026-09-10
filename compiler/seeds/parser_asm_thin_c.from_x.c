@@ -274,7 +274,7 @@ int32_t parser_asm_stretch_expr_bitxor_binop_audit_c(void *lex_inout, void *sour
 int32_t parser_asm_stretch_expr_bitor_binop_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_expr_logand_binop_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_expr_logor_binop_audit_c(void *lex_inout, void *source);
-int32_t parser_asm_stretch_as_suffix_chain_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_as_suffix_chain_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_unary_prefix_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_simd_builtin_audit_c(struct parser_asm_lexer_result r_at,
@@ -337,7 +337,7 @@ int32_t parser_asm_stretch_balanced_braces_depth_probe_c(void *lex_inout, void *
 int32_t parser_asm_stretch_balanced_braces_depth_probe_buf_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_skip_one_trait_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_skip_one_impl_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_parse_one_extern_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_parse_one_extern_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_import_select_item_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                            int32_t name_len);
 int32_t parser_asm_stretch_import_select_brace_head_audit_c(struct parser_asm_lexer_result r);
@@ -347,7 +347,7 @@ int32_t parser_asm_stretch_skip_one_struct_buf_audit_c(void *lex_inout, uint8_t 
 int32_t parser_asm_stretch_skip_one_enum_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_collect_imports_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_skip_one_if_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_skip_one_extern_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_skip_one_extern_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 
 int32_t parser_asm_stretch_try_skip_allow_paren_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_allow_kw_paren_buf_audit_c(struct parser_asm_lexer_result r, uint8_t *data, int32_t len);
@@ -429,13 +429,12 @@ int32_t parser_asm_stretch_primary_expr_deep_buf_audit_c(struct parser_asm_lexer
 /** tier29 stretch 审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_balanced_brackets_depth_probe_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_balanced_brackets_depth_probe_buf_c(void *lex_inout, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_primary_expr_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_primary_expr_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_match_subject_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_match_subject_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_onefunc_buf_deep_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_parse_expr_prefix_chain_audit_c(struct parser_asm_lexer lex,
-                                                           struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_parse_expr_prefix_chain_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_parse_expr_prefix_chain_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_parse_expr_prefix_chain_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_if_body_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_if_body_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_parse_one_function_ok_pipeline_deep_buf_audit_c(uint8_t *data, int32_t len);
@@ -449,8 +448,8 @@ int32_t parser_asm_stretch_skip_one_function_full_deep_buf_audit_c(struct parser
 int32_t parser_asm_stretch_diag_parse_one_collect_deep_buf_audit_c(uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_parse_into_function_branch_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data,
                                                                        int32_t len);
-int32_t parser_asm_stretch_ternary_assign_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_ternary_assign_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_ternary_assign_deep_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_ternary_assign_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_expr_binop_lower_chain_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_expr_binop_lower_chain_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_trait_impl_header_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
@@ -494,8 +493,8 @@ int32_t parser_asm_stretch_trait_impl_type_deep_buf_audit_c(struct parser_asm_le
 int32_t parser_asm_stretch_struct_layout_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_struct_layout_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_skip_imports_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_expr_stmt_full_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_expr_stmt_full_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_expr_stmt_full_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_stmt_full_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_match_block_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_match_block_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_top_level_let_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
@@ -506,8 +505,8 @@ int32_t parser_asm_stretch_parse_into_preamble_full_deep_buf_audit_c(struct pars
 /** tier34 stretch 审计前向声明（定义在本文件后部）。 */
 int32_t parser_asm_stretch_if_stmt_deep_buf_audit_c(struct parser_asm_lexer lex_at_if, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_if_expr_deep_buf_audit_c(struct parser_asm_lexer lex_at_if, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_parse_cond_expr_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_parse_cond_expr_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_simd_builtin_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_simd_builtin_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_struct_lit_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
@@ -521,7 +520,7 @@ int32_t parser_asm_stretch_collect_imports_full_deep_buf_audit_c(struct parser_a
 int32_t parser_asm_stretch_type_ref_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_block_stmt_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 /** tier35 stretch 审计前向声明（定义在本文件后部）。 */
-int32_t parser_asm_stretch_ternary_assign_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_ternary_assign_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_ternary_assign_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_primary_expr_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_primary_expr_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
@@ -534,10 +533,10 @@ int32_t parser_asm_stretch_match_subject_full_deep_audit_c(struct parser_asm_lex
 int32_t parser_asm_stretch_match_subject_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_async_fn_sig_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_async_fn_sig_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_cast_unary_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_cast_unary_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_return_stmt_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_return_stmt_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_cast_unary_full_deep_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_cast_unary_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_return_stmt_full_deep_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_return_stmt_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_skip_let_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_diag_skip_let_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_onefunc_slice_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
@@ -609,14 +608,14 @@ int32_t parser_asm_stretch_async_fn_mega_full_deep_audit_c(struct parser_asm_lex
 int32_t parser_asm_stretch_async_fn_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_parse_ultra_mega_full_deep_buf_audit_c(uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_loop_control_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_expr_stmt_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_expr_stmt_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
+int32_t parser_asm_stretch_expr_stmt_mega_full_deep_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_expr_stmt_mega_full_deep_buf_audit_c(void *lex_inout, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_skip_imports_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_skip_imports_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_fn_control_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_fn_control_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 /** tier39 stretch 审计前向声明（定义在本文件后部）。 */
-int32_t parser_asm_stretch_ternary_assign_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_ternary_assign_mega_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_ternary_assign_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_primary_expr_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_primary_expr_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
@@ -625,9 +624,9 @@ int32_t parser_asm_stretch_import_stmt_mega_full_deep_buf_audit_c(struct parser_
 int32_t parser_asm_stretch_parse_into_entry_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_match_subject_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_match_subject_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_cast_unary_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_cast_unary_mega_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_cast_unary_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
-int32_t parser_asm_stretch_stmt_control_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_stmt_control_mega_full_deep_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_stmt_control_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);
 int32_t parser_asm_stretch_diag_skip_let_mega_full_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_diag_skip_let_mega_full_deep_buf_audit_c(struct parser_asm_lexer lex, uint8_t *data, int32_t len);

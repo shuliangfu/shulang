@@ -7753,7 +7753,7 @@ void parser_asm_parse_one_extern_skip_into_slice_c(struct parser_asm_extern_pars
     PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_param_count_audit_c(lex, source, &extern_param_score));
     (void)extern_param_score;
   }
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_fn_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_fn_audit_c(&lex, source));
   ast_pool_onefunc_reset((uint8_t *)out);
   out->abi_kind = 0; /* 默认 X ABI；extern "C" 时在下方设为 1 */
   out->is_variadic = 0; /* 默认定参；遇到 `...` 时在参数循环中设为 1 */
@@ -8055,7 +8055,7 @@ void parser_asm_skip_one_extern_into_slice_c(struct parser_asm_lexer *out, struc
   if (!out || !source)
     return;
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_skip_one_extern_body_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_fn_audit_c(lex, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_extern_fn_audit_c(&lex, source));
   lexer_next_into(&r, lex, source);
   if (r.tok.kind != (int32_t)TOKEN_EXTERN) {
     out->pos = lex.pos;

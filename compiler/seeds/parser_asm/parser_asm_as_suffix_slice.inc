@@ -27,8 +27,7 @@ struct parser_asm_ast_expr parser_asm_arena_expr_get_c(void *arena, int32_t ref)
 static void parser_asm_arena_expr_set_c(void *arena, int32_t ref, struct parser_asm_ast_expr ae);
 void parser_asm_expr_set_common_zeros_c(struct parser_asm_ast_expr *e);
 /* parser_asm_lex_from_result_val_into: provided by P1 lex_skip (non-static) */
-extern int32_t parser_asm_stretch_as_suffix_chain_audit_c(struct parser_asm_lexer lex,
-                                                          struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_as_suffix_chain_audit_c(void *lex_inout, void *source);
 
 /**
  * parse_as_suffix_into：解析零个或多个 postfix 后缀（`?` Result 传播、`as type`；假定 out 已由 primary 填充）。
@@ -45,7 +44,7 @@ void parser_asm_parse_as_suffix_into_slice_c(void *arena, struct parser_asm_slic
   if (!out || !out->ok || !source)
     return;
   lex_cur = out->next_lex;
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_as_suffix_chain_audit_c(lex_cur, source));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_as_suffix_chain_audit_c(&lex_cur, source));
   for (;;) {
     lexer_next_into(&r, lex_cur, source);
     if (r.tok.kind == (int32_t)TOKEN_QUESTION) {

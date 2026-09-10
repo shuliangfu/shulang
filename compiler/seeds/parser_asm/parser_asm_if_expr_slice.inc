@@ -23,8 +23,7 @@ extern void parser_parse_if_expr_into_glue(void *arena, struct parser_asm_lexer 
 extern int32_t ast_ast_arena_expr_alloc(void *arena);
 extern struct ast_Expr ast_ast_arena_expr_get(void *arena, int32_t ref);
 extern void ast_ast_arena_expr_set(void *arena, int32_t ref, struct ast_Expr e);
-extern int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(struct parser_asm_lexer lex,
-                                                             struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_parse_cond_expr_deep_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_if_expr_deep_audit_c(struct parser_asm_lexer lex_at_if,
                                                        struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_if_expr_branch_audit_c(void *lex_inout, void *source);
@@ -119,7 +118,7 @@ void parser_asm_parse_if_expr_into_c(void *arena, struct parser_asm_lexer lex_at
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_if_expr_deep_audit_c(lex_at_if, source));
   lexer_next_into(&r, lex_at_if, source);
   if (r.tok.kind == (int32_t)TOKEN_IF)
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_audit_c(r.next_lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_parse_cond_expr_deep_audit_c(&r.next_lex, source));
   lex_cur = lex_at_if;
   lexer_next_into(&r, lex_cur, source);
   if (r.tok.kind != (int32_t)TOKEN_IF)
