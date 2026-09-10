@@ -298,8 +298,8 @@ int32_t parser_asm_stretch_allow_kw_paren_audit_c(struct parser_asm_lexer_result
                                                   struct parser_asm_slice_u8 *source);
 int32_t parser_asm_stretch_try_skip_allow_paren_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_linear_type_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_array_type_bracket_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-int32_t parser_asm_stretch_slice_type_bracket_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
+int32_t parser_asm_stretch_array_type_bracket_audit_c(void *lex_inout, void *source);
+int32_t parser_asm_stretch_slice_type_bracket_audit_c(void *lex_inout, void *source);
 int32_t parser_asm_stretch_builtin_vec_token_audit_c(int32_t kind);
 int32_t parser_asm_stretch_import_select_bind_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                       int32_t name_len);

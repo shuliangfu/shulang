@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gen_stretch_audit_x.py — 7.2.1 B-minus generator v4.9 (RFC §5a/§5c/§5d)
+# gen_stretch_audit_x.py — 7.2.1 B-minus generator v5.0 (RFC §5a/§5c/§5d)
 #
 # Translates LINEAR LEAF audit functions from the suite slice into B-minus
 # .x ports (in-place cursor model: peek reads the current token, step
@@ -30,6 +30,12 @@
 #   elide void by-value `loop_stmt_body_audit` (no cursor net effect).
 #   Soft-knife remaining out probes (trait_methods / struct_lit /
 #   extern_param / block_stmt).
+#
+# v5.0: elide discarded `(void)CALLEE(&r.next_lex, source)` — C copies the
+#   next_lex value into the callee (restore-trio ports; no write-back), so
+#   the call has zero cursor net effect. The old v4.5 step+call before a
+#   following `skip_*(…, r.next_lex)` / `lexer_next_into(&r, r.next_lex)`
+#   double-stepped (trait_methods / array·slice bracket wall).
 #
 # Outputs (in-place):
 #   src/asm/pthin_stretch_audit.x            — .x port appended
@@ -1053,13 +1059,11 @@ def translate(name, body, tokvals):
             x.extend(rlines)
             si += 1
             continue
-        # v4.5: (void)CALLEE(&r.next_lex, source) — consume current token then call
+        # v5.0: (void)CALLEE(&r.next_lex, source) — C copies next_lex; callee
+        # restore-trio → zero cursor net effect. Elide (do NOT step): a following
+        # skip/next from the same r.next_lex owns the single advance.
         m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\(&(r\w*)\.next_lex, source(?:, (\d+))?\);$", st)
         if m and m.group(2) in cur_results:
-            emit("parser_asm_lex_step_kind_c(lex, source);")
-            x2, ntok = translate_call(m.group(1), "lex", m.group(3))
-            used |= ntok
-            emit(strip_inout(x2) + ";")
             si += 1
             continue
         m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\((&?\w+), source(?:, (\d+))?\);$", st)
@@ -1734,12 +1738,9 @@ def translate_block(block, cur_results, indent=2):
             out.append(f"{pad}}}")
             si += 1
             continue
+        # v5.0: elide void &r.next_lex (see top-level handler — dual-step wall)
         m = re.match(r"\(void\)(parser_asm_stretch_\w+_c)\(&(r\w*)\.next_lex, source(?:, (\d+))?\);$", st)
         if m:
-            out.append(f"{pad}parser_asm_lex_step_kind_c(lex, source);")
-            x2, ntok = translate_call(m.group(1), "lex", m.group(3))
-            used |= ntok
-            out.append(f"{pad}{strip_inout(x2)};")
             si += 1
             continue
         # v4.7: out write / depth-- / VAR = N inside blocks
@@ -2098,7 +2099,7 @@ def emit_out_x(name, x_lines, docline, out_name, int_vars=()):
                     "  let sln2: usize = 0;\n  let bhit: i32 = 0;\n") + int_lets
     return f"""/**
  * {docline}
- * B-minus generated out-param port (gen_stretch_audit_x.py v4.9) of the suite
+ * B-minus generated out-param port (gen_stretch_audit_x.py v5.0) of the suite
  * twin `{name}` — pointer ABI + by-value net semantics via the restore trio;
  * writes `{out_name}[0]` when the out pointer is non-null.
  * @param lex *u8 — opaque lexer (read-only net effect)

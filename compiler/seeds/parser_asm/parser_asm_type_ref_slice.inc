@@ -97,10 +97,8 @@ extern int32_t parser_asm_stretch_type_ref_mega_full_deep_audit_c(struct parser_
 extern int32_t parser_asm_stretch_vector_type_ident_audit_c(struct parser_asm_slice_u8 *source, size_t token_start,
                                                           int32_t nlen);
 extern int32_t parser_asm_stretch_linear_type_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_array_type_bracket_audit_c(struct parser_asm_lexer lex,
-                                                             struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_slice_type_bracket_audit_c(struct parser_asm_lexer lex,
-                                                             struct parser_asm_slice_u8 *source);
+extern int32_t parser_asm_stretch_array_type_bracket_audit_c(void *lex_inout, void *source);
+extern int32_t parser_asm_stretch_slice_type_bracket_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_builtin_vec_token_audit_c(int32_t kind);
 
 /**
@@ -788,8 +786,8 @@ static int32_t parser_asm_parse_type_ref_impl_c(void *arena, struct parser_asm_l
     return parser_asm_parse_postfix_array_type_ref_c(arena, elem_ref, lex, source, out_lex);
   }
   if (r.tok.kind == (int32_t)TOKEN_LBRACKET) {
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_slice_type_bracket_audit_c(lex, source));
-    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_array_type_bracket_audit_c(lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_slice_type_bracket_audit_c(&lex, source));
+    PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_array_type_bracket_audit_c(&lex, source));
     parser_asm_lex_from_result_val_into(&lex, r);
     lexer_next_into(&r, lex, source);
     if (r.tok.kind == (int32_t)TOKEN_RBRACKET) {

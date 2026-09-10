@@ -5440,7 +5440,7 @@ void parser_asm_skip_one_trait_into_slice_c(struct parser_asm_lexer *out, struct
     return;
   }
   PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_methods_body_audit_c(lex, source));
-  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_methods_probe_c(r.next_lex, source, 0));
+  PARSER_ASM_STRETCH_AUDIT_CALL(parser_asm_stretch_trait_methods_probe_c(&r.next_lex, source, 0));
   /* wave421: walk trait body for `function name` rather than opaque brace skip. */
   lex = r.next_lex;
   guard = 0;

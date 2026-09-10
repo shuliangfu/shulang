@@ -6442,3 +6442,245 @@ export function parser_asm_stretch_struct_lit_fields_probe_c(lex: *u8, source: *
   }
   return 0;
 }
+
+/* ── generated (gen_stretch_audit_x.py) ── */
+
+/**
+ * Generated audit port parser_asm_stretch_trait_methods_probe_c.
+ * B-minus generated out-param port (gen_stretch_audit_x.py v4.9) of the suite
+ * twin `parser_asm_stretch_trait_methods_probe_c` — pointer ABI + by-value net semantics via the restore trio;
+ * writes `out_method_count[0]` when the out pointer is non-null.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @param out_method_count *i32 — optional out slot; null skips the write
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_trait_methods_probe_c(lex: *u8, source: *u8, out_method_count: *i32): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let data2: *u8 = 0 as *u8;
+  let ts2: usize = 0;
+  let sln2: usize = 0;
+  let bhit: i32 = 0;
+  let adv0: usize = 0;
+  let idptr: *u8 = 0 as *u8;
+  let rc: i32 = 0;
+  let guard: i32 = 0;
+  let nm: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    nm = 0;
+    guard = 0;
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    while (kind != TOKEN_RBRACE && kind != TOKEN_EOF) {
+        guard = guard + 1;
+        if ((guard - 1) > 128) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        if (kind != TOKEN_FUNCTION) {
+            parser_asm_lex_step_kind_c(lex, source);
+            kind = parser_asm_lex_peek_kind_c(lex, source);
+            idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+            continue;
+        }
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        if (kind != TOKEN_IDENT) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        idptr = parser_asm_lex_peek_ident_ptr_c(lex, source);
+        parser_asm_stretch_bind_name_validate_c(idptr, idlen);
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        if (kind != TOKEN_LPAREN) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        parser_asm_lex_step_kind_c(lex, source);
+        parser_asm_lex_skip_balanced_parens_inplace_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        if (kind != TOKEN_COLON) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        parser_asm_stretch_trait_method_return_audit_c(lex, source);
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+        while (kind != TOKEN_SEMICOLON && kind != TOKEN_EOF) {
+            if ((parser_asm_lex_is_type_start_kind_c(kind) != 0)) {
+                parser_asm_lex_step_kind_c(lex, source);
+                adv0 = parser_asm_lex_pos_c(lex);
+                parser_asm_lex_skip_type_suffix_inplace_c(lex, source);
+                kind = parser_asm_lex_peek_kind_c(lex, source);
+                idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+                continue;
+            }
+            if (kind == TOKEN_STAR) {
+                parser_asm_lex_step_kind_c(lex, source);
+                kind = parser_asm_lex_peek_kind_c(lex, source);
+                idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+                continue;
+            }
+            parser_asm_lex_set_pos_c(lex, pos0);
+            parser_asm_lex_set_line_c(lex, line0);
+            parser_asm_lex_set_col_c(lex, col0);
+            return 0;
+        }
+        if (kind != TOKEN_SEMICOLON) {
+          parser_asm_lex_set_pos_c(lex, pos0);
+          parser_asm_lex_set_line_c(lex, line0);
+          parser_asm_lex_set_col_c(lex, col0);
+          return 0;
+        }
+        nm = nm + 1;
+        parser_asm_lex_step_kind_c(lex, source);
+        kind = parser_asm_lex_peek_kind_c(lex, source);
+        idlen = parser_asm_lex_peek_ident_len_c(lex, source);
+    }
+    if (out_method_count != 0 as *i32) {
+      out_method_count[0] = nm;
+    }
+      if (kind == TOKEN_RBRACE) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_array_type_bracket_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_array_type_bracket_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_array_type_bracket_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let data2: *u8 = 0 as *u8;
+  let ts2: usize = 0;
+  let sln2: usize = 0;
+  let bhit: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let rc: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_LBRACKET) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+      if (kind == TOKEN_INT) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+  }
+  return 0;
+}
+
+/**
+ * Generated audit port parser_asm_stretch_slice_type_bracket_audit_c.
+ * B-minus generated port (gen_stretch_audit_x.py v1) of the suite twin
+ * `parser_asm_stretch_slice_type_bracket_audit_c` — pointer ABI + by-value net semantics via the restore trio;
+ * linear peek/step chain over the opaque lexer.
+ * @param lex *u8 — opaque lexer (read-only net effect)
+ * @param source *u8 — opaque slice
+ * @return i32 — audit verdict (≡ suite twin)
+ * PLATFORM: SHARED.
+ */
+#[no_mangle]
+export function parser_asm_stretch_slice_type_bracket_audit_c(lex: *u8, source: *u8): i32 {
+  let pos0: usize = 0;
+  let line0: i32 = 0;
+  let col0: i32 = 0;
+  let kind: i32 = 0;
+  let idlen: i32 = 0;
+  let data2: *u8 = 0 as *u8;
+  let ts2: usize = 0;
+  let sln2: usize = 0;
+  let bhit: i32 = 0;
+  let idptr: *u8 = 0 as *u8;
+  let rc: i32 = 0;
+  if (lex == 0 as *u8 || source == 0 as *u8) {
+    return 0;
+  }
+  unsafe {
+    pos0 = parser_asm_lex_pos_c(lex);
+    line0 = parser_asm_lex_line_c(lex);
+    col0 = parser_asm_lex_col_c(lex);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+    if (kind != TOKEN_LBRACKET) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 0;
+    }
+    parser_asm_lex_step_kind_c(lex, source);
+    kind = parser_asm_lex_peek_kind_c(lex, source);
+      if (kind == TOKEN_RBRACKET) {
+        parser_asm_lex_set_pos_c(lex, pos0);
+        parser_asm_lex_set_line_c(lex, line0);
+        parser_asm_lex_set_col_c(lex, col0);
+        return 1;
+      }
+      parser_asm_lex_set_pos_c(lex, pos0);
+      parser_asm_lex_set_line_c(lex, line0);
+      parser_asm_lex_set_col_c(lex, col0);
+      return 0;
+  }
+  return 0;
+}

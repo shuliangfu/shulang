@@ -164,7 +164,7 @@ extern int32_t parser_asm_stretch_struct_zenith_peak_summit_apexversal_maxversal
 extern int32_t parser_asm_stretch_trait_header_audit_c(void *lex_inout, void *source);
 extern int32_t parser_asm_stretch_trait_impl_type_deep_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern int32_t parser_asm_stretch_trait_methods_body_audit_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
-extern int32_t parser_asm_stretch_trait_methods_probe_c(struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source, int32_t *out_method_count);
+extern int32_t parser_asm_stretch_trait_methods_probe_c(void *lex_inout, void *source, int32_t *out_method_count);
 extern void parser_skip_one_extern_into_glue(struct parser_asm_lexer *out, struct parser_asm_lexer lex, struct parser_asm_slice_u8 *source);
 extern void pipeline_arena_func_param_write(void *arena, int32_t func_ref, int32_t param_index, uint8_t *name_bytes, int32_t name_len, int32_t type_ref);
 extern int32_t pipeline_module_enum_append_variant(void *module, int32_t idx, uint8_t *bytes, int32_t len);
